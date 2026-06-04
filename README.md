@@ -53,6 +53,8 @@ The integrated capsule run spike bridges the real pieces. `pnpm prototype:integr
 
 The machine planner spike covers dynamic planning without eval hell. `pnpm prototype:planner:dry` selects from a known pattern library and validates JSON-like XState v5 machine receipts, harness plans, verification contracts, and output targets for Wzrrd review, GitHub PR, and artifact-only jobs. It rejects arbitrary generated machine code before planning.
 
+The Cloudflare parallel workflow spike is the real massively-parallel control proof. `pnpm prototype:parallel:deploy` deploys a Worker with a Durable Object supervisor, Queue producer/consumer, Sandbox binding, and Artifacts binding. `pnpm prototype:parallel:real` runs the 8-lane / cap-3 fixture through real Queue-backed lane admission, real Sandbox lane execution, Artifacts commits, fan-in, synthesis, verification, generic `implementation_plan` output delivery, and sandbox cleanup.
+
 ## Tooling baseline
 
 - Package manager: `pnpm`
@@ -69,7 +71,7 @@ Production code eventually owns:
 - capsule identity and lifecycle
 - context-pack resolution
 - Artifacts repo/ref bindings
-- run queue and concurrency leases
+- Queue-backed lane scheduling and bounded hot concurrency leases
 - sandbox role orchestration
 - secret reference to task-scoped `auth.json` minting
 - event logs and Wzrrd publication metadata

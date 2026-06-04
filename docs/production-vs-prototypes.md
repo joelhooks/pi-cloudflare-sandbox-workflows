@@ -74,4 +74,8 @@ Integrated proof:
 
 - `integrated-capsule-run-spike/` proves one end-to-end request shape in local Wrangler: a real Durable Object capsule routes by `workItemId`, persists snapshot/event/capsule state, calls the deployed real sandbox Worker, and captures real Sandbox/Artifacts/Wzrrd/verification receipts. Receipt: `integrated-capsule-run-receipt.v1`, latest run repo `piwf-run-mpz1z9vz-29d06a92`, plan commit `5177b6b834a0b8580bb10806c9fdc6547b8aa419`, reader commit `a8fd1cf660e2e165a6255e78ed876b76ed8a5aab`, verifier commit `daf3e3d97ee24ac28b5ff3314cf7b5589cfa3bef`, lease ref `lease:piCodexAuth:run-mpz1z9vz-29d06a92:task-scoped-auth-json`, Wzrrd URL `https://piwf-run-mpz1z9vz-29d06a92.wzrrd.sh/`, HTTP `200` verified.
 
+Parallel Cloudflare proof:
+
+- `cloudflare-parallel-workflow-spike/` proves the deployed real Cloudflare control shape for dynamic parallel workflows: Worker API + queue consumer, Durable Object capsule supervisor, Queue-backed lane scheduling/backpressure, real Sandbox lanes, Artifacts plan/lane/synthesis/verifier/output receipts, fan-in, verification, generic `implementation_plan` delivery, and cleanup. Receipt: `cloudflare-parallel-workflow-receipt.v1`, latest run `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, repo `piwfp-run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, plan commit `4e8ec58ee343e6f3fa6adf190e02607c28a0706c`, synthesis commit `03c30e7a847e33f23790aeea8b5464782cbf8727`, lanes `8`, cap `3`, max observed active lanes `3`, final state `captured`, verifier `verified`, cleanup all `:ok`.
+
 Do not promote prototype code. Rewrite production interfaces around these receipts instead.

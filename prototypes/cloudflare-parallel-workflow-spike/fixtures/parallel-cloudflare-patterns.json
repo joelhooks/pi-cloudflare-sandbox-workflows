@@ -1,0 +1,27 @@
+{
+  "workItemId": "parallel-cloudflare-patterns-001",
+  "task": "fan out research across Cloudflare primitives, XState machines, secret leases, artifact memory, output targets, and failure/backpressure patterns; synthesize a source-backed implementation plan; verify it; deliver the final implementation plan artifact",
+  "contextPackRefs": ["dynamic-workflow-scale-catalog@0.1.0"],
+  "secretRefs": ["piCodexAuth"],
+  "verificationContract": "source-backed-synthesis-v1",
+  "outputTarget": {
+    "kind": "implementation_plan"
+  },
+  "parallel": {
+    "plannedLaneCount": 8,
+    "concurrencyCap": 3,
+    "fanIn": {
+      "strategy": "wait_all",
+      "requiredLaneIds": [
+        "cloudflare-primitives",
+        "xstate-machines",
+        "secret-leases",
+        "artifact-memory"
+      ]
+    },
+    "failurePolicy": {
+      "laneFailure": "retry_then_degrade",
+      "maxRetries": 2
+    }
+  }
+}

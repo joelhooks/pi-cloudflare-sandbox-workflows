@@ -24,7 +24,9 @@
     "prototype:review:dry": "tsx prototypes/review-gate-spike/src/run.ts",
     "prototype:capsule-do:local": "node prototypes/capsule-do-spike/scripts/run-local-demo.mjs",
     "prototype:integrated:real": "node prototypes/integrated-capsule-run-spike/scripts/run-real-demo.mjs",
-    "prototype:planner:dry": "tsx prototypes/machine-planner-spike/src/run.ts"
+    "prototype:planner:dry": "tsx prototypes/machine-planner-spike/src/run.ts",
+    "prototype:parallel:deploy": "set -a; [ ! -f .env.local ] || . ./.env.local; set +a; (cd prototypes/cloudflare-parallel-workflow-spike && node scripts/wrangler-with-cloudflare-token.mjs queues create piwf-parallel-lanes || true) && (cd prototypes/cloudflare-parallel-workflow-spike && node scripts/wrangler-with-cloudflare-token.mjs deploy) && (test -z \"$ACCESS_TOKEN\" || printf '%s' \"$ACCESS_TOKEN\" | node prototypes/cloudflare-parallel-workflow-spike/scripts/wrangler-with-cloudflare-token.mjs secret put ACCESS_TOKEN --config prototypes/cloudflare-parallel-workflow-spike/wrangler.jsonc)",
+    "prototype:parallel:real": "node prototypes/cloudflare-parallel-workflow-spike/scripts/run-real-demo.mjs"
   },
   "dependencies": {
     "@cloudflare/sandbox": "0.11.0",

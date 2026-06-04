@@ -107,6 +107,25 @@ Machine planner dry run:
 - receipt schema: `machine-planner-receipt.v1`
 - runtime stance: generated machine config is receipt-only; no arbitrary generated TypeScript is executed
 
+Cloudflare parallel workflow real run:
+
+- command: `pnpm prototype:parallel:real`
+- receipt: `prototypes/cloudflare-parallel-workflow-spike/out/latest-receipt.json` ignored by git
+- deployed Worker: `https://pi-cloudflare-parallel-workflow-spike.joelhooks.workers.dev`
+- run id: `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`
+- capsule: `capsule:parallel-cloudflare-patterns-3e945e7e`
+- Artifacts repo: `piwfp-run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`
+- plan commit: `4e8ec58ee343e6f3fa6adf190e02607c28a0706c`
+- synthesis commit: `03c30e7a847e33f23790aeea8b5464782cbf8727`
+- lane count: `8`; concurrency cap: `3`; max observed active lanes: `3`
+- all 8 lane receipts include real Cloudflare Sandbox IDs and Artifacts commit SHAs
+- verifier result: `verified`, no warnings, no blocking failures
+- output target: generic `implementation_plan`, not Wzrrd-specific lifecycle language
+- final state: `captured`
+- cleanup receipts: all lane, synthesis, verifier, and delivery sandboxes destroyed with `:ok`
+- receipt schema: `cloudflare-parallel-workflow-receipt.v1`
+- important runtime fix learned: Artifacts repos created in the start request expose a plain remote/token, but fetched repo fields can cross the Worker RPC boundary as promise-ish values. The prototype now keeps the initial Artifacts token in DO-private storage, never in public receipts, and uses it for queue/finalizer sandbox Git pushes.
+
 Review gate dry run:
 
 - command: `pnpm prototype:review:dry`
@@ -118,7 +137,9 @@ Review gate dry run:
 - private Wzrrd claim URL is excluded from public payload and receipt
 - receipt schema: `review-gate-receipt.v1`
 
-## Lifecycle shape
+## Lifecycle shapes
+
+Serial reader/verifier prototype:
 
 ```txt
 idle
@@ -132,12 +153,30 @@ idle
   -> runningVerifier
   -> committingVerifierOutputs
   -> evaluatingVerification
-  -> publishingWzrrd
+  -> deliveringOutput
   -> destroyingSandbox
   -> captured
 ```
 
-Failure/cancel paths exist, but this prototype's success receipt is the useful artifact.
+Parallel Cloudflare prototype:
+
+```txt
+planning
+  -> validatingPlan
+  -> committingPlanArtifacts
+  -> admittingLanes
+  -> enqueueingLaneJobs
+  -> runningFanoutLanes
+  -> waitingFanIn
+  -> synthesizingResults
+  -> runningVerifier
+  -> evaluatingVerification
+  -> deliveringOutput
+  -> destroyingSandboxes
+  -> captured
+```
+
+Failure/cancel paths exist. The useful artifact is the success receipt plus the concrete substrate failures fixed along the way: sandbox ID length limits, fetched Artifacts repo RPC fields, Git prompt hangs, and commit-SHA parsing through wrapped sandbox commands.
 
 ## Plan phase
 

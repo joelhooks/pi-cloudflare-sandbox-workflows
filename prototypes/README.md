@@ -18,3 +18,4 @@ Active:
 - `secret-lease-broker-spike/` — secretRef → task-scoped auth materialization dry spike that records lease metadata and scans public receipts for plaintext leakage.
 - `review-gate-spike/` — Wzrrd-style review gate dry spike for verifier trust statuses, required review artifacts, human approve/reject, and claim URL redaction.
 - `machine-planner-spike/` — safe dynamic planner dry spike that selects known workflow patterns, validates JSON-like XState v5 machine receipts, harness plans, verification contracts, and output targets without executing generated TypeScript.
+- `cloudflare-parallel-workflow-spike/` — deployed Cloudflare Worker + Durable Object + Queue + Sandbox + Artifacts spike for 8 planned lanes with cap-3 bounded hot concurrency, fan-in, synthesis, verification, output delivery, and cleanup.

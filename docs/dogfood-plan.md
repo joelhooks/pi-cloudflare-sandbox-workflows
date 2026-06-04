@@ -100,6 +100,18 @@ Why:
    - proves approve reaches accepted and reject reaches rejected
    - proves private Wzrrd claim URL is excluded from public payload and receipt
    - current limitation: Wzrrd-shaped dry payload only; no real hosted review action yet
+9. **Real Cloudflare parallel workflow**
+   - active prototype: `prototypes/cloudflare-parallel-workflow-spike/`
+   - deploy command: `pnpm prototype:parallel:deploy`
+   - real receipt command: `pnpm prototype:parallel:real`
+   - proves Worker API + queue consumer, Durable Object supervisor, Queue-backed lane scheduling/backpressure, real Cloudflare Sandbox execution, and Artifacts-backed receipts in one deployed Worker module
+   - latest clean receipt: `cloudflare-parallel-workflow-receipt.v1`
+   - latest run: `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, capsule `capsule:parallel-cloudflare-patterns-3e945e7e`, repo `piwfp-run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`
+   - plan commit `4e8ec58ee343e6f3fa6adf190e02607c28a0706c`, synthesis commit `03c30e7a847e33f23790aeea8b5464782cbf8727`
+   - planned lanes `8`, concurrency cap `3`, max observed active lanes `3`
+   - all lane, synthesis, verifier, and delivery sandboxes destroyed with `:ok`
+   - final state `captured`, verifier status `verified`, output target `implementation_plan`
+   - current limitation: lane runtime defaults to bounded shell in real Sandbox; set `LANE_RUNTIME=pi` + `PI_AUTH_JSON_B64` when the next question is model spend rather than Cloudflare control shape
 
 ## Stop conditions
 

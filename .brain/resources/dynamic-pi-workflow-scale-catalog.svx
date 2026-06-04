@@ -21,10 +21,12 @@ Recovered from `workflow_os` run `wfr_mpzlnt6g_6m5ryl` after conversation compac
 - Workflow name: `dynamic-workflow-catalog-research`
 - Status: `completed`
 - Agents: 7 total, 7 done, 0 failed
-- Recovered branches: `cloudflare-primitives`, `durable-workflow-engines`, `xstate-state-machines`, `event-use-cases`, `catalog-synthesis`
-- Missing/blank branches in persisted run: `agent-orchestration`, `catalog-verifier`
+- Original recovered branches: `cloudflare-primitives`, `durable-workflow-engines`, `xstate-state-machines`, `event-use-cases`, `catalog-synthesis`
+- Original missing/blank branches in persisted run: `agent-orchestration`, `catalog-verifier`
+- Follow-up completed on 2026-06-04: verified research for LangGraph, OpenAI Agents/Responses, Vercel AI SDK, Claude Code/HITL/audit/memory/security, and Trigger.dev durable tasks was accepted and persisted into this note.
+- Remaining follow-up caveat: one branch output was blank and is not treated as research evidence.
 
-Caveat: the dedicated agent-orchestration branch returned an empty string. Agent-specific material still survived through the use-case branch and synthesis, especially the Anthropic dynamic harness source, but LangGraph/OpenAI/Vercel AI SDK deserve a follow-up branch if this becomes production design input.
+Caveat: the agent orchestration material below is **pattern vocabulary**, not a runtime commitment. The production spine stays: XState lifecycle truth, Zod artifact contracts, Durable Object capsule supervision, pinned Artifacts receipts, brokered secret leases, verification contracts, and Wzrrd/Brain review/output surfaces.
 
 ## 1. Executive read
 
@@ -50,6 +52,8 @@ many durable capsules/repos/runs
 ```
 
 For this repo, the current local docs already agree: `docs/dynamic-workflow-machine.md` says plan/machine/verification artifacts must be pinned before sandbox creation, and `.brain/projects/pi-sandbox-workflows.svx` says **capsule ID beats sandbox ID**.
+
+Deployed prototype receipt: `prototypes/cloudflare-parallel-workflow-spike/` ran `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9` through Worker + Durable Object + Queue + Sandbox + Artifacts with 8 planned lanes, concurrency cap 3, max observed active lanes 3, final state `captured`, verifier `verified`, and all lane/synthesis/verifier/delivery sandboxes destroyed with `:ok`.
 
 ## 2. Pattern catalog
 
@@ -191,6 +195,8 @@ FANIN_READY
 Rule: address thousands of lanes, run only `N` hot sandboxes.
 
 Pi implication: use spawned XState actors for dynamic lanes, but cap before spawn. Active slots are leased by supervisor policy, not by optimistic JavaScript loops.
+
+Prototype receipt: the deployed `cloudflare-parallel-workflow-spike` fixture planned 8 lanes, capped hot concurrency at 3, observed max active lanes of 3, committed all 8 lane outputs to Artifacts, then fan-in/synthesis/verifier/delivery completed to `captured`.
 
 ### Coordination patterns
 
@@ -339,36 +345,50 @@ Pi implication: use XState snapshot for operational resume; use event log + Arti
 
 ### Human/review patterns
 
-#### Wait-for-review gate
+#### Durable interruption / approval gate
 
-Sources: [Events and parameters · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/events-and-parameters/), [Wait for token · Trigger.dev](https://trigger.dev/docs/wait-for-token), local `prototypes/review-gate-spike/src/run.ts`.
+Sources: [Events and parameters · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/events-and-parameters/), [Wait for token · Trigger.dev](https://trigger.dev/docs/wait-for-token), [OpenAI guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), [LangGraph interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts), [Temporal human-in-the-loop AI agent](https://docs.temporal.io/ai-cookbook/human-in-the-loop-python), local `prototypes/review-gate-spike/src/run.ts`.
 
 Shape:
 
 ```txt
-publishingReview
-→ waitingForReview
-→ approved | rejected | timedOut | cancelled
+running | toolProposed | verificationNeedsHuman
+→ approvalPayloadPinned
+→ pendingHumanReview
+→ approved | edited | rejected | timedOut | cancelled
+→ deliveringOutput | blocked | cleanup
 ```
 
 Events:
 
 ```txt
-WZRRD_PUBLISHED
-WZRRD_APPROVED
-BRAIN_FEEDBACK_RECEIVED
+APPROVAL_REQUESTED
+APPROVAL_PAYLOAD_PINNED
+APPROVAL_TOKEN_CREATED
+REVIEW_RENDERED
+HUMAN_APPROVED
+HUMAN_EDITED
 HUMAN_REJECTED
 WAIT_TIMEOUT
 CANCEL_REQUESTED
 ```
 
-Pi implication: Wzrrd/Brain are review/output targets, not runtime truth. They emit approval/feedback events back to the capsule DO/workflow. Mutating actions wait here.
+Pi implication:
+
+- The approval binds to an exact action payload hash plus artifact refs, not “approve this agent generally.”
+- The capsule Durable Object owns pending approval state, timeout, cancel, and resume routing.
+- Wzrrd/Brain render the review surface and return approval/edit/reject events; they are not lifecycle truth.
+- `run/approval.json` or equivalent Artifacts receipts should include the redacted payload, hash, verification status, output target, and approval ref.
+- Worker sandboxes should be destroyed or slept before long waits. Resume from capsule state and pinned Artifacts, not from a hot shell.
+- Public Wzrrd/Artifacts payloads must redact private claim URLs, wait tokens, approval URLs, raw secrets, and bearer-ish callback material.
+
+Mutating external actions wait here unless the verification contract explicitly allows automatic delivery.
 
 ### Agent-specific patterns
 
 #### Dynamic harness as pinned artifact
 
-Sources: [A harness for every task: dynamic workflows in Claude Code · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code), local `.brain/projects/pi-sandbox-workflows.svx`.
+Sources: [A harness for every task: dynamic workflows in Claude Code · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code), local `.brain/projects/pi-sandbox-workflows.svx`, local `docs/dynamic-workflow-machine.md`.
 
 Shape:
 
@@ -391,6 +411,409 @@ EXECUTION_STARTED
 ```
 
 Pi implication: generated harnesses can define fan-out, phases, stop conditions, verifier roles, and output targets. They do **not** get to widen auth, pick arbitrary context packs, or control their own sandbox lifecycle.
+
+For now, generated `workflows/machine.ts` and `workflows/harness.js` are receipts until policy validation is real. The trusted Worker/supervisor executes known patterns and pins the generated artifacts for review.
+
+### Agent orchestration patterns
+
+Follow-up completed on 2026-06-04 accepted LangGraph, OpenAI Agents/Responses, Vercel AI SDK, Claude Code, Trigger.dev, and HITL/audit/memory/security research as source-backed pattern input. Use these as reusable shapes; do not let vendor ergonomics erase the repo invariant: **unbounded addressability with bounded hot concurrency**.
+
+#### Runtime-fit matrix
+
+| Source family | Strongest reusable pattern | Runtime stance | Pi mapping |
+| --- | --- | --- | --- |
+| LangGraph | graph state, node boundaries, super-step checkpoints, `interrupt()`, `Send()`/reducers, replay/fork vocabulary | pattern source, not Cloudflare supervisor runtime yet | XState/DO owns lifecycle; Artifacts/event logs own audit; node side effects must be idempotent |
+| OpenAI Agents/Responses | bounded agent run loop, item-based function calls, `call_id` tool results, guardrails/approvals, background responses, harness-vs-sandbox split | worker-lane runtime candidate, not supervisor | model lane refs only; tool calls become audit events; OpenAI IDs are not canonical memory |
+| Vercel AI SDK | typed tool-loop lane, hard step caps, `prepareStep`, approval parts, subagent compaction, resumable streams | worker/UI lane runtime candidate with version pinning | stop conditions in manifest; stream IDs are UI projections; supervisor owns cancellation |
+| Claude Code | dynamic harness source, hooks, permissions, security posture | pattern source for harness receipts and tool gates | generated harness is pinned; `PreToolUse`/permission shapes inform Pi tool audit extensions |
+| Trigger.dev | durable task states, queues/concurrency, `batchTriggerAndWait`, wait tokens, idempotency, metadata/streams | workflow vocabulary; AI Chat remains RC unless pinned | scheduled lanes, cold HITL waits, idempotent child runs, artifact-ref fan-in |
+| Cross-cutting | HITL, tool audit, secret leases, memory compaction, sandbox boundary | supervisor-enforced policy, not library magic | capsule DO + XState + Zod + Artifacts + leases + Wzrrd/Brain |
+
+#### Pattern card contract
+
+Every reusable workflow pattern should be saved as a card with this minimum shape:
+
+```txt
+name
+source receipts
+states
+transitions/events
+waits and external callbacks
+retry/timeout policy
+cancel/cleanup behavior
+replay/repair behavior
+backpressure and concurrency cap
+HITL gates
+observability events
+memory/compaction boundary
+sandbox boundary
+Pi mapping: capsule, supervisor, worker lane, artifacts, leases, verifier, output target
+version/API caveats
+```
+
+This keeps pattern reuse boring enough to validate and render. The card is vocabulary; the executable truth remains the pinned XState machine/harness plus Zod contracts.
+
+#### LangGraph graph/checkpoint/interrupt vocabulary
+
+Sources: [LangGraph JS Graph API](https://docs.langchain.com/oss/javascript/langgraph/graph-api), [LangGraph JS persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence), [LangGraph JS durable execution](https://docs.langchain.com/oss/javascript/langgraph/durable-execution), [LangGraph JS interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts), [LangGraph JS subgraphs](https://docs.langchain.com/oss/javascript/langgraph/use-subgraphs), [LangGraph JS workflows and agents](https://docs.langchain.com/oss/javascript/langgraph/workflows-agents), [LangGraphJS Cloudflare Worker checkpointer issue](https://github.com/langchain-ai/langgraphjs/issues/1692).
+
+Shape:
+
+```txt
+stateSnapshot
+→ runningNode
+→ checkpointingSuperstep
+→ routingNext
+→ runningNode | pendingHumanReview | fanIn | captured | blocked
+```
+
+Events:
+
+```txt
+NODE_STARTED
+NODE_SUCCEEDED
+NODE_FAILED
+CHECKPOINT_WRITTEN
+ROUTE_SELECTED
+INTERRUPT_RAISED
+STATE_FORKED
+REPLAY_REQUESTED
+```
+
+Pi mapping:
+
+- LangGraph `State` maps to Zod-validated `run/manifest.json` plus XState context, not a replacement for either.
+- `Command(update, goto)` maps cleanly to XState events with payloads.
+- `Send()`/reducers map to scheduled worker lanes and reducer payloads that are artifact refs, not huge model text blobs.
+- `interrupt()` maps to the durable approval gate above; resume comes back as a capsule event.
+- Subgraphs are useful vocabulary, but opaque subagent-as-tool calls are worse than explicit lane actors with artifact refs and event receipts.
+- Checkpoints happen at super-step boundaries; if a node reruns, side effects must be idempotent.
+
+Caveats: do not use LangGraph checkpointers as audit truth, do not rely on in-process concurrency for Cloudflare quotas, and do not allow graph topology/code drift for replayable production runs unless `workflows/machine.ts`, `workflows/harness.js`, and manifest refs were pinned before execution.
+
+#### OpenAI Agents/Responses bounded worker lane
+
+Sources: [OpenAI Agents running agents](https://developers.openai.com/api/docs/guides/agents/running-agents), [OpenAI Agents orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration), [OpenAI guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals), [OpenAI sandboxes](https://developers.openai.com/api/docs/guides/agents/sandboxes), [OpenAI background mode](https://developers.openai.com/api/docs/guides/background), [OpenAI compaction](https://developers.openai.com/api/docs/guides/compaction), [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling), [OpenAI MCP/connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp).
+
+Shape:
+
+```txt
+preparingLaneInput
+→ runningModel
+→ handlingFunctionCalls
+→ submittingToolOutputs
+→ maybeHandingOff
+→ waitingForBackgroundResponse
+→ finalizing
+→ workerDone | approvalRequired | failed
+```
+
+Events:
+
+```txt
+RUN_REQUESTED
+MODEL_OUTPUT_RECEIVED
+FUNCTION_CALLS_EMITTED
+TOOL_OUTPUTS_SUBMITTED
+HANDOFF_SELECTED
+BACKGROUND_RESPONSE_QUEUED
+BACKGROUND_RESPONSE_COMPLETED
+FINAL_OUTPUT_READY
+MAX_TURNS_EXCEEDED
+```
+
+Pi mapping:
+
+- Treat an OpenAI SDK run as one bounded worker lane. The capsule supervisor still owns admission, budget, retries, cancellation, verification, artifact capture, and cleanup.
+- Function-call items give a clean audit pair: `function_call { name, arguments, call_id }` and `function_call_output { call_id, output }`.
+- Handoffs change lane ownership inside a run; agents-as-tools keep the manager/supervisor lane in control. Prefer agents-as-tools for verifier/report helper lanes unless ownership truly changes.
+- `previous_response_id`, conversation IDs, and background response IDs are lane refs only. Canonical memory remains capsule Artifacts, event logs, transcripts, verifier results, and Brain decisions.
+- OpenAI sandbox docs reinforce the split this repo already wants: harness/control plane outside, sandbox compute inside.
+
+Caveats: background responses and vendor conversations have retention/compatibility implications; they are not replay receipts. Remote MCP servers are untrusted tool providers and OpenAI warns they can exfiltrate sensitive context, so use allowed-tools policy, approvals, and secret leases.
+
+#### Vercel AI SDK tool-loop lane
+
+Sources: [AI SDK tool calling](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling), [AI SDK loop control](https://ai-sdk.dev/docs/agents/loop-control), [AI SDK ToolLoopAgent](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool-loop-agent), [AI SDK workflows](https://ai-sdk.dev/docs/agents/workflows), [AI SDK subagents](https://ai-sdk.dev/docs/agents/subagents), [AI SDK UI tool approvals](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage), [AI SDK resumable streams](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-resume-streams), [AI SDK telemetry](https://ai-sdk.dev/docs/ai-sdk-core/telemetry), [`tool-loop-agent.ts` source](https://github.com/vercel/ai/blob/main/packages/ai/src/agent/tool-loop-agent.ts).
+
+Shape:
+
+```txt
+modelStep
+→ toolCallsAvailable
+→ executeTools
+→ appendToolResults
+→ nextModelStep
+→ stopConditionMet | approvalRequired | failed
+→ workerDone
+```
+
+Events:
+
+```txt
+STEP_STARTED
+TOOL_CALLS_AVAILABLE
+TOOL_EXECUTION_STARTED
+TOOL_EXECUTION_FINISHED
+STEP_FINISHED
+STOP_CONDITION_MET
+APPROVAL_REQUIRED
+STREAM_RESUME_REQUESTED
+```
+
+Pi mapping:
+
+- Use `ToolLoopAgent`/`generateText`/`streamText` style loops as worker lanes, never as the supervisor.
+- Pin `stopWhen`/step cap, active tool set, phase gates, and done-tool contract into `run/manifest.json` and `run/verification-contract.json`.
+- `prepareStep` maps to supervisor-selected phase gates like `searchOnly → analyzeOnly → summarizeOnly`; workers should not self-widen tools or context.
+- A `done`/`finalAnswer` tool means `workerDone → verifying`, not “truth.” It should return structured artifact refs and claim lists.
+- Resumable streams are UI projections over run events. `stop()` as client disconnect is not lifecycle cancellation; capsule DO/XState owns cancellation.
+- Subagent context offload is useful when the parent sees compact results while full traces go to Artifacts.
+
+Caveat: API names are moving. Docs/source have shown `stepCountIs` vs `isStepCount`, and `needsApproval` vs `toolApproval` depending on Core/ToolLoopAgent/WorkflowAgent. Pin the installed `ai` version before copying snippets.
+
+#### Claude Code hooks, permissions, and harness discipline
+
+Sources: [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks), [Claude Code hooks guide](https://docs.anthropic.com/en/docs/claude-code/hooks-guide), [Claude Agent SDK permissions](https://code.claude.com/docs/en/agent-sdk/permissions), [Claude Code security](https://code.claude.com/docs/en/security), [A harness for every task · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code).
+
+Shape:
+
+```txt
+toolProposed
+→ preToolUsePolicy
+→ allowed | blocked | permissionRequested
+→ toolExecuted
+→ postToolBatchAudited
+→ nextModelTurn
+```
+
+Events:
+
+```txt
+PRE_TOOL_USE
+TOOL_POLICY_ALLOWED
+TOOL_POLICY_BLOCKED
+PERMISSION_REQUESTED
+TOOL_EXECUTED
+POST_TOOL_BATCH_AUDITED
+```
+
+Pi mapping:
+
+- Claude Code’s hook/permission vocabulary maps directly to a project-local Pi tool-audit extension: intercept tool calls before execution, redact/annotate results after execution, and persist event rows.
+- Permissions approve concrete tool/action shapes; they should not grant hidden broad authority to generated harnesses.
+- Dynamic harnesses are valuable for task-specific fan-out, adversarial verification, tournaments, loops, and classification, but the harness must be pinned and policy-checked before execution.
+- Claude Code security guidance reinforces the need to treat repo content, tool output, and MCP/tool descriptions as untrusted input.
+
+Caveat: post-tool auditing cannot undo damage. Side-effecting tools need pre-execution policy and, when needed, the durable approval gate.
+
+#### Trigger.dev durable task and AI-session vocabulary
+
+Sources: [Trigger.dev tasks](https://trigger.dev/docs/tasks/overview), [Trigger.dev runs](https://trigger.dev/docs/runs), [Trigger.dev triggering](https://trigger.dev/docs/triggering), [Trigger.dev queue concurrency](https://trigger.dev/docs/queue-concurrency), [Trigger.dev wait for token](https://trigger.dev/docs/wait-for-token), [Trigger.dev idempotency](https://trigger.dev/docs/idempotency), [Trigger.dev errors/retrying](https://trigger.dev/docs/errors-retrying), [Trigger.dev streams](https://trigger.dev/docs/tasks/streams), [Trigger.dev AI Chat overview](https://trigger.dev/docs/ai-chat/overview), [Trigger.dev persistence and replay](https://trigger.dev/docs/ai-chat/patterns/persistence-and-replay), [Trigger.dev tool result auditing](https://trigger.dev/docs/ai-chat/patterns/tool-result-auditing).
+
+Run shape:
+
+```txt
+pendingVersion | delayed | queued | dequeued
+→ executing
+→ waiting
+→ executing
+→ completed | canceled | failed | timedOut | crashed | systemFailure | expired
+```
+
+Fan-out shape:
+
+```txt
+planningLanes
+→ batchCreated
+→ childrenQueued
+→ waitingForChildren
+→ aggregateResults
+→ verifyAggregate
+→ captured | blocked
+```
+
+Events:
+
+```txt
+TASK_TRIGGERED
+VERSION_LOCKED
+RUN_DEQUEUED
+ATTEMPT_STARTED
+WAITPOINT_REACHED
+WAITPOINT_COMPLETED
+BATCH_CREATED
+CHILD_RUN_OK
+CHILD_RUN_FAILED
+ALL_CHILDREN_FINISHED
+RETRY_SCHEDULED
+CANCEL_REQUESTED
+RUN_REPLAY_REQUESTED
+```
+
+Pi mapping:
+
+- Use Trigger’s states as durable-workflow vocabulary while XState/DO remains this repo’s lifecycle truth.
+- `batchTriggerAndWait` maps to scheduled worker lanes with child outputs as artifact refs.
+- Wait tokens map cleanly to Wzrrd/Brain review pages plus capsule-owned pending state.
+- Idempotency keys should be deterministic: `capsuleId + runId + stepId + artifactRef` for sandbox creation, Artifacts commits, secret leases, Wzrrd publish, GitHub/Linear/customer mutations.
+- Metadata/streams are live projections. Durable memory stays in Artifacts/Brain/event logs.
+
+Caveats: Trigger AI Chat is release-candidate pattern vocabulary until a specific SDK version is pinned. Trigger replay using latest code is not acceptable for audit replay unless the operator explicitly requests redrive-on-latest.
+
+#### Shared tool audit + secret gate
+
+Sources: OpenAI function calling/approvals, Claude Code hooks/permissions, Trigger tool result auditing, Cloudflare Sandbox security, Cloudflare Artifacts best practices, local `docs/kody-secrets-pattern.md`.
+
+Shape:
+
+```txt
+toolCallProposed
+→ policyPreflight
+→ allowed | blocked | needsHumanReview
+→ secretLeaseMinted
+→ sandboxToolExecution
+→ toolResultRecorded
+→ leaseRevoked | leaseExpired
+```
+
+Events:
+
+```txt
+TOOL_CALL_PROPOSED
+TOOL_POLICY_ALLOWED
+TOOL_POLICY_BLOCKED
+TOOL_REVIEW_REQUIRED
+SECRET_REF_REQUESTED
+SECRET_LEASE_MINTED
+TOOL_RESULT_RECORDED
+SECRET_LEASE_REVOKED
+```
+
+Pi mapping:
+
+- Supervisor validates the allowed tool surface from `run/manifest.json` before any worker sees tools.
+- Plans carry `secretRef`, not plaintext. Broker mints task-scoped material only when policy allows it.
+- Store `toolCallId`/`call_id`, tool name, actor profile, args hash, redacted args ref, result ref, approval ref, lease refs, duration, and verifier status.
+- Secret-bearing network calls should prefer a broker/gateway that injects credentials server-side; only materialize `/workspace/.pi/agent/auth.json` when unavoidable.
+- Tool outputs and tool descriptions are untrusted content. Do not let reader lanes write shared Brain or widen secrets.
+
+#### Shared event JSONL contract
+
+Minimum durable event row:
+
+```json
+{
+  "schemaVersion": "piwf.event.v0",
+  "ts": "2026-06-04T00:00:00.000Z",
+  "seq": 1,
+  "capsuleId": "capsule:external-work-item",
+  "runId": "run-abc",
+  "laneId": "lane-reader-1",
+  "state": "policyPreToolGate",
+  "event": "TOOL_CALL_PROPOSED",
+  "actor": "worker:reader",
+  "payloadHash": "sha256:...",
+  "payloadRef": "artifacts://repo/run/events/0001.json",
+  "artifactRefs": [],
+  "leaseRefs": [],
+  "approvalRef": null,
+  "verificationRef": null,
+  "redaction": "public-safe"
+}
+```
+
+Persist hot snapshot/status projection in DO/D1. Commit cold receipts to Artifacts as `run/events.jsonl`, traces/log refs, verifier results, and output-delivery receipts. Wzrrd renders from refs; Brain captures reusable decisions after verification.
+
+#### Memory, compaction, and replay boundary
+
+Sources: [OpenAI compaction](https://developers.openai.com/api/docs/guides/compaction), [LangGraph persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence), [Trigger.dev persistence and replay](https://trigger.dev/docs/ai-chat/patterns/persistence-and-replay), [XState persistence](https://stately.ai/docs/persistence), local Pi `docs/compaction.md` and `docs/session-format.md` receipts.
+
+Shape:
+
+```txt
+beforeCompaction
+→ memoryArtifactWritten
+→ memoryVerified
+→ compacted
+→ restoredFromArtifact
+```
+
+Events:
+
+```txt
+COMPACTION_REQUESTED
+MEMORY_ARTIFACT_PINNED
+MEMORY_VERIFICATION_PASSED
+MEMORY_VERIFICATION_BLOCKED
+COMPACTION_COMPLETED
+RESTORE_REQUESTED
+```
+
+Pi mapping:
+
+- Runtime context = selected context pack refs, policy, budget, output target, and secret refs.
+- Run state = XState snapshot/context plus lane working state.
+- Long-term store = Brain, Artifacts, D1 indexes, and R2 blobs; not vendor conversation memory.
+- Compaction summaries are model-context helpers until pinned and verified as artifacts.
+- Audit replay uses Artifacts commits + event JSONL. Operational resume uses XState snapshots in the control plane.
+
+#### Brain persistence as a terminal workflow step
+
+Source: this follow-up run `wfr_mpzmh6oj_l8zzeo`, Joel's 2026-06-04 correction, and the project Brain rule that durable research belongs in `.brain/` after verification.
+
+Shape:
+
+```txt
+verificationAccepted
+→ synthesizingDurableMemory
+→ writingBrainResource
+→ runningBrainCheck
+→ verifyingNotesRoute
+→ captured
+```
+
+Events:
+
+```txt
+BRAIN_PERSISTENCE_REQUESTED
+BRAIN_NOTE_UPDATED
+BRAIN_CHECK_PASSED
+NOTES_ROUTE_VERIFIED
+PERSISTENCE_BLOCKED
+```
+
+Pi mapping:
+
+- Parallel research lanes do not each edit Brain. They return source-backed findings and caveats.
+- A single-writer persistence step merges accepted findings into the project Brain note and records remaining gaps.
+- The workflow is not “done” until Brain check passes and the local notes route is verified.
+- Final output includes file path, Document Host URL, checks run, and uncommitted status.
+
+This prevents the exact failure mode that created this note: good research trapped in workflow output or compacted transcript sludge instead of durable project memory.
+
+#### Generated machine / harness policy validator checklist
+
+Before executing any generated machine or harness as more than receipt-only, require:
+
+- Pattern selected from approved library, or human-reviewed new pattern card.
+- `workflows/machine.ts`, `workflows/harness.js`, `run/manifest.json`, `run/verification-contract.json`, and `run/plan.json` pinned before sandbox creation.
+- Tool surface declared per lane and denied by default outside the manifest.
+- Context pack refs immutable and selected by supervisor, not worker discovery.
+- Secret refs declared; no plaintext in plan/harness/events/Wzrrd/Artifacts.
+- Budget/stop conditions/retry/timeouts/cancel/cleanup states present.
+- Output target explicit: Wzrrd, GitHub, Linear, artifact-only, email draft, etc.
+- Verification contract states what blocks capture vs warnings vs HITL.
+- Event schema version declared and redaction mode set.
+- Sandbox lifecycle includes destroy/sleep receipt on success, failure, timeout, and cancel.
+
+#### API churn and dependency caveats
+
+- Vercel AI SDK docs/source are moving; pin package version before copying `stepCountIs`/`isStepCount`, `needsApproval`/`toolApproval`, or WorkflowAgent examples.
+- OpenAI Sandbox Agents are beta pattern vocabulary; OpenAI background/conversation state is lane continuation, not audit memory.
+- Trigger.dev AI Chat is RC pattern vocabulary unless a specific `@trigger.dev/sdk` version is pinned.
+- LangGraphJS Cloudflare Worker checkpointer support has an open issue; do not build production Cloudflare supervision on it yet.
+- Remote MCP/tool servers can exfiltrate context. Treat them as untrusted and require allowed tools, approval gates, and secret leases.
 
 ### Observability patterns
 
@@ -823,12 +1246,15 @@ Sources: [Invoke · Stately docs](https://stately.ai/docs/invoke), [Actions · S
 ### Open questions
 
 1. Should final warning status be `captured_with_warnings` or `captured` with warning context?
-2. Which generated-machine policy checks are required before runtime execution?
+2. Which generated-machine policy checks are required before runtime execution is allowed beyond the minimum checklist above?
 3. How does verifier request human review while cleanup still destroys hot sandboxes?
 4. Which patterns belong in the first reusable pattern library?
 5. Does Cloudflare Workflows become the durable step runner now, or after the DO capsule rewrite?
 6. Where does high-volume event history live: DO storage, D1 batches, Artifacts JSONL, or split by hot/cold?
 7. What is the real encrypted secret storage shape for Codex OAuth blobs larger than Secrets Store limits?
+8. What is the exact model/provider budget broker shape for rate limits, token caps, background jobs, and cost backpressure?
+9. Which vendor lane runtimes, if any, get pinned for production experiments versus kept as pattern vocabulary only?
+10. What redaction contract should apply to MCP/tool descriptions, tool outputs, traces, and Wzrrd review pages?
 
 ### Next prototype candidates
 
@@ -910,3 +1336,82 @@ Sources: [Invoke · Stately docs](https://stately.ai/docs/invoke), [Actions · S
 ### Agent workflow source
 
 - [A harness for every task: dynamic workflows in Claude Code · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code)
+
+#### LangGraph / LangChain
+
+- [LangGraph JS Graph API](https://docs.langchain.com/oss/javascript/langgraph/graph-api)
+- [Use the LangGraph JS Graph API](https://docs.langchain.com/oss/javascript/langgraph/use-graph-api)
+- [LangGraph JS persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence)
+- [LangGraph JS durable execution](https://docs.langchain.com/oss/javascript/langgraph/durable-execution)
+- [LangGraph JS interrupts](https://docs.langchain.com/oss/javascript/langgraph/interrupts)
+- [LangGraph JS subgraphs](https://docs.langchain.com/oss/javascript/langgraph/use-subgraphs)
+- [LangGraph JS workflows and agents](https://docs.langchain.com/oss/javascript/langgraph/workflows-agents)
+- [LangChain multi-agent patterns](https://docs.langchain.com/oss/python/langchain/multi-agent)
+- [LangChain human-in-the-loop middleware](https://docs.langchain.com/oss/python/langchain/human-in-the-loop)
+- [LangChain context engineering](https://docs.langchain.com/oss/python/langchain/context-engineering)
+- [LangGraphJS Cloudflare Worker checkpointer issue](https://github.com/langchain-ai/langgraphjs/issues/1692)
+
+#### OpenAI Agents / Responses
+
+- [OpenAI Agents guide](https://developers.openai.com/api/docs/guides/agents)
+- [Running agents](https://developers.openai.com/api/docs/guides/agents/running-agents)
+- [Agents orchestration](https://developers.openai.com/api/docs/guides/agents/orchestration)
+- [Agent results/state](https://developers.openai.com/api/docs/guides/agents/results)
+- [Guardrails and approvals](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals)
+- [Agents observability](https://developers.openai.com/api/docs/guides/agents/integrations-observability)
+- [Sandbox agents](https://developers.openai.com/api/docs/guides/agents/sandboxes)
+- [Function calling](https://developers.openai.com/api/docs/guides/function-calling)
+- [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
+- [Background mode](https://developers.openai.com/api/docs/guides/background)
+- [Compaction](https://developers.openai.com/api/docs/guides/compaction)
+- [MCP tools/connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+
+#### Vercel AI SDK
+
+- [Tools and tool calling](https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling)
+- [Loop control](https://ai-sdk.dev/docs/agents/loop-control)
+- [Building agents](https://ai-sdk.dev/docs/agents/building-agents)
+- [ToolLoopAgent reference](https://ai-sdk.dev/docs/reference/ai-sdk-core/tool-loop-agent)
+- [Workflows](https://ai-sdk.dev/docs/agents/workflows)
+- [Subagents](https://ai-sdk.dev/docs/agents/subagents)
+- [Chatbot tool usage and approvals](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage)
+- [Resumable streams](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-resume-streams)
+- [Telemetry](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)
+- [`tool-loop-agent.ts` source](https://github.com/vercel/ai/blob/main/packages/ai/src/agent/tool-loop-agent.ts)
+
+#### Claude Code / Anthropic
+
+- [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks)
+- [Claude Code hooks guide](https://docs.anthropic.com/en/docs/claude-code/hooks-guide)
+- [Claude Agent SDK permissions](https://code.claude.com/docs/en/agent-sdk/permissions)
+- [Claude Code security](https://code.claude.com/docs/en/security)
+
+#### Trigger.dev
+
+- [Tasks overview](https://trigger.dev/docs/tasks/overview)
+- [Runs](https://trigger.dev/docs/runs)
+- [Triggering and batches](https://trigger.dev/docs/triggering)
+- [Queue concurrency](https://trigger.dev/docs/queue-concurrency)
+- [Waits](https://trigger.dev/docs/wait)
+- [Wait for token](https://trigger.dev/docs/wait-for-token)
+- [Idempotency](https://trigger.dev/docs/idempotency)
+- [Errors and retrying](https://trigger.dev/docs/errors-retrying)
+- [Logging](https://trigger.dev/docs/logging)
+- [Run metadata](https://trigger.dev/docs/runs/metadata)
+- [Task streams](https://trigger.dev/docs/tasks/streams)
+- [AI Chat overview](https://trigger.dev/docs/ai-chat/overview)
+- [AI Chat sessions](https://trigger.dev/docs/ai-chat/sessions)
+- [AI Chat compaction](https://trigger.dev/docs/ai-chat/compaction)
+- [Persistence and replay](https://trigger.dev/docs/ai-chat/patterns/persistence-and-replay)
+- [Tool result auditing](https://trigger.dev/docs/ai-chat/patterns/tool-result-auditing)
+- [Sub-agents](https://trigger.dev/docs/ai-chat/patterns/sub-agents)
+- [Code sandbox pattern](https://trigger.dev/docs/ai-chat/patterns/code-sandbox)
+
+#### Extra HITL / audit / security receipts
+
+- [Cloudflare Sandbox security](https://developers.cloudflare.com/sandbox/concepts/security/)
+- [Cloudflare Sandbox lifecycle API](https://developers.cloudflare.com/sandbox/api/lifecycle/)
+- [Cloudflare outbound Workers sandbox auth](https://blog.cloudflare.com/sandbox-auth/)
+- [Cloudflare Artifacts best practices](https://developers.cloudflare.com/artifacts/concepts/best-practices/)
+- [Cloudflare Secrets Store](https://developers.cloudflare.com/secrets-store/manage-secrets/)
+- [Temporal human-in-the-loop AI agent](https://docs.temporal.io/ai-cookbook/human-in-the-loop-python)
