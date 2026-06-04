@@ -1,0 +1,35 @@
+{
+  "id": "research-claude-workflows",
+  "version": "0.0.0-prototype",
+  "kind": "pi-context-pack",
+  "status": "prototype-fixture",
+  "description": "Minimal context-pack fixture for researching Claude dynamic workflows with source-backed verification.",
+  "taskMatchers": [
+    "research-claude-workflows",
+    "dynamic workflows",
+    "Claude Code workflows",
+    "harness as code"
+  ],
+  "permissions": {
+    "network": "source-read-only",
+    "filesystem": "workspace-write",
+    "secrets": [
+      {
+        "scope": "user",
+        "name": "piCodexAuth",
+        "use": "mint-pi-auth-json"
+      }
+    ]
+  },
+  "outputs": {
+    "report": "artifacts/report.md",
+    "sourceMap": "artifacts/sources.json",
+    "contextPack": "artifacts/context-pack/pack.json",
+    "wzrrdPage": "artifacts/wzrrd/review.html"
+  },
+  "sourceRules": [
+    "Every visible factual claim in report.md must cite a source URL or local source file.",
+    "Interpretation belongs under an Implications section.",
+    "Generated harness code must be committed as an artifact before execution."
+  ]
+}

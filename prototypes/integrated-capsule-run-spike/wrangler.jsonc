@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pi-integrated-capsule-run-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "REAL_RUN_URL": "https://pi-sandbox-workflow-spike.joelhooks.workers.dev/api/real-run",
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CAPSULES",
+        "class_name": "IntegratedCapsule",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["IntegratedCapsule"],
+    },
+  ],
+}
