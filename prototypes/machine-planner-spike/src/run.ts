@@ -1,5 +1,3 @@
-/* eslint-disable func-style, no-use-before-define */
-
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -28,47 +26,27 @@ const fixtureFiles = [
 ];
 const unsafeFixture = "unsafe-machine-code.json";
 
-async function main() {
-  const plans: PlannedWorkflow[] = [];
-  for (const fixtureFile of fixtureFiles) {
-    const result = planJob(await readJson(resolve(fixtureDir, fixtureFile)));
-    if (isRejected(result)) {
-      throw new Error(
-        `Expected ${fixtureFile} to plan, got rejection: ${result.reason}`
-      );
-    }
-    plans.push(result);
-  }
+const isRejected = (
+  value: PlannedWorkflow | RejectedPlan
+): value is RejectedPlan => "reason" in value;
 
-  const unsafeResult = planJob(
-    await readJson(resolve(fixtureDir, unsafeFixture))
+const requirePlan = (
+  plans: PlannedWorkflow[],
+  targetKind: PlannedWorkflow["outputTarget"]["kind"]
+): PlannedWorkflow => {
+  const plan = plans.find(
+    (candidate) => candidate.outputTarget.kind === targetKind
   );
-  if (!isRejected(unsafeResult)) {
-    throw new Error(
-      "Unsafe machine code fixture planned successfully; expected rejection."
-    );
+  if (!plan) {
+    throw new Error(`Missing plan for ${targetKind}`);
   }
+  return plan;
+};
 
-  const receipt = PlannerReceiptSchema.parse({
-    checks: buildReceiptChecks(plans, unsafeResult),
-    generatedAt: new Date().toISOString(),
-    plans,
-    prototype: "machine-planner-spike",
-    question:
-      "Can a planner turn a job spec into a validated lifecycle plan using a known pattern library, without executing arbitrary generated machine code?",
-    rejected: [unsafeResult],
-    schemaVersion: "machine-planner-receipt.v1",
-  });
-  assertAllChecksPassed(receipt);
-  await writeJson(outPath, receipt);
-  console.log(JSON.stringify(receipt, null, 2));
-  console.log(`wrote ${outPath}`);
-}
-
-function buildReceiptChecks(
+const buildReceiptChecks = (
   plans: PlannedWorkflow[],
   unsafeResult: RejectedPlan
-): PolicyCheck[] {
+): PolicyCheck[] => {
   const githubPlan = requirePlan(plans, "github_pr");
   const wzrrdPlan = requirePlan(plans, "wzrrd_review");
   const artifactPlan = requirePlan(plans, "artifact_only");
@@ -152,9 +130,9 @@ function buildReceiptChecks(
       summary: "All per-plan policy checks passed.",
     },
   ];
-}
+};
 
-function assertAllChecksPassed(receipt: PlannerReceipt) {
+const assertAllChecksPassed = (receipt: PlannerReceipt): void => {
   const failed = [
     ...receipt.checks,
     ...receipt.plans.flatMap((plan) => plan.policyChecks),
@@ -164,35 +142,52 @@ function assertAllChecksPassed(receipt: PlannerReceipt) {
       `Planner receipt had failed checks: ${JSON.stringify(failed, null, 2)}`
     );
   }
-}
+};
 
-function isRejected(
-  value: PlannedWorkflow | RejectedPlan
-): value is RejectedPlan {
-  return "reason" in value;
-}
+const readJson = async (path: string): Promise<unknown> =>
+  JSON.parse(await readFile(path, "utf-8"));
 
-function requirePlan(
-  plans: PlannedWorkflow[],
-  targetKind: PlannedWorkflow["outputTarget"]["kind"]
-): PlannedWorkflow {
-  const plan = plans.find(
-    (candidate) => candidate.outputTarget.kind === targetKind
-  );
-  if (!plan) {
-    throw new Error(`Missing plan for ${targetKind}`);
-  }
-  return plan;
-}
-
-async function readJson(path: string): Promise<unknown> {
-  return JSON.parse(await readFile(path, "utf-8"));
-}
-
-async function writeJson(path: string, value: unknown) {
+const writeJson = async (path: string, value: unknown): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
-}
+};
+
+const main = async (): Promise<void> => {
+  const plans: PlannedWorkflow[] = [];
+  for (const fixtureFile of fixtureFiles) {
+    const result = planJob(await readJson(resolve(fixtureDir, fixtureFile)));
+    if (isRejected(result)) {
+      throw new Error(
+        `Expected ${fixtureFile} to plan, got rejection: ${result.reason}`
+      );
+    }
+    plans.push(result);
+  }
+
+  const unsafeResult = planJob(
+    await readJson(resolve(fixtureDir, unsafeFixture))
+  );
+  if (!isRejected(unsafeResult)) {
+    throw new Error(
+      "Unsafe machine code fixture planned successfully; expected rejection."
+    );
+  }
+
+  const receipt = PlannerReceiptSchema.parse({
+    checks: buildReceiptChecks(plans, unsafeResult),
+    generatedAt: new Date().toISOString(),
+    plans,
+    prototype: "machine-planner-spike",
+    question:
+      "Can a planner turn a job spec into a validated lifecycle plan using a known pattern library, without executing arbitrary generated machine code?",
+    rejected: [unsafeResult],
+    schemaVersion: "machine-planner-receipt.v1",
+  });
+  assertAllChecksPassed(receipt);
+  await writeJson(outPath, receipt);
+  console.log(JSON.stringify(receipt, null, 2));
+  console.log(`wrote ${outPath}`);
+};
 
 try {
   await main();
