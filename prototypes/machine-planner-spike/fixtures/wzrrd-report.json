@@ -1,0 +1,10 @@
+{
+  "workItemId": "thread-report-123",
+  "task": "research this and produce a source-backed report",
+  "contextPackRefs": ["research-claude-workflows@0.1.0"],
+  "secretRefs": ["piCodexAuth"],
+  "verificationContract": "source-grounded-report-v1",
+  "outputTarget": {
+    "kind": "wzrrd_review"
+  }
+}

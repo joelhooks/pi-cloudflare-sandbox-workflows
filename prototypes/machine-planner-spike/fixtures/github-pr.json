@@ -1,0 +1,12 @@
+{
+  "workItemId": "issue-gh-pr-456",
+  "task": "make a PR to this GitHub repo",
+  "contextPackRefs": ["repo-editing@0.1.0"],
+  "secretRefs": ["githubAppInstallation"],
+  "verificationContract": "tests-pass-and-diff-reviewed",
+  "outputTarget": {
+    "kind": "github_pr",
+    "repo": "owner/repo",
+    "base": "main"
+  }
+}

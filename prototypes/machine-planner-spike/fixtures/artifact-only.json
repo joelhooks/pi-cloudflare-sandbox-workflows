@@ -1,0 +1,10 @@
+{
+  "workItemId": "internal-analysis-789",
+  "task": "analyze logs and save a private report",
+  "contextPackRefs": ["log-analysis@0.1.0"],
+  "secretRefs": ["axiomReadOnly"],
+  "verificationContract": "artifact-presence-v1",
+  "outputTarget": {
+    "kind": "artifact_only"
+  }
+}

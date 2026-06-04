@@ -1,0 +1,12 @@
+{
+  "workItemId": "unsafe-code-999",
+  "task": "run this model-written lifecycle machine",
+  "contextPackRefs": ["unsafe@0.0.1"],
+  "secretRefs": ["piCodexAuth"],
+  "verificationContract": "artifact-presence-v1",
+  "outputTarget": {
+    "kind": "artifact_only"
+  },
+  "requestedMachineCode": "import { setup } from 'xstate'; export const machine = setup({}).createMachine({});",
+  "machineTs": "() => eval(process.env.SECRET)"
+}
