@@ -1,0 +1,422 @@
+---
+title: Pi Sandbox Workflows
+status: active
+updated: 2026-06-04
+---
+
+# Pi Sandbox Workflows
+
+Canonical project Brain for `/Users/joel/Code/joelhooks/pi-cloudflare-sandbox-workflows`.
+
+This note was moved from the top-level `joelhooks/.brain/projects/ephemeral-pi-sandboxes.svx` so future design/prototype receipts live with the repo that owns the work.
+
+## Decision
+
+The browser terminal Cloudflare prototype proved that Pi can run in a Cloudflare Sandbox with ChatGPT/Codex subscription OAuth seeded through `~/.pi/agent/auth.json`, but the desired product shape is **contextual sandboxes for bounded runs**, not a persistent browser TUI.
+
+Accepted identity boundary: **context capsule keyed by the external work item/thread**, not by sandbox ID. Sandbox IDs are replaceable compute handles; the capsule owns durable state.
+
+## Receipts
+
+Local source corpus for this project:
+
+- Source map: `docs/source-map.md`
+- Thariq notes/articles copied into `sources/thariq/`
+- Kody secret-management reference map: `docs/kody-secrets-pattern.md`
+- Cloudflare source map: `docs/cloudflare-references.md`
+- Production/prototype boundary: `docs/production-vs-prototypes.md`
+- Dynamic workflow machine prototype/runbook: `docs/dynamic-workflow-machine.md`
+- Tooling baseline receipts: `docs/tooling-baseline.md`
+- Prototype deletion contract: `PROTOTYPES.md`
+
+Primary receipts:
+
+- Pi supports subscription auth via `/login`; tokens live in `~/.pi/agent/auth.json` and auto-refresh. Source: `/Users/joel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/providers.md`.
+- Pi supports single-shot print mode via `runPrintMode` and subprocess RPC via `pi --mode rpc --no-session`. Source: `/Users/joel/.bun/install/global/node_modules/@earendil-works/pi-coding-agent/docs/sdk.md`.
+- Cloudflare Sandbox creates isolated Linux container sandboxes, with per-session/per-task naming and explicit `destroy()` cleanup. Source: `https://developers.cloudflare.com/sandbox/concepts/sandboxes/index.md`.
+- Cloudflare Containers pricing is Workers Paid + active container resources: memory/disk provisioned while running, CPU active usage only, plus Workers/Durable Objects/logs/egress. Source: `https://developers.cloudflare.com/containers/pricing/index.md`.
+- `just-bash` is an in-process virtual bash with no arbitrary native binary execution; it is useful as a cheap command sandbox/controller, not as the substrate for running the Pi CLI. Source: `vercel-labs/just-bash/packages/just-bash/README.md`.
+- Cloudflare Artifacts stores durable, versioned file trees behind Git-compatible repos; repos have scoped tokens, remotes, history, refs, and durable state. Source: `https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/`.
+- Cloudflare's Sandbox SDK + Artifacts example uses the same ID for sandbox and Artifacts repo, passes a short-lived authenticated Git remote into the sandbox, and lets sandbox code use normal `git clone/fetch/pull/push`. Source: `https://developers.cloudflare.com/artifacts/examples/sandbox-sdk-artifacts/`.
+- Artifacts best practices recommend one repo per agent/session/application, forking from stable baselines, short-lived least-privilege repo tokens, and git notes for prompts/model output. Source: `https://developers.cloudflare.com/artifacts/concepts/best-practices/`.
+- Cloudflare Secrets Store is account-level encrypted secret storage compatible with Workers and AI Gateway; Workers bind individual account secrets and access values with `await env.BINDING.get()`. Source: `https://developers.cloudflare.com/secrets-store/integrations/workers/`.
+- Secrets Store beta limits: one store per account, up to 100 production secrets, each secret is a string up to 1024 bytes. Source: `https://developers.cloudflare.com/secrets-store/manage-secrets/`.
+- Local measurement: the current `openai-codex` OAuth auth entry is about 2242 bytes serialized, so it does not fit in one Secrets Store secret; no secret value was printed.
+
+## Repo tooling decision
+
+Accepted baseline:
+
+- `pnpm` is the package manager.
+- Turborepo is installed up front as a **light workspace spine**, not a permission slip for monorepo theater.
+- `@total-typescript/tsconfig` is the TypeScript base, with extra local strictness: `exactOptionalPropertyTypes`, `noImplicitReturns`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`, and `noPropertyAccessFromIndexSignature`.
+- `tsgo` from `@typescript/native-preview` is the primary typecheck command for TS7 speed. Classic `tsc` remains as `pnpm typecheck:tsc` for compatibility receipts.
+- Ultracite is configured with `oxlint` + `oxfmt`, not Biome.
+- Lefthook pre-commit formats staged files, stages fixes, then runs full lint and full typecheck. Pre-push runs the Turborepo workspace verify task.
+
+Receipt commands:
+
+```bash
+pnpm install
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm verify:workspace
+```
+
+## Type story
+
+Accepted stance: pursue a **supreme type story** where generated workflow plans are still boring to validate, replay, and render.
+
+- **XState v5 owns workflow types**: states, events, actor snapshots, transition decisions, verification gates, cancellation, cleanup, and capture status. Do not duplicate lifecycle truth in Zod or ad hoc JSON.
+- **Zod v4 owns artifact data contracts**: `run/plan.json`, `run/manifest.json`, `run/verification-contract.json`, `artifacts/verification/result.json`, Wzrrd publish responses, and any generated structured data that crosses trust boundaries.
+- **TypeScript owns compile-time glue**: infer domain types from Zod schemas where data crosses boundaries, and use XState's setup/types for machine context and events. Avoid parallel hand-written interfaces that drift from schemas.
+- **JSON Schema is exported, not authored by hand**: use Zod v4 `z.toJSONSchema()` for structured-output prompts, Wzrrd docs, and external contract display when needed.
+- **No untyped generated blobs**: generated plan/machine/harness artifacts should be parsed and validated before execution or publication, even when the current prototype uses a fixed executor.
+
+Prototype schema targets:
+
+```txt
+PlanSchema
+RunManifestSchema
+VerificationContractSchema
+VerificationResultSchema
+WzrrdPublishResultSchema
+```
+
+Rule: Zod validates the data moving through the machine. XState models the machine.
+
+## Prototype checkpoint rule
+
+When a prototype answers its question, capture the learning in Brain/docs, then commit a checkpoint before starting the next question. If the next question changes the core axis, create a new `prototypes/<name>/` directory instead of mutating the previous spike. Mutate an existing prototype only for same-question deepening or receipt fixes.
+
+Applied here: adding snapshot resume to `sandbox-workflow-spike` is acceptable same-lane deepening. The next major axis, such as a lease broker, Durable Object capsule actor, generated-machine policy gate, multi-sandbox fan-out, or Wzrrd review UX, should get its own prototype directory.
+
+## Target architecture
+
+1. Request resolves or creates a context capsule for the external work item/thread.
+2. Worker creates/reuses the capsule's Artifacts repo, usually by forking a stable baseline.
+3. Worker mints short-lived read/write Artifacts tokens only for the authorized run.
+4. Worker gets `getSandbox(env.Sandbox, sandboxRunId)` and hydrates it from the capsule.
+5. Worker writes a minimal `auth.json` containing only the portable `openai-codex` OAuth entry.
+6. Worker checks out or mounts the bounded workspace from Artifacts.
+7. Worker runs Pi non-interactively:
+   - simple job: `pi -p --provider openai-codex --model <codex-model> "<task>"`
+   - controlled multi-turn job: `pi --mode rpc --no-session`
+   - embedded Node host: Pi SDK `runPrintMode` / `AgentSession`
+8. Stream stdout/events to caller.
+9. Push requested artifacts, patches, logs, and run notes back to Artifacts / capsule metadata.
+10. Always let the execution sandbox sleep or `sandbox.destroy()` in `finally` for one-shot runs.
+
+## Working language
+
+- **Contextual sandbox**: an execution sandbox plus a scoped context manifest for a specific job/thread. The sandbox gets only the artifacts, repo/workspace, auth leases, config, prompts, extensions, and skills needed for that assignment.
+- **Context capsule**: the durable record keyed by external work item/thread that survives compute sleep/destruction: task identity, Artifacts repo/ref, selected Brain/docs/context, Pi session/transcript refs, config overlays, allowed tools, auth policy, and output contract.
+- **Execution sandbox**: disposable compute. It may sleep or be destroyed. It should not be treated as the durable memory boundary.
+- **Task-specific context pack**: a versioned Artifacts package selected into a context capsule for one job class or assignment. It can contain prompts, skills, extension bundles, config overlays, source maps, examples, eval fixtures, and non-secret policy docs. Context packs are referenced by immutable ref in run records so runs are reproducible.
+- **Dynamic harness**: a generated, bounded workflow script for a specific capsule/run. The harness is code-as-plan: it can fan out agents, select phases, enforce verification barriers, and define stop conditions, but side effects still route through declared agent profiles/tools and policy gates.
+- **Dynamic workflow machine**: a generated or selected **XState v5** state machine for a specific job. It is the lifecycle plan for the run: states, events, lane roles, retries, verification gates, cancellation, capture rules, and cleanup. The dynamic harness may be the executable script; the dynamic workflow machine is the auditable lifecycle contract. Use XState directly; do not invent a softer intermediate machine DSL unless the hard need appears later.
+- **Workflow pattern library**: reusable machine/harness templates for common jobs: linear step chain, fan-out/fan-in, reader → verifier, generate → filter, tournament, loop-until-done, scheduled batch, idempotent retry, throttle/concurrency/backpressure, cancellation, and human review gates. Jobs select and specialize patterns instead of hard-coding one universal flow.
+- **Verification contract**: a job-specific acceptance contract derived from intent and desired outcomes. It defines what the verifier must check, what evidence counts, what artifacts must be inspected, and whether failures block capture or become warnings. There is no universal verifier rubric; source-citation checks are only one contract type.
+- **Output target**: the instruction-selected delivery destination for a run's accepted output. Wzrrd is one useful review/output target, not a hardcoded core subsystem. Other valid targets include GitHub PRs, issue comments, Linear updates, artifact-only capture, email drafts, or any policy-approved delivery surface.
+
+## Cloudflare substrate map
+
+Use all of Cloudflare's state surfaces, but give each one a clean job:
+
+- **Artifacts**: versioned filesystem state. Store worktrees, generated artifacts, baseline forks, prompt packs, skill bundles, extension/config snapshots, non-secret context manifests, patches, and git notes for prompts/summaries.
+- **Durable Objects**: per-capsule actor. Own lifecycle state, locks, run queue, active sandbox handle, streaming/WebSocket coordination, cancellation, and wake/sleep orchestration.
+- **D1**: queryable control-plane index. Store capsule/run catalogs, status history, artifact repo names/refs, audit rows, search facets, and cross-capsule lookup metadata.
+- **R2**: large blob storage when a file is too big or too raw for Git ergonomics: videos, PDFs, datasets, trace bundles, screenshots, tarballs.
+- **Secrets Store / Worker secrets / scoped token services**: account-level reusable small secrets, per-Worker larger secrets, OAuth refresh material, short-lived leases, and provider credentials. Do not store live secrets in Artifacts.
+
+Secrets Store is useful for small reusable account secrets and root keys that Workers can bind. It is not, by itself, a dynamic lease service and may be too small for full portable OAuth blobs. For Pi subscription auth, likely options are:
+
+1. per-Worker secret for the current `openai-codex` auth blob when static deployment binding is acceptable
+2. encrypted OAuth blob in D1/R2/Artifacts-adjacent private storage, with the encryption key in Secrets Store or Worker secret
+3. split Secrets Store entries only if we accept the operational ugliness and 100-secret beta cap
+4. external agent-secrets/secret broker during early prototypes
+
+Kent C. Dodds' `kody` repo has a useful stronger pattern to borrow for v2 secret brokering:
+
+- `kody` stores encrypted saved secrets in D1 `secret_buckets`/`secret_entries`, with scopes `session`, `app`, and `user`, plus optional `expires_at`. Source: `kentcdodds/kody/packages/worker/migrations/0008-secret-buckets.sql`.
+- Secret values are encrypted with AES-GCM using a derived key from `SECRET_STORE_KEY`; rotation docs warn this key needs re-encryption migration because there is no legacy fallback. Sources: `kentcdodds/kody/packages/worker/src/mcp/secrets/crypto.ts` and `docs/contributing/secret-rotation.md`.
+- Runtime secret listing returns metadata only: names, descriptions, allowed hosts/capabilities/packages, timestamps, TTL. Source: `kentcdodds/kody/packages/worker/src/mcp/capabilities/secrets/secret-list.ts`.
+- Runtime secret setting is write-only from the model perspective and preserves existing policy allowlists. Source: `kentcdodds/kody/packages/worker/src/mcp/capabilities/secrets/secret-set.ts` and `packages/worker/src/mcp/secrets/service.ts`.
+- Outbound network secret use happens through placeholders that the server-side fetch gateway resolves only after checking user auth and per-secret host approval; missing approvals return explicit approval URLs. Sources: `kentcdodds/kody/packages/worker/src/mcp/fetch-gateway.ts`, `packages/worker/src/mcp/secrets/errors.ts`, and `docs/use/secrets-and-values.md`.
+- Policy widening is intentionally restricted to authenticated account admin UI, not MCP tools, generated UI, or sandboxed execute code. Source: `kentcdodds/kody/docs/contributing/secret-host-approval.md`.
+
+Design takeaway: for contextual Pi sandboxes, copy Kody's separation of **secret value storage**, **metadata discovery**, **policy approval**, and **derived-use gateway**. Do not hand raw long-lived OAuth material to generated harnesses by default. Let capsules reference secrets by name/scope, have the supervisor/broker mint a task-scoped derived artifact such as `auth.json`, and record approvals/leases in the control plane.
+
+Kody reference map for implementation:
+
+| Concern | Kody receipt | Borrow for Pi sandbox workflows |
+| --- | --- | --- |
+| Secret scopes and expiry | `kentcdodds/kody/packages/worker/migrations/0008-secret-buckets.sql` | `user` operator credential, `app` context-pack/integration credential, `session` capsule/run lease |
+| Encrypt/decrypt values | `kentcdodds/kody/packages/worker/src/mcp/secrets/crypto.ts` | Store encrypted Codex OAuth blobs outside Cloudflare Secrets Store size limits |
+| Rotation policy | `kentcdodds/kody/docs/contributing/secret-rotation.md` | Treat root encryption key rotation as an explicit re-encryption migration |
+| Metadata-only discovery | `kentcdodds/kody/packages/worker/src/mcp/capabilities/secrets/secret-list.ts` | Let harnesses discover secret references without plaintext |
+| Write-only persistence | `kentcdodds/kody/packages/worker/src/mcp/capabilities/secrets/secret-set.ts` | Allow trusted refresh paths to persist tokens without echoing values |
+| Host approval gateway | `kentcdodds/kody/packages/worker/src/mcp/fetch-gateway.ts` | Gate secret-bearing network use and derived auth injection through supervisor policy |
+| Approval errors/links | `kentcdodds/kody/packages/worker/src/mcp/secrets/errors.ts` | Return actionable approval requirements instead of retry sludge |
+| Admin-only widening | `kentcdodds/kody/docs/contributing/secret-host-approval.md` | Generated workflows may request approvals, not grant themselves broader secret use |
+| User-facing rules | `kentcdodds/kody/docs/use/secrets-and-values.md` | Document that placeholders are wiring, not general string interpolation |
+
+Rule of thumb: if it should be diffed, forked, checked out, reviewed, or replayed, put it in Artifacts. If it is live coordination, authorization, queueing, or a secret, keep it in the control plane.
+
+## Task-specific context packs
+
+Accepted format: context packs should use a **Pi package-compatible layout plus `pack.json` metadata**. This lets sandboxes reuse Pi's existing skills/prompts/extensions discovery while adding control-plane metadata for matching, compatibility, checksums, artifact refs, and permissions.
+
+A context capsule may hydrate one or more task-specific context packs before running Pi. Packs should be composable and pinned by immutable ref:
+
+```txt
+/context-packs/{pack-name}/
+  pack.json              # id, version, compatibility, task matchers, permissions, default verification contract, checksums
+  package.json           # optional Pi package manifest compatibility
+  prompts/*.md           # system/task prompt fragments
+  skills/*/SKILL.md      # Pi/agent skills for this job type
+  extensions/*           # optional Pi extensions or tool adapters
+  config/*.json          # non-secret config overlays
+  docs/**                # source-backed task docs and examples
+  evals/**               # fixtures/smoke tests for the pack
+```
+
+Selection happens in the control plane, not by dumping every available skill into the sandbox. The capsule records `contextPackRefs[]`; the sandbox checks those refs out, overlays them into the Pi agent dir/project dir, runs the job, and records which pack refs influenced the result.
+
+Default verification contracts live in `context-packs/{pack-name}/pack.json` so a job type can be reused. The exact contract used for a specific run is pinned into `run/manifest.json`; verifier lanes must read the run manifest first so each run is replayable and auditable even when the pack default changes later.
+
+## Related pattern: `pi-workflow-os`
+
+`pi-workflow-os` is the orchestration cousin of contextual sandboxes:
+
+- It uses small deterministic JavaScript workflow scripts to fan out isolated Pi subagents. Source: `joelhooks/pi-workflow-os/README.md`.
+- XState owns workflow lifecycle while workflow events are the durable source of truth and snapshots are projections. Source: `joelhooks/pi-workflow-os/src/machine.ts` and `src/store.ts`.
+- It already models agent profiles, cancellation, run/agent supervision, structured output, retries, worktree isolation, budgets, and concurrency. Source: `joelhooks/pi-workflow-os/src/types.ts`, `src/runtime.ts`, `src/supervisor.ts`, and `src/agent.ts`.
+
+For contextual sandboxes, reuse this mental model at the cloud boundary: a Durable Object per capsule can act like the workflow supervisor/state machine, Artifacts can store workflow scripts/runs/context packs, and each workflow step can hydrate a sandbox from pinned capsule refs. The key distinction: Workflow OS orchestrates Pi subagents inside a Pi process; contextual sandboxes orchestrate disposable compute plus durable artifact/context hydration.
+
+Context packs may include saved Workflow OS scripts under `workflows/*.js` when the assignment needs multi-agent fan-out, verification barriers, or explicit stop conditions.
+
+The Claude dynamic-workflows lineage matters: Workflow OS is not just a static workflow runner. It should support **generating a harness on the fly** for a specific task, then pinning that generated script as an artifact before execution.
+
+`Michaelliv/pi-dynamic-workflows` is useful prior art for the harness side: a Pi extension lets the model write deterministic JavaScript workflow scripts with literal `meta`, `agent`, `parallel`, `pipeline`, `phase`, structured output schemas, abort handling, and live progress. It intentionally lacks persisted/resumable runs, which is exactly where the Cloudflare Sandbox + Artifacts + state-machine spine should deepen the model.
+
+For sandbox workflows, generate or select **two artifacts**:
+
+1. the executable dynamic harness script
+2. the XState v5 dynamic workflow machine that governs lifecycle, retries, verification gates, cancellation, capture status, cleanup, and flow control
+
+The capsule should record:
+
+- the prompt/source context that generated the harness and machine
+- the generated workflow script ref
+- the generated XState machine ref
+- the context pack refs the harness requested
+- the job-specific verification contract
+- policy validation results before execution
+- event log and snapshot projection after execution
+
+This makes the generated harness and its lifecycle rules replayable and reviewable instead of disappearing as vibes in the model context. The machine artifact should be inspectable XState v5 TypeScript/config, not prose.
+
+## Dynamic workflow as sandbox orchestration
+
+A dynamic workflow can be the orchestration layer for contextual sandboxes. In this framing, a Workflow OS harness is not only `agent()` fan-out; it is a generated runbook for compute lifecycle, backed by a generated/selected workflow machine blueprint:
+
+1. resolve capsule identity and policy
+2. run a supervisor/control-plane **plan phase** before sandbox creation
+3. choose workflow pattern(s) from the pattern library
+4. generate or specialize the XState v5 workflow machine
+5. generate or specialize the executable harness script
+6. select/pin context packs
+7. create or fork Artifacts repos
+8. mint short-lived repo/provider/auth leases
+9. create/wake one or more sandboxes
+10. hydrate workspace, prompts, skills, extensions, config, and artifacts
+11. run Pi turns or RPC sessions inside the sandbox
+12. verify output through the job's verification contract before deciding capture status
+13. commit artifacts, patches, logs, notes, and summaries
+14. sleep or destroy sandboxes
+
+Inngest is useful pattern vocabulary, not necessarily the runtime: durable steps, retriable checkpoints, concurrency, throttling, debouncing, idempotency, batching, cancellation, and event-triggered fan-out are reusable workflow-machine patterns. For Pi sandbox workflows, these become XState machine/harness templates that can be selected by job intent and quota policy.
+
+XState v5 persistence is the default lifecycle strategy. Actors can restore from a persisted snapshot with `createActor(machine, { snapshot })`, and `actor.getPersistedSnapshot()` returns a JSON-serializable object for storage. For Cloudflare, persist snapshots in the control plane and commit selected snapshot/event receipts to Artifacts for audit. Snapshot persistence is the operational resume path; event logs are the audit/replay story. XState Store's snapshot/event persistence strategies are useful vocabulary for deciding when to store full snapshots versus event logs.
+
+`just-bash` stays valuable as a cheap local controller/test harness for generated machines and shell-step plans. Use it to simulate step ordering, command surfaces, and failure paths before burning Cloudflare/Sandbox cycles. Do not treat it as the runtime substrate for real Pi CLI execution; the real proof still runs in Cloudflare Sandbox.
+
+Important boundary: the orchestration workflow should run in the control plane, not inside the sandbox it controls. The sandbox may run nested Pi/Workflow OS work when needed, but lifecycle, auth, pack selection, cancellation, and policy checks stay outside as the privileged supervisor.
+
+The plan phase is a supervisor/control-plane phase. It shapes and pins the dynamic XState machine, harness, context packs, verification contract, allowed lane roles, budget/backpressure policy, and cleanup guarantees before any worker sandbox is created. Worker sandboxes may execute lane work, but they do not get to invent or widen the machine that controls their own lifecycle or auth.
+
+Plan-phase artifacts must be committed/pinned before sandbox creation:
+
+```txt
+run/plan.json
+workflows/machine.ts
+workflows/harness.js
+run/verification-contract.json
+run/manifest.json
+```
+
+This preserves the receipt chain: intent → plan → machine → sandbox work → verification → Wzrrd. If the plan is not pinned before execution, the run is not auditable enough to trust.
+
+For the next prototype, `workflows/machine.ts` is a source receipt, not runtime-loaded control code. The Worker should execute through a fixed, constrained prototype executor/known machine path while committing the planned XState machine for review. Running generated lifecycle code in the Worker is a later trust-boundary decision after validation and policy gates exist.
+
+The next implementation slice should include both pieces in one receipt chain: first commit the plan-phase artifacts, then execute the fixed reader → verifier pipeline against that pinned plan. This is acceptable because the generated machine remains a receipt while the trusted Worker executor owns real lifecycle behavior.
+
+The supervisor may itself have an execution sandbox if it needs heavier compute, Pi, or generated-harness authoring. Call that a **supervisor sandbox**: a privileged, separate lane with different policy from worker sandboxes. It may generate/validate harnesses and publish verified outputs, but it should not be the same sandbox that reads untrusted inputs or performs task work. Control authority is a role boundary, not necessarily a no-container rule.
+
+### Scale invariant
+
+A workflow may describe hundreds or thousands of sandbox work items, but the supervisor should treat them as **scheduled lanes**, not all-hot containers. Active concurrency is bounded by policy, quota, budget, and backpressure.
+
+Receipts:
+
+- Cloudflare Containers Workers Paid account limits currently list 6 TiB memory, 1,500 vCPU, and 30 TB disk for concurrent live container instances. Source: `https://developers.cloudflare.com/containers/platform-details/limits/`.
+- Sandbox containers sleep after inactivity but still count toward account limits until destroyed; use `destroy()` to free resources immediately. Source: `https://developers.cloudflare.com/sandbox/api/lifecycle/`.
+- Artifacts supports unlimited repositories, with 10 GB per repository and 1 TB per account by default. Source: `https://developers.cloudflare.com/artifacts/platform/limits/`.
+
+Design implication: thousands of capsules/repos/work items are fine; thousands of simultaneously running sandboxes are a scheduling/cost decision, not a default. The DO supervisor should maintain a run queue, lease active slots, and aggressively destroy or sleep lanes after artifact commits.
+
+Accepted sequencing: optimize first for **wide batch throughput with a tiny concurrency cap**, then deepen per-capsule orchestration once capsule identity, Artifacts hydration, token leases, sandbox lifecycle, event logs, and backpressure are proven.
+
+## First batch workload candidate: research Claude workflows
+
+Use `research-claude-workflows` as the first wide-batch contextual-sandbox task. It is source-heavy, low-risk, and exercises the full spine without touching production repos.
+
+Source-backed seed from Anthropic's Claude blog post, "A harness for every task: dynamic workflows in Claude Code" (`https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code`):
+
+- Dynamic workflows let Claude Code write and orchestrate a task-specific multi-agent JavaScript harness on the fly.
+- Workflows help with long-running, massively parallel, highly structured, and adversarial tasks where one context window risks agentic laziness, self-preferential bias, and goal drift.
+- Workflow patterns named by the source include classify-and-act, fan-out-and-synthesize, adversarial verification, generate-and-filter, tournament, and loop-until-done.
+- Source use cases include migrations/refactors, deep research, deep verification, sorting, memory/rule adherence, root-cause investigation, triage at scale, exploration/taste, evals, and model/intelligence routing.
+- The source warns workflows use more tokens and are not needed for every task.
+- The source says workflows can be saved/shared through workflow files or distributed via a skill, with scripts treated as templates when flexibility is needed.
+
+Proposed sandbox orchestration harness:
+
+1. create one capsule for the research task
+2. fork/create an Artifacts repo for the research output
+3. hydrate a `research` context pack with web/source-reading prompts and citation rules
+4. fan out source collectors across Claude blog/docs/X/repo references
+5. run verifier lanes against the job-specific verification contract; for this research workload that means checking extracted/report claims against source text
+6. synthesize a short source-backed report and a context-pack recommendation for Pi Workflow OS
+7. commit `report.md`, `sources.json`, extracted pattern cards, and the generated harness script to Artifacts
+8. destroy all active sandboxes
+
+Accepted deliverables: produce **both** a source-backed report and a reusable task-specific context pack, rendered as Wzrrd pages for human review.
+
+Research is the first test because it is a good fan-out workload, not because research is the final product shape. The durable outputs still live in Artifacts; Wzrrd pages are the readable/public-or-private review surface generated from those outputs.
+
+Acceptance for this research workload:
+
+- the run must carry a verification contract in the manifest/context pack so verifier behavior is explicit and replayable
+- every visible claim in the report must cite a source URL or local repo file
+- unsourced interpretation belongs in a separate "Implications for Pi" section
+- the reusable context pack must include prompts, workflow templates, source-citation rules, verifier rubrics, and smoke/eval fixtures for future dynamic-workflow research tasks
+- the report and context pack should be committed/pinned as Artifacts outputs for replay
+- a Wzrrd page should present the report, source map, generated harness, context pack manifest, verification contract, verifier result, and run/event receipts
+
+## Related pattern: `pi-discord-threads`
+
+`pi-discord-threads` already has the local version of this shape:
+
+- `ThreadRecord` maps a durable external conversation to `cwd`, `sessionFile`, `sessionName`, and status. Source: `joelhooks/pi-discord-threads/src/registry.ts`.
+- `PiRuntimeManager` lazily creates a Pi runtime for a thread, reopens the saved session file, appends a mode-specific system prompt, queues work, then disposes the runtime after `idleTtlMs`. Source: `joelhooks/pi-discord-threads/src/pi-runtime.ts`.
+- Attachment ingestion saves Discord artifacts to a data directory and appends local file-path context to the prompt. Source: `joelhooks/pi-discord-threads/src/attachments.ts`.
+
+For cloud contextual sandboxes, copy the **durable mapping + lazy runtime** pattern, but persist context/artifacts outside the Cloudflare container because sandbox sleep resets in-container state.
+
+## Prototype readiness
+
+Use `/skill:prototype` for the next move. The prototype question should be narrow:
+
+> Can a supervisor-style run create a capsule, resolve a context pack, mint a task-scoped `auth.json` from a secret reference, run one bounded Pi job in a sandbox, commit outputs, and destroy/sleep the sandbox with receipts?
+
+Prototype constraints:
+
+- mark all prototype code as throwaway
+- use an explicit state machine shape before wiring lifecycle logic
+- use a tiny concurrency cap, probably `1` first and `2` after the spine works
+- use the existing Cloudflare Sandbox prototype only as substrate proof, not as UX direction
+- dogfood as soon as the smallest lane can run `research-claude-workflows` and publish a Wzrrd review page
+- capture the answer back into this note, including files to delete or absorb
+
+First prototype artifact is a real Worker/Sandbox runner, not a polished browser terminal:
+
+```txt
+prototypes/sandbox-workflow-spike/
+  Dockerfile                # real Cloudflare Sandbox image with Pi installed
+  wrangler.jsonc            # Sandbox + Artifacts bindings
+  README.md                 # question, run command, delete/absorb plan
+  src/machine.ts            # capsule/run lifecycle state model
+  src/worker.ts             # throwaway real Worker route: /api/real-run
+  src/run.ts                # cheap dry state-machine receipt
+  scripts/extract-codex-auth.mjs
+  pack.json                 # minimal research context pack metadata
+  workflow.research.js      # tiny generated-harness-shaped script
+```
+
+## Prototype capture: sandbox-workflow-spike
+
+Date: 2026-06-04
+
+Question answered first: can we express the first dogfood lane as an explicit supervisor lifecycle without mixing prototype and production code?
+
+Result: yes for the dry-run state/data model. The prototype ends in `captured` and emits a receipt-shaped context containing capsule id, context pack ref, auth lease ref, sandbox role/id, artifact refs, Wzrrd page ref, and destroy receipt.
+
+Question answered next: can the first lane hit real Cloudflare substrate instead of fake adapters?
+
+Result: yes. The real prototype deploys a Cloudflare Worker with Sandbox + Artifacts bindings, creates a unique Artifacts repo per run, passes a short-lived authenticated Git remote into the sandbox as `ARTIFACTS_GIT_REMOTE`, materializes only the `openai-codex` auth entry from `PI_AUTH_JSON_B64` into `/workspace/.pi/agent/auth.json`, runs `pi --provider openai-codex --model gpt-5.5 --thinking off --no-session -p @run/prompt.md`, commits report/source-map/context-pack/Wzrrd outputs plus git notes, pushes to Artifacts, and calls `sandbox.destroy()`.
+
+Real run receipts:
+
+- Worker URL: `https://pi-sandbox-workflow-spike.joelhooks.workers.dev` (`ACCESS_TOKEN` required; localhost dev allowed without it)
+- First real run: `run-mpywwl8n-7011b6e4`, Artifacts repo `piwf-run-mpywwl8n-7011b6e4`, commit `6aca450abbb6f6443b9c7e8a4d0bb3ca530d1143`, destroy receipt `destroy:run-mpywwl8n-7011b6e4:ok`
+- Post-auth-hardening run: `run-mpyx07be-278f4e0a`, Artifacts repo `piwf-run-mpyx07be-278f4e0a`, commit `3da0abca86e4d9d20a279abe26b0365d4464f6a4`, destroy receipt `destroy:run-mpyx07be-278f4e0a:ok`
+- User-operated run: `run-mpyxbylh-32ab2385`, Artifacts repo `piwf-run-mpyxbylh-32ab2385`, commit `ab03fcf3d0f94b9bb6e0f3ed9edaddc9b477834c`, Pi command duration `20348ms`, commit/push duration `3180ms`, destroy receipt `destroy:run-mpyxbylh-32ab2385:ok`; result ended in state `captured` with 9 committed files and report/context-pack/Wzrrd outputs.
+- Wzrrd publisher run: `run-mpyxliun-6419b3b3`, Artifacts repo `piwf-run-mpyxliun-6419b3b3`, commit `6424a943828ada3e5fffec05a0cd47cffe75bedf`, Wzrrd URL `https://piwf-run-mpyxliun-6419b3b3.wzrrd.sh/`, Wzrrd lifecycle `ephemeral`, claim URL returned by the API.
+- Sanitized Wzrrd response run: `run-mpyxodsx-c365d69a`, Artifacts repo `piwf-run-mpyxodsx-c365d69a`, commit `adf4eea3f67ce491ecffa8bed91d5072d83ee8b9`, Wzrrd URL `https://piwf-run-mpyxodsx-c365d69a.wzrrd.sh/`, Wzrrd lifecycle `ephemeral`, claim URL returned by the API, `claimTokenHash` removed from the Worker response. `curl -I` returned HTTP `200`; `/report.md` served the source-cited Markdown report.
+- Dynamic workflow machine run: `run-mpyzrsfj-48078d74`, Artifacts repo `piwf-run-mpyzrsfj-48078d74`, plan commit `c91139e1213b7f7834d112b45a49b6e6ad45fe08`, reader commit `6a0a2784358aab89677512cc566aaca2470bf9b8`, verifier commit `2b97b2f277909b9b8be10b471752e6add5e7e78e`, capture status `verified`, destroy receipt `destroy:run-mpyzrsfj-48078d74:ok`, Wzrrd URL `https://piwf-run-mpyzrsfj-48078d74.wzrrd.sh/`, Wzrrd lifecycle `ephemeral`, claim URL returned by the API. `curl -I` returned HTTP `200`; `/run/plan.json` exposed `pattern: reader-verifier`, `executor: fixed-prototype-reader-verifier`, `generatedMachineRuntime: receipt-only`; `/artifacts/verification/result.json` returned `status: verified`, two checks, no warnings, no blocking failures.
+- Snapshot-resume dry run: `pnpm prototype:spike:dry` wrote ignored receipts under `prototypes/sandbox-workflow-spike/out/`; the actor persisted with `actor.getPersistedSnapshot()` at `committingReaderOutputs`, restored with `createActor(machine, { snapshot })` at `committingReaderOutputs`, continued to final state `captured`, final actor status `done`, event log length `14`, receipt schema `prototype-snapshot-resume-receipt.v1`.
+- Capsule supervisor dry run: `pnpm prototype:capsule:dry` wrote ignored receipt `prototypes/capsule-supervisor-spike/out/latest-receipt.json`; capsule id derives from external `workItemId`, sandbox id is a separate disposable handle, capsule record owns artifact repo ref/context pack refs/latest run id/persisted snapshot/event log/Wzrrd ref/secret lease refs, a new supervisor instance restores actor state at `runningSandbox`, success path reaches `captured`, cancel path destroys sandbox and reaches `cancelled`, post-cancel work event stays `cancelled`, receipt schema `capsule-supervisor-receipt.v1`.
+- Capsule Durable Object local run: `pnpm prototype:capsule-do:local` wrote ignored receipt `prototypes/capsule-do-spike/out/latest-receipt.json`; local Wrangler Worker routes by external `workItemId` to a real Durable Object, DO storage owns persisted XState snapshot/event log/capsule record, each state-transition request restores the actor from storage, success reaches `captured`, cancel destroys sandbox and post-cancel work stays `cancelled`, receipt schema `capsule-do-receipt.v1`.
+- Secret lease broker dry run: `pnpm prototype:secrets:dry` wrote ignored receipt `prototypes/secret-lease-broker-spike/out/latest-receipt.json`; request carries `secretRefs` only, broker mints a run-scoped lease for `/workspace/.pi/agent/auth.json`, public Artifacts/Wzrrd/event payloads contain lease metadata only, unapproved secret returns `missing_secret_approval` with approval URL, plaintext leak scan passed, receipt schema `secret-lease-broker-receipt.v1`.
+- Review gate dry run: `pnpm prototype:review:dry` wrote ignored receipt `prototypes/review-gate-spike/out/latest-receipt.json`; status matrix routes `verified -> accepted`, `warnings -> accepted_with_warnings`, `blocked -> blocked`, `needs_human_review -> pending_human_review`; review payload includes report/source map/plan/event log/machine receipt/verification result refs; human approve reaches `accepted`, human reject reaches `rejected`; private Wzrrd claim URL redaction passed; receipt schema `review-gate-receipt.v1`.
+- Integrated capsule run: `pnpm prototype:integrated:real` wrote ignored receipt `prototypes/integrated-capsule-run-spike/out/latest-receipt.json`; local Durable Object capsule routes by `workItemId`, persists supervisor state/events, calls the deployed real sandbox Worker, and captures real Sandbox/Artifacts/Wzrrd/verification receipts. Latest integrated run: capsule `capsule:thread-or-issue-integrated-50ce77b3`, repo `piwf-run-mpz1z9vz-29d06a92`, plan commit `5177b6b834a0b8580bb10806c9fdc6547b8aa419`, reader commit `a8fd1cf660e2e165a6255e78ed876b76ed8a5aab`, verifier commit `daf3e3d97ee24ac28b5ff3314cf7b5589cfa3bef`, lease ref `lease:piCodexAuth:run-mpz1z9vz-29d06a92:task-scoped-auth-json`, final state `captured`, verification `verified`, destroy receipt `destroy:run-mpz1z9vz-29d06a92:ok`, Wzrrd `https://piwf-run-mpz1z9vz-29d06a92.wzrrd.sh/`, HTTP `200` verified, receipt schema `integrated-capsule-run-receipt.v1`. Limitation: bridge calls deployed `sandbox-workflow-spike` over HTTP; DO + Sandbox/Artifacts bindings are not yet one deployed module.
+- Machine planner dry run: `pnpm prototype:planner:dry` wrote ignored receipt `prototypes/machine-planner-spike/out/latest-receipt.json`; planner selects from a known pattern library and emits JSON/config-like XState v5 machine receipts, harness plans, verification contracts, output targets, and policy checks without executing generated TypeScript. Planned fixtures: `thread-report-123 -> reader_verifier + wzrrd_review`, `issue-gh-pr-456 -> edit_verify_pr + github_pr`, `internal-analysis-789 -> artifact_only_capture + artifact_only`. GitHub PR plan has no Wzrrd state names and uses GitHub App/broker/ShitRat actor policy; Wzrrd target is target-specific SvelteKit static HTML + Wzrrd publish delivery; artifact-only has no external publish. Unsafe `requestedMachineCode` / `machineTs` fixture rejected before planning. Receipt schema `machine-planner-receipt.v1`.
+- Unauthenticated deployed `GET /healthz` returned `401` after hardening, so a missing `ACCESS_TOKEN` no longer leaves public workers open.
+- `prototypes/sandbox-workflow-spike/scripts/wrangler-with-cloudflare-token.mjs` wraps Wrangler and leases Cloudflare credentials from agent-secrets when `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` are absent; secret names are overrideable with `CLOUDFLARE_API_TOKEN_SECRET_NAME` and `CLOUDFLARE_ACCOUNT_ID_SECRET_NAME`.
+
+Commands run:
+
+```bash
+cd /Users/joel/Code/joelhooks/pi-cloudflare-sandbox-workflows
+pnpm add -w @cloudflare/sandbox@0.11.0
+pnpm add -Dw @cloudflare/workers-types@^4.20260525.0 wrangler@^4.76.0
+pnpm install
+pnpm prototype:spike:auth:put
+pnpm prototype:spike:deploy
+curl -X POST https://pi-sandbox-workflow-spike.joelhooks.workers.dev/api/real-run ...
+pnpm fix
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm prototype:spike:dry
+```
+
+Files to delete or absorb after next iteration:
+
+- delete `prototypes/sandbox-workflow-spike/` after the real workflow spine is rewritten into production `src/`, or after a better spike replaces this route shape
+- absorb by rewrite: state names, event names, output receipt shape, Artifacts repo/token handoff, auth materialization boundary, and destroy-in-finally behavior
+- do not absorb: Worker route glue, static `PI_AUTH_JSON_B64` secret source, hard-coded source seed, or generated Wzrrd HTML string
+- keep source maps and Kody/Thariq references in `docs/` and `sources/`
+
+Next prototype question: can the real lane deepen into a reader → verifier pipeline where the verifier consumes a job-specific verification contract, with separate bounded Pi runs, separate artifact notes, a supervisor concurrency cap of `2`, and the same destroy/backpressure discipline?
+
+## Open questions
+
+- Which capsule metadata belongs in Git/Artifacts vs a control-plane store?
+- Exact portable OAuth handoff format and TTL policy.
+- Whether runs should return patches only, commit through ShitRat, or expose a short-lived review URL.
+- Whether Cloudflare Sandbox quotas/cold-starts are acceptable under real usage.

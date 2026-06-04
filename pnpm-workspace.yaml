@@ -1,0 +1,12 @@
+packages:
+  - "."
+  - "apps/*"
+  - "packages/*"
+  - "prototypes/*"
+allowBuilds:
+  "@mongodb-js/zstd": false
+  esbuild: true
+  lefthook: true
+  node-liblzma: false
+  sharp: true
+  workerd: true

@@ -1,0 +1,912 @@
+---
+title: Dynamic Pi Workflow Scale Catalog
+status: active
+updated: 2026-06-04
+source: "workflow_os run wfr_mpzlnt6g_6m5ryl"
+tags:
+  - workflows
+  - xstate
+  - cloudflare
+  - sandbox
+  - research
+---
+
+# Dynamic Pi Workflow Scale Catalog
+
+Recovered from `workflow_os` run `wfr_mpzlnt6g_6m5ryl` after conversation compaction ate the visible result. The durable workflow record preserved the fan-out findings and synthesis.
+
+## Recovery receipts
+
+- Workflow run: `wfr_mpzlnt6g_6m5ryl`
+- Workflow name: `dynamic-workflow-catalog-research`
+- Status: `completed`
+- Agents: 7 total, 7 done, 0 failed
+- Recovered branches: `cloudflare-primitives`, `durable-workflow-engines`, `xstate-state-machines`, `event-use-cases`, `catalog-synthesis`
+- Missing/blank branches in persisted run: `agent-orchestration`, `catalog-verifier`
+
+Caveat: the dedicated agent-orchestration branch returned an empty string. Agent-specific material still survived through the use-case branch and synthesis, especially the Anthropic dynamic harness source, but LangGraph/OpenAI/Vercel AI SDK deserve a follow-up branch if this becomes production design input.
+
+## 1. Executive read
+
+“Infinitely scalable” is the wrong promise. Call it:
+
+> **unbounded addressability with bounded hot concurrency**
+
+We can address huge numbers of context capsules, Artifacts repos, queued lanes, D1 rows, R2 blobs, and sleeping workflow instances. We cannot run infinite hot sandboxes. Active work is bounded by Cloudflare quotas, container vCPU/memory/disk, Workers CPU/subrequests, Queues throughput, model/API rate limits, secret lease limits, token budgets, and cost.
+
+Receipts:
+
+- Cloudflare Workflows are finite: 50k concurrent instances, 2M queued, 300 creations/sec/account, 1 MB event payload, 1 GB persisted state. Source: [Limits · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/reference/limits/)
+- Cloudflare Containers are finite: paid account live caps include 1,500 vCPU, 6 TiB memory, 30 TB disk. Source: [Limits and Instance Types · Cloudflare Containers docs](https://developers.cloudflare.com/containers/platform-details/limits/)
+- XState actors process events one at a time and are not a durable or bounded queue. Sources: [Actors · Stately docs](https://stately.ai/docs/actors), [`Mailbox.ts` · XState source](https://github.com/statelyai/xstate/blob/main/packages/core/src/Mailbox.ts)
+
+Sharp architecture line:
+
+```txt
+many durable capsules/repos/runs
++ tiny bounded active sandbox slots
++ explicit admission/backpressure
++ replay from Artifacts + snapshots/events
+```
+
+For this repo, the current local docs already agree: `docs/dynamic-workflow-machine.md` says plan/machine/verification artifacts must be pinned before sandbox creation, and `.brain/projects/pi-sandbox-workflows.svx` says **capsule ID beats sandbox ID**.
+
+## 2. Pattern catalog
+
+### Lifecycle patterns
+
+#### Plan-pin-before-run
+
+Sources: [How Artifacts works · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/), [Best practices for Artifacts · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/concepts/best-practices/), local `docs/dynamic-workflow-machine.md`.
+
+Shape:
+
+```txt
+idle
+→ resolvingCapsule
+→ selectingContextPacks
+→ generatingPlan
+→ validatingPlan
+→ committingPlanArtifacts
+→ queuedForExecution
+```
+
+Events:
+
+```txt
+RUN_REQUESTED
+CAPSULE_RESOLVED
+CONTEXT_PACK_SELECTED
+PLAN_GENERATED
+PLAN_REJECTED
+PLAN_PINNED
+```
+
+Pi implication: commit before sandbox creation:
+
+```txt
+run/plan.json
+workflows/machine.ts
+workflows/harness.js
+run/verification-contract.json
+run/manifest.json
+```
+
+If the plan is not pinned first, the run is not auditable enough to trust.
+
+#### Sandbox lease lifecycle
+
+Sources: [Sandbox lifecycle · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/concepts/sandboxes/), [Limits · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/platform/limits/), [Security model · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/concepts/security/).
+
+Shape:
+
+```txt
+awaitingSlot
+→ mintingSecretLeases
+→ attachingSandbox
+→ hydratingWorkspace
+→ runningLane
+→ committingOutputs
+→ destroyingSandbox
+→ laneCaptured
+```
+
+Events:
+
+```txt
+SLOT_GRANTED
+SECRET_LEASES_MINTED
+SANDBOX_READY
+WORKSPACE_HYDRATED
+LANE_SUCCEEDED
+OUTPUTS_COMMITTED
+SANDBOX_DESTROYED
+```
+
+Pi implication: sandbox ID is disposable compute. Durable state goes to Artifacts/R2/D1/DO, not `/workspace`.
+
+### Scaling and backpressure patterns
+
+#### Admission + quota broker
+
+Sources: [Limits · Cloudflare Queues docs](https://developers.cloudflare.com/queues/platform/limits/), [Batching, Retries and Delays · Cloudflare Queues docs](https://developers.cloudflare.com/queues/configuration/batching-retries/), [Delivery guarantees · Cloudflare Queues docs](https://developers.cloudflare.com/queues/reference/delivery-guarantees/).
+
+Shape:
+
+```txt
+runRequested
+→ checkingCapsuleLock
+→ checkingQuota
+→ admitted | queued | rejected | dlq
+```
+
+Events:
+
+```txt
+RUN_REQUESTED
+CAPSULE_LOCKED
+QUOTA_GRANTED
+QUOTA_DENIED
+QUEUE_ENQUEUED
+DLQ_WRITTEN
+```
+
+Backpressure:
+
+- Queue ingress work.
+- Durable Object owns capsule lock.
+- D1 indexes budget/quota status.
+- Every queue handler is idempotent because Queues are at least once.
+
+Pi implication: DO admits only when sandbox/model/token/secret budgets allow. Waiting lanes hold no container.
+
+#### Bounded fan-out/fan-in
+
+Sources: [Concurrency management · Inngest Documentation](https://www.inngest.com/docs/guides/concurrency), [Concurrency & Queues · Trigger.dev](https://trigger.dev/docs/queue-concurrency), [Step Functions service quotas · AWS Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/service-quotas.html).
+
+Shape:
+
+```txt
+planningLanes
+→ waitingForSlot
+→ runningLane[]
+→ fanIn
+→ aggregateVerification
+→ captured
+```
+
+Events:
+
+```txt
+LANE_PLANNED
+SLOT_GRANTED
+SLOT_DENIED
+LANE_STARTED
+LANE_OUTPUT_COMMITTED
+LANE_FAILED
+ALL_LANES_SETTLED
+FANIN_READY
+```
+
+Rule: address thousands of lanes, run only `N` hot sandboxes.
+
+Pi implication: use spawned XState actors for dynamic lanes, but cap before spawn. Active slots are leased by supervisor policy, not by optimistic JavaScript loops.
+
+### Coordination patterns
+
+#### Capsule supervisor actor
+
+Sources: [Rules of Durable Objects · Cloudflare Durable Objects docs](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/), [Limits · Cloudflare Durable Objects docs](https://developers.cloudflare.com/durable-objects/platform/limits/), [Actors · Stately docs](https://stately.ai/docs/actors).
+
+Shape:
+
+```txt
+idle
+→ resolvingCapsule
+→ pinningContextPacks
+→ committingPlanArtifacts
+→ acquiringBudgetSlot
+→ runningLanes
+→ verifying
+→ deliveringOutput
+→ cleanup
+→ captured
+```
+
+Events:
+
+```txt
+START_REQUEST
+CAPSULE_RESOLVED
+PLAN_ARTIFACTS_COMMITTED
+BUDGET_SLOT_GRANTED
+LANE_DONE
+VERIFICATION_ACCEPTED
+OUTPUT_PUBLISHED
+CANCEL_REQUESTED
+REPLAY_REQUESTED
+```
+
+Pi implication: one Durable Object per `contextCapsuleId`, not one global coordinator. The DO owns lifecycle truth, current XState snapshot, event log pointer, locks, cancellation, active lane refs, and Wzrrd/Brain review state.
+
+#### Child workflow / lane workflow
+
+Sources: [Child Workflows · Temporal docs](https://docs.temporal.io/child-workflows), [Workflow · Convex component](https://www.convex.dev/components/workflow), [client.trigger · Upstash Documentation](https://upstash.com/docs/workflow/basics/client/trigger).
+
+Use when a lane has:
+
+- its own retry/cancel lifecycle
+- long history
+- separate worker profile
+- independent verification/output
+
+Pi implication: parent capsule workflow owns policy and fan-in. Child lane workflow owns one sandbox run and returns Artifacts refs, not giant payloads.
+
+### Reliability patterns
+
+#### Durable step as transaction
+
+Sources: [Rules of Workflows · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/rules-of-workflows/), [Sleeping and retrying · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/sleeping-and-retrying/), [Inngest Steps · Inngest Documentation](https://www.inngest.com/docs/learn/inngest-steps).
+
+Shape:
+
+```txt
+scheduled
+→ running
+→ succeeded | failed
+→ retry_wait
+→ running | terminal_failed
+```
+
+Events:
+
+```txt
+STEP_SCHEDULED
+STEP_STARTED
+STEP_SUCCEEDED
+STEP_FAILED
+RETRY_TIMER_FIRED
+NON_RETRYABLE_ERROR
+```
+
+Pi implication: one side-effect boundary per step:
+
+- resolve capsule
+- pin plan
+- mint leases
+- create sandbox
+- hydrate workspace
+- run Pi
+- commit outputs
+- verify
+- publish review
+- cleanup
+
+Step output should be refs: `artifactCommit`, `leaseRef`, `sandboxRunId`, `verificationResultRef`.
+
+#### Cancel/cleanup
+
+Sources: [Workers API · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/workers-api/), [Promise actors · Stately docs](https://stately.ai/docs/promise-actors), [Callback Actors · Stately docs](https://stately.ai/docs/callback-actors).
+
+Shape:
+
+```txt
+running
+→ cancelling
+→ terminatingWorkflow
+→ destroyingSandbox
+→ revokingLeases
+→ cancelled
+```
+
+Events:
+
+```txt
+CANCEL_REQUESTED
+WORKFLOW_TERMINATED
+SANDBOX_DESTROYED
+LEASE_REVOKED
+CLEANUP_DONE
+```
+
+Pi implication: cancel means stop new work, kill/close active work where possible, destroy sandbox, revoke leases, and record a cancellation receipt. Already-started external side effects need idempotency/compensation.
+
+#### Replay/repair
+
+Sources: [Persistence · Stately docs](https://stately.ai/docs/persistence), [Events and Event History · Temporal docs](https://docs.temporal.io/workflow-execution/event), [Restarting state machine executions with redrive in Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/redrive-executions.html).
+
+Shape:
+
+```txt
+loadingReceipt
+→ restoringSnapshot | restartingFromStep
+→ rerunningLane | rerunningVerifier
+→ verifying
+→ captured | blocked
+```
+
+Events:
+
+```txt
+REPLAY_REQUESTED
+SNAPSHOT_RESTORED
+STEP_REDRIVEN
+VERIFICATION_PASSED
+VERIFICATION_BLOCKED
+```
+
+Pi implication: use XState snapshot for operational resume; use event log + Artifacts commits for audit replay. Restored XState snapshots do not re-run actions, but invoked work can restart, so every side-effecting actor needs idempotency checks.
+
+### Human/review patterns
+
+#### Wait-for-review gate
+
+Sources: [Events and parameters · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/events-and-parameters/), [Wait for token · Trigger.dev](https://trigger.dev/docs/wait-for-token), local `prototypes/review-gate-spike/src/run.ts`.
+
+Shape:
+
+```txt
+publishingReview
+→ waitingForReview
+→ approved | rejected | timedOut | cancelled
+```
+
+Events:
+
+```txt
+WZRRD_PUBLISHED
+WZRRD_APPROVED
+BRAIN_FEEDBACK_RECEIVED
+HUMAN_REJECTED
+WAIT_TIMEOUT
+CANCEL_REQUESTED
+```
+
+Pi implication: Wzrrd/Brain are review/output targets, not runtime truth. They emit approval/feedback events back to the capsule DO/workflow. Mutating actions wait here.
+
+### Agent-specific patterns
+
+#### Dynamic harness as pinned artifact
+
+Sources: [A harness for every task: dynamic workflows in Claude Code · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code), local `.brain/projects/pi-sandbox-workflows.svx`.
+
+Shape:
+
+```txt
+intent
+→ generateHarness
+→ validateHarnessPolicy
+→ pinHarness
+→ executeTrustedRunner
+```
+
+Events:
+
+```txt
+HARNESS_GENERATED
+HARNESS_POLICY_PASSED
+HARNESS_POLICY_FAILED
+HARNESS_PINNED
+EXECUTION_STARTED
+```
+
+Pi implication: generated harnesses can define fan-out, phases, stop conditions, verifier roles, and output targets. They do **not** get to widen auth, pick arbitrary context packs, or control their own sandbox lifecycle.
+
+### Observability patterns
+
+#### Event/snapshot/status indexing
+
+Sources: [Inspection · Stately docs](https://stately.ai/docs/inspection), [Metrics and analytics · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/observability/metrics-analytics/), [Diagnostics in Durable Functions · Azure](https://docs.azure.cn/en-us/azure-functions/durable-functions/durable-functions-diagnostics).
+
+Persist:
+
+```txt
+@xstate.event      → run/events.jsonl
+@xstate.snapshot   → DO/D1 status projection
+@xstate.actor      → lane registry
+@xstate.microstep  → policy/debug trace
+```
+
+Index fields:
+
+```txt
+capsuleId
+externalWorkItemId
+workflowId
+runId
+state
+laneId
+provider
+sandboxId
+artifactRepo
+artifactCommit
+contextPackRefs
+leaseRefs
+verificationStatus
+wzrrdUrl
+failureKind
+retryCount
+costBucket
+quotaBucket
+```
+
+Pi implication: D1 is query/index. Artifacts are receipts. R2 is bulky evidence. Wzrrd/Brain are human-readable review.
+
+### Security/secrets patterns
+
+#### Secret leases, not raw secrets
+
+Sources: [Manage account secrets · Cloudflare Secrets Store docs](https://developers.cloudflare.com/secrets-store/manage-secrets/), [Workers integration · Cloudflare Secrets Store docs](https://developers.cloudflare.com/secrets-store/integrations/workers/), local `docs/kody-secrets-pattern.md`.
+
+Shape:
+
+```txt
+requestSecretRefs
+→ checkPolicy
+→ mintLease
+→ materializeTaskAuth
+→ revokeOrExpire
+```
+
+Events:
+
+```txt
+SECRET_REF_REQUESTED
+SECRET_POLICY_APPROVED
+SECRET_POLICY_DENIED
+LEASE_MINTED
+LEASE_EXPIRED
+LEASE_REVOKED
+```
+
+Pi implication: plans contain `secretRef`, never plaintext. Broker materializes task-scoped `/workspace/.pi/agent/auth.json`. Public Artifacts/Wzrrd/event logs carry lease metadata only.
+
+### Artifact/memory patterns
+
+#### Git-native durable workspace
+
+Sources: [How Artifacts works · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/), [Sandbox SDK + Artifacts · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/examples/sandbox-sdk-artifacts/), [Limits · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/platform/limits/).
+
+Store in Artifacts:
+
+```txt
+run/plan.json
+run/manifest.json
+run/verification-contract.json
+workflows/machine.ts
+workflows/harness.js
+context-packs/**
+artifacts/reports/**
+artifacts/verification/**
+transcripts/**
+patches/**
+```
+
+Pi implication: Artifacts is the reviewable filesystem. R2 holds large blobs. Brain captures durable decisions and reusable pattern learning after verification.
+
+## 3. Use-case catalog by product/domain
+
+### Research / knowledge work
+
+#### Source-backed research reports
+
+Shape:
+
+```txt
+WORK_ITEM_RECEIVED
+→ fanoutSourceCollectors
+→ extractClaims
+→ verifyClaims
+→ synthesize
+→ publishReview
+```
+
+Events:
+
+```txt
+SOURCE_COLLECTED
+CLAIM_EXTRACTED
+CLAIM_VERIFIED
+CLAIM_BLOCKED
+SYNTHESIS_COMMITTED
+WZRRD_PUBLISHED
+```
+
+Pi fit: context capsule pins prompt, source law, context pack, verifier contract. Worker sandboxes collect sources. Artifacts stores `sources.json`, source map, report, verifier result. Wzrrd/Brain review captures decisions.
+
+Risks: stale sources, hallucinated claims, token burn. Use source caps, citation verifier, and budget cancel.
+
+### Engineering
+
+#### Code review
+
+Shape:
+
+```txt
+checkout
+→ fanoutReviewLanes
+→ reduceFindings
+→ verifyFindings
+→ publishReview
+→ optionalPatchGate
+```
+
+Risks: untrusted PR code, false positives, secret leakage. Default read-only sandboxes. Mutating patches require human gate.
+
+#### Migrations/refactors
+
+Shape:
+
+```txt
+inventory
+→ sliceByCallsites
+→ parallelPatchForks
+→ testEach
+→ mergeCandidate
+→ adversarialReview
+→ capture
+```
+
+Pi fit: Artifacts fork per slice. Supervisor owns merge policy. Verification contract pins expected tests/behavior.
+
+Risks: merge conflicts, semantic drift, expensive test loops. Cap hot workers; serialize final merge.
+
+#### Devtools / CI/CD
+
+Shape:
+
+```txt
+forkArtifact
+→ buildTest
+→ preview
+→ verify
+→ publishStatus
+→ cleanup
+```
+
+Pi fit: sandbox runs build/test. Artifacts stores worktree and receipts. Wzrrd exposes preview/test status.
+
+Risks: runaway builds and untrusted code. Hard timeouts, no broad secrets, small container caps.
+
+### Support / inbox
+
+#### Support triage
+
+Shape:
+
+```txt
+classify
+→ fetchCustomerContext
+→ draftOrAction
+→ approvalWait
+→ sendArchiveEscalate
+```
+
+Events:
+
+```txt
+THREAD_CLASSIFIED
+CUSTOMER_CONTEXT_FETCHED
+DRAFT_READY
+HUMAN_APPROVED
+REPLY_SENT
+ESCALATED
+```
+
+Pi fit: capsule key = support thread. Secret lease grants narrow API access. Artifacts stores evidence/draft. Wzrrd/Brain handles tricky cases.
+
+Risks: wrong refund/access action, privacy leaks, tone drift. Approval required for customer-facing mutations.
+
+#### Personal inbox triage
+
+Shape:
+
+```txt
+debounceThread
+→ classify
+→ group
+→ retrieveHistory
+→ archiveDraftEscalate
+```
+
+Risks: over-archiving important mail. Use confidence thresholds and human review bucket.
+
+### Data / media
+
+#### ETL / sync
+
+Shape:
+
+```txt
+ingestBatch
+→ normalize
+→ validateSchema
+→ load
+→ reconcile
+→ capture | dlq
+```
+
+Sources: [Dead Letter Queues · Cloudflare Queues docs](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/), [Delivery guarantees · Cloudflare Queues docs](https://developers.cloudflare.com/queues/reference/delivery-guarantees/).
+
+Risks: duplicate writes, downstream 429s, PII. Use idempotency keys, destination throttle, DLQ review.
+
+#### Media processing
+
+Shape:
+
+```txt
+uploadEvent
+→ probe
+→ transcodeExtract
+→ aiDescribe
+→ verifyOutputs
+→ publish
+```
+
+Pi fit: sandbox runs FFmpeg/OCR/browser tools. R2 stores large blobs. Artifacts stores manifests, transcripts, thumbnails.
+
+Risks: big files, egress, active container cost. Cap size/duration and queue slow jobs.
+
+### Ops / security
+
+#### Incident investigation
+
+Shape:
+
+```txt
+dedupeAlert
+→ investigateLogs
+→ hypothesize
+→ runSafeChecks
+→ proposeFix
+→ approveOrExecute
+```
+
+Risks: self-healing can make shit worse. Keep diagnosis read-only. Gate production mutation.
+
+#### Security workflow
+
+Shape:
+
+```txt
+enrichAlert
+→ classifySeverity
+→ parallelInvestigate
+→ verifyRepro
+→ recommendOrBlock
+→ hitlAction
+```
+
+Risks: prompt injection, secret exposure, false containment. No privileged action from untrusted-reader lanes.
+
+### Marketing / lifecycle
+
+#### Marketing ops
+
+Shape:
+
+```txt
+segment
+→ enrich
+→ generateVariants
+→ approvalWait
+→ send
+→ measure
+→ learn
+```
+
+Risks: spam/compliance/brand damage. Throttle per provider/list. Approval for outbound.
+
+#### Customer success
+
+Shape:
+
+```txt
+accountSnapshot
+→ classifyNeed
+→ draftPlan
+→ approval
+→ crmUpdate
+→ followupWait
+```
+
+Risks: creepy personalization and accidental sends. Human gate for external comms.
+
+### Evals / model routing
+
+Shape:
+
+```txt
+generateCases
+→ parallelRun
+→ judgePanel
+→ aggregate
+→ decisionGate
+```
+
+Pi fit: context packs pin fixtures/rubrics. Artifacts stores runs/results. Wzrrd shows comparison.
+
+Risks: judge bias, flaky tests, token inferno. Fixed fixtures, sample caps, stop when confidence is enough.
+
+## 4. Cloudflare primitive mapping
+
+| Primitive | Use in Pi workflow system | Keep out of it |
+|---|---|---|
+| Workers | Edge ingress, auth, routing, supervisor shell, bindings | Long-running Pi CLI work |
+| Durable Objects | Per-capsule actor, lock, snapshot pointer, event coordination, cancel/progress | Global mega-coordinator |
+| Workflows | Durable steps, retries, sleeps, `waitForEvent`, restart/terminate | Lifecycle truth without XState receipts |
+| Queues | Admission buffer, retries, delays, DLQ | Exactly-once assumptions |
+| Sandbox SDK | Disposable Linux compute for Pi/git/tests | Durable memory |
+| Containers | Hot runtime pool behind sandboxes | Unlimited concurrency fantasy |
+| Artifacts | Git-native plans, machines, harnesses, context packs, outputs, transcripts | Secrets |
+| R2 | Large blobs: traces, screenshots, datasets, videos | Fine-grained lifecycle state |
+| D1 | Queryable status/index/audit facets | High-write global event log without batching |
+| KV | Read-heavy config/cache/manifests | Locks or lifecycle truth |
+| Secrets Store | Small root/account secrets | Full OAuth blobs / dynamic lease broker by itself |
+| Dynamic Workers | Generated validators/tool glue in isolates | Pi CLI/git/test runner substrate |
+
+## 5. XState machine blueprint vocabulary
+
+### Core states
+
+```txt
+idle
+resolvingCapsule
+pinningContextPacks
+committingPlanArtifacts
+queued
+acquiringBudgetSlot
+mintingSecretLeases
+attachingSandbox
+hydratingSandbox
+runningLanes
+waitingForRetry
+waitingForEvent
+verifying
+pendingHumanReview
+deliveringOutput
+destroyingSandbox
+captured
+capturedWithWarnings
+blocked
+failedTerminal
+cancelled
+dlq
+```
+
+### Core events
+
+```txt
+RUN_REQUESTED
+CAPSULE_RESOLVED
+CONTEXT_PACKS_PINNED
+PLAN_ARTIFACTS_COMMITTED
+QUEUE_ENQUEUED
+BUDGET_SLOT_GRANTED
+BUDGET_SLOT_DENIED
+SECRET_LEASES_MINTED
+SANDBOX_READY
+LANE_STARTED
+LANE_PROGRESS
+LANE_SUCCEEDED
+LANE_FAILED
+STEP_FAILED_RETRYABLE
+RETRY_TIMER_FIRED
+WAIT_EVENT_RECEIVED
+VERIFICATION_ACCEPTED
+VERIFICATION_WARNINGS
+VERIFICATION_BLOCKED
+NEEDS_HUMAN_REVIEW
+HUMAN_APPROVED
+HUMAN_REJECTED
+OUTPUT_PUBLISHED
+CANCEL_REQUESTED
+SANDBOX_DESTROYED
+REPLAY_REQUESTED
+```
+
+### Modeling rules
+
+Sources: [Invoke · Stately docs](https://stately.ai/docs/invoke), [Actions · Stately docs](https://stately.ai/docs/actions), [Guards · Stately docs](https://stately.ai/docs/guards), [Delayed transitions · Stately docs](https://stately.ai/docs/delayed-transitions), [Persistence · Stately docs](https://stately.ai/docs/persistence).
+
+- Use invoked actors for awaited side effects.
+- Use actions only for sync assigns/metrics.
+- Use guards only for sync routing.
+- Async quota checks emit `SLOT_GRANTED` / `SLOT_DENIED`.
+- Use spawned actors for dynamic lanes.
+- Use `after` for retries/timeouts.
+- Avoid audit-critical `always` transitions unless microsteps are inspected.
+- Persist snapshots for resume; persist event logs for receipts/replay.
+
+## 6. Open questions + next prototypes
+
+### Open questions
+
+1. Should final warning status be `captured_with_warnings` or `captured` with warning context?
+2. Which generated-machine policy checks are required before runtime execution?
+3. How does verifier request human review while cleanup still destroys hot sandboxes?
+4. Which patterns belong in the first reusable pattern library?
+5. Does Cloudflare Workflows become the durable step runner now, or after the DO capsule rewrite?
+6. Where does high-volume event history live: DO storage, D1 batches, Artifacts JSONL, or split by hot/cold?
+7. What is the real encrypted secret storage shape for Codex OAuth blobs larger than Secrets Store limits?
+
+### Next prototype candidates
+
+1. **Unified DO + Sandbox/Artifacts Worker** — rewrite the integrated bridge so one deployed Worker owns DO + Sandbox + Artifacts bindings.
+2. **Bounded fan-out cap=2/3** — prove scheduled lanes, slot leasing, `SLOT_DENIED`, retry wait, fan-in, and no extra hot sandboxes.
+3. **Generated-machine policy gate** — validate pinned `workflows/machine.ts` / harness before execution. For now, execute fixed trusted runners.
+4. **Real secret lease broker** — encrypted D1/R2-backed OAuth blob storage, metadata-only discovery, task-scoped `auth.json`, lease expiry/revoke, no plaintext in Artifacts/Wzrrd.
+5. **Wzrrd wait-for-event review gate** — publish review, cleanup sandbox, wait cold for `HUMAN_APPROVED` / `HUMAN_REJECTED`, then deliver output.
+6. **Replay/repair proof** — restore from XState snapshot + Artifacts refs, redrive one failed lane or verifier step, prove idempotency.
+7. **D1 status index + live review page** — capsule/run/lane status indexed in D1, Wzrrd/Brain review reads status and artifact refs without slurping full payloads.
+
+## 7. Bibliography
+
+### Local project receipts
+
+- `BRAIN.md` — Pi Sandbox Workflows Brain
+- `.brain/projects/pi-sandbox-workflows.svx` — Pi Sandbox Workflows
+- `docs/source-map.md` — Source Map
+- `docs/production-vs-prototypes.md` — Production vs Prototypes
+- `PROTOTYPES.md` — Prototype Deletion Contract
+- `docs/dynamic-workflow-machine.md` — Dynamic Workflow Machine Prototype
+
+### Cloudflare
+
+- [Limits · Cloudflare Workers docs](https://developers.cloudflare.com/workers/platform/limits/)
+- [Limits · Cloudflare Durable Objects docs](https://developers.cloudflare.com/durable-objects/platform/limits/)
+- [Rules of Durable Objects · Cloudflare Durable Objects docs](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/)
+- [Limits · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/reference/limits/)
+- [Workers API · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/workers-api/)
+- [Events and parameters · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/events-and-parameters/)
+- [Sleeping and retrying · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/build/sleeping-and-retrying/)
+- [Metrics and analytics · Cloudflare Workflows docs](https://developers.cloudflare.com/workflows/observability/metrics-analytics/)
+- [Limits · Cloudflare Queues docs](https://developers.cloudflare.com/queues/platform/limits/)
+- [Batching, Retries and Delays · Cloudflare Queues docs](https://developers.cloudflare.com/queues/configuration/batching-retries/)
+- [Dead Letter Queues · Cloudflare Queues docs](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)
+- [Delivery guarantees · Cloudflare Queues docs](https://developers.cloudflare.com/queues/reference/delivery-guarantees/)
+- [Sandbox lifecycle · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/concepts/sandboxes/)
+- [Limits · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/platform/limits/)
+- [Security model · Cloudflare Sandbox SDK docs](https://developers.cloudflare.com/sandbox/concepts/security/)
+- [Limits and Instance Types · Cloudflare Containers docs](https://developers.cloudflare.com/containers/platform-details/limits/)
+- [Pricing · Cloudflare Containers docs](https://developers.cloudflare.com/containers/pricing/)
+- [How Artifacts works · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/)
+- [Best practices for Artifacts · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/concepts/best-practices/)
+- [Limits · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/platform/limits/)
+- [Sandbox SDK + Artifacts · Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/examples/sandbox-sdk-artifacts/)
+- [Limits · Cloudflare R2 docs](https://developers.cloudflare.com/r2/platform/limits/)
+- [Limits · Cloudflare D1 docs](https://developers.cloudflare.com/d1/platform/limits/)
+- [How KV works · Cloudflare Workers KV docs](https://developers.cloudflare.com/kv/concepts/how-kv-works/)
+- [Manage account secrets · Cloudflare Secrets Store docs](https://developers.cloudflare.com/secrets-store/manage-secrets/)
+- [Dynamic Workers · Cloudflare Dynamic Workers docs](https://developers.cloudflare.com/dynamic-workers/)
+
+### Workflow engines / patterns
+
+- [Temporal Workflow](https://docs.temporal.io/workflows)
+- [Workflow Execution limits](https://docs.temporal.io/workflow-execution/limits)
+- [Events and Event History](https://docs.temporal.io/workflow-execution/event)
+- [Child Workflows](https://docs.temporal.io/child-workflows)
+- [Step Functions service quotas · AWS Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/service-quotas.html)
+- [Concurrency management · Inngest Documentation](https://www.inngest.com/docs/guides/concurrency)
+- [Concurrency & Queues · Trigger.dev](https://trigger.dev/docs/queue-concurrency)
+- [Idempotency · Trigger.dev](https://trigger.dev/docs/idempotency)
+- [How Workflow Works · Upstash Documentation](https://upstash.com/docs/workflow/basics/how)
+- [Durable Orchestrations Overview · Azure](https://learn.microsoft.com/en-us/azure/azure-functions/durable/durable-functions-orchestrations)
+- [Workflow · Convex component](https://www.convex.dev/components/workflow)
+
+### XState
+
+- [Actors · Stately docs](https://stately.ai/docs/actors)
+- [Invoke · Stately docs](https://stately.ai/docs/invoke)
+- [Spawn · Stately docs](https://stately.ai/docs/spawn)
+- [Persistence · Stately docs](https://stately.ai/docs/persistence)
+- [Inspection · Stately docs](https://stately.ai/docs/inspection)
+- [Actions · Stately docs](https://stately.ai/docs/actions)
+- [Guards · Stately docs](https://stately.ai/docs/guards)
+- [Delayed transitions · Stately docs](https://stately.ai/docs/delayed-transitions)
+- [Eventless transitions · Stately docs](https://stately.ai/docs/eventless-transitions)
+- [`Mailbox.ts` · XState source](https://github.com/statelyai/xstate/blob/main/packages/core/src/Mailbox.ts)
+
+### Agent workflow source
+
+- [A harness for every task: dynamic workflows in Claude Code · Anthropic](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code)

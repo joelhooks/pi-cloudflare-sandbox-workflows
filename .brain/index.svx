@@ -1,0 +1,13 @@
+---
+title: Pi Sandbox Workflows Brain
+status: active
+updated: 2026-06-04
+---
+
+# Pi Sandbox Workflows Brain
+
+- [Project architecture](./projects/pi-sandbox-workflows)
+- [Dynamic Pi workflow scale catalog](./resources/dynamic-pi-workflow-scale-catalog)
+- [Trigger.dev event-driven workflow use cases](./resources/trigger-dev-event-driven-workflows)
+
+Durable decisions, receipts, and prototype captures belong here. Prototype code should not become the memory system.

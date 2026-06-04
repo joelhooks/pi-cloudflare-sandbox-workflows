@@ -1,0 +1,54 @@
+{
+  "name": "pi-cloudflare-sandbox-workflows",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prototype-to-production spine for contextual Pi runs in Cloudflare Sandboxes.",
+  "type": "module",
+  "scripts": {
+    "check": "ultracite check .",
+    "fix": "ultracite fix .",
+    "typecheck": "tsgo --noEmit --project tsconfig.json",
+    "typecheck:tsc": "tsc --noEmit --project tsconfig.json",
+    "verify": "pnpm check && pnpm typecheck",
+    "verify:workspace": "turbo run check typecheck",
+    "prototype:spike": "pnpm prototype:spike:dev",
+    "prototype:spike:access:put": "set -a; [ ! -f .env.local ] || . ./.env.local; set +a; test -n \"$ACCESS_TOKEN\" && printf '%s' \"$ACCESS_TOKEN\" | node prototypes/sandbox-workflow-spike/scripts/wrangler-with-cloudflare-token.mjs secret put ACCESS_TOKEN --config prototypes/sandbox-workflow-spike/wrangler.jsonc",
+    "prototype:spike:auth:put": "node prototypes/sandbox-workflow-spike/scripts/extract-codex-auth.mjs | node prototypes/sandbox-workflow-spike/scripts/wrangler-with-cloudflare-token.mjs secret put PI_AUTH_JSON_B64 --config prototypes/sandbox-workflow-spike/wrangler.jsonc",
+    "prototype:spike:deploy": "cd prototypes/sandbox-workflow-spike && node scripts/wrangler-with-cloudflare-token.mjs deploy",
+    "prototype:spike:dev": "cd prototypes/sandbox-workflow-spike && node scripts/wrangler-with-cloudflare-token.mjs dev",
+    "prototype:spike:dry": "tsx prototypes/sandbox-workflow-spike/src/run.ts --dry-run",
+    "prototype:spike:state": "tsx prototypes/sandbox-workflow-spike/src/run.ts",
+    "prepare": "lefthook install",
+    "prototype:capsule:dry": "tsx prototypes/capsule-supervisor-spike/src/run.ts",
+    "prototype:secrets:dry": "tsx prototypes/secret-lease-broker-spike/src/run.ts",
+    "prototype:review:dry": "tsx prototypes/review-gate-spike/src/run.ts",
+    "prototype:capsule-do:local": "node prototypes/capsule-do-spike/scripts/run-local-demo.mjs",
+    "prototype:integrated:real": "node prototypes/integrated-capsule-run-spike/scripts/run-real-demo.mjs",
+    "prototype:planner:dry": "tsx prototypes/machine-planner-spike/src/run.ts"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.11.0",
+    "isomorphic-git": "^1.38.4",
+    "just-bash": "^3.0.1",
+    "xstate": "^5.24.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260603.1",
+    "@total-typescript/tsconfig": "1.0.4",
+    "@types/node": "24.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260603.1",
+    "lefthook": "latest",
+    "oxfmt": "latest",
+    "oxlint": "latest",
+    "tsx": "4.20.6",
+    "turbo": "2.9.16",
+    "typescript": "5.9.3",
+    "ultracite": "7.8.1",
+    "wrangler": "^4.97.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.1.2"
+}

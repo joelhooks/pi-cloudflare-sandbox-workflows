@@ -1,0 +1,124 @@
+---
+title: Trigger.dev Event-Driven Workflow Use Cases
+status: resource
+updated: 2026-06-04
+source: https://trigger.dev/docs/guides/use-cases/overview
+---
+
+# Trigger.dev event-driven workflow use cases
+
+## Source sweep
+
+Scraped the Trigger.dev use-case overview and subpages as markdown on 2026-06-04:
+
+- [Use cases overview](https://trigger.dev/docs/guides/use-cases/overview)
+- [Data processing and ETL workflows](https://trigger.dev/docs/guides/use-cases/data-processing-etl)
+- [Media processing workflows](https://trigger.dev/docs/guides/use-cases/media-processing)
+- [AI media generation workflows](https://trigger.dev/docs/guides/use-cases/media-generation)
+- [Marketing workflows](https://trigger.dev/docs/guides/use-cases/marketing)
+
+Receipt command shape:
+
+```bash
+curl -L -A 'Mozilla/5.0' \
+  https://trigger.dev/docs/guides/use-cases/<slug>.md
+```
+
+## Core read
+
+Trigger.dev frames event-driven workflows as a fit for jobs that normal platforms struggle with: long-running operations, unpredictable API latency, multi-hour processing, and complex orchestration. The docs repeatedly emphasize no timeout limits, automatic retries, progress tracking, parallel work, rate limiting, delays, and human approval gates.
+
+For this project, the useful read is not “use Trigger.dev.” It is the use-case vocabulary: event starts a durable workflow, workflow fans out or waits, progress is observable, external latency is normal, and side effects need retry/idempotency discipline.
+
+## Use-case map
+
+### Data processing and ETL
+
+**Events:** CSV upload, scheduled import, webhook, database change, data-source sync request.
+
+**Jobs:** CSV import, multi-source extraction from APIs/databases/S3, web scraping, batch record enrichment, warehouse loads.
+
+**Patterns from the docs:**
+
+- Sequential CSV import: parse file → validate rows → bulk insert → notify completion.
+- Coordinator fan-out/fan-in with `batchTriggerAndWait` for multi-source ETL.
+- Parallel browser scraping, then clean, normalize, and store results.
+- Batch enrichment with configurable concurrency to respect downstream API rate limits.
+
+**Why event-driven:** these jobs may run for hours, process thousands of records, need progress streamed to users, and need retries without overwhelming downstream systems.
+
+Customer examples named by Trigger.dev: MagicSchool AI, Comp AI, and Midday.
+
+### Media processing
+
+**Events:** video/image/audio/document upload, storage webhook, manual reprocess request.
+
+**Jobs:** video transcoding, thumbnail extraction, image optimization, audio enhancement, transcription, document conversion, OCR, structured document extraction.
+
+**Patterns from the docs:**
+
+- Video transcode: download source → parallel transcodes/thumbnails → upload results.
+- Router + coordinator: inspect media metadata, choose a processing route, then fan out post-processing.
+- Smart image optimization: classify content type, route to specialized processors, then generate variants in parallel.
+- Podcast production: clean audio, run transcription/enhancement/chapter detection in parallel, then generate notes and publish.
+- Document extraction with optional `wait.forToken` approval before integration.
+
+**Why event-driven:** media work is long-running, CPU-heavy, resource-sensitive, and progress-heavy. Upload events naturally start the workflow, while concurrency controls keep the system from melting itself. Tasty little guardrail, that. 🐀
+
+### AI media generation
+
+**Events:** prompt submitted, asset-generation request, campaign asset request, human feedback callback.
+
+**Jobs:** image generation, video/audio generation, product-image generation, meme generation, multi-step creative enhancement, AI content review and publish.
+
+**Patterns from the docs:**
+
+- Supervisor with approval gate: generate content → pause for review with `wait.forToken` → publish or apply feedback and regenerate.
+- Simple image generation: prompt → model call → post-process → upload → update database.
+- Batch image generation with rate-limited fan-out/fan-in.
+- Multi-step enhancement: generate → style transfer/enhance → upscale → optimize → upload.
+
+**Why event-driven:** AI generation has unpredictable API latency, may take minutes or hours, benefits from checkpoint/resume while waiting on model APIs, and often needs human approval for brand/safety review.
+
+Customer examples named by Trigger.dev: Icon and Papermark.
+
+### Marketing workflows
+
+**Events:** account created, user behavior, campaign start, survey submitted, scheduled follow-up, approval callback.
+
+**Jobs:** drip email sequences, multi-channel campaigns, AI marketing content generation, survey-response enrichment, CRM/profile updates, personalized follow-ups.
+
+**Patterns from the docs:**
+
+- Drip campaign: signup → welcome email → `wait.for 24h` → tips email → `wait.for 7d` → feedback email.
+- Router pattern: choose email/SMS/push from user preference, then continue a delayed sequence.
+- AI content with approval: generate assets → `wait.forToken` review → publish or revise.
+- Survey enrichment: fan out CRM/analytics/behavior lookups, analyze and score, update profile, trigger follow-up.
+
+**Why event-driven:** marketing wants long delays without idle compute cost, retry-safe delivery, rate-limited scale, and clean handoff from behavior events into follow-up actions. Trigger.dev specifically says waits over 5 seconds checkpoint and do not count toward compute usage, and that messages send exactly once even after retries.
+
+Customer example named by Trigger.dev: Icon.
+
+## Pattern vocabulary worth stealing
+
+- **Sequential pipeline:** one event starts a finite chain of steps.
+- **Coordinator / fan-out-fan-in:** split a batch across child runs, wait for all results, then aggregate.
+- **Router:** inspect metadata or context, then pick a specialized route.
+- **Supervisor with approval gate:** pause on a wait token, resume from external human input.
+- **Long delay orchestration:** wait hours/days/weeks without keeping compute hot.
+- **Rate-limited batching:** cap concurrency against third-party APIs or expensive models.
+- **Progress streaming:** keep users/operators out of the “is it dead?” pit.
+- **Retry-safe side effects:** failed steps should retry without duplicate sends, duplicate writes, or regenerated content drift.
+
+## Fit for Pi sandbox workflows
+
+For contextual Pi sandboxes, this source sweep supports a concrete event-driven shape:
+
+1. External event resolves the **context capsule**: issue, thread, webhook, upload, schedule, or campaign-like request.
+2. Supervisor pins plan artifacts before work starts.
+3. Workflow machine selects a pattern: sequential, fan-out/fan-in, router, approval gate, long-delay, or rate-limited batch.
+4. Worker sandboxes run bounded lanes, report progress, and checkpoint outputs.
+5. Verification/review gates decide whether to capture, retry, wait for human input, or stop.
+6. Artifacts and Brain get the durable receipt after accepted work.
+
+The sharp requirement for our own workflow machine: retries, waits, progress, human gates, and fan-out are not “nice later.” They are the common shape of real event-driven work.

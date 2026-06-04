@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.turbo/
+.wrangler/
+.dev.vars*
+.env*
+*.log
+.DS_Store
+.pi/
+
+# Prototype outputs are kept only when captured intentionally.
+prototypes/**/out/
+prototypes/**/.tmp/

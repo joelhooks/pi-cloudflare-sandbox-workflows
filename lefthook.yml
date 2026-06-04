@@ -1,0 +1,19 @@
+pre-commit:
+  parallel: false
+  jobs:
+    - name: format staged files
+      glob: "*.{js,jsx,ts,tsx,json,jsonc,md,mdx,yml,yaml,css,scss,html}"
+      run: pnpm exec oxfmt --write --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+
+    - name: lint all files
+      run: pnpm exec ultracite check .
+
+    - name: typecheck all files
+      run: pnpm typecheck
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: verify workspace
+      run: pnpm verify:workspace
