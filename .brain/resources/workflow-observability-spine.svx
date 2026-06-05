@@ -21,6 +21,218 @@ Agent observability may be more important than the eyeball UI. A debugging agent
 
 Observability is not a dashboard bolted on later. It is part of the workflow contract and data model.
 
+## Next prototype stance
+
+Joel correction, 2026-06-05: the next observability prototype must be **full realistic end-to-end work**, not a static replay, fake demo, local-only simulation, or hand-authored event fixture.
+
+The prototype must run a real dynamic workflow:
+
+```txt
+real work item
+→ control-plane plan phase
+→ generated/selected workflow machine and harness pinned as artifacts
+→ real Cloudflare Worker + Durable Object + Queue + Sandbox + Artifacts execution
+→ real Pi/tool/model lanes where the work requires them
+→ durable observability pack emitted during/after the run
+→ fresh debugging agent can inspect the pack and explain state/risk/next action
+```
+
+A visualizer or replay surface may consume the pack later, but the pack must be produced by live workflow execution. Static receipts are allowed only as regression fixtures after the real run proves the shape.
+
+Stronger product-shaped target: run a workflow whose actual job is to **build the observability feature**. The workflow should dynamically plan the work, generate/select its machine and harness, launch real implementation/review/verifier lanes, modify prototype code/docs, run validation, and emit an observability pack about itself. The pack is accepted only if a fresh debugging/review agent can use it to understand how the feature was built, what changed, where risk remains, and what the next safe action is.
+
+This makes the prototype self-referential in the useful way:
+
+```txt
+workflow builds observability
+→ observability records workflow
+→ debugger agent inspects observability
+→ verifier checks both feature behavior and run intelligibility
+```
+
+Architecture constraint: use **ports and adapters**. The observability feature should expose core ports like `WorkflowEventSink`, `StatusProjectionStore`, `MetricsRecorder`, `TraceRecorder`, `RedactionPolicy`, and `ObservabilityPackWriter`. Cloudflare Workers, Durable Objects, Artifacts, Analytics Engine, WebSockets, and local filesystem are adapters behind those ports, not concepts leaking through the workflow domain.
+
+The prototype may use Cloudflare adapters for the real proof, but the winning shape should be portable enough to rewrite into `src/` without dragging prototype Worker route glue or vendor-specific calls into the core model.
+
+Locked prototype shape, accepted 2026-06-05:
+
+```txt
+prototypes/workflow-observability-spine-spike/
+  src/core/
+    ports.ts                 # pure interfaces/types
+    events.ts                # event schema + helpers
+    projections.ts           # status/metrics/cost reducers
+    redaction.ts             # redaction policy
+    observability-pack.ts    # pack writer contract
+  src/adapters/
+    artifacts-pack-writer.ts
+    durable-object-status-store.ts
+    worker-event-sink.ts
+    sandbox-metrics-recorder.ts
+    local-fixture-reader.ts  # regression fixtures only, not proof
+  src/workflows/
+    planner.ts               # dynamic workflow generation/selection
+    build-observability.ts   # generated/pinned harness target
+  src/worker.ts              # real Cloudflare route/queue/DO
+```
+
+Acceptance constraint: files under `src/core/` must not import `cloudflare:workers`, the Sandbox SDK, Wrangler, Node filesystem APIs, or local shell helpers. Core emits/consumes typed ports and portable data. Cloudflare, Artifacts, Durable Object, Queue, WebSocket, Analytics Engine, and local fixture behavior live in adapters.
+
+Dynamic generation stance, accepted 2026-06-05: **real generated workflow execution, not receipt-only cosplay**.
+
+The workflow must generate/select and pin its own plan, machine, and harness, then actually execute that generated harness to build the observability feature. A fixed Worker executor pretending to follow a generated machine is not enough for this prototype.
+
+Safety boundary: real does not mean raw `eval` inside the privileged Worker. The generated harness should execute inside an isolated supervisor sandbox or similarly bounded runtime with a declared capability manifest. The Durable Object/Worker control plane owns admission, leases, queues, cancellation, and policy gates; the generated harness can request capabilities through narrow ports/adapters.
+
+Required generated artifacts:
+
+```txt
+run/plan.json
+workflows/machine.json
+workflows/harness.ts or workflows/harness.js
+run/capability-manifest.json
+run/observability-contract.json
+run/verification-contract.json
+```
+
+Execution contract:
+
+```txt
+plan/generate harness
+→ pin plan + machine + harness + capability manifest
+→ validate imports/capabilities/budget/output target/redaction policy
+→ execute generated harness in supervisor sandbox
+→ harness uses declared ports to emit events, enqueue real lanes, write artifacts, request approvals, and deliver output
+→ observability pack records the whole run, including the generated workflow execution itself
+```
+
+Acceptance rejects fake paths:
+
+- no local-only simulation as the main proof
+- no hand-authored event log as the main proof
+- no static replay standing in for live execution
+- no receipt-only generated machine/harness that never runs
+- no Worker-only deterministic script pretending to be dynamic generation
+- no arbitrary generated code with broad secrets or control-plane privileges
+
+Sandbox code-work capability, accepted 2026-06-05: the generated harness must be able to perform real code work inside the sandbox. That means it can clone/fetch the repo or hydrate an Artifacts workspace, edit files, run checks, produce patches, and safely push or publish the result through a declared output target.
+
+Safety rule: “safe push” means capability-scoped Git access, not ambient Joel credentials. For agent-authored GitHub writes in this repo, prefer the ShitRat GitHub App actor (`shitratgit[bot]`) or an equivalent short-lived GitHub App installation token minted by the supervisor. The harness should record the branch/ref, commit SHA, actor, diff stats, validation commands, and output target receipt.
+
+Default code-work flow:
+
+```txt
+hydrate workspace from pinned repo/ref
+→ generated harness edits code/docs through sandbox filesystem
+→ run checks inside sandbox or verifier lane
+→ commit to Artifacts and/or Git branch with scoped credentials
+→ verifier inspects diff + checks + observability pack
+→ output target publishes branch/PR/review URL or blocks
+```
+
+The prototype should prove code mutation as real work, not only research/document generation.
+
+Output target, accepted 2026-06-05: v0 should deliver a **GitHub PR**, not just a branch-only commit. The generated harness should push a scoped branch, open a PR, and include the observability pack, verifier summary, changed files, checks run, risk notes, and next safe action in the PR body. The PR should be produced by the policy-approved GitHub App/ShitRat-style actor, not Joel's ambient credentials.
+
+Credential note: ShitRat GitHub App credentials are available through the local secrets system. The workflow plan should still carry a `secretRef`/capability reference, not plaintext. The supervisor or broker leases the credential only at the point of scoped branch/PR creation, records actor/installation metadata and receipt hashes, and never exposes private keys, installation tokens, or GitHub credentials to public logs, prompts, observer surfaces, or Artifacts.
+
+Scope, accepted 2026-06-05: v0 PR changes should be **prototype-only**. The generated workflow may create and edit `prototypes/workflow-observability-spine-spike/**`, root package scripts for that prototype, and Brain/docs captures. It should not write production `src/` code yet. The later production rewrite absorbs only the winning ports, event schema, adapter boundaries, and receipts.
+
+Topology, accepted 2026-06-05:
+
+```txt
+planner/supervisor sandbox
+  → reads task + repo docs
+  → generates plan/machine/harness/capability manifest
+  → pins artifacts
+  → asks DO/Worker to validate and launch
+
+generated build harness sandbox
+  → hydrates repo workspace
+  → edits prototype files
+  → emits observability events through ports
+  → runs checks
+  → pushes branch / opens PR via ShitRat capability
+
+verifier/debugger lane
+  → reads observabilityPack, diff, checks
+  → writes run diagnosis + next-safe-action
+  → decides PR body is publishable
+```
+
+Parallelization note: design the generated build harness so it can split feature work into independently verifiable lanes instead of one giant sandbox doing everything. Use `joelhooks/swarm-tools` as a planning reference before finalizing the lane topology.
+
+Swarm-tools planning receipts to borrow:
+
+- coordinator orchestrates; workers execute
+- spawn all independent workers in one wave instead of one-by-one
+- workers reserve/own their own files; the coordinator does not pre-reserve worker files
+- use waves/dependencies when file ownership overlaps
+- use worktree isolation for high-risk/broad edit lanes; file reservation is fine for smaller disjoint lanes
+- every lane reports progress, blockers, changed files, checks, and learnings
+- coordinator/verifier reviews worker outputs before completion/PR publication
+- recovery should offer same-plan retry, edited-plan retry, or fresh-start paths
+
+Applied to this prototype: the generated harness should plan a small parallel build swarm, not a single monolithic code lane. Candidate lanes:
+
+```txt
+lane: core-ports-and-events
+  owns: prototypes/workflow-observability-spine-spike/src/core/**
+  builds: portable ports, event schema, redaction/data contracts
+
+lane: cloudflare-adapters
+  owns: prototypes/workflow-observability-spine-spike/src/adapters/**
+  builds: Artifacts pack writer, DO status store, event sink, metrics recorder
+
+lane: dynamic-harness-runtime
+  owns: prototypes/workflow-observability-spine-spike/src/workflows/** and src/worker.ts integration seams
+  builds: generated harness execution path, capability manifest validation, sandbox launch shape
+
+lane: verifier-debugger
+  owns: debugger/verifier artifacts and tests under the prototype
+  builds: debugger-agent pack reader, run diagnosis, next-safe-action contract
+
+lane: docs-and-capture
+  owns: prototype README, Brain capture, package scripts
+  builds: run instructions, delete/absorb rule, acceptance receipt language
+```
+
+The generated supervisor may merge or split these lanes after inspecting the repo, but it must record why the final lane graph differs from this seed topology. Parallelism is useful only when file ownership and dependency boundaries stay explicit.
+
+Isolation decision, accepted 2026-06-05: each generated code lane gets an isolated sandbox/workspace, then merges through Artifacts and the final GitHub PR path. Do not let parallel lanes mutate one shared checkout. Each lane should emit its own diff, checks, artifacts, progress events, failure/cancel receipts, and learning summary. The supervisor fan-in step merges lane outputs intentionally and records conflicts/resolutions in the observability pack.
+
+Generated harness runtime, accepted 2026-06-05: use a TypeScript/JavaScript harness executed inside a supervisor sandbox, likely via `tsx`, with a tiny injected capability SDK. This follows the Pi/Workflow OS dynamic workflow lineage while keeping the generated code outside the privileged Worker/DO runtime.
+
+Harness import rule:
+
+```txt
+workflows/harness.ts may import:
+  ./capabilities.ts
+  zod schemas / typed contracts
+  local pinned workflow artifacts
+
+workflows/harness.ts may not import:
+  cloudflare:workers
+  raw Cloudflare bindings
+  raw secret stores
+  raw GitHub credentials
+  unapproved network clients
+```
+
+Capability SDK shape:
+
+```ts
+capabilities.emitEvent(...)
+capabilities.enqueueLane(...)
+capabilities.readArtifact(...)
+capabilities.writeArtifact(...)
+capabilities.requestSecretLease(secretRef)
+capabilities.openPullRequest(...)
+capabilities.reportProgress(...)
+```
+
+The Worker/DO validates `run/capability-manifest.json`, then starts the supervisor sandbox. The harness can request declared capabilities through the SDK; the control plane decides whether to grant, reject, enqueue, or require human approval.
+
 A workflow run should emit enough structured, high-cardinality telemetry that:
 
 1. an agent can inspect the receipts and explain what is right or wrong
@@ -464,3 +676,163 @@ A first prototype is useful if a human and an agent can both answer these from t
 - What should we do next?
 
 If the visualizer cannot answer those, it is just a fancy log tail with mascara.
+## Proven run receipt — 2026-06-05
+
+Real deployed run succeeded:
+
+- run: `run-workflow-observability-spine-86638042`
+- Worker: `https://pi-workflow-observability-spine-spike.joelhooks.workers.dev`
+- Artifacts repo: `piwfo-run-workflow-observability-spine-86638042`
+- output target: `github_pr`
+- GitHub PR: https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/1
+- PR actor: `shitratgit[bot]`
+- PR branch: `workflow-observability-spine-86638042`
+- verifier status: `verified`
+- total planned lanes: `5`
+- max observed active lanes: `2`
+- generated files in PR: `10`
+
+Acceptance evidence from `prototypes/workflow-observability-spine-spike/out/latest-receipt.json`:
+
+- `generated-harness-executed`: passed
+- `isolated-lanes-generated-files`: passed
+- `debugger-can-explain-run`: passed
+- observability pack refs: `run/events.jsonl`, `run/status.json`, `run/metrics-summary.json`, `run/cost-summary.json`, `run/trace-summary.json`, `run/redaction-policy.json`, `run/agent-observability-summary.md`
+
+Verification receipts:
+
+```bash
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm verify:workspace
+```
+
+PR/readback checks performed after the run:
+
+- GitHub API readback returned PR `#1` open on `main` from `workflow-observability-spine-86638042`.
+- PR author readback: `shitratgit[bot]`.
+- PR body includes `Run receipt`, `Generated files`, `Observability pack`, and `Debugger diagnosis` sections.
+- PR diff is prototype/Brain scoped and contains no `BRAVE_SEARCH_API_KEY`, `ACCESS_TOKEN`, `PI_AUTH_JSON_B64`, `art_v1_`, `shitrat_github_private_key`, or private-key block text.
+
+Runtime diagnosis learned during dogfood:
+
+- `isomorphic-git.push()` needs `url`, not `remote`; the wrong option caused Worker 1101 on first start.
+- Generated `tsx` harnesses should avoid top-level await unless the sandbox module mode is explicit; wrapping in `async main()` avoided the CJS transform trap.
+- Generated shell/Node heredocs should use `String.raw` or `String.fromCharCode(10)` for embedded newlines; otherwise template rendering can turn `\n` into syntax-breaking literal newlines.
+- Queue failures must update capsule state to `blocked`; silent queue retry loops make observability lie.
+- Lane retry state must re-enqueue the lane message; `retry_queued` without a queue send is boolean-soup cosplay wearing a state-machine hat.
+
+## Next required prototype: Cloud Capability Lease Broker + PR output
+
+Joel correction, 2026-06-05: the observability PR proof was still hybrid. The workflow build ran in Cloudflare, but GitHub PR publication happened from a local ShitRat adapter. That is not acceptable for the real product standard. Secrets are a pillar, but the workflow should not lease raw secrets or broad tokens. It should lease **permission to perform one exact operation** through a trusted broker.
+
+Canonical term: **capability lease**.
+
+
+Ports/adapters requirement: the prototype must code against interfaces. Core capability workflow code defines portable ports such as `CapabilityLeaseBroker`, `CapabilityPolicyAuthorizer`, `SecretMaterialStore`, `PullRequestOutputPort`, and `CapabilityReceiptSink`. Cloudflare Worker/DO/storage, GitHub App/API calls, Artifacts `filesRef` resolution, and observability writes are adapters behind those ports. Core code must not import `cloudflare:workers`, the Sandbox SDK, Wrangler, `@octokit/*`, raw GitHub clients, Node filesystem/shell helpers, or concrete secret storage implementations.
+
+
+Interface-prototyping stance: this prototype is explicitly allowed to focus on the interface shape. The main artifact is the portable core contract plus one real Cloudflare/GitHub adapter path that proves the interface is not fantasy. Do not promote the prototype interfaces into production `src/` by copy/paste; after the proof, rewrite the winning interface names, request/receipt schemas, policy boundaries, and adapter seams into production.
+
+Expected prototype layout:
+
+```txt
+prototypes/cloud-capability-lease-broker-spike/
+  src/core/
+    capability-lease-broker.ts
+    capability-policy-authorizer.ts
+    secret-material-store.ts
+    pull-request-output-port.ts
+    capability-receipt-sink.ts
+    schemas.ts
+  src/adapters/
+    cloudflare-capability-lease-broker.ts
+    cloudflare-secret-material-store.ts
+    github-app-pull-request-output.ts
+    artifacts-files-ref.ts
+    observability-receipt-sink.ts
+  src/worker.ts
+```
+
+Create a new prototype instead of patching this into the observability spike:
+
+```txt
+prototypes/cloud-capability-lease-broker-spike/
+```
+
+Question:
+
+```txt
+Can a deployed Cloudflare Worker/Durable Object broker accept secretRef + payload-bound capability requests, keep root GitHub App material and installation tokens inside the trusted boundary, execute PR publication from Cloudflare, and prove no plaintext secret, broad token, bearer-ish URL, or raw Worker secret name/value leaks into Artifacts, logs, public observers, prompts, PR body, or final receipts?
+```
+
+Required real path:
+
+```txt
+workflow plan carries secretRef + requested capability only
+→ Durable Object broker validates policy, run envelope, capability id, payload hash, repo allowlist, actor, and expiry
+→ broker reads root GitHub App material from Worker secret/Secrets Store binding or encrypted private storage
+→ broker mints any GitHub App installation token only inside the trusted Worker/DO boundary
+→ generated harness/finalizer receives a capabilityRef and operation receipt, not root secret material or installation token
+→ broker performs the exact GitHub API operation: create branch/tree/commit/PR from approved filesRef + payloadHash
+→ receipt records actor, repo, branch, commit, PR URL, capabilityRef, lease expiry, policy id, payload hash, and cleanup/revoke status
+→ public receipts leak no private key, installation token, bearer-ish URL, token-bearing remote, or raw Worker secret name/value
+```
+
+Capability request shape:
+
+```ts
+type CapabilityLeaseRequest = {
+  runId: string;
+  workItemId: string;
+  secretRef: "githubApp:shitrat";
+  capability: "github.openPullRequest";
+  repo: "joelhooks/pi-cloudflare-sandbox-workflows";
+  branch: string;
+  filesRef: string;
+  payloadHash: string;
+  prTitle: string;
+  prBodyHash: string;
+  expiresInSeconds: number;
+};
+```
+
+Acceptance gates:
+
+- local runner may start/poll/verify only; it may not create commits, branches, tokens, or PRs
+- no sandbox, generated harness, Artifacts repo, PR body, Brain note, logs, or public observer sees a GitHub App private key, installation token, token-bearing remote URL, or raw secret value
+- the broker executes only the exact payload-bound operation; branch, repo, filesRef, PR title/body hash, and run id are part of the lease envelope
+- a denied request returns `missing_secret_approval`, `capability_denied`, or `payload_hash_mismatch`, not a retry loop
+- leases have expiry, scope, actor, purpose, run id, capability id, payload hash, and revoke/cleanup receipt
+- verifier proves PR readback from GitHub API shows `shitratgit[bot]` and the expected branch/commit/payload hash
+- failure modes are stateful and visible: blocked states, redacted error, approval URL/ref, no silent queue retry soup
+
+Borrow from existing receipts:
+
+- `prototypes/secret-lease-broker-spike/` for `secretRef -> task-scoped lease -> metadata-only receipt`
+- `docs/kody-secrets-pattern.md` for encrypted storage, metadata discovery, placeholder references, approval errors, rotation doctrine, and derived secret use at a gateway
+- `prototypes/workflow-observability-spine-spike/` for generated harness, isolated lanes, observability pack, verifier/debugger receipt, and the discovered anti-patterns
+
+Hard line: the next proof must produce a PR without local GitHub credentials, local ShitRat API calls, or sandbox-visible GitHub tokens. Local can verify; the cloud broker must execute the output capability.
+
+## Follow-up proof receipt: cloud capability broker
+
+The local-output gap from the observability proof is closed by `prototypes/cloud-capability-lease-broker-spike/`.
+
+Latest successful real run:
+
+- Worker: `https://pi-cloud-capability-lease-broker-spike.joelhooks.workers.dev`
+- run: `run-cloud-capability-lease-4dac021e-eecfdfb5`
+- Artifacts repo: `piclb-run-cloud-capability-lease-4dac021e-eecfdfb5`
+- sandbox receipt commit: `b2efdd6eebb2536114e7cf98d1659d039e6932bf`
+- cloud-created PR: https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/9
+- PR actor/readback: `shitratgit[bot]`
+- PR branch: `cloud-capability-lease-eecfdfb5`
+- PR commit: `2a8e7d648e4e77e467efef09e6e67246e2fb08c0`
+- payload hash: `3be8433a5f04dc173dee3d0c27e91b39a0ca4325f77eef52959e01a3f403813a`
+- denied probes: `capability_denied`, `missing_secret_approval`, `payload_hash_mismatch`
+- leak scan: passed
+- CodeRabbit: `findings: 0`
+
+Macroscope is intentionally excluded from the default review loop after invoice spikes; use CodeRabbit plus targeted local review unless Joel explicitly asks for Macroscope.

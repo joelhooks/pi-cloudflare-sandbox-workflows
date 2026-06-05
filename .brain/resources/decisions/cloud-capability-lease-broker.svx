@@ -1,0 +1,182 @@
+---
+title: "Cloud Capability Lease Broker"
+type: "decision"
+status: "accepted"
+created_at: "2026-06-05"
+tags:
+  - decision
+  - secrets
+  - capability-leases
+  - cloudflare
+  - github
+---
+
+# Cloud Capability Lease Broker
+
+## Decision
+
+Use **capability leases**, not token leases, for cloud output delivery.
+
+A generated workflow may request a payload-bound operation such as `github.openPullRequest`, but it must not receive a GitHub App private key, installation token, token-bearing remote URL, or broad credential. A deployed Cloudflare Worker/Durable Object broker keeps root secret material and any minted installation token inside the trusted boundary, executes the exact approved operation, and returns only metadata receipts.
+
+The prototype and eventual production rewrite must follow **ports/adapters**. Core workflow code depends on interfaces and portable data contracts. Cloudflare bindings, D1/R2/Secrets Store, GitHub App JWT minting, GitHub API calls, Artifacts fetches, and Worker routes are adapters.
+
+## Ports / adapters invariant
+
+Core code should define and consume ports like:
+
+```ts
+export interface CapabilityLeaseBroker {
+  requestCapability(input: CapabilityLeaseRequest): Promise<CapabilityLeaseResult>;
+}
+
+export interface CapabilityPolicyAuthorizer {
+  authorize(input: CapabilityLeaseRequest): Promise<CapabilityPolicyDecision>;
+}
+
+export interface SecretMaterialStore {
+  withSecretMaterial<Result>(
+    input: SecretMaterialUseRequest,
+    use: (material: GitHubAppSigningHandle) => Promise<Result>
+  ): Promise<Result>;
+}
+
+export interface PullRequestOutputPort {
+  openPullRequest(
+    input: OpenPullRequestCapabilityPayload,
+    signingHandle: GitHubAppSigningHandle
+  ): Promise<PullRequestReceipt>;
+}
+
+export interface CapabilityReceiptSink {
+  record(receipt: CapabilityLeaseReceipt): Promise<void>;
+}
+```
+
+Adapters implement those ports:
+
+- `CloudflareCapabilityLeaseBrokerAdapter` wires Worker/DO routes and storage.
+- `CloudflareSecretMaterialStoreAdapter` reads Worker secret, Secrets Store binding, or encrypted private storage.
+- `GitHubAppPullRequestAdapter` mints any installation token inside the trusted boundary and calls GitHub.
+- `ArtifactsFilesRefAdapter` resolves approved `filesRef` payloads.
+- `ObservabilityReceiptSinkAdapter` writes redacted event/receipt artifacts.
+
+Hard import rule: core capability code must not import `cloudflare:workers`, Cloudflare Sandbox SDK, Wrangler, `@octokit/*`, raw GitHub API clients, Node filesystem/shell helpers, or secret-store concrete implementations. Adapters may import those. Tests should include an import-boundary check.
+
+Approved secret-material shape: `SecretMaterialStore` exposes `withSecretMaterial(input, use)` instead of `getSecretMaterial(ref)`. The callback may receive a narrow signing handle inside the trusted adapter boundary; it should not return root secret material, installation tokens, or token-bearing remotes.
+
+This prototype is explicitly an **interface prototype**. The interface shape is the product learning: names, request/receipt schemas, policy split, capability envelope, and adapter seams. One real Cloudflare/GitHub adapter path must prove the interfaces can execute, but the interfaces still remain prototype code until rewritten into production `src/`.
+
+## Why
+
+The `workflow-observability-spine-spike` proved that generated harnesses and isolated lanes can run in Cloudflare, but its PR output used a local ShitRat adapter. That was still local cheating against the product goal.
+
+Naively moving the GitHub installation token into a Cloudflare Sandbox would only move the risk. The stronger model borrows Kody's "derived secret use at a gateway" shape: generated workflows lease permission to perform one exact operation, not secret material.
+
+## Required envelope
+
+A capability lease request should bind at least:
+
+```ts
+type CapabilityLeaseRequest = {
+  runId: string;
+  workItemId: string;
+  secretRef: "githubApp:shitrat";
+  capability: "github.openPullRequest";
+  repo: "joelhooks/pi-cloudflare-sandbox-workflows";
+  branch: string;
+  filesRef: string;
+  payloadHash: string;
+  prTitle: string;
+  prBodyHash: string;
+  expiresInSeconds: number;
+};
+```
+
+The broker must verify policy, repo allowlist, run envelope, payload hash, expiry, and actor before executing. That verification happens through the `CapabilityPolicyAuthorizer` port so policy can be tested without Cloudflare or GitHub adapters.
+
+## Acceptance consequences
+
+- Local runners may start, poll, and verify only.
+- Local runners may not create commits, branches, tokens, or PRs for the proof.
+- Core workflow/capability code is written against ports/interfaces, not Cloudflare or GitHub concrete clients.
+- Import-boundary checks prove core code does not import Cloudflare, Sandbox, Wrangler, GitHub API clients, Node filesystem, shell helpers, or concrete secret stores.
+- Sandboxes and generated harnesses do not receive broad GitHub tokens.
+- Public receipts record `capabilityRef`, policy id, payload hash, expiry, actor, branch, commit, and PR URL.
+- Denied requests return `missing_secret_approval`, `capability_denied`, or `payload_hash_mismatch`, not silent retry loops.
+- Verifier readback must prove the PR actor is `shitratgit[bot]` and the branch/commit/payload match.
+
+## Source receipts
+
+- `prototypes/secret-lease-broker-spike/` proves `secretRef -> task-scoped lease -> metadata-only receipt` in dry mode.
+- `docs/kody-secrets-pattern.md` maps Kody's encrypted storage, metadata discovery, approval errors, rotation doctrine, and derived secret gateway pattern.
+- `prototypes/workflow-observability-spine-spike/` proves Cloudflare generated harness + lane execution, and exposes the local-output anti-pattern this decision fixes.
+
+## Cloud proof receipt — 2026-06-05
+
+`prototypes/cloud-capability-lease-broker-spike/` proved the real adapter path:
+
+- Worker: `https://pi-cloud-capability-lease-broker-spike.joelhooks.workers.dev`
+- run: `run-cloud-capability-lease-4dac021e-eecfdfb5`
+- Artifacts repo: `piclb-run-cloud-capability-lease-4dac021e-eecfdfb5`
+- sandbox receipt commit: `b2efdd6eebb2536114e7cf98d1659d039e6932bf`
+- cleanup: `destroy:cap-run-cloud-capability-lease-4dac021e-eecfdfb5:ok`
+- PR: https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/9
+- PR branch: `cloud-capability-lease-eecfdfb5`
+- PR commit: `2a8e7d648e4e77e467efef09e6e67246e2fb08c0`
+- payload hash: `3be8433a5f04dc173dee3d0c27e91b39a0ca4325f77eef52959e01a3f403813a`
+- PR body hash: `5ecbfe0ecd24c2f4747322bc5bdc1f2ebd6984d3cfcc4f13a6033f5f35cd0916`
+- denied probes: `capability_denied`, `missing_secret_approval`, `payload_hash_mismatch`
+- GitHub readback: actor, branch, and commit matched `shitratgit[bot]` / receipt values
+- leak scan: passed for PEM blocks, GitHub tokens, bearer tokens, token-bearing URLs, Artifacts tokens, and JWT-shaped values
+- local role: start/poll/verify only; Cloudflare Worker/Durable Object created the branch, commit, and PR
+
+Reviewer receipts for PR #9:
+
+- `pnpm check` passed on fetched PR branch
+- `pnpm typecheck` passed on fetched PR branch
+- `pnpm typecheck:tsc` passed on fetched PR branch
+- CodeRabbit CLI doctor passed and `coderabbit review --agent` returned `findings: 0`
+
+Macroscope was intentionally stopped after cost blowups; future review loops for this prototype should use CodeRabbit plus targeted local review unless Joel explicitly asks for Macroscope.
+
+## Public/private posture — 2026-06-05
+
+Accepted stance: this repo can stay public as the **public experiment/incubator** for Cloudflare Sandbox workflow patterns. The value is sharing the interesting generic shape while keeping Wizard/Wzrrd production internals private.
+
+```txt
+pi-cloudflare-sandbox-workflows public repo
+  owns: experiments, prototype interfaces, generic patterns, fake/safe adapters, public receipts, learning artifacts
+
+Wizard/Wzrrd private systems
+  own: production policies, real tenant/org/user rules, real secret authority, private workload adapters, operator workflows, deployment authority, billing/support/access details
+```
+
+The public repo is allowed to expose the pattern:
+
+- XState workflow lifecycle shapes
+- Cloudflare Sandbox/DO/Queue/Artifacts orchestration patterns
+- capability lease broker interfaces
+- observability pack / verifier receipt patterns
+- fake or sanitized adapter examples
+- lessons learned from dogfooding
+
+The public repo should not expose private operational guts:
+
+- plaintext secrets, tokens, private keys, bearer-ish URLs, or token-bearing remotes
+- private host topology, machine names beyond intentional public docs, or tailnet internals
+- real Wizard/Wzrrd production policies that are not intended as product docs
+- private customer/support/billing/access workflows
+- private workload adapters or source-specific migration strategy that gives away too much
+- raw Brain/private strategy beyond what we intentionally want to share
+
+Production absorption rule:
+
+```txt
+prove publicly with generic prototypes
+→ extract interface names, schemas, state machines, adapter seams, receipts
+→ rewrite/adapt privately in Wizard/Wzrrd production code
+→ optionally publish a sanitized package/example if still useful
+```
+
+Operational implication: keep `joelhooks/pi-cloudflare-sandbox-workflows` public, but maintain a deliberate scrub line before pushing new receipts or examples.
