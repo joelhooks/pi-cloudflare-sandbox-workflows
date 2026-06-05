@@ -1,0 +1,58 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pi-cloud-capability-lease-broker-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox",
+      },
+      {
+        "name": "CAPABILITY_RUNS",
+        "class_name": "CapabilityRun",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox", "CapabilityRun"],
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "queue": "piwf-capability-broker-jobs",
+        "binding": "CAPABILITY_QUEUE",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "piwf-capability-broker-jobs",
+        "max_batch_size": 2,
+        "max_batch_timeout": 2,
+      },
+    ],
+  },
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": true,
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 4,
+    },
+  ],
+}
