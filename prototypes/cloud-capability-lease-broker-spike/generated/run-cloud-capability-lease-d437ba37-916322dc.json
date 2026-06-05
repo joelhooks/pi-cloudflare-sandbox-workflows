@@ -1,0 +1,8 @@
+{
+  "actor": "cloud-workflow",
+  "branch": "cloud-capability-lease-916322dc",
+  "capability": "github.openPullRequest",
+  "publicSafe": true,
+  "runId": "run-cloud-capability-lease-d437ba37-916322dc",
+  "workItemId": "cloud-capability-lease-d437ba37"
+}
