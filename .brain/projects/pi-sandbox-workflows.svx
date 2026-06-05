@@ -39,10 +39,13 @@ Primary receipts:
 - Cloudflare Artifacts stores durable, versioned file trees behind Git-compatible repos; repos have scoped tokens, remotes, history, refs, and durable state. Source: `https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/`.
 - Cloudflare's Sandbox SDK + Artifacts example uses the same ID for sandbox and Artifacts repo, passes a short-lived authenticated Git remote into the sandbox, and lets sandbox code use normal `git clone/fetch/pull/push`. Source: `https://developers.cloudflare.com/artifacts/examples/sandbox-sdk-artifacts/`.
 - `cloudflare-parallel-workflow-spike` proves the real deployed parallel control shape: Worker API + Queue consumer, Durable Object supervisor, Queue-backed lane admission, real Sandbox lane execution, Artifacts receipts, fan-in, synthesis, verifier, generic `implementation_plan` delivery, and cleanup. Latest clean receipt: `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, repo `piwfp-run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, plan commit `4e8ec58ee343e6f3fa6adf190e02607c28a0706c`, lanes `8`, cap `3`, max observed active lanes `3`, verifier `verified`, final state `captured`, cleanup all `:ok`.
+- `cloudflare-registry-workflow-os-spike` proves a real deployed internal context-pack registry shape for prompts and skills: Worker API, Durable Object package/job state, Queue validation/install jobs, one Artifacts repo per package, real Sandbox validation, real Sandbox install-smoke, and destroy receipts. Latest clean receipt: package `internal-context-pack-registry-f8be2fa6@0.1.0`, repo `pi-registry-internal-context-pack-registry-f8be2fa6-cc3d6c9a`, publish commit `456312d52876ba81c32cabc4175ab1f81d6e50ea`, validation commit `d4777c23df550575b60c9c6ff4cddebbb6af721b`, validation sandbox `rv-internal-context-pack-registry-f8be2fa-b6ff9b7f`, install-smoke sandbox `ri-internal-context-pack-registry-f8be2fa-be8a933a`, final state `captured`, cleanup all `:ok`.
+- `cloud-capability-lease-broker-spike` closes the observability prototype's local-output cheat by proving a real Cloudflare Worker/Durable Object GitHub PR output broker. Latest clean receipt: Worker `https://pi-cloud-capability-lease-broker-spike.joelhooks.workers.dev`, run `run-cloud-capability-lease-4dac021e-eecfdfb5`, Artifacts repo `piclb-run-cloud-capability-lease-4dac021e-eecfdfb5`, sandbox receipt commit `b2efdd6eebb2536114e7cf98d1659d039e6932bf`, cleanup `destroy:cap-run-cloud-capability-lease-4dac021e-eecfdfb5:ok`, cloud-created PR https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/9 by `shitratgit[bot]`, branch `cloud-capability-lease-eecfdfb5`, PR commit `2a8e7d648e4e77e467efef09e6e67246e2fb08c0`, payload hash `3be8433a5f04dc173dee3d0c27e91b39a0ca4325f77eef52959e01a3f403813a`, denied probes `capability_denied` / `missing_secret_approval` / `payload_hash_mismatch`, leak scan passed, CodeRabbit findings `0`.
 - Artifacts best practices recommend one repo per agent/session/application, forking from stable baselines, short-lived least-privilege repo tokens, and git notes for prompts/model output. Source: `https://developers.cloudflare.com/artifacts/concepts/best-practices/`.
 - Cloudflare Secrets Store is account-level encrypted secret storage compatible with Workers and AI Gateway; Workers bind individual account secrets and access values with `await env.BINDING.get()`. Source: `https://developers.cloudflare.com/secrets-store/integrations/workers/`.
 - Secrets Store beta limits: one store per account, up to 100 production secrets, each secret is a string up to 1024 bytes. Source: `https://developers.cloudflare.com/secrets-store/manage-secrets/`.
 - Local measurement: the current `openai-codex` OAuth auth entry is about 2242 bytes serialized, so it does not fit in one Secrets Store secret; no secret value was printed.
+- Artem Zhutov's dynamic workflows + Second Brain article is a useful product-framing receipt: deterministic generated workflows reduce agent laziness, self-preferential bias, and goal drift; strong pattern candidates for this project are fan-out/synthesize, classify/act, tournament, loop-until-done, and deep verification. Source: `https://x.com/ArtemXTech/status/2062582596190498864?s=20`.
 
 ## Repo tooling decision
 
@@ -422,3 +425,43 @@ Next prototype question: can the real lane deepen into a reader → verifier pip
 - Exact portable OAuth handoff format and TTL policy.
 - Whether runs should return patches only, commit through ShitRat, or expose a short-lived review URL.
 - Whether Cloudflare Sandbox quotas/cold-starts are acceptable under real usage.
+## Public/private posture — 2026-06-05
+
+Accepted stance: this repo can stay public as the **public experiment/incubator** for Cloudflare Sandbox workflow patterns. The value is sharing the interesting generic shape while keeping Wizard/Wzrrd production internals private.
+
+```txt
+pi-cloudflare-sandbox-workflows public repo
+  owns: experiments, prototype interfaces, generic patterns, fake/safe adapters, public receipts, learning artifacts
+
+Wizard/Wzrrd private systems
+  own: production policies, real tenant/org/user rules, real secret authority, private workload adapters, operator workflows, deployment authority, billing/support/access details
+```
+
+The public repo is allowed to expose the pattern:
+
+- XState workflow lifecycle shapes
+- Cloudflare Sandbox/DO/Queue/Artifacts orchestration patterns
+- capability lease broker interfaces
+- observability pack / verifier receipt patterns
+- fake or sanitized adapter examples
+- lessons learned from dogfooding
+
+The public repo should not expose private operational guts:
+
+- plaintext secrets, tokens, private keys, bearer-ish URLs, or token-bearing remotes
+- private host topology, machine names beyond intentional public docs, or tailnet internals
+- real Wizard/Wzrrd production policies that are not intended as product docs
+- private customer/support/billing/access workflows
+- private workload adapters or source-specific migration strategy that gives away too much
+- raw Brain/private strategy beyond what we intentionally want to share
+
+Production absorption rule:
+
+```txt
+prove publicly with generic prototypes
+→ extract interface names, schemas, state machines, adapter seams, receipts
+→ rewrite/adapt privately in Wizard/Wzrrd production code
+→ optionally publish a sanitized package/example if still useful
+```
+
+Operational implication: keep `joelhooks/pi-cloudflare-sandbox-workflows` public, but maintain a deliberate scrub line before pushing new receipts or examples.
