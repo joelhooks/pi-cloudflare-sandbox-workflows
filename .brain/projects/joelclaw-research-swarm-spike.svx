@@ -1,0 +1,303 @@
+---
+title: "JoelClaw Research Swarm Spike"
+type: "project"
+status: "complete"
+created_at: "2026-06-04"
+tags:
+  - prd
+  - prototype
+  - cloudflare
+  - joelclaw
+---
+
+# JoelClaw Research Swarm Spike
+
+## Problem
+
+The repo has proved the Cloudflare control substrate for parallel Pi workflows, but the research/content side is still too hand-shaped. We need to prove that a contextual workflow can dynamically plan a source-grounded research swarm, use JoelClaw as Joel's personal research library, expand into broader current web/source-repo research, and deliver a fully rendered Brain page with verification receipts.
+
+This is not a tiny source-adapter spike. Joel explicitly wants end-to-end full-task practice results using real production-grade primitives and tooling.
+
+## Current receipt
+
+The full Cloudflare hot swarm is prototype-proven.
+
+```txt
+run: run-joelclaw-research-swarm-workflow-verifier-evals-96a02bd9
+Worker: https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev
+public research output: https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev/research/joelclaw-research-swarm-workflow-verifier-evals
+public observer: https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev/observer/joelclaw-research-swarm-workflow-verifier-evals
+Artifacts repo: jcrs-run-joelclaw-research-swarm-workflow-verifier-evals-96a02bd9
+research lanes: 6 real Pi internet-research agent lanes
+model: openai-codex/gpt-5.5
+max observed active lanes: 3
+verifier: verified
+final state: captured
+cleanup receipts: 9
+output refs: .brain/resources/workflow-verifier-evals-playbook.svx, capsule:inline-bibliography, capsule:inline-source-map
+Brain page: .brain/resources/workflow-verifier-evals-playbook.svx
+Brain URL: https://pi-notes-4188.localhost/notes/resources/workflow-verifier-evals-playbook
+```
+
+Validation receipts:
+
+```txt
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm verify:workspace
+pi_notes_brain_check
+observer-redaction-passed
+```
+
+Useful failures were captured and fixed during the real run:
+
+- Six simultaneous cold Sandbox starts plus missing lane env revealed the need for bounded hot admission and explicit `LANE_ID` env.
+- Queue retry messages can outlive a run, so lane admission now rejects stale `runId` messages.
+- Node heredoc lanes must avoid top-level `await` with CommonJS `require`; the lane script now uses an async IIFE.
+- The first captured run used deterministic Node reports. The corrected run materializes `PI_AUTH_JSON_B64` into task-scoped `auth.json`; the latest run also pins `.pi/extensions/research-tools.ts`, passes `BRAVE_SEARCH_API_KEY` as a Worker secret, and invokes `pi -e .pi/extensions/research-tools.ts --provider openai-codex --model gpt-5.5` inside each research Sandbox.
+
+## Desired outcome
+
+Build `prototypes/joelclaw-research-swarm-spike/` to run a real adaptive research workflow that produces:
+
+```txt
+.brain/resources/workflow-verifier-evals-playbook.svx
+```
+
+The output should be a robust, detailed, source-grounded Brain page about verifier/evals practice for generated workflow machines, bounded concurrency, cancel/cleanup, retry idempotency, HITL resume, and source-backed claim checking.
+
+## Source receipts
+
+- Project architecture: `.brain/projects/pi-sandbox-workflows.svx`
+- JoelClaw backlog and prototype contract: `.brain/resources/joelclaw-docs-api-research-backlog.svx`
+- Scale/workflow patterns: `.brain/resources/dynamic-pi-workflow-scale-catalog.svx`
+- Prototype boundary: `PROTOTYPES.md`
+- Production/prototype boundary: `docs/production-vs-prototypes.md`
+- Source map: `docs/source-map.md`
+- Proven Cloudflare parallel prototype: `prototypes/cloudflare-parallel-workflow-spike/README.md`
+- Latest clean parallel receipt: `prototypes/cloudflare-parallel-workflow-spike/out/latest-receipt.json` when present locally
+
+## Non-goals
+
+- Do not build a generic custom UI before the workflow proof exists.
+- Do not make this a Worker-only source search demo while claiming hot Cloudflare research lanes.
+- Do not hard-code a magic lane count like 50. Lane count is derived from scout evidence and operator-approved limits.
+- Do not promote prototype code into `src/`.
+- Do not launch expensive hot swarms without hash-bound operator approval.
+- Do not make public outputs a substitute for original books/docs. Use fair use intentionally with source receipts.
+
+## Corpus and source policy
+
+JoelClaw is Joel's personal research library, including books he owns physically. Use it aggressively for private project research and source-grounded synthesis. Public pages may quote, analyze, compare, transform, and use ideas, patterns, and principles under fair use. Keep attribution and source receipts clear.
+
+Source classes are mandatory:
+
+| Class | Use |
+| --- | --- |
+| `official` | canonical product/API/runtime truth; can back implementation/API claims |
+| `source_repo` | source, tests, examples, issues; can confirm exact API shape and edge behavior |
+| `maintainer` | engineering posts, talks, release notes; can back intent/rationale/migration cautions |
+| `book_or_corpus` | JoelClaw books/PDFs/notes; can back pattern vocabulary and durable principles |
+| `field_report` | issues/forums/debug posts; can back risks and warnings, not canonical API truth |
+| `local_project` | this repo's Brain/docs/code/receipts; canonical for project terminology and decisions |
+
+Every selected source should record `sourceClass`, URL/local path, `docId`/`chunkId` when available, freshness/date when relevant, and what kind of claim it may support.
+
+## Operator workflow
+
+Planning is collaborative, inspired by `/skill:grill-with-docs`, `/skill:to-prd`, `/skill:to-issues`, and the Brain-first workflow.
+
+The system should first generate a pre-launch Brain review page, then wait for operator approval/edit/reject before launching hot research lanes.
+
+Pre-launch review page shape:
+
+```txt
+.brain/reviews/joelclaw-research-swarm-<run>.svx
+```
+
+It should render:
+
+- research envelope
+- workflow machine summary
+- harness/lane strategy
+- constructive limits
+- source policy
+- verifier contract
+- estimated cost/risk
+- approval hash bundle
+- public observer URL or planned observer target
+
+## Public observer URL
+
+Joel wants a public URL to watch logs/events as the dynamic workflow is built. The prototype should publish a redacted observer surface, likely through Wzrrd or a similarly public static/event projection, that shows workflow progress without requiring local pi-notes.
+
+Observer surface should include:
+
+```txt
+run id
+capsule/work item id
+current machine state
+plan revision history
+scout wave status
+theme map summary
+lane queue/running/complete counts
+per-lane status, sandbox id, source classes, artifact refs
+verifier status
+blocked/warning reasons
+cleanup receipts
+```
+
+Observer surface must not include:
+
+```txt
+raw auth/secret values
+private Artifacts tokens
+approval callback tokens
+claim URLs or bearer-ish links
+unredacted private operator notes
+large raw corpus chunks
+```
+
+The pre-launch envelope should include `observerTarget` and the final receipt should include `publicObserverUrl`.
+
+## Required pre-launch artifacts
+
+If these artifacts are missing or invalid, state is `planning_needs_operator`, not `launching`:
+
+```txt
+run/research-envelope.json
+workflows/machine.json
+workflows/harness.json
+run/source-policy.json
+run/verification-contract.json
+run/operator-approval.json
+```
+
+`run/operator-approval.json` must bind approval to exact artifact hashes:
+
+```txt
+researchEnvelopeSha256
+machineSha256
+harnessSha256
+sourcePolicySha256
+verificationContractSha256
+```
+
+Approval should not nag the operator for safe changes inside the approved envelope. Re-approval is only required for material changes to spend/time/lane limits, output target/publication surface, source classes, secret/tool permissions, verifier blocking rules, or machine/harness policy.
+
+## Adaptive workflow shape
+
+```txt
+planning envelope
+→ scout JoelClaw corpus terrain
+→ fan-in scout theme map
+→ revise plan from scout evidence
+→ spawn hot Cloudflare Sandbox research lanes for chosen themes
+→ fan-in source maps and findings
+→ synthesize Brain MDSvX page
+→ verify claims/source classes/fair-use/freshness
+→ write/render Brain page
+→ emit final Artifacts receipt and cleanup receipts
+```
+
+The supervisor should not pretend to know the final lane graph at the start. It knows the goal, source policy, output contract, limits, stop rules, and approval boundary; it adapts lane waves based on scout evidence and intermediate fan-in.
+
+## Constructive limits
+
+The pre-launch research envelope must make these operator-visible:
+
+- `maxScoutWaves`
+- `maxHotSandboxLanesPerWave`
+- `maxTotalHotSandboxLanes`
+- `maxWallClock`
+- `maxModelSpend` / `maxTokenBudget`
+- `requiredCoverageQuestions`
+- `stopWhenDuplicateSources`
+
+## Failure policy
+
+- Transient Cloudflare/Sandbox startup errors: retry with jitter, same lane intent, new sandbox id; abort if repeated failures imply platform/config breakage.
+- Cloudflare hard quota/rate limit: pause/admit fewer lanes, record quota receipt, resume when allowed; abort if no lane can start within run budget.
+- OpenAI/Pi/model credit or auth exhaustion: stop model-heavy lanes, preserve source-search receipts, return actionable blocker; abort synthesis if required analysis/verifier lanes cannot run.
+- JoelClaw/API rate limit: backoff/retry and preserve partial refs; abort only if seed corpus coverage falls below required minimum.
+- Artifacts Git/token failure: mint fresh token, retry idempotent push, verify branch/ref; abort if plan/source/lane receipts cannot be committed.
+- Verifier blocking failure: do not deliver Brain page as accepted; persist blocked receipt and source map; terminal `blocked`.
+- Cancellation: stop new lane admission, destroy hot sandboxes, revoke leases, persist cancel receipt; terminal `cancelled`.
+
+## Prototype implementation shape
+
+Create `prototypes/joelclaw-research-swarm-spike/` with:
+
+```txt
+README.md
+Dockerfile
+wrangler.jsonc
+fixtures/workflow-verifier-evals-task.json
+scripts/wrangler-with-cloudflare-token.mjs
+scripts/run-plan-demo.mjs
+scripts/run-real-demo.mjs
+src/schema.ts
+src/machine.ts
+src/planner.ts
+src/memory-fs.ts
+src/worker.ts
+```
+
+Prefer copying proven Cloudflare boundaries from `cloudflare-parallel-workflow-spike` and rewriting the domain pieces for adaptive research.
+
+Root scripts should include:
+
+```txt
+prototype:joelclaw-swarm:plan
+prototype:joelclaw-swarm:deploy
+prototype:joelclaw-swarm:real
+```
+
+## Acceptance contract
+
+1. Pre-launch Brain review page is generated and hash-bound approval is recorded.
+2. Workflow launches only after approval.
+3. Scouts search JoelClaw and produce a theme map.
+4. Dynamic lane plan is derived from scout evidence.
+5. Hot Cloudflare Sandbox research lanes run for each chosen theme.
+6. Lanes use JoelClaw plus broader source-classed web/official sources.
+7. Fan-in synthesis writes `.brain/resources/workflow-verifier-evals-playbook.svx`.
+8. Verifier checks claims, source classes, fair-use attribution, and freshness.
+9. `pi_notes_brain_check` passes.
+10. Final receipt includes Brain page URL, public observer URL, Artifacts refs, lane receipts, verifier result, and cleanup receipts.
+
+## Validation
+
+Run at minimum:
+
+```bash
+pnpm fix
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm verify:workspace
+pi_notes_brain_check
+```
+
+Completed prototype-specific validation included:
+
+```bash
+JOELCLAW_SWARM_APPROVE=1 pnpm prototype:joelclaw-swarm:plan
+pnpm prototype:joelclaw-swarm:deploy
+pnpm prototype:joelclaw-swarm:real # direct monitor succeeded after the run-script parser hiccup
+```
+
+Prototype-specific validation should keep:
+
+```bash
+pnpm prototype:joelclaw-swarm:plan
+pnpm prototype:joelclaw-swarm:deploy
+pnpm prototype:joelclaw-swarm:real
+```
+
+The real run must leave local ignored receipts under `prototypes/joelclaw-research-swarm-spike/out/`.
+
+## Tracker mirror
+
+No tracker artifact yet. Brain is canonical until Joel asks to slice/publish issues.

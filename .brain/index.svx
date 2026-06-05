@@ -7,7 +7,12 @@ updated: 2026-06-04
 # Pi Sandbox Workflows Brain
 
 - [Project architecture](./projects/pi-sandbox-workflows)
+- [JoelClaw Research Swarm Spike](./projects/joelclaw-research-swarm-spike)
 - [Dynamic Pi workflow scale catalog](./resources/dynamic-pi-workflow-scale-catalog)
+- [JoelClaw Docs API research backlog](./resources/joelclaw-docs-api-research-backlog)
 - [Trigger.dev event-driven workflow use cases](./resources/trigger-dev-event-driven-workflows)
+- [Workflow observability spine](./resources/workflow-observability-spine)
+- [Workflow visualizer prototype idea](./resources/workflow-visualizer-prototype-idea)
+- [Next prototype Grill-with-Docs prompt](./reviews/next-prototype-grill-with-docs-prompt)
 
 Durable decisions, receipts, and prototype captures belong here. Prototype code should not become the memory system.

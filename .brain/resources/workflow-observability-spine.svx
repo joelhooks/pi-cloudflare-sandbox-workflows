@@ -1,0 +1,466 @@
+---
+title: Workflow Observability Spine
+status: active
+updated: 2026-06-04
+tags:
+  - observability
+  - telemetry
+  - workflows
+  - agents
+  - visualizer
+  - cloudflare
+---
+
+# Workflow Observability Spine
+
+Joel refinement, 2026-06-04: this is not primarily about the HUD. The visualizer is one consumer. The real thing is the **observability spine under the hood**: structured telemetry, traces, events, cost/token/sandbox accounting, and agent-readable receipts that let humans and agents understand a workflow while it runs and after it finishes.
+
+Agent observability may be more important than the eyeball UI. A debugging agent should be able to attach to a run, inspect the telemetry pack, and explain what is right, what is wrong, what remains, what is costing money, and what the next safe action is.
+
+## Core stance
+
+Observability is not a dashboard bolted on later. It is part of the workflow contract and data model.
+
+A workflow run should emit enough structured, high-cardinality telemetry that:
+
+1. an agent can inspect the receipts and explain what is right or wrong
+2. a human can see current state, work left, cost pressure, and risk
+3. replay can reconstruct the run from durable artifacts
+4. live sockets and HUDs can animate current work without becoming source of truth
+
+Rule:
+
+```txt
+live socket = projection
+event JSONL + traces + Artifacts + status indexes = truth
+Brain = durable decisions after verification
+```
+
+## Source receipts
+
+Cloudflare:
+
+- [Workers Observability](https://developers.cloudflare.com/workers/observability/)
+- [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/)
+- [Workers Query Builder](https://developers.cloudflare.com/workers/observability/query-builder/)
+- [Workers metrics and analytics](https://developers.cloudflare.com/workers/observability/metrics-and-analytics/)
+- [Workflows metrics and analytics](https://developers.cloudflare.com/workflows/observability/metrics-analytics/)
+- [Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
+- [Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/)
+
+OpenTelemetry / GenAI:
+
+- [OpenTelemetry GenAI metrics](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
+- [OpenTelemetry GenAI spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/)
+- [OpenTelemetry GenAI events](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/)
+- [OpenTelemetry OpenAI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/openai/)
+
+Local project:
+
+- `.brain/resources/workflow-visualizer-prototype-idea.svx`
+- `.brain/resources/dynamic-pi-workflow-scale-catalog.svx`
+- `docs/dynamic-workflow-machine.md`
+
+Key receipts:
+
+- Cloudflare Workers Logs recommend structured JSON logs and say indexed fields allow segmentation across dimensions with unlimited cardinality.
+- Workers Observability supports metrics, structured queries, logs, OpenTelemetry export to OTLP destinations, errors/exceptions, source maps, and DevTools.
+- Workers metrics include request counts, error rates, CPU time, wall time, and execution duration.
+- Workers Analytics Engine is a fit for custom business/usage metrics, high-cardinality dimensions, usage-based billing, and SQL/Grafana analysis.
+- Cloudflare Workflows metrics expose workflow invocations, error rates, steps, total duration, and GraphQL datasets such as `workflowsAdaptiveGroups` and `workflowsAdaptive` with status/event dimensions.
+- OpenTelemetry GenAI conventions define `gen_ai.client.token.usage`, operation duration, time to first chunk/token, model/provider attributes, and input/output/reasoning token attributes.
+
+## Observability layers
+
+### 1. Observability data plane
+
+The data plane answers: what can humans and agents query, summarize, debug, replay, and trust?
+
+Primary sources:
+
+```txt
+run/events.jsonl
+run/metrics-summary.json
+run/trace-summary.json
+run/cost-summary.json
+run/agent-observability-summary.md
+DO/D1 status projections
+Artifacts refs
+R2 trace/log blob refs
+Workers Logs / Analytics Engine / OTLP exports
+```
+
+The HUD is downstream from this. If the data plane is weak, the visualizer is bullshit with nicer colors.
+
+### 2. Live stream projection
+
+The live stream answers: what is happening right now?
+
+Source: capsule Durable Object WebSocket stream plus latest DO/D1 status projection. It feeds HUDs, live agents, and alerts.
+
+Signals:
+
+```txt
+current run state
+active lanes
+queued lanes
+hot sandbox slots
+waiting approvals
+retry timers
+verifier status
+cleanup status
+live token/cost counters
+artifact writes
+secret leases active
+remaining required steps
+```
+
+Consumer shapes:
+
+```txt
+human HUD: status / elapsed / cost / token usage / hot sandboxes
+visualizer: timeline / swimlanes / D2 topology / graph canvas
+agent watcher: anomaly scanner / next-action recommender / run explainer
+alerts: budget exceeded / stalled lane / cleanup missing / unsafe publish
+```
+
+### 3. Durable event log
+
+The durable event log answers: what actually happened?
+
+Source: `run/events.jsonl` committed to Artifacts, with status projections in DO/D1.
+
+Minimum event fields:
+
+```json
+{
+  "schemaVersion": "piwf.event.v0",
+  "ts": "2026-06-04T00:00:00.000Z",
+  "seq": 1,
+  "traceId": "trace-abc",
+  "spanId": "span-abc",
+  "parentSpanId": "span-parent",
+  "capsuleId": "capsule:external-work-item",
+  "runId": "run-abc",
+  "workflowId": "workflow-research-swarm",
+  "laneId": "lane-reader-1",
+  "actor": "worker:reader",
+  "state": "runningLane",
+  "event": "LANE_STARTED",
+  "severity": "info",
+  "payloadHash": "sha256:...",
+  "payloadRef": "artifacts://repo/run/events/0001.json",
+  "artifactRefs": [],
+  "leaseRefs": [],
+  "approvalRef": null,
+  "verificationRef": null,
+  "redaction": "public-safe"
+}
+```
+
+Do not log raw secrets, bearer tokens, claim URLs, unredacted customer data, or full private/paid corpus chunks.
+
+### 4. Metrics and counters
+
+Metrics answer: how much, how fast, how expensive, how healthy?
+
+Core counters/gauges/histograms:
+
+```txt
+runs.started
+runs.completed
+runs.blocked
+runs.cancelled
+lanes.active
+lanes.queued
+lanes.failed
+sandbox.slots.active
+sandbox.slots.available
+sandbox.seconds
+container.vcpu_seconds
+container.memory_gb_seconds
+artifact.commits
+artifact.bytes_written
+secret_leases.active
+secret_leases.revoked
+approval.waiting
+approval.wait_seconds
+tokens.input
+tokens.output
+tokens.reasoning
+model.operation.duration
+model.time_to_first_chunk
+tool.calls
+tool.failures
+verifier.accepted
+verifier.warnings
+verifier.blocked
+cost.estimated_usd
+```
+
+Map GenAI metrics to OpenTelemetry names where possible:
+
+```txt
+gen_ai.client.token.usage
+gen_ai.client.operation.duration
+gen_ai.client.operation.time_to_first_chunk
+gen_ai.server.time_to_first_token
+```
+
+Required dimensions:
+
+```txt
+capsuleId
+runId
+workflowId
+laneId
+actorProfile
+provider
+model
+operation
+contextPackRef
+artifactRepo
+sandboxId
+outputTarget
+verificationStatus
+failureKind
+costBucket
+quotaBucket
+```
+
+High cardinality is the point here. The user needs to ask: “show me every failure for this capsule/run/lane/model/tool,” not just “error rate went up.”
+
+### 5. Traces/spans
+
+Traces answer: where did time go, and what called what?
+
+Trace shape:
+
+```txt
+workflow run span
+  plan phase span
+  context pack selection span
+  artifact plan commit span
+  lane reader-1 span
+    model call span
+    tool call span
+    artifact commit span
+  lane reader-2 span
+  verifier span
+  review gate span
+  cleanup span
+```
+
+Span tags should include run/capsule/lane IDs, model/provider, sandbox ID, artifact refs, lease refs, approval refs, and verification refs.
+
+Keep span bodies redacted. Store bulky raw logs/screenshots/traces in R2 or Artifacts, then reference them.
+
+### 6. Human review surface
+
+Human observability answers: what do I need to know without reading the entire run? It is a consumer of the observability spine, not the spine itself.
+
+Wzrrd/Brain review should show:
+
+- current state and final capture state
+- workflow pattern selected
+- lane count and fan-out/fan-in shape
+- hot sandbox slot usage
+- token and cost summary
+- verifier result and warnings
+- human approvals requested/completed
+- artifact commits and output target
+- cleanup receipts
+- links to D2 topology, event log, traces, and source pack refs
+
+This is operator-readable, not vendor-dashboard-readable.
+
+### 7. Agentic observability surface
+
+Agentic observability answers: can we put an agent on the run and have it explain or debug it? This is first-class, not a dashboard accessory.
+
+Create an `observabilityPack` per run:
+
+```txt
+run/manifest.json
+run/events.jsonl
+run/metrics-summary.json
+run/trace-summary.json
+run/cost-summary.json
+run/agent-observability-summary.md
+artifacts/verification/result.json
+artifacts/diagrams/workflow-topology.d2
+artifacts/diagrams/workflow-topology.svg
+selected logs/traces refs
+redaction policy
+```
+
+Agent debugger workflow:
+
+```txt
+OBSERVE_RUN_REQUESTED
+→ loadObservabilityPack
+→ inspectStateAndEvents
+→ detectAnomalies
+→ inspectArtifactsAndVerifier
+→ explainCurrentStatus
+→ recommendNextAction
+→ optionallyOpenHumanReview
+```
+
+Agent questions it must answer:
+
+- What is currently being built?
+- Which processes are still left?
+- Which agents/lanes are active, queued, blocked, or done?
+- What is the current bottleneck: budget, queue, model latency, sandbox, approval, verifier, external API, or cleanup?
+- How much has this cost so far?
+- What is the estimated cost to finish?
+- What data is safe to show publicly?
+- What is the next safe action?
+
+The agent should never need full raw transcripts by default. Start with structured summaries and refs; drill into redacted chunks only when needed.
+
+## Heads-up display cards
+
+### Run card
+
+```txt
+status: running | waiting | verifying | blocked | captured | cancelled
+pattern: research-swarm / reader-verifier / edit-verify-pr
+elapsed: 00:06:32
+estimated remaining: 00:02:10
+capture gate: verifier pending
+cost: $0.84 estimated
+tokens: 120k input / 18k output / 9k reasoning
+```
+
+### Lane card
+
+```txt
+lane: reader-3
+actor: source collector
+state: runningModel
+model: openai-codex/gpt-5.5
+sandbox: hot
+last event: TOOL_RESULT_RECORDED
+artifacts: 3 writes
+warnings: none
+```
+
+### Cost card
+
+```txt
+model cost estimated
+sandbox active seconds
+container memory/disk/vCPU allocation
+Workers/DO/Workflow wall time
+Artifacts writes/bytes
+R2 bytes
+external API calls
+```
+
+### Risk card
+
+```txt
+secrets active: 1
+public-safe redaction: pending
+unverified artifacts: 2
+approval waits: 1
+cleanup missing: 0
+MCP/untrusted tool outputs: 3 inspected
+```
+
+### Work-left card
+
+```txt
+remaining:
+- reader lanes: 1/6 active
+- fan-in synthesis: waiting
+- verifier: not started
+- Brain persistence: not started
+- output delivery: not started
+- cleanup: not started
+```
+
+## State machine sketch
+
+The observability subsystem has its own lifecycle:
+
+```txt
+idle
+→ attachingToRun
+→ hydratingHistory
+→ followingLive
+→ indexingTelemetry
+→ summarizingForHuman
+→ summarizingForAgent
+→ degraded
+→ disconnected
+→ archived
+```
+
+Events:
+
+```txt
+OBSERVE_RUN_REQUESTED
+HISTORY_LOADED
+LIVE_SOCKET_CONNECTED
+LIVE_EVENT_RECEIVED
+METRIC_UPDATED
+TRACE_LINKED
+SUMMARY_UPDATED
+AGENT_INSPECTION_REQUESTED
+ANOMALY_DETECTED
+LIVE_SOCKET_DISCONNECTED
+RECONNECT_FAILED
+RUN_ARCHIVED
+```
+
+## Anomaly detection ideas
+
+Start boring:
+
+```txt
+lane active too long
+sandbox hot while waiting for human
+secret lease still active after lane done
+verification reads uncommitted artifact
+output delivered before verifier accepted
+retry loop exceeded policy
+no event received for N seconds while lane marked active
+cost exceeds budget threshold
+fan-out width exceeds cap
+cleanup missing after terminal state
+```
+
+Each anomaly should become both:
+
+- live HUD warning
+- event/log row for agent debugger
+
+## Storage map
+
+| Data | Hot/live | Query/index | Durable/cold | Review |
+| --- | --- | --- | --- | --- |
+| Current state | Durable Object memory/storage | D1 status row | Artifacts manifest snapshot | HUD/Wzrrd |
+| Events | WebSocket stream | D1 event facets / Workers Logs | `run/events.jsonl` | replay timeline |
+| Metrics | DO aggregate counters | Analytics Engine / Workers metrics / Workflows GraphQL | `run/metrics-summary.json` | HUD cards |
+| Traces | live refs | OTLP backend / Axiom / Cloudflare | trace summary + R2 refs | trace links |
+| Artifacts | latest refs | D1 refs | Artifacts repo | Wzrrd/Brain |
+| Cost | live estimate | D1/Analytics Engine | `run/cost-summary.json` | cost card |
+| Agent summary | live generated note | D1 latest summary | `run/agent-observability-summary.md` | agent debugger / Brain / HUD |
+
+## Prototype acceptance bar
+
+A first prototype is useful if a human and an agent can both answer these from the same telemetry pack:
+
+- What is running right now?
+- What is queued or blocked?
+- What work remains before capture?
+- What is the current cost/token/sandbox burn?
+- Which lane is suspicious or stuck?
+- What verifier gate is blocking capture?
+- Did cleanup happen?
+- What should we do next?
+
+If the visualizer cannot answer those, it is just a fancy log tail with mascara.

@@ -1,0 +1,40 @@
+{
+  "workItemId": "joelclaw-research-swarm-workflow-verifier-evals",
+  "targetBrainPage": ".brain/resources/workflow-verifier-evals-playbook.svx",
+  "desiredOutcome": "A source-grounded Brain playbook for verifier/evals practice in dynamic Pi Cloudflare sandbox workflows.",
+  "researchTask": "Use JoelClaw as the seed corpus, then expand into official docs, source repos, maintainer posts, and field reports to build a detailed verifier/evals playbook for generated workflow machines, bounded hot concurrency, cancellation/cleanup, retry idempotency, HITL resume, and source-backed claim checking.",
+  "seedQueries": [
+    "agent evaluation test suite prompt injection security",
+    "stateful property based testing state machine model",
+    "domain modeling workflows finite state machine impossible states",
+    "saga pattern workflow compensation distributed systems",
+    "outbox pattern event sourcing workflow idempotency",
+    "serverless orchestration queues dead letter retry idempotency",
+    "supervisor worker actor model supervision erlang otp",
+    "observability tracing distributed systems workflow logs"
+  ],
+  "requiredCoverageQuestions": [
+    "What is the minimum verification contract card for generated workflow machines?",
+    "Which properties must every generated workflow machine satisfy before launch?",
+    "How should cancel/cleanup, retry idempotency, HITL resume, and bounded concurrency be tested?",
+    "How should verifier lanes distinguish accepted warnings from blocking failures?",
+    "How should source classes affect whether a claim can support implementation, pattern, or risk guidance?",
+    "How should fair-use excerpts and source receipts appear in Brain pages without becoming a substitute for original works?"
+  ],
+  "constructiveLimits": {
+    "maxHotSandboxLanesPerWave": 64,
+    "maxModelSpendUsd": 75,
+    "maxScoutWaves": 3,
+    "maxTotalHotSandboxLanes": 128,
+    "maxWallClockMinutes": 60,
+    "maxWebSourcesPerLane": 12,
+    "stopWhenDuplicateSources": true
+  },
+  "observerTarget": {
+    "kind": "public_event_log",
+    "visibility": "public_redacted"
+  },
+  "outputTarget": {
+    "kind": "brain_page"
+  }
+}

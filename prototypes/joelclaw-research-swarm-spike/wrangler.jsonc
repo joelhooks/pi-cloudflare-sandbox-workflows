@@ -1,0 +1,60 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pi-joelclaw-research-swarm-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": true,
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 64,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox",
+      },
+      {
+        "class_name": "CapsuleSupervisor",
+        "name": "CAPSULE_SUPERVISOR",
+      },
+    ],
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "LANE_QUEUE",
+        "queue": "piwf-joelclaw-research-swarm-lanes",
+      },
+    ],
+    "consumers": [
+      {
+        "max_batch_size": 32,
+        "max_batch_timeout": 1,
+        "max_retries": 5,
+        "queue": "piwf-joelclaw-research-swarm-lanes",
+        "retry_delay": 2,
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox", "CapsuleSupervisor"],
+      "tag": "v1",
+    },
+  ],
+}

@@ -1,0 +1,470 @@
+---
+title: JoelClaw Docs API Research Backlog
+status: active
+updated: 2026-06-04
+source: https://joelclaw.com/api/docs
+tags:
+  - joelclaw
+  - research
+  - context-packs
+  - workflows
+  - agents
+---
+
+# JoelClaw Docs API Research Backlog
+
+JoelClaw's public docs API is a useful source-discovery surface for this project. Treat it as a **source adapter** for building context packs and research lanes, not as automatic truth.
+
+Corpus policy: JoelClaw resources are Joel's personal research library, including books he owns physically. Use the corpus aggressively for private project research and source-grounded synthesis; do not act squeamish about consulting it. The boundary is **public redistribution risk**, not project use. Public repo docs, public Wzrrd pages, customer-facing output, and issue/PR text may rely on fair use: quote, analyze, compare, transform, and use ideas, patterns, and principles when it serves the project. Keep attribution/source receipts clear and avoid making public pages a substitute for the original work. Private/control-plane Artifacts may carry selected chunk text when needed for verification.
+
+## API receipts
+
+Discovery and schema:
+
+- [Docs API discovery](https://joelclaw.com/api/docs)
+- [OpenAPI schema](https://joelclaw.com/api/docs/openapi.json)
+- [Swagger UI](https://joelclaw.com/api/docs/ui)
+- [Health](https://joelclaw.com/api/docs/health)
+- [List docs](https://joelclaw.com/api/docs/docs?page=1&perPage=20)
+- [Example search](https://joelclaw.com/api/docs/search?q=typesense&perPage=3&semantic=true)
+
+Observed on 2026-06-04:
+
+- Discovery route is public-read: no bearer required on `/api/docs` routes.
+- Rate limit in discovery response: Upstash, all requests, `1200 / 1 m`.
+- Health route reported docs-api status `ok` and Typesense status `200`.
+- List docs route reported `found: 660` documents.
+
+Useful route shapes:
+
+```txt
+GET /api/docs
+GET /api/docs/openapi.json
+GET /api/docs/health
+GET /api/docs/docs?page=1&perPage=20
+GET /api/docs/docs/{docId}
+GET /api/docs/docs/{docId}/toc
+GET /api/docs/chunks/{chunkId}?lite=true&includeEmbedding=false
+GET /api/docs/search?q=<query>&page=1&perPage=5&semantic=true|false
+```
+
+## Strong source found: Patterns for Building AI Agents
+
+Best matched document for agent workflow research:
+
+- [Document metadata](https://joelclaw.com/api/docs/docs/patterns-for-building-ai-agents-1-3cdbfd2f64df)
+- [Document TOC](https://joelclaw.com/api/docs/docs/patterns-for-building-ai-agents-1-3cdbfd2f64df/toc)
+- [Search: Claude Code dynamic workflows harness](https://joelclaw.com/api/docs/search?q=Claude%20Code%20dynamic%20workflows%20harness&perPage=2&page=1&semantic=false)
+- [Search: parallelize subagents safely context engineering eval prompt injection](https://joelclaw.com/api/docs/search?q=parallelize%20subagents%20safely%20context%20engineering%20eval%20prompt%20injection&perPage=5&page=1&semantic=true)
+- [Search: agent evaluation test suite prompt injection security](https://joelclaw.com/api/docs/search?q=agent%20evaluation%20test%20suite%20prompt%20injection%20security&perPage=5&page=1&semantic=true)
+- [Search: agent context engineering multi agent systems](https://joelclaw.com/api/docs/search?q=agent%20context%20engineering%20multi%20agent%20systems&perPage=5&page=1&semantic=true)
+
+Observed metadata:
+
+```txt
+docId: patterns-for-building-ai-agents-1-3cdbfd2f64df
+title: Patterns for Building AI Agents 1
+file_type: pdf
+document_type: book
+storage_category: programming
+page_count: 93
+primary_concept_id: jc:docs:programming
+source_host: dark-wizard
+```
+
+Why it matters for this project:
+
+- It has sections on agent configuration and architecture.
+- It has a context-engineering section that search surfaced for parallel subagents, sharing context, avoiding context failure modes, compressing context, and feeding errors into context.
+- It has evaluation material that can inform verifier contracts.
+- It has security material that can inform tool audit, prompt-injection boundaries, and access control.
+
+Keep future capture source-backed and ref-heavy. Use chunk links as receipts, not as pasted corpus.
+
+## Useful research captures for this repo
+
+### 1. JoelClaw Docs API source adapter
+
+Research target: turn JoelClaw docs search into a reusable context-pack/source-pack workflow.
+
+Shape:
+
+```txt
+researchIntent
+→ joelclawSearch
+→ fetchDocMetadataAndToc
+→ selectChunks
+→ assembleSourcePack
+→ verifyClaimsAgainstChunks
+→ persistBrainResource
+```
+
+Events:
+
+```txt
+JOELCLAW_SEARCH_REQUESTED
+DOC_HIT_SELECTED
+TOC_FETCHED
+CHUNK_SELECTED
+SOURCE_PACK_ASSEMBLED
+CLAIMS_VERIFIED
+BRAIN_NOTE_PERSISTED
+```
+
+Pi mapping:
+
+- Context capsule records query URLs, selected `docId`s, selected `chunkId`s, and source-pack refs.
+- Worker lanes may fetch/search JoelClaw, but a verifier lane must check claims before Brain persistence.
+- Artifacts should store query receipts and source-pack manifests, not full private/paid text dumps.
+- Brain notes should link to JoelClaw API refs and summarize reusable decisions.
+
+Why first: it turns the corpus into repeatable fuel for `research-claude-workflows` instead of one-off search spelunking.
+
+### 2. Agent security threat model
+
+Research target: combine JoelClaw-discovered agent security material with official Claude/OpenAI/Cloudflare docs.
+
+Useful refs:
+
+- [Search: agent evaluation test suite prompt injection security](https://joelclaw.com/api/docs/search?q=agent%20evaluation%20test%20suite%20prompt%20injection%20security&perPage=5&page=1&semantic=true)
+- [Search: sandbox security prompt injection tool output untrusted](https://joelclaw.com/api/docs/search?q=sandbox%20security%20prompt%20injection%20tool%20output%20untrusted&perPage=5&page=1&semantic=true)
+- [Cloudflare Sandbox security](https://developers.cloudflare.com/sandbox/concepts/security/)
+- [Claude Code security](https://code.claude.com/docs/en/security)
+- [OpenAI MCP/tools connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
+
+Capture questions:
+
+- Which three-leg prompt-injection conditions apply to Pi sandbox workflows?
+- Which tool outputs are untrusted inputs?
+- Which lanes can read secrets, write artifacts, update Brain, or publish Wzrrd/GitHub/Linear/customer output?
+- What approval gate must bind to exact action payload hash + artifact refs?
+
+Expected Brain output: `.brain/resources/agent-security-threat-model.svx`.
+
+### 3. Context engineering for subagents
+
+Research target: define how context packs are selected, compressed, shared, and handed between subagents/worker lanes.
+
+Useful refs:
+
+- [Search: parallelize subagents safely context engineering eval prompt injection](https://joelclaw.com/api/docs/search?q=parallelize%20subagents%20safely%20context%20engineering%20eval%20prompt%20injection&perPage=5&page=1&semantic=true)
+- [Search: agent context engineering multi agent systems](https://joelclaw.com/api/docs/search?q=agent%20context%20engineering%20multi%20agent%20systems&perPage=5&page=1&semantic=true)
+- [Patterns doc TOC](https://joelclaw.com/api/docs/docs/patterns-for-building-ai-agents-1-3cdbfd2f64df/toc)
+- Local `.brain/projects/pi-sandbox-workflows.svx` context-pack section.
+
+Capture questions:
+
+- What belongs in the supervisor context vs worker-lane context?
+- What should be passed between subagents: full transcript, compact summary, artifact ref, claim list, or verifier contract?
+- How should compaction become a pinned artifact instead of hidden model-state vibes?
+- What context failure modes should verifier lanes inspect?
+
+Expected Brain output: `.brain/resources/subagent-context-engineering.svx`.
+
+### 4. Verifier/evals playbook
+
+Research target: make `catalog-verifier` and future verifier lanes less hand-wavy.
+
+Useful refs:
+
+- [Search: agent evaluation test suite prompt injection security](https://joelclaw.com/api/docs/search?q=agent%20evaluation%20test%20suite%20prompt%20injection%20security&perPage=5&page=1&semantic=true)
+- [Search: stateful property based testing state machine model](https://joelclaw.com/api/docs/search?q=stateful%20property%20based%20testing%20state%20machine%20model&perPage=5&page=1&semantic=true)
+- [Search: domain modeling workflows finite state machine impossible states](https://joelclaw.com/api/docs/search?q=domain%20modeling%20workflows%20finite%20state%20machine%20impossible%20states&perPage=5&page=1&semantic=true)
+
+Capture questions:
+
+- What is the minimum verification contract card?
+- Which properties must every generated workflow machine satisfy?
+- How do we test cancel/cleanup, retry idempotency, HITL resume, and bounded concurrency?
+- How do verifier lanes distinguish accepted warnings from blocking failures?
+
+Expected Brain output: `.brain/resources/workflow-verifier-evals-playbook.svx`.
+
+Completed prototype receipt:
+
+```txt
+run: run-joelclaw-research-swarm-workflow-verifier-evals-96a02bd9
+prototype: prototypes/joelclaw-research-swarm-spike/
+public research output: https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev/research/joelclaw-research-swarm-workflow-verifier-evals
+public observer: https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev/observer/joelclaw-research-swarm-workflow-verifier-evals
+Artifacts repo: jcrs-run-joelclaw-research-swarm-workflow-verifier-evals-96a02bd9
+research lanes: 6 real Pi internet-research agent lanes
+model: openai-codex/gpt-5.5
+max observed active lanes: 3
+source refs: 62
+verifier: verified
+final state: captured
+output refs: .brain/resources/workflow-verifier-evals-playbook.svx, capsule:inline-bibliography, capsule:inline-source-map
+Brain page: .brain/resources/workflow-verifier-evals-playbook.svx
+Brain URL: https://pi-notes-4188.localhost/notes/resources/workflow-verifier-evals-playbook
+```
+
+Implementation lessons:
+
+- Bounded hot concurrency beat cold-start stampede; the clean run used 3 active Sandboxes across 6 total lanes.
+- Queue messages need run-id guards because stale retry messages can outlive a capsule run.
+- Real lane scripts need explicit env shape (`LANE_ID`, `LANE_JSON`) and should avoid ambiguous Node module syntax.
+- The corrected research run materialized Pi auth, pinned a project-local `.pi/extensions/research-tools.ts`, exposed Brave/URL/JoelClaw research tools to Pi, and invoked `pi -e .pi/extensions/research-tools.ts --provider openai-codex --model gpt-5.5` inside each research Sandbox; lane receipts record `runtime: pi-agent-internet-research`.
+
+### 5. State machine modeling receipts
+
+Research target: strengthen the XState modeling rules with domain-model and property-test receipts.
+
+Useful refs:
+
+- [Search: domain modeling workflows finite state machine impossible states](https://joelclaw.com/api/docs/search?q=domain%20modeling%20workflows%20finite%20state%20machine%20impossible%20states&perPage=5&page=1&semantic=true)
+- [Search: stateful property based testing state machine model](https://joelclaw.com/api/docs/search?q=stateful%20property%20based%20testing%20state%20machine%20model&perPage=5&page=1&semantic=true)
+- [XState persistence](https://stately.ai/docs/persistence)
+
+Capture questions:
+
+- Which impossible states should the workflow machine make impossible?
+- Which event sequences should property tests generate?
+- What invariants must hold after every transition?
+- Which states require explicit cleanup or lease revocation before terminal capture?
+
+Expected Brain output: `.brain/resources/workflow-state-machine-modeling.svx`.
+
+### 6. Workflow failure modes, sagas, and compensation
+
+Research target: cancellation and cleanup after side effects.
+
+Useful refs:
+
+- [Search: saga pattern workflow compensation distributed systems](https://joelclaw.com/api/docs/search?q=saga%20pattern%20workflow%20compensation%20distributed%20systems&perPage=5&page=1&semantic=true)
+- [Search: outbox pattern event sourcing workflow idempotency](https://joelclaw.com/api/docs/search?q=outbox%20pattern%20event%20sourcing%20workflow%20idempotency&perPage=5&page=1&semantic=true)
+- [Search: serverless orchestration queues dead letter retry idempotency](https://joelclaw.com/api/docs/search?q=serverless%20orchestration%20queues%20dead%20letter%20retry%20idempotency&perPage=5&page=1&semantic=true)
+
+Capture questions:
+
+- Which side effects are compensatable, irreversible, or require human intervention?
+- What belongs in `cancelled`, `failedTerminal`, `dlq`, and `capturedWithWarnings`?
+- How do we persist outbox/event records before external mutations?
+- When does replay use pinned refs vs latest code?
+
+Expected Brain output: `.brain/resources/workflow-failure-modes-compensation.svx`.
+
+### 7. Actor supervision model
+
+Research target: borrow supervision vocabulary for Durable Object capsule supervisors and child lane actors.
+
+Useful refs:
+
+- [Search: supervisor worker actor model supervision erlang otp](https://joelclaw.com/api/docs/search?q=supervisor%20worker%20actor%20model%20supervision%20erlang%20otp&perPage=5&page=1&semantic=true)
+- [XState actors](https://stately.ai/docs/actors)
+- Local `.brain/resources/dynamic-pi-workflow-scale-catalog.svx` capsule supervisor section.
+
+Capture questions:
+
+- Which child lane failures restart, retry, block, cancel siblings, or only warn?
+- What is the supervisor restart/cancel policy per lane type?
+- How does the capsule actor prevent global coordinator soup?
+
+Expected Brain output: `.brain/resources/capsule-supervisor-actor-model.svx`.
+
+### 8. Observability and event trace schema
+
+Research target: sharpen the event log, D1 projection, and Wzrrd review receipts.
+
+Useful refs:
+
+- [Search: observability tracing distributed systems workflow logs](https://joelclaw.com/api/docs/search?q=observability%20tracing%20distributed%20systems%20workflow%20logs&perPage=5&page=1&semantic=true)
+- [Cloudflare Workflows metrics](https://developers.cloudflare.com/workflows/observability/metrics-analytics/)
+- [XState inspection](https://stately.ai/docs/inspection)
+- Local `.brain/resources/dynamic-pi-workflow-scale-catalog.svx` shared event JSONL contract.
+
+Capture questions:
+
+- What events are required for audit vs live UI?
+- Which fields are safe for public Wzrrd review and which require redaction?
+- How do trace IDs connect capsule, run, lane, tool call, artifact commit, approval, and verifier result?
+- What should be indexed in D1 vs stored in Artifacts/R2?
+
+Expected Brain output: `.brain/resources/workflow-observability-event-schema.svx`.
+
+## Next prototype candidates
+
+Merged with `.brain/resources/dynamic-pi-workflow-scale-catalog.svx`, the next useful prototype ladder is:
+
+1. **`joelclaw-source-pack-spike`** — recommended next move. Prove JoelClaw search → metadata/TOC → selected chunk refs → source-pack manifest → verifier claim checks → Brain resource persistence. This gives parallel lanes source-grounded fuel without dumping paid/private chunks into public artifacts.
+2. **`workflow-pattern-card-spike`** — turn scale-catalog patterns into validated reusable cards with states/events, retry policy, cancel/cleanup, replay/repair, HITL gates, observability events, sandbox boundary, and Pi mapping. This makes dynamic planning select verified vocabulary instead of inventing workflow soup.
+3. **`child-lane-workflow-spike`** — split each lane into its own mini workflow: parent capsule owns policy/fan-in, child lane owns one sandbox lifecycle and returns Artifacts refs.
+4. **`replay-repair-redrive-spike`** — prove a failed lane/verifier can be redriven from pinned Artifacts and XState snapshot/event receipts without restarting the whole run.
+5. **`approval-payload-gate-spike`** — bind risky output/secret/external actions to an exact payload hash plus artifact refs before approval, then resume to delivery or block.
+6. **`workflow-observability-trace-spike`** — define trace/event projection across capsule, run, lane, sandbox, tool call, artifact commit, verifier, approval, and output target.
+
+Decision for current grilling: the next prototype should be **`joelclaw-research-swarm-spike`**, not a tiny `joelclaw-source-pack-spike`. The goal is to unleash a parallel swarm of research agents on the JoelClaw corpus and assemble a fully rendered Brain page result.
+
+Grill correction: do **not** make this a tiny adapter-only slice. Joel wants end-to-end full-task practice results using real production-grade primitives and tooling. The prototype should run a real source-grounded task through the deployed Cloudflare-style control shape: JoelClaw source discovery, source-pack assembly, real parallel research lanes, synthesis, verifier claim checks, Artifacts receipts, Brain note draft/persistence, and output delivery. The adapter contract is necessary, but it is not the whole answer. Use JoelClaw as a real project research corpus; the safety boundary is intentional fair-use publication with source receipts, not avoiding the corpus or limiting ourselves to timid paraphrase.
+
+Prototype success shape:
+
+```txt
+research task
+→ supervisor plans research lanes
+→ JoelClaw search lanes query corpus
+→ source-pack lanes select doc/chunk refs and fair-use excerpts
+→ synthesis lane assembles a Brain page draft
+→ verifier lane checks claims against selected sources
+→ Brain persistence step writes `.brain/resources/<topic>.svx`
+→ pi-notes check/render verifies the page
+→ output receipt records sources, lane commits, verifier result, and Brain page URL
+```
+
+Expanded swarm shape: make this a multi-stage/child-workflow prototype. JoelClaw is the seed corpus that discovers durable ideas, patterns, principles, and terms. The supervisor then spawns child research workflows that use those seeds to search broader/current web sources, especially official docs and implementation-specific references. Synthesis should produce a robust, detailed Brain page with source receipts, fair-use excerpts, generated diagrams, and visual explanation assets where useful.
+
+```txt
+seed stage: JoelClaw corpus swarm
+  → source ideas, patterns, principles, terms, and chunk refs
+expansion stage: child workflows per theme
+  → web/official-doc search, fresh API docs, examples, implementation references
+assembly stage
+  → source map, pattern cards, diagrams, detailed Brain MDSvX page
+verification stage
+  → claim/source checks, quote attribution, freshness checks, contradiction notes
+render/delivery stage
+  → pi-notes Brain page URL, generated diagram assets, Artifacts receipt
+```
+
+The first target topic is likely `.brain/resources/workflow-verifier-evals-playbook.svx`: a source-grounded, detailed verifier/evals playbook for generated workflow machines, bounded concurrency, cancel/cleanup, retry idempotency, HITL resume, and source-backed claim checking.
+
+Source classes are part of the prototype contract so broader web search does not become a trash hose:
+
+| Class | Meaning | Examples | Use in verifier |
+| --- | --- | --- | --- |
+| `official` | canonical product/API/runtime truth | Cloudflare, XState, OpenAI, Anthropic, Vercel AI SDK, Trigger.dev docs | may back implementation requirements and current API claims |
+| `source_repo` | source code, tests, examples, issues from the implementation repo | GitHub source, examples, changelog, typed APIs | may confirm exact API shape and edge behavior |
+| `maintainer` | vendor engineering posts or maintainer-authored explanations | engineering blogs, talks, release notes | may back intent, design rationale, and migration cautions |
+| `book_or_corpus` | JoelClaw personal library / durable patterns and principles | books, PDFs, extracted notes | may back pattern vocabulary, heuristics, and conceptual framing under fair use |
+| `field_report` | real-world usage reports, forum threads, issue discussions | GitHub issues, Discord/forum posts, blog debugging notes | may back risk notes and “watch for this” warnings, not canonical API claims |
+| `local_project` | this repo's Brain/docs/code/receipts | `.brain/`, `docs/`, prototypes, run receipts | canonical for project decisions and local terminology |
+
+Every selected source should carry `sourceClass`, `url` or local path, `docId`/`chunkId` when available, freshness/date when relevant, and whether it can support implementation claims, pattern claims, or only risk/anecdote claims.
+
+Constructive limits should be explicit and operator-visible:
+
+| Limit | Purpose | Operator interaction |
+| --- | --- | --- |
+| `maxScoutWaves` | prevent endless terrain mapping | operator can approve another scout wave when coverage is still weak |
+| `maxHotSandboxLanesPerWave` | bound Cloudflare/model spend per wave | operator sees estimated lane count and can raise/lower it |
+| `maxTotalHotSandboxLanes` | cap total run size | operator can explicitly authorize pushing beyond the default |
+| `maxWallClock` | avoid forgotten long-running swarms | operator can extend before timeout |
+| `maxModelSpend` / `maxTokenBudget` | avoid surprise inference spend | operator can approve higher spend for higher-value output |
+| `requiredCoverageQuestions` | define what “good enough” means | operator can add/remove questions during planning |
+| `stopWhenDuplicateSources` | stop when new lanes only repeat sources/claims | operator can force exploration of a neglected branch |
+
+Failure policy should be explicit:
+
+| Failure class | Default behavior | Stop condition |
+| --- | --- | --- |
+| transient Cloudflare/Sandbox startup error | retry with jitter, same lane intent, new sandbox id | abort if repeated startup failures suggest platform/config breakage |
+| Cloudflare hard quota/rate limit | pause/admit fewer lanes, record quota receipt, resume when allowed | abort if no lane can start within run budget |
+| OpenAI/Pi/model credit or auth exhaustion | stop model-heavy lanes, preserve source-search receipts, return actionable blocker | abort synthesis if required analysis/verifier lanes cannot run |
+| JoelClaw/API rate limit | backoff and retry; preserve partial selected refs | abort only if seed corpus coverage falls below required minimum |
+| Artifacts Git/token failure | mint fresh token, retry idempotent push, verify branch/ref | abort if plan/source/lane receipts cannot be committed |
+| verifier blocking failure | do not deliver Brain page as accepted; persist blocked receipt and source map | terminal `blocked` |
+| cancellation request | stop new lane admission, destroy hot sandboxes, revoke leases, persist cancel receipt | terminal `cancelled` |
+
+Scale target: push the first swarm beyond toy scale, but do **not** hard-code “50” as an arbitrary magic number. The lane count should be discovered adaptively. First send lightweight scout lanes into JoelClaw to map the source terrain, identify distinct deep-dive themes, estimate source density, and expose contradictions/gaps. Then spawn however many hot Cloudflare Sandbox research agents are actually needed for those themes. The plan can grow or narrow in response to intermediate fan-in. Each lane should have a specific topic/search direction, not duplicate the same search terms. The supervisor should record `plannedLaneCount`, `whyThisManyLanes`, per-lane `researchQuestion`, source classes, coverage gaps, and plan revision history. “Hot” still means real Cloudflare Sandboxes for research lanes, not a cheap Worker-only search dodge. Expect success at large fan-out, but make contingencies first-class workflow policy: Cloudflare rate limiting/quota errors, OpenAI/Pi/model credit exhaustion, JoelClaw/API rate limits, Artifacts Git/token failures, sandbox startup failures, queue retries, verifier failures, and explicit abort-style errors that stop the run instead of producing garbage. Keep per-lane timeouts, cleanup receipts, source receipts, retry/failover decisions, and cost/quota visibility so this is aggressive without becoming unobservable chaos.
+
+## Search receipts from 2026-06-04
+
+The following JoelClaw API searches were useful and should be reused as starting points:
+
+- [Cloudflare Sandbox Artifacts](https://joelclaw.com/api/docs/search?q=Cloudflare%20Sandbox%20Artifacts&perPage=3&page=1&semantic=false)
+- [Cloudflare Workflows Durable Objects Sandbox Artifacts](https://joelclaw.com/api/docs/search?q=Cloudflare%20Workflows%20Durable%20Objects%20Sandbox%20Artifacts&perPage=3&page=1&semantic=false)
+- [pi workflow os dynamic workflows](https://joelclaw.com/api/docs/search?q=pi%20workflow%20os%20dynamic%20workflows&perPage=3&page=1&semantic=false)
+- [Claude Code dynamic workflows harness](https://joelclaw.com/api/docs/search?q=Claude%20Code%20dynamic%20workflows%20harness&perPage=3&page=1&semantic=false)
+- [XState workflow persistence state machine](https://joelclaw.com/api/docs/search?q=XState%20workflow%20persistence%20state%20machine&perPage=3&page=1&semantic=false)
+- [context capsule sandbox](https://joelclaw.com/api/docs/search?q=context%20capsule%20sandbox&perPage=3&page=1&semantic=false)
+- [Workflow OS](https://joelclaw.com/api/docs/search?q=Workflow%20OS&perPage=3&page=1&semantic=false)
+- [pi subagents](https://joelclaw.com/api/docs/search?q=pi%20subagents&perPage=3&page=1&semantic=false)
+- [Wzrrd review](https://joelclaw.com/api/docs/search?q=Wzrrd%20review&perPage=3&page=1&semantic=false)
+- [joelclaw API docs](https://joelclaw.com/api/docs/search?q=joelclaw%20API%20docs&perPage=3&page=1&semantic=false)
+
+Many generic/local-term searches are noisy because the corpus is broad. Prefer domain-specific queries plus `docId`/TOC follow-up.
+
+## Next implementation move
+
+Build `prototypes/joelclaw-research-swarm-spike/` as an end-to-end full-task prototype:
+
+```txt
+adaptive planning stage:
+  read target research task and desired output
+  commit an initial planning envelope: allowed sources, budgets, stop rules, source classes, output contract, and safety policy
+  launch lightweight scout lanes to search JoelClaw broadly and map the corpus terrain
+  fan-in scout receipts into a theme map: candidate deep dives, source density, contradictions, and coverage gaps
+  decide the next wave of hot research lanes from scout evidence, not from a frozen up-front lane list
+  repeat scout/deep-dive planning waves when the work reveals new necessary branches
+  commit each plan revision, machine/harness revision, and why-this-many-lanes rationale to Artifacts
+
+hot research stage:
+  wake one real Cloudflare Sandbox per planned research lane
+  each lane researches one specific theme across JoelClaw and broader web/official sources
+  each lane commits source refs, fair-use excerpts, notes, contradictions, and coverage gaps
+
+fan-in stage:
+  assemble source map and theme summaries
+  synthesize a detailed Brain MDSvX page with diagrams/assets where useful
+
+verification stage:
+  verify claims against source refs/classes
+  check fair-use attribution and freshness where relevant
+  block or mark warnings explicitly
+
+render/delivery stage:
+  write `.brain/resources/workflow-verifier-evals-playbook.svx`
+  run pi-notes brain check/render verification
+  emit final Artifacts receipt with Brain URL
+```
+
+This proves dynamic source-grounded swarm planning and full Brain-page delivery, not a tiny adapter slice. The supervisor should not pretend to know the final lane graph at the start. It should know the goal, constraints, budget envelope, source policy, stop rules, and output contract; then it should adapt the lane graph based on scout evidence and intermediate fan-in results.
+
+Operator-shaped planning is part of the workflow, inspired by `/skill:grill-with-docs`, `/skill:to-prd`, `/skill:to-issues`, and the Brain-first workflow. The system should not just spin up a giant cloud swarm and spend money before the operator helps shape the goal, output, limits, acceptance criteria, and workflow definition. Treat planning as a collaborative state with receipts: ask sharp questions when the outcome is fuzzy, show the proposed research envelope/lane families/cost-risk shape/workflow definition, let the operator approve/edit/reject, then launch. Brain remains canonical; issues/receipts/cloud outputs mirror the plan.
+
+Pre-launch artifacts are required. If the workflow definition is not well defined enough to validate, the swarm should not launch. The research envelope must include or link to the workflow definition and its launch criteria:
+
+```txt
+run/research-envelope.json
+workflows/machine.json
+workflows/harness.json
+run/source-policy.json
+run/verification-contract.json
+run/operator-approval.json
+```
+
+Launch criteria should check:
+
+- target Brain page path and desired outcome are explicit
+- required coverage questions are explicit
+- source classes and fair-use publication policy are explicit
+- planned/adaptive lane strategy is explicit, including scout waves and deep-dive wave rules
+- constructive limits are explicit
+- abort/stop conditions are explicit
+- verifier contract is explicit enough to block bad output
+- output delivery/persistence path is explicit
+- public observer target is explicit so the operator can watch redacted logs/events from a public URL while the workflow is being built
+- operator approval is recorded with the approved artifact hashes
+
+If any of these are missing, state is `planning_needs_operator`, not `launching`.
+
+Operator approval must bind to artifact hashes. Approval means the operator approved exactly this research envelope, workflow machine, harness, source policy, constructive limits, verifier contract, and output target. It does not mean “agent, go vibe-spend.” `run/operator-approval.json` should record the approving actor, timestamp, decision, and approved artifact hashes such as `researchEnvelopeSha256`, `machineSha256`, `harnessSha256`, `sourcePolicySha256`, and `verificationContractSha256`. Launching a hot swarm without hash-bound approval is invalid.
+
+Approval boundaries should respect operator attention. The system should adapt freely inside the approved intent/envelope instead of pestering the operator for every tiny change. Re-approval is required only when a change materially exceeds the original intent, spend/time/lane limits, source policy, output target/publication surface, secret/tool permissions, or verifier blocking rules. Low-risk changes like retrying lanes, merging duplicate themes, changing search terms within the approved source policy, or spawning discovered-theme lanes within approved limits should proceed without nagging.
+
+First approval surface: use a pi-notes/Brain review page, not a custom app. Pre-launch should create a review document such as `.brain/reviews/joelclaw-research-swarm-<run>.svx` that renders the research envelope, workflow machine summary, harness/lane strategy, constructive limits, source policy, verifier contract, estimated cost/risk, approval hash bundle, and public observer target. Operator actions are approve, edit request, or reject. Custom UI can wait until the workflow proof exists.
+
+Addendum: Joel wants a public URL to watch logs/events as the dynamic workflow is built. The workflow should publish a redacted public observer surface, likely via Wzrrd or a similar public static/event projection. It should show run id, capsule/work item id, current state, plan revisions, scout wave status, theme map summary, lane counts/statuses, sandbox ids, source classes, artifact refs, verifier status, blocked/warning reasons, and cleanup receipts. It must not expose raw secrets, private Artifacts tokens, approval callback tokens, bearer-ish links, unredacted operator notes, or large raw corpus chunks. Pre-launch artifacts should include `observerTarget`; final receipts should include `publicObserverUrl`.
+
+Acceptance contract for `joelclaw-research-swarm-spike`:
+
+1. Pre-launch Brain review page is generated and hash-bound approval is recorded.
+2. Workflow launches only after approval.
+3. Scouts search JoelClaw and produce a theme map.
+4. Dynamic lane plan is derived from scout evidence.
+5. Hot Cloudflare Sandbox research lanes run for each chosen theme.
+6. Lanes use JoelClaw plus broader source-classed web/official sources.
+7. Fan-in synthesis writes `.brain/resources/workflow-verifier-evals-playbook.svx`.
+8. Verifier checks claims, source classes, fair-use attribution, and freshness.
+9. `pi_notes_brain_check` passes.
+10. Final receipt includes Brain page URL, public observer URL, Artifacts refs, lane receipts, verifier result, and cleanup receipts.

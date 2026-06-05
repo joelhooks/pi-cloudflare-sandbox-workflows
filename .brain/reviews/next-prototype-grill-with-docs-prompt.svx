@@ -1,0 +1,101 @@
+---
+title: "Next Prototype Grill With Docs Prompt"
+type: "review"
+status: "ready"
+created_at: "2026-06-05"
+tags:
+  - grill-with-docs
+  - prototypes
+  - planning
+  - cloudflare
+---
+
+# Next Prototype Grill With Docs Prompt
+
+Use this prompt in a fresh Pi context with `/skill:grill-with-docs` loaded.
+
+```txt
+We need to decide the next prototype for `joelhooks/pi-cloudflare-sandbox-workflows`.
+
+Run this as a Grill-with-Docs session. Ask one sharp question at a time, but inspect the repo/Brain before asking if the docs already answer it. Update Brain inline when language or decisions crystallize.
+
+Read first:
+
+- `AGENTS.md`
+- `BRAIN.md`
+- `PROTOTYPES.md`
+- `README.md`
+- `docs/production-vs-prototypes.md`
+- `docs/dynamic-workflow-machine.md`
+- `docs/dogfood-plan.md`
+- `.brain/projects/pi-sandbox-workflows.svx`
+- `.brain/projects/joelclaw-research-swarm-spike.svx`
+- `.brain/resources/joelclaw-docs-api-research-backlog.svx`
+- `.brain/resources/workflow-verifier-evals-playbook.svx`
+- `.brain/resources/workflow-observability-spine.svx`
+- `.brain/resources/workflow-visualizer-prototype-idea.svx`
+- `prototypes/joelclaw-research-swarm-spike/README.md`
+- `prototypes/cloudflare-parallel-workflow-spike/README.md`
+
+Current receipts to preserve:
+
+- Real Cloudflare parallel workflow prototype proved Worker + Durable Object + Queue + Sandbox + Artifacts with bounded hot concurrency.
+- JoelClaw research swarm proved real Pi agents inside hot Cloudflare Sandboxes using a project-local Pi extension with `research_search`, `research_fetch`, and `joelclaw_search` tools.
+- Latest captured swarm run: `run-joelclaw-research-swarm-workflow-verifier-evals-96a02bd9`.
+- Public output with visible bibliography: `https://pi-joelclaw-research-swarm-spike.joelhooks.workers.dev/research/joelclaw-research-swarm-workflow-verifier-evals.md`.
+- Verifier status: `verified`.
+- Output refs: `.brain/resources/workflow-verifier-evals-playbook.svx`, `capsule:inline-bibliography`, `capsule:inline-source-map`.
+
+Known prototype lessons:
+
+- Finalization glue should not require a long-lived finalizer Sandbox when the expensive work is already done in Pi research lanes; Worker/DO-side fan-in is acceptable for deterministic synthesis/verification bookkeeping.
+- Model-written source-ref JSON must be normalized before typed validation; strict enum gates should verify semantic policy, not reject useful bibliography because phrasing differs.
+- Public outputs must expose visible URLs/bibliography, not just private Artifacts refs.
+- Observer/socket/HUD is not the core problem; the durable observability spine underneath is.
+- Socket streams are projections. Durable event JSONL/traces/status indexes/Artifacts are truth.
+
+Candidate next prototype lanes to grill:
+
+1. **Workflow observability spine prototype**
+   - Prove per-run structured telemetry/events/traces/cost/sandbox accounting that both humans and agents can inspect.
+   - Optional UI/visualizer is only a projection.
+   - Success means a debugging agent can attach to a run and explain state, cost, stuck points, remaining work, and next safe action from receipts.
+
+2. **Workflow visualizer prototype**
+   - Local WebSocket/Three.js/canvas/D2 view of a live workflow.
+   - Must hydrate from durable receipts and tail live events.
+   - Do not make dashboard state the source of truth.
+
+3. **Production rewrite spine**
+   - Start rewriting winning prototypes into `src/` as production-intended modules.
+   - Likely boundaries: capsule supervisor, plan/envelope contracts, lane tool materialization, Artifacts repository access, verifier contract, output targets.
+   - Must not import prototype code directly.
+
+4. **Secret lease broker real deployment**
+   - Replace static Worker secret `PI_AUTH_JSON_B64` with real `secretRef -> lease broker -> task-scoped auth.json` in deployed Sandboxes.
+   - Success means secrets remain refs in prompts/plans, scoped materialization happens only inside the task, and public receipts prove no plaintext leakage.
+
+5. **Recovery/idempotency hardening prototype**
+   - Focus on cancellation, stale queue messages, finalizer retries, resuming partially captured runs, idempotent commits, and cleanup receipts.
+   - Success means killing/retrying a wedged run does not require manual surgery.
+
+Grill goal:
+
+Choose the next prototype that most reduces future production risk while staying prototype-to-production honest.
+
+Force clarity on:
+
+- exact prototype question
+- why this next, not the other candidates
+- non-goals
+- success receipt
+- Cloudflare primitives involved
+- what must be public vs private
+- required Brain/docs updates
+- deletion/capture trigger
+- how the result feeds the later `src/` rewrite
+
+Stop when the next prototype has a concrete name, acceptance contract, first run command, and capture target.
+
+After decisions crystallize, update the relevant Brain page(s) and run `pi-notes brain check`.
+```

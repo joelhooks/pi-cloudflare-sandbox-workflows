@@ -1,0 +1,92 @@
+---
+title: "JoelClaw Research Swarm Prelaunch Review"
+type: "review"
+status: "active"
+created_at: "2026-06-04"
+tags:
+  - review
+  - prototype
+  - joelclaw
+---
+
+# JoelClaw Research Swarm Prelaunch Review
+
+This is the operator approval surface for `joelclaw-research-swarm-spike`.
+
+## Decision
+
+Current decision: **approved**
+
+Hot Cloudflare Sandbox research lanes must not launch until this approval is `approved` and bound to the hashes below.
+
+## Target
+
+- Target Brain page: `.brain/resources/workflow-verifier-evals-playbook.svx`
+- Desired outcome: A source-grounded Brain playbook for verifier/evals practice in dynamic Pi Cloudflare sandbox workflows.
+- Observer target: `public_event_log` / `public_redacted`
+
+## Required coverage questions
+
+- What is the minimum verification contract card for generated workflow machines?
+- Which properties must every generated workflow machine satisfy before launch?
+- How should cancel/cleanup, retry idempotency, HITL resume, and bounded concurrency be tested?
+- How should verifier lanes distinguish accepted warnings from blocking failures?
+- How should source classes affect whether a claim can support implementation, pattern, or risk guidance?
+- How should fair-use excerpts and source receipts appear in Brain pages without becoming a substitute for original works?
+
+## Constructive limits
+
+```json
+{
+  "maxHotSandboxLanesPerWave": 64,
+  "maxModelSpendUsd": 75,
+  "maxScoutWaves": 3,
+  "maxTotalHotSandboxLanes": 128,
+  "maxWallClockMinutes": 60,
+  "maxWebSourcesPerLane": 12,
+  "stopWhenDuplicateSources": true
+}
+```
+
+## Theme map from JoelClaw scouts
+
+| Lane | Theme | Source density | Source classes |
+| --- | --- | ---: | --- |
+| research-verification-contract-cards-and-acceptance-crite | Verification contract cards and acceptance criteria | 1290 | book_or_corpus, official, local_project |
+| research-workflow-machine-invariants-and-property-tests | Workflow machine invariants and property tests | 1290 | book_or_corpus, official, source_repo |
+| research-cancel-cleanup-retry-and-idempotency-checks | Cancel, cleanup, retry, and idempotency checks | 4 | official, source_repo, field_report |
+| research-hitl-approvals-warnings-and-blocking-failures | HITL approvals, warnings, and blocking failures | 1 | official, maintainer, field_report |
+| research-source-classes-and-claim-support-policy | Source classes and claim support policy | 4 | book_or_corpus, official, local_project |
+| research-fair-use-synthesis-and-brain-publication-receipt | Fair-use synthesis and Brain publication receipts | 1 | book_or_corpus, maintainer, local_project |
+
+## Public observer surface
+
+The full run should publish a public redacted observer URL for live logs/events. It may show run state, plan revisions, scout wave status, lane counts, lane statuses, sandbox ids, source classes, artifact refs, verifier status, blocked/warning reasons, and cleanup receipts. It must not show secrets, private Artifacts tokens, approval callback tokens, bearer-ish links, unredacted private operator notes, or large raw corpus chunks.
+
+## Source policy
+
+Use JoelClaw aggressively as Joel's personal research library. Public output may quote, analyze, compare, transform, and use ideas/patterns/principles under fair use with clear source receipts; do not make output a substitute for original works.
+
+## Verifier contract
+
+- **claims-have-source-support** (blocking): Every implementation or pattern claim in the Brain page must point to one or more selected source refs.
+- **source-classes-match-claim-types** (blocking): Implementation/API claims require official or source_repo support; field reports may only support risk notes.
+- **fair-use-attribution-present** (blocking): Fair-use excerpts and transformed ideas must carry clear source attribution and not substitute for original works.
+- **fresh-official-docs-checked** (warning): Current implementation claims should include freshness/date receipts for official docs or source repos.
+- **brain-page-renders** (blocking): pi_notes_brain_check must pass after writing the Brain page.
+- **public-observer-is-redacted** (blocking): Public observer output must expose workflow state/events without secrets, bearer-ish links, private approval tokens, or large raw corpus chunks.
+- **sandbox-cleanup-receipts-present** (blocking): Every hot research, synthesis, verifier, and delivery sandbox must have a cleanup receipt.
+
+## Approval hash bundle
+
+- `harnessSha256`: `0c457624c2942c53642dfe37dad04e17f3f2c89b89a121c65b8ccccc6433f7b6`
+- `machineSha256`: `f60cb9b3ee31428b00cb2ba4e8be113431293f1aa294772046aa7372ebc4a79c`
+- `researchEnvelopeSha256`: `0094012bce5e164743e4168f810c6e3709581c087d7ff8d59c910d13e85f7d0b`
+- `sourcePolicySha256`: `89be6d0b593d2661df784631b3fa9d1d57299511b41263b5411fa9faa4147ad8`
+- `verificationContractSha256`: `e15649c822f1294730afa40d8152dacf31c3fbef63f41867045b024f89bc9197`
+
+## Operator actions
+
+- Approve: rerun the planning command with `JOELCLAW_SWARM_APPROVE=1` after reviewing this page.
+- Edit request: update the fixture or PRD, rerun planning, and review new hashes.
+- Reject: do not launch the hot swarm.

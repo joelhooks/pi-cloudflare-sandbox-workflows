@@ -1,0 +1,393 @@
+---
+title: Workflow Visualizer Prototype Idea
+status: active
+updated: 2026-06-04
+tags:
+  - workflow-visualizer
+  - prototype
+  - threejs
+  - canvas
+  - d2
+  - xstate
+---
+
+# Workflow Visualizer Prototype Idea
+
+Joel idea, 2026-06-04: it would be useful and fun to **see** Pi sandbox workflows as they run, maybe as a Three.js/canvas jawn.
+
+This should be a companion to the workflow prototypes, not a production dashboard yet. Keep it visual, local, and delete/absorb after it answers the question.
+
+## Prototype question
+
+Can a visual surface make the workflow lifecycle obvious enough that we can spot stuck states, hot-sandbox pressure, missing cleanup, weak verification, and weird fan-out shape faster than reading JSONL/event logs?
+
+## Real-time socket-connected workflow insight
+
+Related observability concept: [Workflow observability spine](./workflow-observability-spine).
+
+Joel refinement, same day: workflows should be **socket-connected** so the visualizer can watch work emerge while the workflow is being built and executed.
+
+The useful feeling is not just replaying a dead log. It is seeing:
+
+- which workflow shape is being generated
+- how many agents/lanes have spun out
+- which processes are hot, queued, waiting, verifying, or cleaning up
+- what remains before capture
+- where human review, retries, or budget pressure are blocking progress
+
+Cloudflare Durable Objects fit this nicely: they can hold the per-capsule supervisor, accept WebSocket clients, and hibernate while clients stay connected. Receipts: [Use WebSockets · Cloudflare Durable Objects docs](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) and [Durable Object lifecycle](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/).
+
+Key rule: **socket stream is live projection, not memory**. Every streamed event must also be appendable to durable `run/events.jsonl` / DO-D1 status projection / Artifacts receipts. If the browser disconnects, reload should hydrate from durable receipts, then tail live events.
+
+Live event categories:
+
+```txt
+plan events       → pattern selected, lane planned, harness generated, machine pinned
+spawn events      → agent/lane spawned, child workflow queued, slot granted/denied
+work events       → model step, tool call proposed, artifact write, progress update
+wait events       → approval requested, external callback waiting, retry scheduled
+verify events     → claim checked, verifier warning, blocking failure, accepted output
+cleanup events    → sandbox destroyed, lease revoked, output delivered, Brain persisted
+```
+
+Socket topology:
+
+```txt
+capsule Durable Object
+  → accepts visualizer WebSocket clients
+  → broadcasts redacted workflow events
+  → persists snapshot/status projection
+  → appends/commits cold event receipts
+
+visualizer
+  → loads run manifest + existing event log
+  → subscribes to capsule event stream
+  → replays history, then animates tail events
+```
+
+## Taste call
+
+Do not make a 3D aquarium just because Three.js is shiny. The useful version is:
+
+- **2D timeline / lane swimlane** for truth and debugging
+- **graph canvas** for topology and fan-out/fan-in shape
+- optional **Three.js depth** only if z-axis carries meaning: nested actors, context packs, artifact layers, or replay time
+
+Fun is allowed. Useless cockpit theater is not. 🐀
+
+## Data source contract
+
+Start from durable workflow receipts, not live model context. Live sockets are a tail over the same event stream, not a separate source of truth:
+
+```txt
+run/events.jsonl
+run/manifest.json
+workflows/machine.ts or machine receipt
+artifacts/verification/result.json
+run/plan.json
+run/output-target.json
+```
+
+Minimum event row shape can reuse the catalog contract from `.brain/resources/dynamic-pi-workflow-scale-catalog.svx`:
+
+```json
+{
+  "schemaVersion": "piwf.event.v0",
+  "ts": "2026-06-04T00:00:00.000Z",
+  "seq": 1,
+  "capsuleId": "capsule:external-work-item",
+  "runId": "run-abc",
+  "laneId": "lane-reader-1",
+  "state": "runningLane",
+  "event": "LANE_STARTED",
+  "actor": "worker:reader",
+  "artifactRefs": [],
+  "leaseRefs": [],
+  "approvalRef": null,
+  "verificationRef": null,
+  "redaction": "public-safe"
+}
+```
+
+No private tool args, secrets, bearer tokens, claim URLs, customer data, or raw paid-corpus text in the visualizer dataset.
+
+## First visual modes
+
+### 1. Lifecycle timeline
+
+Shows actual event order and state transitions.
+
+```txt
+planPinned → queued → sandboxReady → laneStarted → toolAudit → verifier → reviewGate → cleanup → captured
+```
+
+Useful signals:
+
+- current state
+- elapsed time per state
+- retry loops
+- wait states
+- cancellation path
+- cleanup receipt
+- verifier result
+
+### 2. Lane swimlanes
+
+Rows by actor/lane:
+
+```txt
+supervisor
+reader-1
+reader-2
+verifier
+publisher
+cleanup
+```
+
+Useful signals:
+
+- fan-out width
+- hot slots in use
+- blocked/waiting lanes
+- failed/retried lanes
+- artifact commits per lane
+- child lane completion/fan-in
+
+### 3. Graph/topology canvas
+
+Nodes:
+
+- states
+- lanes/actors
+- artifacts
+- context packs
+- secret leases
+- approval gates
+- output targets
+
+Edges:
+
+- event transition
+- spawned child lane
+- artifact write
+- verifier reads
+- approval resumes
+- cleanup destroys/revokes
+
+Useful signals:
+
+- missing cleanup edge
+- worker directly touching output target
+- unverified artifact used for publish
+- secret lease crossing too many lanes
+- sandbox kept hot during human wait
+
+### 4. Replay scrubber
+
+A scrubber over `seq` or timestamp that replays the run.
+
+Controls:
+
+```txt
+play / pause
+step event
+jump to failure
+jump to retry
+jump to verifier
+jump to cleanup
+```
+
+This is the killer move. If replay tells the story, the event schema is working.
+
+### 5. D2 diagram surface
+
+Joel refinement: D2 would be a super useful diagramming surface here.
+
+Sources: [D2 home](https://d2lang.com/), [D2 tour](https://d2lang.com/tour/intro/), [D2 GitHub](https://github.com/terrastruct/d2).
+
+Why D2 fits:
+
+- It is text-first and versionable, so diagrams can be generated from workflow receipts and committed beside `run/events.jsonl`.
+- It can render SVG/PNG/PDF from `.d2` files with the CLI.
+- It supports containers, labels, links/tooltips, variables, themes, imports, multiple layout engines, and sketch/animated diagrams.
+- It gives us a durable diagram artifact that Brain/Wzrrd can render even when the live socket visualizer is gone.
+
+D2 should be the **static/durable diagram layer**. Canvas/Three.js can be the live/animated layer. Same events, different renderers.
+
+Generated artifact shape:
+
+```txt
+artifacts/diagrams/workflow-topology.d2
+artifacts/diagrams/workflow-topology.svg
+artifacts/diagrams/workflow-replay-frames/*.d2
+artifacts/diagrams/workflow-replay-frames/*.svg
+```
+
+Possible generation pipeline:
+
+```txt
+run/events.jsonl
+→ normalize workflow graph
+→ emit D2 topology
+→ render SVG
+→ publish in Wzrrd/Brain review
+→ use same graph model for live canvas
+```
+
+Tiny D2 sketch:
+
+```txt
+capsule: Context capsule {
+  supervisor: Capsule DO supervisor
+  plan: Plan pinned
+  lanes: Worker lanes {
+    reader1: Reader lane
+    reader2: Reader lane
+    verifier: Verifier lane
+  }
+  review: Wzrrd / Brain review
+  cleanup: Cleanup
+}
+
+supervisor -> plan: PLAN_PINNED
+plan -> lanes.reader1: LANE_STARTED
+plan -> lanes.reader2: LANE_STARTED
+lanes.reader1 -> lanes.verifier: artifact refs
+lanes.reader2 -> lanes.verifier: artifact refs
+lanes.verifier -> review: NEEDS_HUMAN_REVIEW
+review -> cleanup: HUMAN_APPROVED
+cleanup -> supervisor: CAPTURED
+```
+
+Visualizer use:
+
+- D2 topology gives “what is the workflow shape?”
+- live socket overlay gives “what is happening right now?”
+- replay scrubber can generate D2 frames for key transitions or use canvas for smooth animation
+
+Taste rule: D2 is great for durable diagrams and review pages. Do not force it to be the real-time renderer if canvas/WebGL gives a better live feel.
+
+## Visual encodings
+
+- Green: verified/captured
+- Yellow: warning / needs human review
+- Red: blocked/failure
+- Purple: secret lease / sensitive boundary
+- Blue: artifact write/read
+- Orange: hot sandbox slot
+- Gray: queued/cold wait
+
+Line styles:
+
+- solid = state transition
+- dashed = artifact ref
+- dotted = verification/read dependency
+- glowing = hot compute
+- fading = destroyed/revoked/closed
+
+## State machine sketch
+
+The visualizer itself should have a tiny XState machine so replay/live UI state does not turn into boolean soup.
+
+```txt
+loadingDataset
+→ parsing
+→ connectingLiveStream
+→ ready
+→ playingReplay
+→ followingLive
+→ paused
+→ inspectingEvent
+→ reconnecting
+→ error
+```
+
+Events:
+
+```txt
+DATASET_SELECTED
+PARSE_SUCCEEDED
+PARSE_FAILED
+LIVE_CONNECT_REQUESTED
+LIVE_CONNECTED
+LIVE_EVENT_RECEIVED
+LIVE_DISCONNECTED
+RECONNECT_TIMER_FIRED
+PLAY
+PAUSE
+STEP_NEXT
+STEP_PREVIOUS
+JUMP_TO_EVENT
+FOLLOW_LIVE
+SELECT_NODE
+RESET
+```
+
+## Prototype shape
+
+Suggested path if this becomes code:
+
+```txt
+prototypes/workflow-visualizer-spike/
+  README.md
+  package.json or use repo workspace script
+  src/
+    sample-run.jsonl
+    sample-manifest.json
+    visualizer-state-machine.ts
+    normalize-events.ts
+    CanvasVisualizer.tsx or Svelte equivalent
+```
+
+README must include, per repo prototype law:
+
+- question answered
+- run command
+- deletion trigger
+- capture target
+
+Possible command:
+
+```bash
+pnpm prototype:visualizer
+```
+
+Capture target:
+
+```txt
+.brain/resources/workflow-visualizer-prototype-idea.svx
+```
+
+## Fit with current work
+
+This pairs well with:
+
+- `.brain/resources/dynamic-pi-workflow-scale-catalog.svx` — event schema, XState states, lifecycle patterns
+- `.brain/resources/workflow-observability-spine.svx` — under-the-hood observability data, agentic observability, cost/token/sandbox telemetry
+- `.brain/resources/joelclaw-docs-api-research-backlog.svx` — source-adapter workflow and Brain persistence step
+- `.brain/projects/joelclaw-research-swarm-spike.svx` — if the other agent is building a research swarm prototype
+- `docs/dynamic-workflow-machine.md` — existing run receipts and prototype machine shape
+
+## Acceptance bar
+
+The prototype is worth keeping only if it can answer at least three of these without reading raw logs:
+
+- Which state is the run in?
+- Which lanes are hot vs queued/cold?
+- Which lane failed, retried, or blocked capture?
+- Did cleanup destroy sandbox and revoke leases?
+- Which artifacts were verified before output?
+- Where did human review pause/resume?
+- Is fan-out bounded, or did it explode into bullshit?
+
+If it cannot answer those, delete it and keep the learning.
+
+## Next tiny move
+
+Create one static sample from an existing prototype receipt/event log, then render it as:
+
+1. timeline
+2. swimlane
+3. graph canvas
+
+Do not wire live Cloudflare or live Pi first. Static receipts first; live mode later.
