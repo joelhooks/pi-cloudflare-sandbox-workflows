@@ -26,6 +26,28 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:55Z run attempt: Dreaming was run through the trusted local memory relay proof, the Cloudflare live preflight, the live submit gate, and a Wzrrd readiness handoff. Local proof passed; live Cloudflare submit correctly did not happen.
+
+Receipts:
+
+- `pnpm app:dream:relay:local-env` refreshed the private ignored startup artifact and redacted receipt at `2026-06-10T10:54:14.705Z`: `sourceRootCount=10`, `tokenConfigured=true`, `tokenPreserved=true`, `docsApiConfigured=true`, no raw credential/path return.
+- `pnpm app:dream:relay:readiness` refreshed `.wrangler/workflow-app/dream-relay/latest-local-readiness.json` at `2026-06-10T10:54:18.874Z`: authenticated local `/healthz`, `status=passed`, 10 source roots, 10 supported operations, no raw credential/path return.
+- `pnpm app:dream:relay:proof` completed local proof `run:dream-relay-local-proof:20260610T105422716Z`: 10 source roots, runtime coverage for `pi=4737`, `codex=259`, `claude=129`, and `cloudflare=215`; machine coverage for `blaine`, `panda`, `flagg`, and `cloudflare`; source-family coverage for `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; 12 search hits; 12 hydrated redacted receipts; 8 signals; 35 correlation nodes; 48 correlation edges; `rawCredentialsReturned=false`, `rawPathsReturned=false`, `rawPathLeaked=false`.
+- `pnpm app:dream:run --refresh-preflight --submit` wrote live request `run-live-dream-memory-fabric-20260610T105446422Z-b4fe02d2` and receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T105446422Z-b4fe02d2-receipt.json`: `status=blocked`, `submit.attempted=false`.
+- `pnpm app:dream:report` rendered `.wrangler/workflow-app/dream-reports/run-live-dream-memory-fabric-20260610T105446422Z-b4fe02d2/`: `report.mdsvx` hash `4fb5c5b6385eff359d7a0767634fdf00a05578a9e7181f6265688ae48909ada9`, `index.html` hash `3ed6a43c4c5ccd4378ba28ace066fc70926d0fdb7a9ff8230ad2b4b223429e6f`.
+- Wzrrd publish: `https://run-live-dream-memory-fabric-20260610t105446422z-b4fe02d2.wzrrd.sh/`, noindex, expiring, `expiresAt=2026-06-11T10:55:07.185Z`, `deleteAfter=2026-06-18T10:55:07.185Z`.
+- `pnpm app:dream:relay:provisioning-preflight` and `pnpm app:dream:relay:approved-provisioning` refreshed the signoff-gated operator handoff; both performed no side effects.
+
+Blocked reasons:
+
+- Worker-facing `DREAM_MEMORY_RELAY_BASE_URL` is not configured.
+- Remote Worker `DREAM_MEMORY_RELAY_TOKEN` is not provisioned.
+- Worker deploy config does not define `DREAM_MEMORY_RELAY_BASE_URL`.
+- Authenticated remote relay `/healthz` is not verified.
+- Exact owner sign-off phrase for the network boundary is still missing.
+
+This is still not a completed Cloudflare Dream. No generated `workflow.xstate-machine.v1`, generated harness/source, Cloudflare execution proof, cartridge invocation proof, or workflow-owned Wzrrd publication exists for this run. The useful result is a current local memory-fabric proof plus a public readiness handoff that refuses to fake live execution.
+
 2026-06-10T10:44Z report handoff: a redacted Dream readiness report was rendered and published as a 24h noindex Wzrrd page.
 
 Receipts:
