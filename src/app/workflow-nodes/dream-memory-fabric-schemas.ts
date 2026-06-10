@@ -9,6 +9,7 @@ import {
   IsoDateTimeSchema,
   Sha256HexSchema,
   VerificationContractArtifactSchema,
+  WorkflowRunRequestSchema,
   WorkflowTraceContextSchema,
 } from "../domain/schemas.ts";
 
@@ -139,6 +140,7 @@ export const DreamWorkflowEffectSchema = z.enum([
   "capture-run",
   "correlate",
   "hitl-decision-seed",
+  "hitl-follow-up-run-request",
   "hitl-report",
   "hydrate",
   "inventory",
@@ -155,6 +157,7 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.capture-artifact",
   "joelclaw.dream.capture-run",
   "joelclaw.dream.hitl-decision-seed",
+  "joelclaw.dream.hitl-follow-up-run-request",
   "joelclaw.dream.hitl-report",
   "joelclaw.dream.hydrate",
   "joelclaw.dream.memory-search",
@@ -966,6 +969,89 @@ export const DreamHitlDecisionWorkflowSeedDocumentSchema = z
     }
   });
 
+export const DreamHitlFollowUpRunRequestStatusSchema = z.enum([
+  "drafted",
+  "no-actionable-decisions",
+]);
+
+export const DreamHitlFollowUpRunRequestDocumentSchema = z
+  .object({
+    actionableDecisionCount: z.number().int().min(0),
+    artifactUpdateTargets: z
+      .array(DreamHitlDecisionArtifactUpdateTargetSchema)
+      .default([]),
+    decisionWorkflowSeedRef: ArtifactRefSchema,
+    generatedAt: IsoDateTimeSchema,
+    redacted: z.literal(true),
+    request: WorkflowRunRequestSchema.optional(),
+    requestedPackageIds: z.array(z.string().min(1)).default([]),
+    requiredCapabilityKinds: z.array(z.string().min(1)).default([]),
+    runId: z.string().min(1),
+    schemaVersion: z.literal("dream.hitl-follow-up-run-request.v1"),
+    sourceRefs: z.array(ArtifactRefSchema).min(1),
+    status: DreamHitlFollowUpRunRequestStatusSchema,
+    submitted: z.literal(false),
+    summary: z.string().min(1),
+    workItemId: z.string().min(1),
+  })
+  .superRefine((document, context) => {
+    if (document.status === "drafted" && document.request === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Drafted follow-up run request artifacts require request.",
+        path: ["request"],
+      });
+    }
+
+    if (
+      document.status === "no-actionable-decisions" &&
+      document.request !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "No-actionable-decisions follow-up artifacts cannot include a run request.",
+        path: ["request"],
+      });
+    }
+
+    if (
+      document.status === "no-actionable-decisions" &&
+      document.actionableDecisionCount !== 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "No-actionable-decisions follow-up artifacts must have actionableDecisionCount === 0.",
+        path: ["actionableDecisionCount"],
+      });
+    }
+
+    if (
+      document.status === "drafted" &&
+      document.actionableDecisionCount === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Drafted follow-up run requests require at least one actionable decision.",
+        path: ["actionableDecisionCount"],
+      });
+    }
+
+    if (
+      document.status === "drafted" &&
+      document.artifactUpdateTargets.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Drafted follow-up run requests require artifact update targets.",
+        path: ["artifactUpdateTargets"],
+      });
+    }
+  });
+
 export const DREAM_HITL_REPORT_SECTION_ORDER = [
   "run-context",
   "actual-dreams",
@@ -1418,6 +1504,12 @@ export type DreamHitlDecisionWorkflowSeedDocument = z.infer<
 >;
 export type DreamHitlDecisionWorkflowSeedStatus = z.infer<
   typeof DreamHitlDecisionWorkflowSeedStatusSchema
+>;
+export type DreamHitlFollowUpRunRequestDocument = z.infer<
+  typeof DreamHitlFollowUpRunRequestDocumentSchema
+>;
+export type DreamHitlFollowUpRunRequestStatus = z.infer<
+  typeof DreamHitlFollowUpRunRequestStatusSchema
 >;
 export type DreamHitlDecisionNextWorkflowSeed = z.infer<
   typeof DreamHitlDecisionNextWorkflowSeedSchema

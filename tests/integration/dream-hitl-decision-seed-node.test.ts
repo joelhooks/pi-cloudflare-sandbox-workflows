@@ -16,6 +16,7 @@ import {
 } from "../../src/app/infrastructure/memory-adapters.ts";
 import {
   DreamHitlDecisionDocumentSchema,
+  DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlDecisionWorkflowSeedDocumentSchema,
 } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
@@ -56,6 +57,25 @@ const step = {
   packageRefs: ["artifact://packages/workflows/dream-memory-fabric/refs/v1"],
   stepId: "seed-next-workflow-from-hitl",
   summary: "Turn accepted Dream HITL decisions into next workflow input.",
+} satisfies WorkflowNodeInvocationStep;
+
+const followUpStep = {
+  config: {
+    requestedPackageIds: [
+      "workflow/dream-memory-fabric",
+      "badass-courses/claw-kernel",
+    ],
+    runId: "run-dream-hitl-follow-up-test",
+    workItemId: "work-item:dream-hitl-follow-up-test",
+  },
+  dependsOn: [step.stepId],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: "joelclaw.dream.hitl-follow-up-run-request",
+  outputPath: "dream/hitl-follow-up-run-request.json",
+  packageRefs: ["artifact://packages/workflows/dream-memory-fabric/refs/v1"],
+  stepId: "draft-follow-up-run-request-from-hitl",
+  summary: "Draft the next generated workflow request from Dream HITL seed.",
 } satisfies WorkflowNodeInvocationStep;
 
 const machine = {
@@ -293,6 +313,98 @@ describe("Dream HITL decision workflow-seed node", () => {
       schemaVersion: "dream.hitl-decision-workflow-seed.v1",
       status: "ready",
       workItemDecisionIds: ["decision:dream:capture-ingest-fix"],
+    });
+  });
+
+  it("drafts a follow-up run request from the HITL workflow seed without submitting it", async () => {
+    const artifacts = createMemoryArtifactStore("dream-hitl-follow-up-node");
+    const seedDocument = DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+      acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
+      actionableDecisionCount: 2,
+      actionableDecisions: decisionDocument.decisions,
+      decisionRef: "artifact://dream-hitl-seed-test/dream/hitl-decision.json",
+      generatedAt: at,
+      heldDecisionIds: [],
+      nextWorkflowSeed: decisionDocument.nextWorkflowSeed,
+      redacted: true,
+      refinementProposalRef:
+        "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+      rejectedDecisionIds: [],
+      reportRef: decisionDocument.reportRef,
+      runId: machine.runId,
+      schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      sourceRefs: [
+        "artifact://dream-hitl-seed-test/dream/hitl-decision.json",
+        "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+        "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+        "artifact://dream-hitl-seed-test/dream/backfill-run.json",
+      ],
+      status: "ready",
+      summary:
+        "HITL accepted one Dream decision and turned one decision into work.",
+      workItemDecisionIds: ["decision:dream:capture-ingest-fix"],
+      workItemId: machine.workItemId,
+    });
+    const seedWrite = await artifacts.writeJson({
+      path: "dream/hitl-decision-workflow-seed.json",
+      redacted: true,
+      runId: machine.runId,
+      value: seedDocument,
+    });
+    const adapter = createDreamMemoryFabricWorkflowNodeAdapter({
+      artifacts,
+      dreamMemoryFabric: createIntegrationTestDreamMemoryFabricAdapter(),
+    });
+    const executeInput = {
+      actor: integrationTestActor,
+      dependencyArtifactRefs: {},
+      machine,
+      plan,
+      step: {
+        ...followUpStep,
+        inputRefs: [seedWrite.artifactRef],
+      },
+    } satisfies Parameters<WorkflowNodeAdapterPort["execute"]>[0];
+
+    const result = await adapter.execute(executeInput);
+    if (result.status === "blocked") {
+      throw new Error(result.blocker.message);
+    }
+    const requestRef = result.outputRefs.at(0);
+    if (requestRef === undefined) {
+      throw new Error("Expected HITL follow-up run request output ref.");
+    }
+
+    const followUp = DreamHitlFollowUpRunRequestDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: requestRef })
+    );
+
+    expect({
+      actionableDecisionCount: followUp.actionableDecisionCount,
+      outputRefCount: result.outputRefs.length,
+      requestRunId: followUp.request?.runId,
+      requestWorkItemId: followUp.request?.workItemId,
+      requestedPackageIds: followUp.requestedPackageIds,
+      schemaVersion: followUp.schemaVersion,
+      status: followUp.status,
+      submitted: followUp.submitted,
+      usesPlannerInstruction:
+        followUp.request?.planProposal.stochasticNotes.includes(
+          "Treat accepted Dream decisions as constraints for the next generated workflow."
+        ) ?? false,
+    }).toStrictEqual({
+      actionableDecisionCount: 2,
+      outputRefCount: 1,
+      requestRunId: "run-dream-hitl-follow-up-test",
+      requestWorkItemId: "work-item:dream-hitl-follow-up-test",
+      requestedPackageIds: [
+        "workflow/dream-memory-fabric",
+        "badass-courses/claw-kernel",
+      ],
+      schemaVersion: "dream.hitl-follow-up-run-request.v1",
+      status: "drafted",
+      submitted: false,
+      usesPlannerInstruction: true,
     });
   });
 });

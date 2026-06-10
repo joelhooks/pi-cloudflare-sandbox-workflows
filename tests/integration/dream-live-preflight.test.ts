@@ -40,6 +40,7 @@ const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
     "joelclaw.dream.refinement-proposals",
     "joelclaw.dream.hitl-report",
     "joelclaw.dream.hitl-decision-seed",
+    "joelclaw.dream.hitl-follow-up-run-request",
   ],
   packageIds: [
     "badass-courses/claw-kernel",
@@ -403,7 +404,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.source-inventory, joelclaw.dream.source-health, joelclaw.dream.backfill-plan, joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, joelclaw.dream.hitl-decision-seed, dream-hitl-decision-schema.",
+        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.source-inventory, joelclaw.dream.source-health, joelclaw.dream.backfill-plan, joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, joelclaw.dream.hitl-decision-seed, joelclaw.dream.hitl-follow-up-run-request, dream-hitl-decision-schema.",
       status: "blocked",
     });
   });

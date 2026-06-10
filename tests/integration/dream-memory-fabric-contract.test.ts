@@ -7,6 +7,7 @@ import {
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionDocumentSchema,
+  DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlDecisionWorkflowSeedDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHydrationDocumentSchema,
@@ -239,6 +240,14 @@ describe("Dream memory fabric domain contracts", () => {
             exportRecord.kind === "workflow-node" &&
             exportRecord.nodeType === "joelclaw.dream.hitl-decision-seed"
         ),
+      packageMetadataHasHitlFollowUpRunRequestNode:
+        dreamMemoryFabricPackageMetadata.exports.some(
+          (exportRecord) =>
+            exportRecord.exportId === "dream-hitl-follow-up-run-request" &&
+            exportRecord.kind === "workflow-node" &&
+            exportRecord.nodeType ===
+              "joelclaw.dream.hitl-follow-up-run-request"
+        ),
       packageMetadataHasProfile: dreamMemoryFabricPackageMetadata.exports.some(
         (exportRecord) => exportRecord.kind === "source-profile"
       ),
@@ -254,6 +263,7 @@ describe("Dream memory fabric domain contracts", () => {
       packageId: "workflow/dream-memory-fabric",
       packageMetadataHasHitlDecisionSchema: true,
       packageMetadataHasHitlDecisionWorkflowSeedNode: true,
+      packageMetadataHasHitlFollowUpRunRequestNode: true,
       packageMetadataHasProfile: true,
       requiredMachines: ["blaine", "panda", "flagg", "cloudflare"],
       sourceFamilies: [
@@ -875,10 +885,47 @@ describe("Dream memory fabric domain contracts", () => {
       workItemDecisionIds: [],
       workItemId: decisions.workItemId,
     });
+    const followUpRunRequest = DreamHitlFollowUpRunRequestDocumentSchema.parse({
+      actionableDecisionCount: workflowSeed.actionableDecisionCount,
+      artifactUpdateTargets:
+        workflowSeed.nextWorkflowSeed.artifactUpdateTargets,
+      decisionWorkflowSeedRef:
+        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+      generatedAt: timestamp,
+      redacted: true,
+      request: {
+        actor: decisions.reviewer,
+        planProposal: {
+          intent:
+            "Run follow-up Dream refinement work from accepted HITL decisions.",
+          requestedPackageIds: ["workflow/dream-memory-fabric"],
+          stochasticNotes: workflowSeed.nextWorkflowSeed.plannerInstructions,
+        },
+        runId: "run-dream-hitl-follow-up",
+        workItemId: "work-item:dream-hitl-follow-up",
+      },
+      requestedPackageIds: ["workflow/dream-memory-fabric"],
+      requiredCapabilityKinds:
+        workflowSeed.nextWorkflowSeed.requiredCapabilityKinds,
+      runId: workflowSeed.runId,
+      schemaVersion: "dream.hitl-follow-up-run-request.v1",
+      sourceRefs: [
+        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+        ...workflowSeed.sourceRefs,
+      ],
+      status: "drafted",
+      submitted: false,
+      summary:
+        "Drafted the next generated workflow request from accepted Dream HITL decisions.",
+      workItemId: workflowSeed.workItemId,
+    });
 
     expect({
       actionableSeedIds: decisions.nextWorkflowSeed.decisionIds,
       decisionCount: decisions.decisionCount,
+      followUpRequestSchemaVersion: followUpRunRequest.schemaVersion,
+      followUpRequestStatus: followUpRunRequest.status,
+      followUpSubmitted: followUpRunRequest.submitted,
       rawTranscriptsReturned:
         JSON.stringify(decisions).includes("full transcript"),
       reviewerType: decisions.reviewer.type,
@@ -892,6 +939,9 @@ describe("Dream memory fabric domain contracts", () => {
     }).toStrictEqual({
       actionableSeedIds: ["decision:dream:generated-machine-proof"],
       decisionCount: 2,
+      followUpRequestSchemaVersion: "dream.hitl-follow-up-run-request.v1",
+      followUpRequestStatus: "drafted",
+      followUpSubmitted: false,
       rawTranscriptsReturned: false,
       reviewerType: "human",
       schemaVersion: "dream.hitl-decision.v1",
@@ -899,6 +949,39 @@ describe("Dream memory fabric domain contracts", () => {
       workflowSeedActionableDecisionCount: 1,
       workflowSeedSchemaVersion: "dream.hitl-decision-workflow-seed.v1",
       workflowSeedStatus: "ready",
+    });
+  });
+
+  it("rejects no-action HITL follow-up requests with actionable decisions", () => {
+    const result = DreamHitlFollowUpRunRequestDocumentSchema.safeParse({
+      actionableDecisionCount: 1,
+      artifactUpdateTargets: [],
+      decisionWorkflowSeedRef:
+        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+      generatedAt: timestamp,
+      redacted: true,
+      requestedPackageIds: ["workflow/dream-memory-fabric"],
+      requiredCapabilityKinds: [],
+      runId: "run-dream-hitl-follow-up",
+      schemaVersion: "dream.hitl-follow-up-run-request.v1",
+      sourceRefs: [
+        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+      ],
+      status: "no-actionable-decisions",
+      submitted: false,
+      summary: "No follow-up workflow request was drafted.",
+      workItemId: "work-item:dream-hitl-follow-up",
+    });
+
+    expect({
+      issueMessage: result.success ? null : result.error.issues.at(0)?.message,
+      issuePath: result.success ? null : result.error.issues.at(0)?.path,
+      success: result.success,
+    }).toStrictEqual({
+      issueMessage:
+        "No-actionable-decisions follow-up artifacts must have actionableDecisionCount === 0.",
+      issuePath: ["actionableDecisionCount"],
+      success: false,
     });
   });
 

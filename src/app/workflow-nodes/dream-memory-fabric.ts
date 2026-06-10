@@ -24,6 +24,7 @@ import {
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionContractSchema,
   DreamHitlDecisionDocumentSchema,
+  DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlDecisionWorkflowSeedDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHitlReportProofLevelSchema,
@@ -53,6 +54,7 @@ import type {
   DreamCorrelationGraphDocument,
   DreamHitlDecisionContract,
   DreamHitlDecisionDocument,
+  DreamHitlFollowUpRunRequestDocument,
   DreamHitlDecisionWorkflowSeedDocument,
   DreamHitlDreamCard,
   DreamHitlReportDocument,
@@ -309,6 +311,20 @@ const DreamHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
   decisionStepId: z.string().min(1).optional(),
 });
 
+const DreamHitlFollowUpRunRequestNodeConfigSchema = z.object({
+  requestedPackageIds: z
+    .array(z.string().min(1))
+    .default([
+      "badass-courses/claw-kernel",
+      "joelhooks/configured-familiar-kernel",
+      "workflow/dream-memory-fabric",
+    ]),
+  runId: z.string().min(1).optional(),
+  seedRef: ArtifactRefSchema.optional(),
+  seedStepId: z.string().min(1).optional(),
+  workItemId: z.string().min(1).optional(),
+});
+
 const blocker = (
   code: CapabilityBlocker["code"],
   message: string
@@ -342,6 +358,7 @@ const writeDocument = async (input: {
     | DreamBackfillRunReceiptDocument
     | DreamCaptureReceiptDocument
     | DreamCorrelationGraphDocument
+    | DreamHitlFollowUpRunRequestDocument
     | DreamHitlDecisionWorkflowSeedDocument
     | DreamHitlReportDocument
     | DreamHydrationDocument
@@ -665,6 +682,31 @@ const loadHitlDecision = async (input: {
   }
 };
 
+const loadHitlDecisionWorkflowSeed = async (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly artifactRef: ArtifactRef;
+}): Promise<
+  | {
+      readonly document: DreamHitlDecisionWorkflowSeedDocument;
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  try {
+    return {
+      document: DreamHitlDecisionWorkflowSeedDocumentSchema.parse(
+        await input.artifacts.readJson({ artifactRef: input.artifactRef })
+      ),
+      status: "loaded",
+    };
+  } catch {
+    return blocker(
+      "stale_package",
+      "Dream HITL decision workflow seed artifact could not be loaded by the Dream node."
+    );
+  }
+};
+
 const inventoryRefFor = (input: {
   readonly config: z.infer<typeof DreamSourceHealthNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
@@ -935,6 +977,19 @@ const hitlDecisionRefFor = (input: {
   dependencyRefFor({
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.decisionStepId,
+  }) ??
+  input.inputRefs.at(0) ??
+  null;
+
+const hitlDecisionWorkflowSeedRefFor = (input: {
+  readonly config: z.infer<typeof DreamHitlFollowUpRunRequestNodeConfigSchema>;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly inputRefs: readonly ArtifactRef[];
+}): ArtifactRef | null =>
+  input.config.seedRef ??
+  dependencyRefFor({
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    stepId: input.config.seedStepId,
   }) ??
   input.inputRefs.at(0) ??
   null;
@@ -1631,6 +1686,10 @@ const uniqueArtifactRefs = (refs: readonly ArtifactRef[]): ArtifactRef[] => [
   ...new Set(refs),
 ];
 
+const uniqueStrings = (values: readonly string[]): string[] => [
+  ...new Set(values),
+];
+
 const hitlDecisionWorkflowSeedDocumentFor = (input: {
   readonly decision: DreamHitlDecisionDocument;
   readonly decisionRef: ArtifactRef;
@@ -1691,6 +1750,97 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
     summary,
     workItemDecisionIds,
     workItemId: input.decision.workItemId,
+  });
+};
+
+const followUpRunRequestIntentFor = (
+  seed: DreamHitlDecisionWorkflowSeedDocument
+): string =>
+  `Run the next generated workflow from accepted Dream HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
+
+const followUpRunRequestNotesFor = (input: {
+  readonly seed: DreamHitlDecisionWorkflowSeedDocument;
+  readonly seedRef: ArtifactRef;
+}): string[] => {
+  const artifactTargets = input.seed.nextWorkflowSeed.artifactUpdateTargets.map(
+    (target) =>
+      `Artifact update target ${target.targetKind}: ${target.summary}; sourceRefs ${target.sourceRefs.join(", ")}.`
+  );
+  const capabilityKinds =
+    input.seed.nextWorkflowSeed.requiredCapabilityKinds.length === 0
+      ? ["No extra capability kinds were declared by the HITL seed."]
+      : [
+          `Required capability kinds before side effects: ${input.seed.nextWorkflowSeed.requiredCapabilityKinds.join(", ")}.`,
+        ];
+
+  return [
+    `Consume Dream HITL decision workflow seed ${input.seedRef}.`,
+    `Actionable decision ids: ${input.seed.nextWorkflowSeed.decisionIds.join(", ")}.`,
+    ...input.seed.nextWorkflowSeed.plannerInstructions,
+    ...capabilityKinds,
+    ...artifactTargets,
+    `Source refs for verification: ${input.seed.sourceRefs.join(", ")}.`,
+    "Generate a fresh workflow.xstate-machine.v1 config, generated TypeScript source, generated harness source, and verifier proof for this follow-up work.",
+    "Do not mutate Brain, packages, schemas, reports, source indexes, or capability policies unless the generated workflow has explicit leased side-effect receipts and review gates.",
+    "Prefer reviewable artifact or GitHub PR delivery for repo-backed artifact updates; keep unleased updates as artifacts for human review.",
+  ];
+};
+
+const hitlFollowUpRunRequestDocumentFor = (input: {
+  readonly actor: DreamWorkflowNodeExecutionInput["actor"];
+  readonly config: z.infer<typeof DreamHitlFollowUpRunRequestNodeConfigSchema>;
+  readonly seed: DreamHitlDecisionWorkflowSeedDocument;
+  readonly seedRef: ArtifactRef;
+}): DreamHitlFollowUpRunRequestDocument => {
+  const status =
+    input.seed.status === "ready" && input.seed.actionableDecisionCount > 0
+      ? "drafted"
+      : ("no-actionable-decisions" as const);
+  const requestedPackageIds = uniqueStrings(input.config.requestedPackageIds);
+  const followUpRunId =
+    input.config.runId ??
+    `run-dream-hitl-follow-up-${proposalSlugFor(input.seed.runId)}`;
+  const followUpWorkItemId =
+    input.config.workItemId ??
+    `work-item:dream-hitl-follow-up:${proposalSlugFor(input.seed.workItemId)}`;
+  const request =
+    status === "drafted"
+      ? {
+          actor: input.actor,
+          planProposal: {
+            intent: followUpRunRequestIntentFor(input.seed),
+            requestedPackageIds,
+            stochasticNotes: followUpRunRequestNotesFor({
+              seed: input.seed,
+              seedRef: input.seedRef,
+            }),
+          },
+          runId: followUpRunId,
+          workItemId: followUpWorkItemId,
+        }
+      : undefined;
+  const summary =
+    status === "drafted"
+      ? `Drafted follow-up workflow request ${followUpRunId} from ${input.seed.actionableDecisionCount} actionable Dream HITL decision(s).`
+      : "No follow-up workflow request was drafted because the HITL decision seed had no actionable decisions.";
+
+  return DreamHitlFollowUpRunRequestDocumentSchema.parse({
+    actionableDecisionCount: input.seed.actionableDecisionCount,
+    artifactUpdateTargets: input.seed.nextWorkflowSeed.artifactUpdateTargets,
+    decisionWorkflowSeedRef: input.seedRef,
+    generatedAt: new Date().toISOString(),
+    redacted: true,
+    ...(request === undefined ? {} : { request }),
+    requestedPackageIds,
+    requiredCapabilityKinds:
+      input.seed.nextWorkflowSeed.requiredCapabilityKinds,
+    runId: input.seed.runId,
+    schemaVersion: "dream.hitl-follow-up-run-request.v1",
+    sourceRefs: uniqueArtifactRefs([input.seedRef, ...input.seed.sourceRefs]),
+    status,
+    submitted: false,
+    summary,
+    workItemId: input.seed.workItemId,
   });
 };
 
@@ -2435,6 +2585,45 @@ const executeHitlDecisionWorkflowSeedNode = async (
   });
 };
 
+const executeHitlFollowUpRunRequestNode = async (
+  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
+  input: DreamWorkflowNodeExecutionInput
+): Promise<WorkflowNodeExecutionResult> => {
+  const nodeConfig = DreamHitlFollowUpRunRequestNodeConfigSchema.parse(
+    input.step.config
+  );
+  const seedRef = hitlDecisionWorkflowSeedRefFor({
+    config: nodeConfig,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    inputRefs: input.step.inputRefs,
+  });
+  if (seedRef === null) {
+    return blocker(
+      "stale_package",
+      "Dream HITL follow-up run request node requires a dream.hitl-decision-workflow-seed.v1 artifact ref."
+    );
+  }
+
+  const seed = await loadHitlDecisionWorkflowSeed({
+    artifactRef: seedRef,
+    artifacts: config.artifacts,
+  });
+  if (seed.status === "blocked") {
+    return seed;
+  }
+
+  return await writeDocument({
+    artifacts: config.artifacts,
+    document: hitlFollowUpRunRequestDocumentFor({
+      actor: input.actor,
+      config: nodeConfig,
+      seed: seed.document,
+      seedRef,
+    }),
+    step: input.step,
+  });
+};
+
 const executeCaptureRunNode = async (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig,
   input: DreamWorkflowNodeExecutionInput
@@ -2691,6 +2880,10 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
 
     if (nodeTypeResult.data === "joelclaw.dream.hitl-decision-seed") {
       return await executeHitlDecisionWorkflowSeedNode(config, input);
+    }
+
+    if (nodeTypeResult.data === "joelclaw.dream.hitl-follow-up-run-request") {
+      return await executeHitlFollowUpRunRequestNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.hitl-report") {

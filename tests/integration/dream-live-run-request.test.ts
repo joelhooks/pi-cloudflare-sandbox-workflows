@@ -156,6 +156,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "joelclaw.dream.refinement-proposals",
       "joelclaw.dream.hitl-report",
       "joelclaw.dream.hitl-decision-seed",
+      "joelclaw.dream.hitl-follow-up-run-request",
     ],
     packageIds: ["workflow/dream-memory-fabric"],
     packageRows: [],

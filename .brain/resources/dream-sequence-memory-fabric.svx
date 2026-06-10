@@ -26,18 +26,32 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T07:55Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
+2026-06-10T08:06Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
 
 Receipts:
 
 - Local trusted relay proof: `run:dream-relay-local-proof:20260610T073025130Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
-- Local proof coverage: 10 source roots; required machine coverage for `blaine`, `panda`, `flagg`, and Cloudflare; required source families `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:55:11.517Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5-receipt.json`, `submit.attempted=false`.
-- Package state: Worker deploy receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` first deployed current code to Worker version `042c96eb-fedb-4922-a8d7-e24a7ef0344e` without Dream relay vars, then package seed completed at `2026-06-10T07:54:49.925Z`. Remote `workflow/dream-memory-fabric` now matches current manifest hash `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a` with seed commit `cde3a3707f3bb85223987a2848d7faac5a05d5ab`.
-- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T07:55:19.781Z`, status `blocked`, no side effects performed.
+- Local proof coverage: 10 source roots; required machine coverage for `blaine`, `panda`, `flagg`, and Cloudflare; required source families `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; runtime coverage for Pi, Codex, Claude, and Cloudflare; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T08:27:14.209Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d-receipt.json`, `submit.attempted=false`.
+- Package state: Worker deploy receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` deployed current code to Worker version `d1143029-8ed7-4081-b6bc-ec09f6f108f7` without Dream relay vars and without reseeding packages. Remote `workflow/dream-memory-fabric` still matches current manifest hash `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`; latest seed commit remains `c5d8f4ac39726846b448977e4c605e0a52abe672` from the 2026-06-10T08:06Z seed.
+- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T08:27:06.500Z`, status `blocked`, no side effects performed. Local proof refresh is ready; local relay start, HTTPS exposure, Worker token provisioning, Worker URL config, relay healthz verification, and live Dream submit remain blocked by missing exact owner sign-off and relay config.
 
 Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
+
+2026-06-10T08:06Z implementation progress: accepted Dream HITL decisions can now draft the next workflow request without submitting or mutating anything.
+
+Receipts:
+
+- New schema: `dream.hitl-follow-up-run-request.v1` in `src/app/workflow-nodes/dream-memory-fabric-schemas.ts`.
+- New package-backed node: `joelclaw.dream.hitl-follow-up-run-request`, exported from `workflow/dream-memory-fabric` as `dream-hitl-follow-up-run-request`.
+- Node behavior: reads a `dream.hitl-decision-workflow-seed.v1` artifact, drafts a normal `workflow.run-request.v1` body, records decision seed ref, required capability kinds, requested packages, source refs, and artifact update targets, then writes `submitted:false`.
+- Proof behavior: `dream.generated-workflow-proof.v1` recognizes `hitl-follow-up-run-request` as a Dream effect but does not require a memory-relay lease sidecar because the node is artifact-only.
+- Planner palette: the latest live request lists `joelclaw.dream.hitl-follow-up-run-request` in the Dream cartridge node palette while still letting the generated workflow choose order, branching, loops, parallelism, and future Think lanes.
+- Verification: `pnpm test:integration`, `pnpm check`, `pnpm typecheck`, `pnpm typecheck:tsc`, and `git diff --check` passed before this Brain capture.
+- Current Dream package manifest hash after this change: `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`.
+
+This is still not a live Dream execution. It closes the artifact loop from human decision to next generated workflow request, but submission still goes through the front door, generated-machine proof, capability leases, review gates, and Cloudflare receipts.
 
 2026-06-10T07:42Z implementation progress: accepted Dream HITL decisions can now feed the next generated workflow as package data instead of report prose.
 
@@ -1999,6 +2013,41 @@ Validation:
 - `pnpm typecheck` passed.
 - `pnpm typecheck:tsc` passed.
 - `pi-notes brain check` passed: `17` Brain pages.
+
+## Dream HITL Follow-Up Run Request Contract
+
+On 2026-06-10, Dream acceptance gained a typed bridge from human decision to the next generated workflow request.
+
+Decision:
+
+- A `dream.hitl-decision.v1` artifact is still the human call.
+- A `dream.hitl-decision-workflow-seed.v1` artifact is still the seed extracted from accepted or `turn-into-work` decisions.
+- The next artifact is `dream.hitl-follow-up-run-request.v1`, written by package-backed node `joelclaw.dream.hitl-follow-up-run-request`.
+- The follow-up artifact wraps a normal `workflow.run-request.v1`, records seed/source/update-target provenance, and sets `submitted:false`.
+- This is not execution. Submission still goes through the normal workflow front door, generated XState/harness proof, capability leases, review gates, and receipts.
+
+Implementation receipt:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` defines `DreamHitlFollowUpRunRequestDocumentSchema`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` loads `dream.hitl-decision-workflow-seed.v1`, drafts a run request only when actionable decisions exist, and writes `no-actionable-decisions` when they do not.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `contract://workflow/dream-memory-fabric/hitl-follow-up-run-request.v1` as package export `dream-hitl-follow-up-run-request` with `nodeType=joelclaw.dream.hitl-follow-up-run-request`.
+- `dream.generated-workflow-proof.v1` recognizes `hitl-follow-up-run-request` as a Dream effect and excludes it from relay sidecar requirements because it is artifact-only.
+- `docs/dream-report-canon.md` now names `dream.hitl-follow-up-run-request.v1` as the artifact after a ready decision seed.
+
+Current package/deploy receipt:
+
+- Worker version `d1143029-8ed7-4081-b6bc-ec09f6f108f7`.
+- Remote Dream package manifest hash `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`.
+- Seed commit `c5d8f4ac39726846b448977e4c605e0a52abe672`.
+- Latest live request `run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d` includes `joelclaw.dream.hitl-follow-up-run-request` in the planner palette and did not submit because relay/signoff gates remain blocked.
+
+Validation:
+
+- `pnpm test:integration` passed: `33` files, `168` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `git diff --check` passed.
 
 ## Dream Preflight Schema Export Proof
 

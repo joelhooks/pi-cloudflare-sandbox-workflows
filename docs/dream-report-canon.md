@@ -146,6 +146,14 @@ reviewer actor
 
 Accepted or work-conversion decisions must also feed the next generated workflow seed. The seed needs planner instructions, source refs, required capability kinds when relevant, and Brain/package/workflow/schema/report/capability update targets.
 
+The next artifact after a ready seed is a follow-up run request draft:
+
+```txt
+dream.hitl-follow-up-run-request.v1
+```
+
+That draft wraps a normal `workflow.run-request.v1` body, records the seed ref and update targets, and sets `submitted: false`. It is planner input, not execution. Submission still goes through the normal front door, generated machine proof, capability leases, review gates, and receipts.
+
 Held and rejected decisions should not silently seed future work. They stay as review receipts until their blocker changes.
 
 ## Three Rs
