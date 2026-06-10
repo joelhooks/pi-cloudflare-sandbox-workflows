@@ -1,0 +1,79 @@
+---
+title: Dreamer First Run
+status: active
+updated: 2026-06-10
+---
+
+# Dreamer First Run
+
+Path from the current state to an on-demand, generatively-planned Dreamer workflow executing in Cloudflare. Produced by a grill-with-docs session on 2026-06-10; the resolved decisions live in:
+
+- `.brain/resources/decisions/dreamer-transcript-substrate.svx` — JoelClaw index is the transcript source; relay shrinks to a thin bridge; per-machine coverage gates deleted.
+- `.brain/resources/decisions/kernel-package-overlays.svx` — package model (kernel overlays, badass → shitrat), Artifacts-git as kernel source of truth, registry-pulling install CLI.
+- `.brain/resources/decisions/dreamer-scope-read-propose.svx` — Dreamer = read + correlate + propose; repair is a separate workflow; report + review-gated proposals; on demand only.
+- `.brain/resources/deep-review-2026-06-09.svx` — full deep-review findings backing the prerequisite fixes.
+
+## The goal, one paragraph
+
+Operator runs one command. The workflow app asks a planner lane (agent, in a sandbox, constructed from kernel packages by role) to generate a run-specific XState machine for transcript review. The safety envelope pins the machine, plan, and packages by hash; capabilities are leased, never raw secrets. The generated machine drives sandbox lanes that search/hydrate/correlate JoelClaw session transcripts across 24h/7d/30d/quarter/all-time horizons, then emits a Wzrrd dream report and review-gated kernel-change proposals. Approved proposals publish new kernel package versions to the registry; any machine (including this one) picks them up via the install CLI.
+
+## Milestones
+
+### M0 — Stop the bleeding (prerequisites, no new features)
+
+1. Commit the production spine. `git ls-files src` currently returns one file; `src/app`, `src/cartridges`, `tests/`, `migrations/`, `wrangler.jsonc`, `Dockerfile` are untracked working-tree files for a deployed Worker. Fix the one oxfmt failure blocking pre-commit, commit on a branch, push.
+2. Auth on `POST /runs` and `GET /runs/:runId/*` (timing-safe bearer, fail closed). Non-negotiable before any relay/tunnel exposure: an unauthenticated run trigger plus a bridge to local memory is the worst combination in the deep review.
+3. Two-line skip-to-done fix: block final initial states in `validateGeneratedMachineStartupProtocol` and assert `completedStepIds.size === plan.steps.length` after the loop.
+4. Idempotent capability lease broker: stepId in lease ids, `on conflict` upserts (an LLM-generated plan may emit duplicate capabilities; today that's a mid-run UNIQUE-constraint crash).
+
+Receipts: commit SHA on the branch, a 401 receipt for unauthenticated `POST /runs`, the two new failing-then-passing tests.
+
+### M1 — Carve the Dreamer down to its decision shape, and un-bake it from the platform
+
+1. Source profile: drop `inventory`/`source-health`/`backfill-plan`/`backfill-run` operations and `requiredMachineIds`; keep `search`/`hydrate`/`correlate` and time horizons.
+2. Delete per-machine file roots and SSH roots from relay config; delete machine-coverage preflight gates and their tests; keep redaction/safety flags.
+3. Repoint the relay at JoelClaw: bridge serves search/hydrate/correlate against the local JoelClaw/Typesense index, redacted receipts only.
+4. Verify panda/flagg ingest into JoelClaw (session-search/ingest health); file gaps as JoelClaw work, surface as report caveats.
+5. De-bake dream from the platform domain (see the 2026-06-10 amendment in `decisions/dreamer-scope-read-propose.svx`): genericize `dream.memory.relay` → `memory.relay` capability with profile-carried secret binding name, generic run-request receipt, rename `dream.*.v1` schema versions to capability-named versions, move the effect-coverage proof from the cartridge to the platform, rename the cartridge `dream-memory-fabric` → `memory-fabric`.
+6. Collapse the nine `dream`-named scripts into profile-parameterized runners (`--profile joelhooks/dream-transcript-review`).
+
+Litmus for M1 done: a second workflow (AIHero support sweep candidate) could run by seeding data only — zero new TypeScript in `src/app`, zero new scripts.
+
+Receipts: updated relay proof run showing JoelClaw-backed hits across machines/runtimes, `grep -ri dream src/app` returning nothing, passing trimmed test suite.
+
+Note: an overnight session (2026-06-10 03:24–04:56 PDT) already moved the dream verticals out of `src/app/workflow-nodes/` and `infrastructure/` into the cartridge — M1.5/M1.6 finish that motion. Coordinate before editing; this working tree has more than one author.
+
+### M2 — Reopen the live gates
+
+1. Reseed the Dream package manifest hash in remote D1 (needs `WORKFLOW_APP_ADMIN_TOKEN` lease) and redeploy.
+2. Expose the bridge: HTTPS tunnel, `DREAM_MEMORY_RELAY_BASE_URL` + `DREAM_MEMORY_RELAY_TOKEN` on the Worker, authenticated `/healthz`. Blocked on the explicit owner sign-off phrase, by design.
+
+Receipts: green provisioning preflight, green `pnpm app:dream:preflight`.
+
+### M3 — First on-demand Dreamer run
+
+1. `pnpm app:dream:run`: planner generates the machine (order/branching/loops/parallelism allowed), envelope pins and verifies effect coverage, lanes execute in Cloudflare sandboxes against the bridge.
+2. Babysit it: the run currently executes inside one Worker fetch with no resume path (known deep-review critical); a silent death is expected-possible until durable execution lands.
+3. Output: Wzrrd dream report per `docs/dream-report-canon.md` + dream proposals as svx artifacts.
+
+Receipts: run id, generated machine config + hash, lane receipts, Wzrrd URL, at least one concrete kernel-change proposal.
+
+### M4 — Close the loop (kernels everywhere)
+
+1. Graduate the registry spike shape into `src/app` (interfaces and state shapes, not spike code) with package kinds: kernel (overlayable), cartridge, context pack, task package. Define overlay conflict semantics in the schema.
+2. Author `badass-kernel` and `shitrat-kernel` as Artifacts-git packages in the registry.
+3. Ship the `kernel` install CLI: install/update/status against the registry, hash-verified, per-machine lockfile, materializing into Claude/Pi/codex targets. Replace ad-hoc shitrat management on this machine first.
+4. Wire proposal approval → kernel Artifacts commit → version publish → CLI update.
+
+Receipts: lockfile on blaine, a dream proposal that round-trips into an installed kernel change.
+
+### Later, explicitly not now
+
+- Durable execution (Cloudflare Workflows or queue+DO persisted transitions) + a reaper for stuck runs — required before unattended/cron dreams, which are themselves deferred per VISION.md.
+- Memory-fabric repair workflow (separate source profile and report).
+- AIHero support sweep workflow (candidate roots saved at `.brain/data/workflow-candidates/`).
+
+## Open items carried from grilling
+
+- Overlay conflict semantics (which layer wins, per file vs per key) — must be settled in the package schema during M4.1.
+- JoelClaw ingest health for panda/flagg — verify during M1.4; gaps are JoelClaw-repo work.

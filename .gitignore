@@ -9,6 +9,9 @@ dist/
 .pi/
 .wzrrd/
 
+# Machine-local operator data (private topology; see VISION.md sign-off list).
+.brain/data/
+
 # Prototype outputs are kept only when captured intentionally.
 prototypes/**/out/
 prototypes/**/.tmp/

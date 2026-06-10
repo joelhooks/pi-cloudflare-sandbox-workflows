@@ -1,0 +1,37 @@
+---
+title: "Dreamer Transcript Substrate: JoelClaw Index"
+type: "decision"
+status: "accepted"
+created_at: "2026-06-10"
+tags:
+  - decision
+  - dreamer
+  - joelclaw
+  - memory
+  - relay
+---
+
+# Dreamer Transcript Substrate: JoelClaw Index
+
+## Decision
+
+The Dreamer reads cross-machine agent session transcripts from the **JoelClaw index** (Typesense-backed session capture), not from per-machine filesystem roots.
+
+The trusted local relay shrinks to a **thin authenticated bridge** in front of JoelClaw on blaine. Its operations reduce to `search`, `hydrate`, and `correlate`, returning redacted receipts only. Per-machine transcript file roots, SSH source roots for panda/flagg, and machine-coverage preflight gates are deleted from the Dreamer path.
+
+Cross-machine coverage is JoelClaw's ingest responsibility. If panda or flagg sessions are missing from the index, the dream report states the coverage caveat; it does not block the run.
+
+## Context
+
+The prior build (see `.brain/resources/dream-sequence-memory-fabric.svx`) gated Dreamer readiness on per-machine authority roots. Receipts showed the asymmetry: blaine `5034` authority records, panda `1`, flagg `6`. The SSH roots passed the coverage gate without providing exploration substrate — a dream run would have been blaine talking to itself. JoelClaw already exists as the cross-machine session capture surface; duplicating its ingest per-machine inside the Dreamer was the wrong boundary.
+
+## Trade-offs
+
+- Accepts a dependency on JoelClaw ingest health instead of owning transcript collection. A stale index produces honest-but-thin dreams; that risk belongs to JoelClaw, where it is visible and fixable once for every consumer.
+- VISION.md still applies: no raw Typesense exposure from Cloudflare. The bridge keeps Typesense local, requires a bearer token, and the network boundary (tunnel + `DREAM_MEMORY_RELAY_BASE_URL`/`DREAM_MEMORY_RELAY_TOKEN`) still requires the explicit owner sign-off phrase before exposure.
+
+## Consequences
+
+- Delete: `inventory`, `source-health`, `backfill-plan`, `backfill-run` relay operations from the Dreamer profile; machine-coverage requirements in `src/cartridges/dream-memory-fabric/source-profile.ts`; SSH/file source roots in `.wrangler/workflow-app/dream-relay/source-roots.json`.
+- Verify panda/flagg sessions actually land in JoelClaw (ingest health check) before the first run; report gaps as caveats.
+- Memory-fabric *repair* becomes a separate workflow — see [[dreamer-scope-read-propose]].

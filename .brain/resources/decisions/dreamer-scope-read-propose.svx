@@ -1,0 +1,50 @@
+---
+title: "Dreamer Scope: Read + Correlate + Propose; Repair Is a Separate Workflow"
+type: "decision"
+status: "accepted"
+created_at: "2026-06-10"
+tags:
+  - decision
+  - dreamer
+  - scope
+  - workflows
+---
+
+# Dreamer Scope: Read + Correlate + Propose
+
+## Decision
+
+The Dreamer workflow does three things: **read** transcripts (short/medium/long horizons via the JoelClaw bridge), **correlate** patterns and friction across runtimes/machines/time, and **propose** improvements to the available kernel packages.
+
+Memory-fabric **repair** (inventory, source-health, backfill of derived indexes) is explicitly out of Dreamer scope. Repair is a separate workflow with its own source profile, capabilities, and report — the generic relay/source-family types may serve both, but the Dreamer's preflight must not require repair coverage. This extends the earlier AIHero-split decision: don't smuggle adjacent missions into Dreamer readiness.
+
+Each Dreamer run produces:
+
+1. a **Wzrrd dream report** per `docs/dream-report-canon.md` (dreams first, proof below, generated-machine diagram, Three-R recommendations), and
+2. **kernel-change proposals** as machine-readable `.brain`/svx artifacts with forward and rollback diffs, each individually review-gated.
+
+An approved proposal becomes a versioned kernel package update in the registry (commit to the kernel's Artifacts git repo via leased capability); machines pick it up through the install CLI. Rejected proposals keep their receipts.
+
+The Dreamer runs **on demand** (operator-triggered script against the authed workflow route). No cron dreams, per VISION.md, until manual focused dreaming proves useful.
+
+The run remains generatively planned: the planner lane designs the run-specific XState machine (order, branching, loops, parallelism, Think lanes) from the source profile and goal; the safety envelope verifies effect coverage, hashes, leases, and review gates — not a canned node list.
+
+## Dreamer is data, not platform (added 2026-06-10)
+
+The Dreamer is itself a dynamically generated workflow, not a baked-in concept. The platform gets the Configured Familiar treatment applied to workflows: core code knows source profiles, cartridges, capabilities, planner, envelope — never "dream".
+
+Bake-in found and slated for removal (receipts, post overnight cartridge move):
+
+- `src/app/domain/schemas.ts` carries dream as domain literals: `capability: "dream.memory.relay"`, `secretBindingName: "DREAM_MEMORY_RELAY_TOKEN"`, `idempotencyKeyPrefix: "dream-memory-relay"`, `DreamLiveRunRequestReceiptSchema` (`workflow.dream-live-run-request.v1`). Genericize: capability `memory.relay`, secret binding name carried as profile/lease data, run-request receipt generic over profile id.
+- Cartridge schema version ids are `dream.*.v1`; rename to capability-named versions (`memory.source-profile.v1`, `memory.relay.request.v1`, …). The repair-mission schemas (`dream.backfill-plan.v1`, `dream.source-health.v1`, `dream.source-inventory.v1`) die under the repair cut anyway.
+- Nine `dream`-named scripts hardwire operations to one workflow; collapse into profile-parameterized runners (`workflow-app-run --profile joelhooks/dream-transcript-review`, ditto preflight/relay).
+- The effect-coverage proof (`generated-workflow-proof.ts`) is generic envelope verification but lives inside the dream cartridge typed against Dream schemas; it moves to the platform, parameterized by any profile's required effects.
+- Cartridge renames `dream-memory-fabric` → capability-named (`memory-fabric`), since what it provides is trusted-source memory retrieval; the dream framing lives in the `joelhooks/dream-transcript-review` profile instance.
+
+Definition of un-baked: a second workflow (e.g. the parked AIHero support sweep) can run by seeding data only — source profile, cartridge install, capability grants — with zero new TypeScript in `src/app` and zero new scripts.
+
+## Trade-offs
+
+- Cutting repair means the first dreams may see an imperfect index; accepted, because honest coverage caveats in a real dream beat a blocked run behind an infrastructure mission.
+- Proposals-as-svx (not GitHub PRs) keeps the loop inside the project's own review gates; revisit if proposal volume wants conventional code review.
+- Genericizing domain literals before the first run adds M1 work; accepted because a domain that names one workflow will keep growing workflow-shaped appendages (the repair mission was exactly that).

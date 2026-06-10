@@ -30,11 +30,27 @@ The identity/personality configured by operator data and packs. “ShitRat” is
 
 Core domain code should model actors, packs, plans, capabilities, leases, receipts, and reviews. Familiar names belong in seed data, pack metadata, fixtures, or operator configuration.
 
+### Package
+
+The generic top-level saved primitive: a versioned, hash-pinned unit published to the registry, whose content source of truth is a Cloudflare Artifacts git repo. Kernel packages, context packs, workflow cartridges, and task packages are package kinds. A package does not contain the world; it has specific contents.
+
+D1 indexes package metadata and entitlements. D1 is not the package.
+
+### Kernel Package
+
+A package kind holding agent-construction material: skills, prompts, config, agentic soul. Kernel packages compose as overlays — a base kernel (company-wide, e.g. `badass-kernel`) with operator/familiar kernels layered on top (e.g. `shitrat-kernel`). The composed kernel stack defines what a familiar is on any machine, cloud sandbox or local.
+
+### Task Package
+
+A package kind loaded/saved per run holding task-specific material. Task packages ride alongside the kernel stack; they do not change familiar identity.
+
+### Role
+
+A composition recipe that selects packages (kernel stack, cartridges, task packages) to construct an agent in a sandbox lane. Planner, worker, verifier, and dreamer are roles, not hardcoded agents.
+
 ### Pack
 
-A versioned context package used by the workflow app. The pack’s source of truth is an immutable Cloudflare Artifacts ref plus manifest/hash verification.
-
-D1 indexes pack metadata and entitlements. D1 is not the pack.
+A versioned context package used by the workflow app — one package kind. The pack’s source of truth is an immutable Cloudflare Artifacts ref plus manifest/hash verification.
 
 ### Pack Metadata
 
@@ -113,6 +129,20 @@ A redacted proof that a workflow step or capability operation happened. Receipts
 ### Review Gate
 
 The decision boundary for side effects. Discord dry-run can be explicitly exempt. Real Discord send requires an approval ref and reviewer actor id.
+
+### Dreamer
+
+The transcript-review workflow: it reads agent session transcripts across short/medium/long horizons, correlates patterns and friction across runtimes and machines, and proposes kernel package improvements. Read + correlate + propose only; memory-fabric repair is a separate workflow. Runs on demand, never on cron.
+
+The Dreamer is one configured workflow profile, not a core domain type — the same rule as Configured Familiar. "Dream" belongs in profile ids, goal text, and package data. It must not appear in domain schemas, capability names, secret binding names, schema version ids, or platform script names. The platform sees a generic run request carrying a source profile; that a given run is a dream is data.
+
+### JoelClaw Session Bridge
+
+The thin authenticated local service in front of the JoelClaw session index. It serves search/hydrate/correlate with redacted receipts only — no raw transcripts, paths, or credentials cross the boundary, and Typesense is never exposed to Cloudflare directly. Cross-machine transcript coverage is JoelClaw ingest responsibility, not the bridge's.
+
+### Dream Proposal
+
+A machine-readable kernel-change proposal produced by a Dreamer run: target package, forward diff, rollback diff, supporting receipts. Each proposal is individually review-gated; approval commits to the kernel package's Artifacts repo and publishes a new version.
 
 ## Bounded Contexts In Code
 
