@@ -74,6 +74,7 @@ Cartridge boundary:
 
 - The Dream cartridge is deterministic package data: manifest metadata, source profile, allowed workflow-node exports, lease/report contracts, and proof requirements.
 - The Dream cartridge is not the workflow runner and does not own run-specific topology. It may constrain what must be covered, but it must not hardcode the order, branching, loops, or Think lanes.
+- The Dream source profile may advertise source packs, but source packs are still data. Required source families define Dream readiness; optional source packs require scoped leases; separate-workflow packs are linked as candidates and must not be silently folded into transcript-review Dream readiness.
 - Each Dream run still needs a planner-generated runtime: `workflow.dynamic-plan.v1`, `workflow.xstate-machine.v1`, generated TypeScript source, generated harness source, artifact hashes, and execution proof.
 - The generated-workflow proof should bind the generated plan to the installed source profile and pinned package export, then prove the generated XState/harness artifacts were executed. Binding to a profile is not the same thing as a fixed deterministic phase list.
 

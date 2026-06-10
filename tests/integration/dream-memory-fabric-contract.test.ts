@@ -229,6 +229,10 @@ describe("Dream memory fabric domain contracts", () => {
       ),
       requiredMachines: profile.requiredMachineIds,
       sourceFamilies: profile.sourceFamiliesExpected,
+      sourcePackIds: profile.sourcePacks.map((pack) => pack.packId),
+      sourcePackPolicies: profile.sourcePacks.map(
+        (pack) => pack.selectionPolicy
+      ),
       workflowId: profile.workflowId,
     }).toStrictEqual({
       exportedKind: "source-profile",
@@ -242,7 +246,71 @@ describe("Dream memory fabric domain contracts", () => {
         "docs-pdf-brain",
         "repo-outputs",
       ],
+      sourcePackIds: [
+        "source-pack:joelhooks:work-graph",
+        "source-pack:badass-courses:aihero-support-sweep",
+      ],
+      sourcePackPolicies: ["optional-lease", "separate-workflow"],
       workflowId: "dream.memory-fabric",
+    });
+  });
+
+  it("advertises optional leased source packs without expanding required Dream readiness", () => {
+    const profile = DreamSourceProfileSchema.parse(
+      dreamTranscriptReviewSourceProfile
+    );
+    const workGraphPack = profile.sourcePacks.find(
+      (pack) => pack.packId === "source-pack:joelhooks:work-graph"
+    );
+    const aiheroPack = profile.sourcePacks.find(
+      (pack) =>
+        pack.packId === "source-pack:badass-courses:aihero-support-sweep"
+    );
+
+    expect({
+      aiheroPolicy: aiheroPack?.selectionPolicy,
+      optionalSurfaces: workGraphPack?.surfaces,
+      requiredFamilies: profile.sourceFamiliesExpected,
+      workGraphFamilies: workGraphPack?.sourceFamilies,
+    }).toStrictEqual({
+      aiheroPolicy: "separate-workflow",
+      optionalSurfaces: ["github", "linear", "slack", "org-project-graph"],
+      requiredFamilies: [
+        "agent-transcripts",
+        "brain",
+        "cloudflare-runs",
+        "docs-pdf-brain",
+        "repo-outputs",
+      ],
+      workGraphFamilies: [
+        "comms",
+        "people-org-memory",
+        "repo-outputs",
+        "support",
+      ],
+    });
+  });
+
+  it("rejects Dream source profiles with duplicate source-pack ids", () => {
+    const profile = DreamSourceProfileSchema.parse(
+      dreamTranscriptReviewSourceProfile
+    );
+    const firstPack = profile.sourcePacks.at(0);
+    if (firstPack === undefined) {
+      throw new Error("Expected Dream transcript-review profile source packs.");
+    }
+    const result = DreamSourceProfileSchema.safeParse({
+      ...profile,
+      sourcePacks: [firstPack, firstPack],
+    });
+
+    expect({
+      issueMessage: result.success ? null : result.error.issues.at(0)?.message,
+      success: result.success,
+    }).toStrictEqual({
+      issueMessage:
+        "Dream source profile sourcePacks packId values must be unique.",
+      success: false,
     });
   });
 

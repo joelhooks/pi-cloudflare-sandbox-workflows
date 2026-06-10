@@ -124,6 +124,7 @@ const sourceProfileFingerprint = (input: {
   requiredMachineIds: input.profile.requiredMachineIds,
   requiredRuntimes: input.profile.requiredRuntimes,
   sourceFamiliesExpected: input.profile.sourceFamiliesExpected,
+  sourcePacks: input.profile.sourcePacks,
   timeHorizons: input.profile.timeHorizons,
   workflowId: input.profile.workflowId,
 });

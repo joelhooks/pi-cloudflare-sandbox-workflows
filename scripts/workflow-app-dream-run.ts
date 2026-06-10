@@ -49,6 +49,14 @@ const dreamWorkflowNodePalette = dreamMemoryFabricPackageMetadata.exports
   .map((exportRecord) => exportRecord.nodeType)
   .filter((nodeType): nodeType is string => nodeType !== undefined);
 
+const dreamSourcePackPlannerSummary =
+  dreamTranscriptReviewSourceProfile.sourcePacks
+    .map(
+      (pack) =>
+        `${pack.packId} (${pack.selectionPolicy}; families ${pack.sourceFamilies.join(", ")}; surfaces ${pack.surfaces.join(", ")}; capabilities ${pack.requiredCapabilityKinds.join(", ")})`
+    )
+    .join("; ");
+
 interface DreamRunArgs {
   readonly approvalSignoff?: string;
   readonly localRelayProofPath?: string;
@@ -247,6 +255,7 @@ export const buildDreamLiveRunRequest = (
         "Use only generated workflow.node.invoke states for Dream cartridge work; do not use static Dream branches in the runner.",
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
         `Dream cartridge node palette: ${dreamWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show source inventory, source health, recovery-only backfill receipt, run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, and HITL report effects happened through generated workflow.node.invoke states.`,
+        `Source packs advertised by the installed profile: ${dreamSourcePackPlannerSummary}. Optional-lease packs may be used only when actor scope and leases allow them. Separate-workflow packs must be saved or linked as candidates, not silently folded into transcript-review Dream readiness.`,
         "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
         "Require native runtime coverage for Pi, Codex, Claude, and Cloudflare or state the missing/false-positive coverage explicitly in the report.",
         "Search across horizons: 24h, 7d, 30d, current quarter, and all-time. Do not collapse the dream into a recent-only summary.",

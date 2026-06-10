@@ -4,6 +4,7 @@ import type {
   DreamMemoryRelayOperation,
   DreamRuntime,
   DreamSourceFamily,
+  DreamSourcePack,
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 
 export const dreamTranscriptReviewSourceFamilies = [
@@ -49,6 +50,50 @@ export const dreamTranscriptReviewTimeHorizons = [
   "all-time",
 ] as const satisfies readonly DreamCoverageHorizon[];
 
+export const dreamTranscriptReviewSourcePacks = [
+  {
+    description:
+      "Optional JoelHooks work graph surfaces for correlating agent-run memories with GitHub, Slack, Linear, support, and org/project graph signals when scoped leases are available.",
+    packId: "source-pack:joelhooks:work-graph",
+    packageId: "source-pack/joelhooks-work-graph",
+    privacyTier: "private",
+    requiredCapabilityKinds: [
+      "dream.memory.relay",
+      "github.read",
+      "linear.read",
+      "slack.search",
+    ],
+    scope: {
+      organizationId: "org:joelhooks",
+    },
+    selectionPolicy: "optional-lease",
+    sourceFamilies: ["comms", "people-org-memory", "repo-outputs", "support"],
+    surfaces: ["github", "linear", "slack", "org-project-graph"],
+    title: "JoelHooks Work Graph Source Pack",
+  },
+  {
+    description:
+      "Saved AIHero support/comms/customer/org source pack candidate. This belongs to an AIHero support-sweep workflow, not Dream transcript-review readiness.",
+    packId: "source-pack:badass-courses:aihero-support-sweep",
+    packageId: "workflow/aihero-support-sweep",
+    privacyTier: "customer-private",
+    requiredCapabilityKinds: [
+      "dream.memory.relay",
+      "front.read",
+      "slack.search",
+      "support.review",
+    ],
+    scope: {
+      organizationId: "org:badass-courses",
+      projectId: "aihero-support",
+    },
+    selectionPolicy: "separate-workflow",
+    sourceFamilies: ["brain", "comms", "people-org-memory", "support"],
+    surfaces: ["brain", "front", "slack", "org-project-graph"],
+    title: "AIHero Support Sweep Source Pack Candidate",
+  },
+] as const satisfies readonly DreamSourcePack[];
+
 export const dreamTranscriptReviewSourceProfile =
   DreamSourceProfileSchema.parse({
     allowedRelayOperations: [...dreamTranscriptReviewRelayOperations],
@@ -67,6 +112,7 @@ export const dreamTranscriptReviewSourceProfile =
     requiredRuntimes: [...dreamTranscriptReviewRequiredRuntimes],
     schemaVersion: "dream.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],
+    sourcePacks: [...dreamTranscriptReviewSourcePacks],
     timeHorizons: [...dreamTranscriptReviewTimeHorizons],
     title: "Dream Transcript Review",
     workflowId: "dream.memory-fabric",

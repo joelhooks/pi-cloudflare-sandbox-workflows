@@ -78,6 +78,39 @@ export const DreamMemoryRelayOperationSchema = z.enum([
   "source-health",
 ]);
 
+export const DreamSourceSurfaceSchema = z.enum([
+  "brain",
+  "cloudflare-artifacts",
+  "discord",
+  "front",
+  "github",
+  "joelclaw-docs",
+  "linear",
+  "local-repo",
+  "org-project-graph",
+  "slack",
+  "wzrrd",
+]);
+
+export const DreamSourcePackSelectionPolicySchema = z.enum([
+  "default",
+  "optional-lease",
+  "separate-workflow",
+]);
+
+export const DreamSourcePackSchema = z.object({
+  description: z.string().min(1),
+  packId: z.string().min(1),
+  packageId: z.string().min(1),
+  privacyTier: DreamPrivacyTierSchema,
+  requiredCapabilityKinds: z.array(z.string().min(1)).min(1),
+  scope: DreamSourceScopeSchema,
+  selectionPolicy: DreamSourcePackSelectionPolicySchema,
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1),
+  surfaces: z.array(DreamSourceSurfaceSchema).min(1),
+  title: z.string().min(1),
+});
+
 export const DreamWorkflowEffectSchema = z.enum([
   "backfill-plan",
   "backfill-run",
@@ -108,26 +141,42 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.source-inventory",
 ]);
 
-export const DreamSourceProfileSchema = z.object({
-  allowedRelayOperations: z.array(DreamMemoryRelayOperationSchema).min(1),
-  defaultQuery: z.string().min(1),
-  outputBoundary: z.object({
-    noCustomerDataInPublicArtifacts: z.literal(true),
-    noRawCredentials: z.literal(true),
-    noRawPrivatePaths: z.literal(true),
-    noRawTranscripts: z.literal(true),
-  }),
-  packageId: z.string().min(1),
-  profileId: z.string().min(1),
-  purpose: z.string().min(1),
-  requiredMachineIds: z.array(z.string().min(1)).min(1),
-  requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
-  schemaVersion: z.literal("dream.source-profile.v1"),
-  sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
-  timeHorizons: z.array(DreamCoverageHorizonSchema).min(1),
-  title: z.string().min(1),
-  workflowId: z.string().min(1),
-});
+export const DreamSourceProfileSchema = z
+  .object({
+    allowedRelayOperations: z.array(DreamMemoryRelayOperationSchema).min(1),
+    defaultQuery: z.string().min(1),
+    outputBoundary: z.object({
+      noCustomerDataInPublicArtifacts: z.literal(true),
+      noRawCredentials: z.literal(true),
+      noRawPrivatePaths: z.literal(true),
+      noRawTranscripts: z.literal(true),
+    }),
+    packageId: z.string().min(1),
+    profileId: z.string().min(1),
+    purpose: z.string().min(1),
+    requiredMachineIds: z.array(z.string().min(1)).min(1),
+    requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
+    schemaVersion: z.literal("dream.source-profile.v1"),
+    sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
+    sourcePacks: z.array(DreamSourcePackSchema).default([]),
+    timeHorizons: z.array(DreamCoverageHorizonSchema).min(1),
+    title: z.string().min(1),
+    workflowId: z.string().min(1),
+  })
+  .superRefine((profile, context) => {
+    const packIds = new Set<string>();
+    for (const [index, pack] of profile.sourcePacks.entries()) {
+      if (packIds.has(pack.packId)) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Dream source profile sourcePacks packId values must be unique.",
+          path: ["sourcePacks", index, "packId"],
+        });
+      }
+      packIds.add(pack.packId);
+    }
+  });
 
 export const DreamMemoryRelayPathSchema = z.enum([
   "/memory/backfill/plan",
@@ -811,6 +860,7 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
     requiredMachineIds: z.array(z.string().min(1)).min(1),
     requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
     sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
+    sourcePacks: z.array(DreamSourcePackSchema).default([]),
     timeHorizons: z.array(DreamCoverageHorizonSchema).min(1),
     workflowId: z.string().min(1),
   }),
@@ -1067,6 +1117,11 @@ export type DreamRuntimeCoverageStatus = z.infer<
 export type DreamSignalDocument = z.infer<typeof DreamSignalDocumentSchema>;
 export type DreamSignalKind = z.infer<typeof DreamSignalKindSchema>;
 export type DreamSourceFamily = z.infer<typeof DreamSourceFamilySchema>;
+export type DreamSourcePack = z.infer<typeof DreamSourcePackSchema>;
+export type DreamSourcePackSelectionPolicy = z.infer<
+  typeof DreamSourcePackSelectionPolicySchema
+>;
+export type DreamSourceSurface = z.infer<typeof DreamSourceSurfaceSchema>;
 export type DreamSourceHealthDocument = z.infer<
   typeof DreamSourceHealthDocumentSchema
 >;

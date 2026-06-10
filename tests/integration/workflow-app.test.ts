@@ -3648,6 +3648,7 @@ describe("workflow app integration contract", () => {
           "docs-pdf-brain",
           "repo-outputs",
         ],
+        sourcePacks: dreamTranscriptReviewSourceProfile.sourcePacks,
         timeHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
         workflowId: "dream.memory-fabric",
       },
