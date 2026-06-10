@@ -26,14 +26,14 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T06:17Z status: the Dream relay proof ran locally and passed, but the live Cloudflare Dream did not submit.
+2026-06-10T06:42Z status: the Dream relay proof ran locally and passed, but the live Cloudflare Dream did not submit.
 
 Receipts:
 
-- Local trusted relay proof: `run:dream-relay-local-proof:20260610T061634863Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
-- Local proof coverage: 10 source roots, Pi `4737`, Codex `259`, Claude `129`, and Cloudflare `175` runtime coverage; `blaine`/`panda`/`flagg`/Cloudflare machine coverage; all required Dreamer source families captured; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T06:17:08.942Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T061707360Z-c143439a`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T061707360Z-c143439a-receipt.json`, `submit.attempted=false`.
+- Local trusted relay proof: `run:dream-relay-local-proof:20260610T064219761Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Local proof coverage: 10 source roots, Pi `4737`, Codex `259`, Claude `129`, and Cloudflare `177` runtime coverage; `blaine`/`panda`/`flagg`/Cloudflare machine coverage; all required Dreamer source families captured; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T06:42:35.895Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T064233737Z-4441393c`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T064233737Z-4441393c-receipt.json`, `submit.attempted=false`.
 - Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T06:17:23.191Z`, status `blocked`, no side effects performed.
 
 Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
