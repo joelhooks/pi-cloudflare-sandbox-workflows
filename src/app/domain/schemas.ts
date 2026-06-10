@@ -407,6 +407,7 @@ export const WorkflowLivePreflightRemoteRegistrySchema = z.object({
   expectedPackageManifestHash: Sha256HexSchema.optional(),
   expectedPackageManifestHashMatched: z.boolean().optional(),
   expectedPackageSeeded: z.boolean().optional(),
+  expectedSchemaExportIds: z.array(z.string().min(1)).default([]),
   expectedWorkflowNodeTypes: z.array(z.string().min(1)).default([]),
   packageIds: z.array(z.string().min(1)).default([]),
   packageRows: z.array(WorkflowLivePreflightRemotePackageRowSchema).default([]),

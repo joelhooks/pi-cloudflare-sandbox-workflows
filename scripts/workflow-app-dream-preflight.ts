@@ -48,6 +48,10 @@ const expectedCartridgeWorkflowNodeTypes =
     .filter((exportRecord) => exportRecord.kind === "workflow-node")
     .map((exportRecord) => exportRecord.nodeType)
     .filter((nodeType): nodeType is string => nodeType !== undefined);
+const expectedCartridgeSchemaExportIds =
+  dreamMemoryFabricPackageMetadata.exports
+    .filter((exportRecord) => exportRecord.kind === "schema")
+    .map((exportRecord) => exportRecord.exportId);
 
 const RelayReceiptFamilyCountSchema = z.object({
   family: z.string().min(1),
@@ -821,6 +825,7 @@ const runCommand = (input: RunCommandInput): CommandResult => {
 const expectedRemoteRegistryFields = () => ({
   expectedPackageArtifactRef: expectedCartridgeArtifactRef,
   expectedPackageManifestHash: expectedCartridgeManifestHash,
+  expectedSchemaExportIds: expectedCartridgeSchemaExportIds,
   expectedWorkflowNodeTypes: expectedCartridgeWorkflowNodeTypes,
 });
 
@@ -1005,8 +1010,13 @@ const requiredActionsForRemoteRegistry = (
     remoteRegistry.expectedPackageArtifactRefMatched !== true ||
     remoteRegistry.expectedPackageManifestHashMatched !== true
   ) {
+    const expectedContractSummary = [
+      ...remoteRegistry.expectedWorkflowNodeTypes,
+      ...remoteRegistry.expectedSchemaExportIds,
+    ].join(", ");
+
     return [
-      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.`,
+      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including ${expectedContractSummary}.`,
     ];
   }
 

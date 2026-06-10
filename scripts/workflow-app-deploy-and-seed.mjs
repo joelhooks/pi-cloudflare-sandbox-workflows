@@ -22,6 +22,8 @@ const repoRoot = resolve(import.meta.dirname, "..");
 const configPath = "wrangler.jsonc";
 const defaultReceiptPath =
   ".wrangler/workflow-app/latest-deploy-seed-receipt.json";
+const defaultWorkerUrl =
+  "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
 const packageSeedAdminAuthRetryDelaysMs = [2000, 5000, 10_000];
 const dreamRelaySignoffPhrase =
   "exposing JoelClaw/Typesense over a new network boundary";
@@ -285,7 +287,7 @@ const parseWorkerUrl = (deployOutput) => {
   if (match?.[0]) {
     return match[0];
   }
-  return "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
+  return defaultWorkerUrl;
 };
 
 const postAdminJson = async (workerUrl, path, body) => {
@@ -518,7 +520,10 @@ const addStep = (name, result) => {
   });
 };
 
-let workerUrl = getArgValue("--worker-url") ?? env.WORKFLOW_APP_URL ?? null;
+let workerUrl =
+  getArgValue("--worker-url") ??
+  env.WORKFLOW_APP_URL ??
+  (hasArg("--skip-deploy") ? defaultWorkerUrl : null);
 let deployedWithSecretsFile = false;
 let generatedDreamRelayConfig = null;
 let status = "completed";

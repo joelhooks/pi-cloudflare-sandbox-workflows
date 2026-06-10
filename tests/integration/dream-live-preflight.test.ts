@@ -25,6 +25,7 @@ const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   command: ["pnpm", "exec", "wrangler", "d1", "execute"],
   expectedPackageId: "workflow/dream-memory-fabric",
   expectedPackageSeeded: false,
+  expectedSchemaExportIds: ["dream-hitl-decision-schema"],
   expectedWorkflowNodeTypes: [
     "joelclaw.dream.source-inventory",
     "joelclaw.dream.source-health",
@@ -401,7 +402,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.",
+        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.source-inventory, joelclaw.dream.source-health, joelclaw.dream.backfill-plan, joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, dream-hitl-decision-schema.",
       status: "blocked",
     });
   });

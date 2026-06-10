@@ -1986,6 +1986,39 @@ Validation:
 - `pnpm typecheck:tsc` passed.
 - `pi-notes brain check` passed: `17` Brain pages.
 
+## Dream Preflight Schema Export Proof
+
+On 2026-06-10, the live Dream preflight started recording required Dream package schema exports in addition to workflow-node exports.
+
+Why:
+
+- The Dream package now owns `dream.hitl-decision.v1`.
+- A package manifest hash mismatch should tell the operator which contract is stale, not only which workflow nodes are expected.
+- HITL decision receipt support is package data. It should show up in package readiness proof without adding a Dream-specific runner branch.
+
+Implementation receipt:
+
+- `src/app/domain/schemas.ts` adds `remoteRegistry.expectedSchemaExportIds` to `workflow.live-preflight.v1`.
+- `scripts/workflow-app-dream-preflight.ts` derives expected schema export ids from `dreamMemoryFabricPackageMetadata.exports`.
+- The stale-package required action now includes both expected workflow node types and `dream-hitl-decision-schema`.
+- `scripts/workflow-app-deploy-and-seed.mjs` now defaults package-only seed runs to `https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev` when `--skip-deploy` is set, so `pnpm app:deploy:seed` reaches the package-seed step instead of failing before it can report admin-token state.
+
+Latest receipts:
+
+- Live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:17:55.862Z`, status `blocked`.
+- Expected current Dream package hash: `c1da9f837a79a94ad03489ce3dd396728867c8b00394ea84d562b28f85ae5353`.
+- Remote Dream package hash: `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`.
+- Expected schema export ids: `dream-hitl-decision-schema`.
+- Package-only seed receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T07:18:43.202Z`, status `completed`, package seed `skipped` because local `WORKFLOW_APP_ADMIN_TOKEN` is missing from environment or `.env.local`.
+
+Validation:
+
+- `pnpm vitest run tests/integration/dream-live-preflight.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `2` files, `23` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pi-notes brain check` passed: `17` Brain pages.
+
 ## Live Dream Run Attempt 2026-06-10T07:02:45Z
 
 Command: `pnpm app:dream:run -- --submit`.
