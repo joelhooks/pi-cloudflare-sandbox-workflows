@@ -7,7 +7,7 @@ import type { PackageSeedTemplate } from "../../app/infrastructure/cloudflare-pa
 export const dreamMemoryFabricPackageSeedTemplate: PackageSeedTemplate =
   PackageSeedTemplateSchema.parse({
     description:
-      "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, run/artifact capture receipts, memory search, redacted hydration, and HITL reports.",
+      "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, run/artifact capture receipts, memory search, redacted hydration, HITL reports, and HITL decision receipts.",
     exports: [
       {
         contractRef:
@@ -90,6 +90,11 @@ export const dreamMemoryFabricPackageSeedTemplate: PackageSeedTemplate =
         exportId: "dream-hitl-report",
         kind: "workflow-node",
         nodeType: "joelclaw.dream.hitl-report",
+      },
+      {
+        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
+        exportId: "dream-hitl-decision-schema",
+        kind: "schema",
       },
     ],
     kind: "workflow-pack",

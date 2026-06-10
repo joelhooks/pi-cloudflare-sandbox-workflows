@@ -746,6 +746,140 @@ export const DreamRefinementProposalDocumentSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+export const DreamHitlDecisionTargetKindSchema = z.enum([
+  "dream-card",
+  "refinement-proposal",
+]);
+
+export const DreamHitlDecisionArtifactUpdateTargetKindSchema = z.enum([
+  "brain",
+  "capability-lease",
+  "package",
+  "report",
+  "schema",
+  "workflow",
+]);
+
+export const DreamHitlDecisionSchema = z.object({
+  decision: DreamRefinementProposalRecommendationSchema,
+  decisionId: z.string().min(1),
+  rating: z.number().int().min(1).max(10),
+  reasoning: z.string().min(1),
+  receiptTrail: z.array(DreamReceiptRefSchema).default([]),
+  recommendation: z.string().min(1),
+  reviewedAt: IsoDateTimeSchema,
+  sourceRefs: z.array(ArtifactRefSchema).min(1),
+  summary: z.string().min(1),
+  targetId: z.string().min(1),
+  targetKind: DreamHitlDecisionTargetKindSchema,
+  targetTitle: z.string().min(1),
+});
+
+export const DreamHitlDecisionArtifactUpdateTargetSchema = z.object({
+  sourceRefs: z.array(ArtifactRefSchema).min(1),
+  summary: z.string().min(1),
+  targetKind: DreamHitlDecisionArtifactUpdateTargetKindSchema,
+});
+
+export const DreamHitlDecisionNextWorkflowSeedSchema = z.object({
+  artifactUpdateTargets: z
+    .array(DreamHitlDecisionArtifactUpdateTargetSchema)
+    .default([]),
+  decisionIds: z.array(z.string().min(1)).default([]),
+  plannerInstructions: z.array(z.string().min(1)).default([]),
+  requiredCapabilityKinds: z.array(z.string().min(1)).default([]),
+  sourceRefs: z.array(ArtifactRefSchema).default([]),
+});
+
+export const DreamHitlDecisionDocumentSchema = z
+  .object({
+    decisionCount: z.number().int().min(0),
+    decisions: z.array(DreamHitlDecisionSchema).default([]),
+    generatedAt: IsoDateTimeSchema,
+    nextWorkflowSeed: DreamHitlDecisionNextWorkflowSeedSchema,
+    redacted: z.literal(true),
+    refinementProposalRef: ArtifactRefSchema.optional(),
+    reportRef: ArtifactRefSchema,
+    reviewer: ActorSchema,
+    runId: z.string().min(1),
+    schemaVersion: z.literal("dream.hitl-decision.v1"),
+    sourceRefs: z.array(ArtifactRefSchema).min(1),
+    workItemId: z.string().min(1),
+  })
+  .superRefine((document, context) => {
+    if (document.decisionCount !== document.decisions.length) {
+      context.addIssue({
+        code: "custom",
+        message: "decisionCount must match decisions.length.",
+        path: ["decisionCount"],
+      });
+    }
+
+    const actionableDecisions = document.decisions.filter(
+      (decision) =>
+        decision.decision === "accept" || decision.decision === "turn-into-work"
+    );
+
+    if (actionableDecisions.length === 0) {
+      if (document.nextWorkflowSeed.decisionIds.length > 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "nextWorkflowSeed.decisionIds must be empty when no decision is accepted or turned into work.",
+          path: ["nextWorkflowSeed", "decisionIds"],
+        });
+      }
+      if (document.nextWorkflowSeed.artifactUpdateTargets.length > 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "nextWorkflowSeed.artifactUpdateTargets must be empty when no decision is accepted or turned into work.",
+          path: ["nextWorkflowSeed", "artifactUpdateTargets"],
+        });
+      }
+      return;
+    }
+
+    const seededDecisionIds = new Set(document.nextWorkflowSeed.decisionIds);
+    for (const decision of actionableDecisions) {
+      if (!seededDecisionIds.has(decision.decisionId)) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Accepted or work-conversion decisions must feed the next workflow seed.",
+          path: ["nextWorkflowSeed", "decisionIds"],
+        });
+      }
+    }
+
+    if (document.nextWorkflowSeed.plannerInstructions.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Accepted or work-conversion decisions require planner instructions for the next generated workflow.",
+        path: ["nextWorkflowSeed", "plannerInstructions"],
+      });
+    }
+
+    if (document.nextWorkflowSeed.sourceRefs.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Accepted or work-conversion decisions require source refs for the next generated workflow.",
+        path: ["nextWorkflowSeed", "sourceRefs"],
+      });
+    }
+
+    if (document.nextWorkflowSeed.artifactUpdateTargets.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Accepted or work-conversion decisions require Brain/package/workflow artifact update targets.",
+        path: ["nextWorkflowSeed", "artifactUpdateTargets"],
+      });
+    }
+  });
+
 export const DREAM_HITL_REPORT_SECTION_ORDER = [
   "run-context",
   "actual-dreams",
@@ -1161,6 +1295,22 @@ export type DreamMemorySearchDocument = z.infer<
 export type DreamMemorySearchHit = z.infer<typeof DreamMemorySearchHitSchema>;
 export type DreamPrivacyTier = z.infer<typeof DreamPrivacyTierSchema>;
 export type DreamReceiptRef = z.infer<typeof DreamReceiptRefSchema>;
+export type DreamHitlDecision = z.infer<typeof DreamHitlDecisionSchema>;
+export type DreamHitlDecisionArtifactUpdateTarget = z.infer<
+  typeof DreamHitlDecisionArtifactUpdateTargetSchema
+>;
+export type DreamHitlDecisionArtifactUpdateTargetKind = z.infer<
+  typeof DreamHitlDecisionArtifactUpdateTargetKindSchema
+>;
+export type DreamHitlDecisionDocument = z.infer<
+  typeof DreamHitlDecisionDocumentSchema
+>;
+export type DreamHitlDecisionNextWorkflowSeed = z.infer<
+  typeof DreamHitlDecisionNextWorkflowSeedSchema
+>;
+export type DreamHitlDecisionTargetKind = z.infer<
+  typeof DreamHitlDecisionTargetKindSchema
+>;
 export type DreamRefinementProposal = z.infer<
   typeof DreamRefinementProposalSchema
 >;

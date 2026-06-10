@@ -265,7 +265,7 @@ export const buildDreamLiveRunRequest = (
         'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
         "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
         "Cloudflare must access memory only through the trusted Dream relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
-        "Accepted dreams should propose kernel/package/workflow/schema/access-lease refinements with reasoning, rating, recommendation, and receipt metadata.",
+        "Accepted dreams must be reviewable as dream.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints.",
       ],
     },
     runId: input.runId,

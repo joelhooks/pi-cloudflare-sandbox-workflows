@@ -1955,6 +1955,37 @@ Validation receipts after the dynamic runtime boundary correction:
 - `pi-notes brain check` passed: `17` Brain pages.
 - `git diff --check` passed.
 
+## Dream HITL Decision Receipt Contract
+
+On 2026-06-10, Dream acceptance became a typed cartridge contract instead of report prose.
+
+Decision:
+
+- A Dream report is review input.
+- The human call is a separate `dream.hitl-decision.v1` artifact.
+- Accepted or `turn-into-work` decisions must feed the next generated workflow seed.
+- Held/rejected decisions are still receipts, but they must not silently seed future work.
+
+Implementation receipt:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` defines `DreamHitlDecisionDocumentSchema`, per-decision Three-R fields, reviewer actor, source refs, receipt trail, and `nextWorkflowSeed`.
+- The schema requires actionable decisions to appear in `nextWorkflowSeed.decisionIds`, include planner instructions, include source refs, and declare Brain/package/workflow/schema/report/capability artifact update targets.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `contract://workflow/dream-memory-fabric/hitl-decision.v1` as `dream-hitl-decision-schema` with `kind=schema`. This is package metadata, not a core runner branch.
+- `scripts/workflow-app-dream-run.ts` now asks future Dream runs to make accepted dreams reviewable as `dream.hitl-decision.v1` decisions with update targets and next-workflow seed constraints.
+- `docs/dream-report-canon.md` records the decision receipt pattern: the public Wzrrd report is not the acceptance record.
+
+Local package hash after this contract addition: `c1da9f837a79a94ad03489ce3dd396728867c8b00394ea84d562b28f85ae5353`.
+
+Operational note: the previous remote package seed receipt still advertised the older Dream package hash. Before the next live Dream can claim the cartridge is current, rerun the package seed/deploy path with `WORKFLOW_APP_ADMIN_TOKEN` available and then refresh live preflight.
+
+Validation:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-live-run-request.test.ts` passed: `3` files, `45` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pi-notes brain check` passed: `17` Brain pages.
+
 ## Live Dream Run Attempt 2026-06-10T07:02:45Z
 
 Command: `pnpm app:dream:run -- --submit`.

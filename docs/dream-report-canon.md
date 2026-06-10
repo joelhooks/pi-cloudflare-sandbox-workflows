@@ -116,6 +116,36 @@ Target: .brain/resources/memory-distillation-dreams.svx.
 
 Receipt metadata should be visually secondary. It proves the card is worth review. It is not the main event.
 
+## HITL decision receipt
+
+The report is review input. The human call is a separate artifact:
+
+```txt
+dream.hitl-decision.v1
+```
+
+Use this when Joel accepts, holds, rejects, or turns a dream/proposal into work. Do not bury acceptance inside report prose or a Slack reply.
+
+Each decision records:
+
+```txt
+decision id
+target kind: dream-card or refinement-proposal
+target id/title
+decision: accept, hold, reject, or turn-into-work
+summary
+reasoning
+rating
+recommendation
+receipt trail
+source refs
+reviewer actor
+```
+
+Accepted or work-conversion decisions must also feed the next generated workflow seed. The seed needs planner instructions, source refs, required capability kinds when relevant, and Brain/package/workflow/schema/report/capability update targets.
+
+Held and rejected decisions should not silently seed future work. They stay as review receipts until their blocker changes.
+
 ## Three Rs
 
 Every dream and rollup item uses the Three Rs:

@@ -6,6 +6,7 @@ import {
   DreamBackfillPlanDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
+  DreamHitlDecisionDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayEndpointCatalogSchema,
@@ -224,6 +225,12 @@ describe("Dream memory fabric domain contracts", () => {
     expect({
       exportedKind: sourceProfileExport?.kind,
       packageId: profile.packageId,
+      packageMetadataHasHitlDecisionSchema:
+        dreamMemoryFabricPackageMetadata.exports.some(
+          (exportRecord) =>
+            exportRecord.exportId === "dream-hitl-decision-schema" &&
+            exportRecord.kind === "schema"
+        ),
       packageMetadataHasProfile: dreamMemoryFabricPackageMetadata.exports.some(
         (exportRecord) => exportRecord.kind === "source-profile"
       ),
@@ -237,6 +244,7 @@ describe("Dream memory fabric domain contracts", () => {
     }).toStrictEqual({
       exportedKind: "source-profile",
       packageId: "workflow/dream-memory-fabric",
+      packageMetadataHasHitlDecisionSchema: true,
       packageMetadataHasProfile: true,
       requiredMachines: ["blaine", "panda", "flagg", "cloudflare"],
       sourceFamilies: [
@@ -729,6 +737,173 @@ describe("Dream memory fabric domain contracts", () => {
       schemaVersion: "dream.refinement-proposals.v1",
       targetKind: "kernel-memory",
     });
+  });
+
+  it("captures HITL decisions as receipts that seed the next generated workflow", () => {
+    const decisions = DreamHitlDecisionDocumentSchema.parse({
+      decisionCount: 2,
+      decisions: [
+        {
+          decision: "accept",
+          decisionId: "decision:dream:generated-machine-proof",
+          rating: 9,
+          reasoning:
+            "The report has generated-machine proof, redacted hydration, and enough source refs to promote the finding.",
+          receiptTrail: [receiptRef],
+          recommendation:
+            "Update the Brain/kernel package contract and require this constraint in the next generated Dream workflow.",
+          reviewedAt: timestamp,
+          sourceRefs: [
+            "artifact://dream-preflight/run/dream/hitl-report.json",
+            "artifact://dream-preflight/run/dream/refinement-proposals.json",
+          ],
+          summary:
+            "Generated-machine proof should become a durable Dream workflow constraint.",
+          targetId: "proposal:kernel-memory:1",
+          targetKind: "refinement-proposal",
+          targetTitle: "Promote generated-machine proof memory",
+        },
+        {
+          decision: "hold",
+          decisionId: "decision:dream:optional-slack-pack",
+          rating: 5,
+          reasoning:
+            "The optional source pack needs a scoped Slack lease before it can be included honestly.",
+          receiptTrail: [],
+          recommendation:
+            "Keep it linked as an optional source-pack candidate until the lease exists.",
+          reviewedAt: timestamp,
+          sourceRefs: [
+            "artifact://dream-preflight/run/dream/source-inventory.json",
+          ],
+          summary:
+            "Optional Slack work-graph coverage is not ready for the transcript-review Dream.",
+          targetId: "dream-card:optional-source-packs",
+          targetKind: "dream-card",
+          targetTitle: "Optional source packs need leases",
+        },
+      ],
+      generatedAt: timestamp,
+      nextWorkflowSeed: {
+        artifactUpdateTargets: [
+          {
+            sourceRefs: [
+              "artifact://dream-preflight/run/dream/hitl-report.json",
+              "artifact://dream-preflight/run/dream/refinement-proposals.json",
+            ],
+            summary:
+              "Update Dream Brain/package constraints with generated-machine proof requirements.",
+            targetKind: "brain",
+          },
+          {
+            sourceRefs: [
+              "artifact://dream-preflight/run/dream/refinement-proposals.json",
+            ],
+            summary:
+              "Feed accepted proof constraints into the next generated workflow plan.",
+            targetKind: "workflow",
+          },
+        ],
+        decisionIds: ["decision:dream:generated-machine-proof"],
+        plannerInstructions: [
+          "Treat accepted HITL decisions as constraints for the next generated workflow.",
+          "Do not include held decisions until their capability leases exist.",
+        ],
+        requiredCapabilityKinds: ["brain.update.review"],
+        sourceRefs: [
+          "artifact://dream-preflight/run/dream/hitl-report.json",
+          "artifact://dream-preflight/run/dream/refinement-proposals.json",
+        ],
+      },
+      redacted: true,
+      refinementProposalRef:
+        "artifact://dream-preflight/run/dream/refinement-proposals.json",
+      reportRef: "artifact://dream-preflight/run/dream/hitl-report.json",
+      reviewer: {
+        id: "actor:joel",
+        organizationId: "org:joelhooks",
+        roleIds: ["dream.reviewer"],
+        sessionId: "session:dream-hitl-review",
+        trustTier: "manual",
+        type: "human",
+      },
+      runId: "run-dream-preflight",
+      schemaVersion: "dream.hitl-decision.v1",
+      sourceRefs: [
+        "artifact://dream-preflight/run/dream/hitl-report.json",
+        "artifact://dream-preflight/run/dream/refinement-proposals.json",
+      ],
+      workItemId: "work-item:dream-preflight",
+    });
+
+    expect({
+      actionableSeedIds: decisions.nextWorkflowSeed.decisionIds,
+      decisionCount: decisions.decisionCount,
+      rawTranscriptsReturned:
+        JSON.stringify(decisions).includes("full transcript"),
+      reviewerType: decisions.reviewer.type,
+      schemaVersion: decisions.schemaVersion,
+      updateTargets: decisions.nextWorkflowSeed.artifactUpdateTargets.map(
+        (target) => target.targetKind
+      ),
+    }).toStrictEqual({
+      actionableSeedIds: ["decision:dream:generated-machine-proof"],
+      decisionCount: 2,
+      rawTranscriptsReturned: false,
+      reviewerType: "human",
+      schemaVersion: "dream.hitl-decision.v1",
+      updateTargets: ["brain", "workflow"],
+    });
+  });
+
+  it("rejects accepted HITL decisions that do not feed the next workflow seed", () => {
+    const result = DreamHitlDecisionDocumentSchema.safeParse({
+      decisionCount: 1,
+      decisions: [
+        {
+          decision: "accept",
+          decisionId: "decision:dream:missing-seed",
+          rating: 8,
+          reasoning:
+            "This decision accepts work, but the next workflow seed is empty.",
+          recommendation:
+            "This should fail because acceptance without a seed becomes a dead-end report.",
+          reviewedAt: timestamp,
+          sourceRefs: ["artifact://dream-preflight/run/dream/hitl-report.json"],
+          summary: "Accepted Dream decision with no seed.",
+          targetId: "proposal:workflow:1",
+          targetKind: "refinement-proposal",
+          targetTitle: "Missing seed",
+        },
+      ],
+      generatedAt: timestamp,
+      nextWorkflowSeed: {},
+      redacted: true,
+      reportRef: "artifact://dream-preflight/run/dream/hitl-report.json",
+      reviewer: {
+        id: "actor:joel",
+        organizationId: "org:joelhooks",
+        roleIds: ["dream.reviewer"],
+        sessionId: "session:dream-hitl-review",
+        trustTier: "manual",
+        type: "human",
+      },
+      runId: "run-dream-preflight",
+      schemaVersion: "dream.hitl-decision.v1",
+      sourceRefs: ["artifact://dream-preflight/run/dream/hitl-report.json"],
+      workItemId: "work-item:dream-preflight",
+    });
+
+    expect(result.success).toBeFalsy();
+    if (result.success) {
+      throw new Error("Expected accepted HITL decision without seed to fail.");
+    }
+    expect(result.error.issues.map((issue) => issue.message)).toStrictEqual([
+      "Accepted or work-conversion decisions must feed the next workflow seed.",
+      "Accepted or work-conversion decisions require planner instructions for the next generated workflow.",
+      "Accepted or work-conversion decisions require source refs for the next generated workflow.",
+      "Accepted or work-conversion decisions require Brain/package/workflow artifact update targets.",
+    ]);
   });
 
   it("captures the Dream HITL report as a redacted MDSvX artifact contract", () => {
