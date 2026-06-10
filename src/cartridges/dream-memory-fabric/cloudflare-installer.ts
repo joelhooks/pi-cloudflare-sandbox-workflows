@@ -12,13 +12,10 @@ import { dreamTranscriptReviewSourceProfile } from "./source-profile.ts";
 import { createDreamMemoryFabricWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
 
 export const DreamMemoryFabricCloudflareEnvBindingSchema = z.object({
-  DREAM_MEMORY_RELAY_BASE_URL: z.url().optional(),
-  DREAM_MEMORY_RELAY_SECRET_REF: z
-    .string()
-    .min(1)
-    .default("secretref:dream-memory-relay"),
-  DREAM_MEMORY_RELAY_TOKEN: z.string().optional(),
-  DREAM_MEMORY_RELAY_USER_AGENT: z
+  MEMORY_RELAY_BASE_URL: z.url().optional(),
+  MEMORY_RELAY_SECRET_REF: z.string().min(1).default("secretref:memory-relay"),
+  MEMORY_RELAY_TOKEN: z.string().optional(),
+  MEMORY_RELAY_USER_AGENT: z
     .string()
     .min(1)
     .default("pi-cloudflare-sandbox-workflows/0.0.0"),
@@ -35,7 +32,7 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
   {
     cartridgeId: "workflow/dream-memory-fabric",
     resolve({ bindings }) {
-      const relayBaseUrl = bindings.DREAM_MEMORY_RELAY_BASE_URL;
+      const relayBaseUrl = bindings.MEMORY_RELAY_BASE_URL;
       if (relayBaseUrl === undefined) {
         return {};
       }
@@ -53,12 +50,12 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
         createWorkflowNodeAdapter: ({ artifacts }) => {
           const dreamMemoryRelay = createCloudflareDreamMemoryFabricRelay({
             relayBaseUrl,
-            relaySecretRef: bindings.DREAM_MEMORY_RELAY_SECRET_REF,
+            relaySecretRef: bindings.MEMORY_RELAY_SECRET_REF,
             secretResolver: createCloudflareDreamMemoryRelayTokenResolver({
-              secret: bindings.DREAM_MEMORY_RELAY_TOKEN ?? "",
-              secretRef: bindings.DREAM_MEMORY_RELAY_SECRET_REF,
+              secret: bindings.MEMORY_RELAY_TOKEN ?? "",
+              secretRef: bindings.MEMORY_RELAY_SECRET_REF,
             }),
-            userAgent: bindings.DREAM_MEMORY_RELAY_USER_AGENT,
+            userAgent: bindings.MEMORY_RELAY_USER_AGENT,
           });
 
           return createArtifactBackedWorkflowCartridgeAdapter({

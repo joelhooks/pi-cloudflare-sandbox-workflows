@@ -47,7 +47,7 @@ export const dreamTranscriptReviewSourcePacks = [
     packageId: "source-pack/joelhooks-work-graph",
     privacyTier: "private",
     requiredCapabilityKinds: [
-      "dream.memory.relay",
+      "memory.relay",
       "github.read",
       "linear.read",
       "slack.search",
@@ -67,7 +67,7 @@ export const dreamTranscriptReviewSourcePacks = [
     packageId: "workflow/aihero-support-sweep",
     privacyTier: "customer-private",
     requiredCapabilityKinds: [
-      "dream.memory.relay",
+      "memory.relay",
       "front.read",
       "slack.search",
       "support.review",

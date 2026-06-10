@@ -7,13 +7,13 @@ import { pathToFileURL } from "node:url";
 
 import {
   ActorSchema,
-  DreamLiveRunRequestReceiptSchema,
+  WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
   WorkflowRunRequestSchema,
 } from "../src/app/domain/schemas.ts";
 import type {
   Actor,
-  DreamLiveRunRequestReceipt,
+  WorkflowLiveRunRequestReceipt,
   WorkflowLivePreflightReceipt,
   WorkflowRunRequest,
 } from "../src/app/domain/schemas.ts";
@@ -38,9 +38,9 @@ const requiredPackageIds = [
 ] as const;
 
 const requiredRelayCheckIds = [
-  "env:DREAM_MEMORY_RELAY_BASE_URL",
-  "env:DREAM_MEMORY_RELAY_TOKEN",
-  "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
+  "env:MEMORY_RELAY_BASE_URL",
+  "env:MEMORY_RELAY_TOKEN",
+  "wrangler:MEMORY_RELAY_BASE_URL",
   "relay:healthz",
 ] as const;
 
@@ -82,7 +82,7 @@ export interface BuildDreamLiveRunRequestInput {
   readonly sessionId?: string;
 }
 
-export interface BuildDreamLiveRunRequestReceiptInput {
+export interface BuildWorkflowLiveRunRequestReceiptInput {
   readonly checkedAt: string;
   readonly preflight: PreflightLoadResult;
   readonly preflightPath: string;
@@ -298,8 +298,8 @@ const submitSignoffFor = (input: {
   readonly processEnv: Readonly<Record<string, string | undefined>>;
 }): string | undefined =>
   input.args.approvalSignoff ??
-  input.processEnv["DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF"] ??
-  input.processEnv["DREAM_MEMORY_RELAY_PROVISIONING_SIGNOFF"];
+  input.processEnv["MEMORY_RELAY_APPROVAL_SIGNOFF"] ??
+  input.processEnv["MEMORY_RELAY_PROVISIONING_SIGNOFF"];
 
 const missingSubmitApprovalReasons = (input: {
   readonly args: DreamRunArgs;
@@ -314,14 +314,14 @@ const missingSubmitApprovalReasons = (input: {
     : [missingSubmitSignoffAction];
 };
 
-export const buildDreamLiveRunRequestReceipt = (
-  input: BuildDreamLiveRunRequestReceiptInput
-): DreamLiveRunRequestReceipt => {
+export const buildWorkflowLiveRunRequestReceipt = (
+  input: BuildWorkflowLiveRunRequestReceiptInput
+): WorkflowLiveRunRequestReceipt => {
   const blockedReasons = [
     ...missingReadyReasons(input.preflight),
     ...(input.submitBlockers ?? []),
   ];
-  let status: DreamLiveRunRequestReceipt["status"] = "prepared";
+  let status: WorkflowLiveRunRequestReceipt["status"] = "prepared";
   if (blockedReasons.length > 0) {
     status = "blocked";
   } else if (input.submitAttempted) {
@@ -333,7 +333,7 @@ export const buildDreamLiveRunRequestReceipt = (
         : "failed";
   }
 
-  return DreamLiveRunRequestReceiptSchema.parse({
+  return WorkflowLiveRunRequestReceiptSchema.parse({
     blockedReasons,
     checkedAt: input.checkedAt,
     preflight: {
@@ -355,7 +355,7 @@ export const buildDreamLiveRunRequestReceipt = (
       ? {}
       : { responsePath: input.responsePath }),
     runId: input.request.runId,
-    schemaVersion: "workflow.dream-live-run-request.v1",
+    schemaVersion: "workflow.live-run-request.v1",
     status,
     submit: {
       attempted: input.submitAttempted,
@@ -439,7 +439,7 @@ const submitLiveDreamRunIfAllowed = async (input: {
 
 export const runDreamLiveRunCli = async (
   input: RunDreamLiveRunCliInput
-): Promise<DreamLiveRunRequestReceipt> => {
+): Promise<WorkflowLiveRunRequestReceipt> => {
   const now = new Date();
   const args = parseArgs(input.argv);
   const runId = args.runId ?? defaultRunId(now);
@@ -493,7 +493,7 @@ export const runDreamLiveRunCli = async (
     workerUrl,
   });
 
-  const receipt = buildDreamLiveRunRequestReceipt({
+  const receipt = buildWorkflowLiveRunRequestReceipt({
     checkedAt: now.toISOString(),
     preflight,
     preflightPath: args.preflightPath,

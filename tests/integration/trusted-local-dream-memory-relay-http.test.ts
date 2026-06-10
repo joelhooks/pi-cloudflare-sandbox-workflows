@@ -61,10 +61,10 @@ const relayEnvelope = (input: {
     },
     idempotencyKey: `trusted-local-relay-http:${input.operation}`,
     lease: {
-      capability: "dream.memory.relay",
+      capability: "memory.relay",
       leaseId: `lease:trusted-local-relay-http:${input.operation}`,
       redacted: true,
-      secretRef: "secretref:dream-memory-relay",
+      secretRef: "secretref:memory-relay",
     },
     operation: input.operation,
     payload: input.payload,

@@ -23,7 +23,7 @@ describe("Dream relay local readiness", () => {
     const logs: string[] = [];
 
     await writeJson(resolve(repoRoot, startupEnvPath), {
-      DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+      MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
         {
           authorityRoot: rawAuthorityRoot,
           family: "agent-transcripts",
@@ -35,7 +35,7 @@ describe("Dream relay local readiness", () => {
           sourceSystem: "codex",
         },
       ]),
-      DREAM_MEMORY_RELAY_TOKEN: relayToken,
+      MEMORY_RELAY_TOKEN: relayToken,
     });
 
     const receipt = await runDreamRelayLocalReadinessCli({

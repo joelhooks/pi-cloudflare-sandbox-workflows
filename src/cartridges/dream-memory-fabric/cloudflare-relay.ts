@@ -197,10 +197,10 @@ const relayRequestEnvelope = (input: {
       maxRows: input.budget?.maxRows ?? 1000,
       maxTokens: input.budget?.maxTokens ?? 100_000,
     },
-    idempotencyKey: `dream-memory-relay:${input.payload.runId}:${input.payload.workItemId}:${input.operation}`,
+    idempotencyKey: `memory-relay:${input.payload.runId}:${input.payload.workItemId}:${input.operation}`,
     lease: {
-      capability: "dream.memory.relay",
-      leaseId: `lease:dream-memory-relay:${input.payload.runId}:${input.payload.workItemId}:${input.operation}`,
+      capability: "memory.relay",
+      leaseId: `lease:memory-relay:${input.payload.runId}:${input.payload.workItemId}:${input.operation}`,
       redacted: true,
       secretRef: input.relaySecretRef,
     },
@@ -221,9 +221,9 @@ const relayRequestEnvelope = (input: {
       label: "all-time",
     },
     traceContext: workflowTraceContextForCapability({
-      capability: "dream.memory.relay",
+      capability: "memory.relay",
       runId: input.payload.runId,
-      stepId: `dream-memory-relay:${input.operation}`,
+      stepId: `memory-relay:${input.operation}`,
     }),
     workItemId: input.payload.workItemId,
   });

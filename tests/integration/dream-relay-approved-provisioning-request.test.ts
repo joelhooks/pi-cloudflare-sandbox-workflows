@@ -17,7 +17,7 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 };
 
 const localStartupEnv = () => ({
-  DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+  MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
     {
       authorityRoot: rawAuthorityRoot,
       family: "agent-transcripts",
@@ -29,7 +29,7 @@ const localStartupEnv = () => ({
       sourceSystem: "codex",
     },
   ]),
-  DREAM_MEMORY_RELAY_TOKEN: relayToken,
+  MEMORY_RELAY_TOKEN: relayToken,
 });
 
 const localReadiness = () => ({
@@ -70,9 +70,9 @@ const provisioningPreflight = () => ({
   checkedAt: "2026-06-10T10:45:10.000Z",
   livePreflight: {
     missingCheckIds: [
-      "env:DREAM_MEMORY_RELAY_BASE_URL",
-      "env:DREAM_MEMORY_RELAY_TOKEN",
-      "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
+      "env:MEMORY_RELAY_BASE_URL",
+      "env:MEMORY_RELAY_TOKEN",
+      "wrangler:MEMORY_RELAY_BASE_URL",
       "relay:healthz",
     ],
     path: ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
@@ -124,9 +124,9 @@ const provisioningPreflight = () => ({
     approvalStatus: "required",
     noSideEffectsPerformed: true,
     redacted: true,
-    requiredSecretBindings: ["DREAM_MEMORY_RELAY_TOKEN"],
+    requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
     requiredSignoffPhrase: signoffPhrase,
-    requiredWorkerVars: ["DREAM_MEMORY_RELAY_BASE_URL"],
+    requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
     schemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
     selectedTransportCandidates: [],
     steps: [],

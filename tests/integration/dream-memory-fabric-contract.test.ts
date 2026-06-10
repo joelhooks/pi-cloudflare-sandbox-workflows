@@ -192,7 +192,7 @@ describe("Dream memory fabric domain contracts", () => {
       packageId: "source-pack/joelhooks-work-graph",
       reason: "Generated planner disposition for optional source pack.",
       requiredCapabilityKinds: [
-        "dream.memory.relay",
+        "memory.relay",
         "github.read",
         "linear.read",
         "slack.search",
@@ -240,12 +240,12 @@ describe("Dream memory fabric domain contracts", () => {
         maxRows: 100,
         maxTokens: 25_000,
       },
-      idempotencyKey: "dream-memory-relay:run-dream-preflight:search",
+      idempotencyKey: "memory-relay:run-dream-preflight:search",
       lease: {
-        capability: "dream.memory.relay",
-        leaseId: "lease:dream-memory-relay:run-dream-preflight:search",
+        capability: "memory.relay",
+        leaseId: "lease:memory-relay:run-dream-preflight:search",
         redacted: true,
-        secretRef: "secretref:dream-memory-relay",
+        secretRef: "secretref:memory-relay",
       },
       operation: "search",
       payload: {

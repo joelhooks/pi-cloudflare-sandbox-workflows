@@ -46,7 +46,7 @@ const runId = `run:dream-relay-local-proof:${new Date()
   .toISOString()
   .replaceAll(/[^0-9A-Za-z]+/gu, "")}`;
 const workItemId = "work:dream-relay-local-proof";
-const relaySecretRef = "secretref:dream-memory-relay-local-proof";
+const relaySecretRef = "secretref:memory-relay-local-proof";
 
 const SourceRootsJsonSchema = z.array(
   z.object({
@@ -187,7 +187,7 @@ const relayEnvelope = (input: {
     },
     idempotencyKey: `${runId}:${input.operation}`,
     lease: {
-      capability: "dream.memory.relay",
+      capability: "memory.relay",
       leaseId: `lease:dream-memory-relay-local-proof:${input.operation}`,
       redacted: true,
       secretRef: relaySecretRef,
@@ -385,10 +385,10 @@ const run = async (): Promise<void> => {
     DREAM_DOCS_API_USER_AGENT:
       process.env["DREAM_DOCS_API_USER_AGENT"] ??
       "pi-cloudflare-sandbox-workflows-dream-relay-proof/0.0.0",
-    DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE:
-      process.env["DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ?? "5000",
-    DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: sourceRootsJson,
-    DREAM_MEMORY_RELAY_TOKEN: token,
+    MEMORY_RELAY_MAX_FILES_PER_SOURCE:
+      process.env["MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ?? "5000",
+    MEMORY_RELAY_SOURCE_ROOTS_JSON: sourceRootsJson,
+    MEMORY_RELAY_TOKEN: token,
   });
   const relay = await startTrustedLocalDreamMemoryRelayHttpServer({
     ...config,

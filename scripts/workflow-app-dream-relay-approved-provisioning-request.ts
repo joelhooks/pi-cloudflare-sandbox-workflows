@@ -67,8 +67,8 @@ export const DreamRelayApprovedProvisioningRequestReceiptSchema = z.object({
     https: z.boolean(),
     redacted: z.literal(true),
   }),
-  requiredSecretBindings: z.array(z.literal("DREAM_MEMORY_RELAY_TOKEN")),
-  requiredWorkerVars: z.array(z.literal("DREAM_MEMORY_RELAY_BASE_URL")),
+  requiredSecretBindings: z.array(z.literal("MEMORY_RELAY_TOKEN")),
+  requiredWorkerVars: z.array(z.literal("MEMORY_RELAY_BASE_URL")),
   schemaVersion: z.literal(
     "trusted.dream-memory-relay.approved-provisioning-request.v1"
   ),
@@ -124,10 +124,10 @@ const parseArgs = (
 ): ApprovedProvisioningArgs => {
   const approvalSignoff =
     argValue(argv, "--approval-signoff") ??
-    env["DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF"] ??
-    env["DREAM_MEMORY_RELAY_PROVISIONING_SIGNOFF"];
+    env["MEMORY_RELAY_APPROVAL_SIGNOFF"] ??
+    env["MEMORY_RELAY_PROVISIONING_SIGNOFF"];
   const relayBaseUrl =
-    argValue(argv, "--relay-base-url") ?? env["DREAM_MEMORY_RELAY_BASE_URL"];
+    argValue(argv, "--relay-base-url") ?? env["MEMORY_RELAY_BASE_URL"];
 
   return {
     ...(approvalSignoff === undefined ? {} : { approvalSignoff }),
@@ -243,7 +243,7 @@ const startupSummary = async (
       blockers: ["local-relay-startup-env-invalid"],
       sourceRootCount: 0,
       status: "blocked",
-      tokenConfigured: parsed.data["DREAM_MEMORY_RELAY_TOKEN"] !== undefined,
+      tokenConfigured: parsed.data["MEMORY_RELAY_TOKEN"] !== undefined,
     };
   }
 };
@@ -341,7 +341,7 @@ const provisioningCommands = (
     {
       blockedBy: commandBlockers,
       commandTemplate:
-        "printf '%s' \"$DREAM_MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put DREAM_MEMORY_RELAY_TOKEN --config wrangler.jsonc",
+        "printf '%s' \"$MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put MEMORY_RELAY_TOKEN --config wrangler.jsonc",
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "secret-write",
@@ -351,7 +351,7 @@ const provisioningCommands = (
     {
       blockedBy: commandBlockers,
       commandTemplate:
-        'DREAM_MEMORY_RELAY_BASE_URL="$DREAM_MEMORY_RELAY_BASE_URL" DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF="$DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF" pnpm app:deploy -- --skip-migrations --skip-secrets --skip-seed --dream-relay-approval-signoff="$DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF"',
+        'MEMORY_RELAY_BASE_URL="$MEMORY_RELAY_BASE_URL" MEMORY_RELAY_APPROVAL_SIGNOFF="$MEMORY_RELAY_APPROVAL_SIGNOFF" pnpm app:deploy -- --skip-migrations --skip-secrets --skip-seed --dream-relay-approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"',
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "worker-config",
@@ -370,7 +370,7 @@ const provisioningCommands = (
     {
       blockedBy: commandBlockers,
       commandTemplate:
-        'pnpm app:dream:run --submit --dream-relay-approval-signoff="$DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF"',
+        'pnpm app:dream:run --submit --dream-relay-approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"',
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "live-workflow-submit",
@@ -437,8 +437,8 @@ export const runDreamRelayApprovedProvisioningRequestCli = async (
     noSideEffectsPerformed: true,
     redacted: true,
     relayEndpoint: relayEndpoint.summary,
-    requiredSecretBindings: ["DREAM_MEMORY_RELAY_TOKEN"],
-    requiredWorkerVars: ["DREAM_MEMORY_RELAY_BASE_URL"],
+    requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
+    requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
     schemaVersion:
       "trusted.dream-memory-relay.approved-provisioning-request.v1",
     status: uniqueBlockers.length === 0 ? "ready-to-provision" : "blocked",

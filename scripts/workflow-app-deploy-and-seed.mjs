@@ -32,7 +32,7 @@ const dreamRelayGeneratedConfigPath =
 const deploySecretNames = [
   "PI_AUTH_JSON_B64",
   "WORKFLOW_APP_MODEL",
-  "DREAM_MEMORY_RELAY_TOKEN",
+  "MEMORY_RELAY_TOKEN",
   "DISCORD_BOT_TOKEN",
   "WZRRD_API_TOKEN",
   "GITHUB_TOKEN",
@@ -41,8 +41,8 @@ const deploySecretNames = [
 ];
 const redactedMaterialNames = [
   ...deploySecretNames,
-  "DREAM_MEMORY_RELAY_BASE_URL",
-  "DREAM_MEMORY_RELAY_SECRET_REF",
+  "MEMORY_RELAY_BASE_URL",
+  "MEMORY_RELAY_SECRET_REF",
 ];
 
 const cliArgs = new Set(process.argv.slice(2));
@@ -136,11 +136,11 @@ const redact = (value) => {
 
 const dreamRelayApprovalSignoff = () =>
   getArgValue("--dream-relay-approval-signoff") ??
-  env.DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF ??
-  env.DREAM_MEMORY_RELAY_PROVISIONING_SIGNOFF;
+  env.MEMORY_RELAY_APPROVAL_SIGNOFF ??
+  env.MEMORY_RELAY_PROVISIONING_SIGNOFF;
 
 const parseDreamRelayBaseUrl = () => {
-  const raw = env.DREAM_MEMORY_RELAY_BASE_URL?.trim();
+  const raw = env.MEMORY_RELAY_BASE_URL?.trim();
   if (!raw) {
     return null;
   }
@@ -149,11 +149,11 @@ const parseDreamRelayBaseUrl = () => {
   try {
     url = new URL(raw);
   } catch {
-    throw new Error("DREAM_MEMORY_RELAY_BASE_URL must be a valid HTTPS URL.");
+    throw new Error("MEMORY_RELAY_BASE_URL must be a valid HTTPS URL.");
   }
 
   if (url.protocol !== "https:") {
-    throw new Error("DREAM_MEMORY_RELAY_BASE_URL must use HTTPS.");
+    throw new Error("MEMORY_RELAY_BASE_URL must use HTTPS.");
   }
 
   return url.toString().replace(/\/$/u, "");
@@ -167,16 +167,16 @@ const dreamRelayWorkerVars = () => {
 
   if (dreamRelayApprovalSignoff() !== dreamRelaySignoffPhrase) {
     throw new Error(
-      `Refusing to deploy DREAM_MEMORY_RELAY_BASE_URL without exact sign-off phrase: ${dreamRelaySignoffPhrase}`
+      `Refusing to deploy MEMORY_RELAY_BASE_URL without exact sign-off phrase: ${dreamRelaySignoffPhrase}`
     );
   }
 
   return {
-    DREAM_MEMORY_RELAY_BASE_URL: relayBaseUrl,
-    DREAM_MEMORY_RELAY_SECRET_REF:
-      env.DREAM_MEMORY_RELAY_SECRET_REF ?? "secretref:dream-memory-relay",
-    DREAM_MEMORY_RELAY_USER_AGENT:
-      env.DREAM_MEMORY_RELAY_USER_AGENT ??
+    MEMORY_RELAY_BASE_URL: relayBaseUrl,
+    MEMORY_RELAY_SECRET_REF:
+      env.MEMORY_RELAY_SECRET_REF ?? "secretref:memory-relay",
+    MEMORY_RELAY_USER_AGENT:
+      env.MEMORY_RELAY_USER_AGENT ??
       "pi-cloudflare-sandbox-workflows-dream-relay/0.0.0",
   };
 };

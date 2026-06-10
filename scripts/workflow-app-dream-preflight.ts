@@ -8,7 +8,7 @@ import { z } from "zod";
 import { hashJson } from "../src/app/domain/hash.ts";
 import {
   WorkflowLivePreflightReceiptSchema,
-  WorkflowLivePreflightDreamSourceFamilySchema,
+  WorkflowLivePreflightMemorySourceFamilySchema,
   WorkflowLivePreflightRemotePackageRowSchema,
   WorkflowLivePreflightRelayOperationSchema,
 } from "../src/app/domain/schemas.ts";
@@ -60,7 +60,7 @@ const RelayReceiptFamilyCountSchema = z.object({
 
 const secretEnvNames = [
   "DISCORD_BOT_TOKEN",
-  "DREAM_MEMORY_RELAY_TOKEN",
+  "MEMORY_RELAY_TOKEN",
   "GITHUB_TOKEN",
   "LINEAR_API_TOKEN",
   "PI_AUTH_JSON_B64",
@@ -126,12 +126,12 @@ const envRequirements: readonly EnvRequirement[] = [
     requiredFor: ["cloudflare-agent-runtime"],
   },
   {
-    name: "DREAM_MEMORY_RELAY_BASE_URL",
+    name: "MEMORY_RELAY_BASE_URL",
     required: true,
     requiredFor: ["dream-memory-relay-binding"],
   },
   {
-    name: "DREAM_MEMORY_RELAY_TOKEN",
+    name: "MEMORY_RELAY_TOKEN",
     required: true,
     requiredFor: ["dream-memory-relay-lease"],
   },
@@ -173,7 +173,7 @@ const relayRequiredOperations = z
   .array(WorkflowLivePreflightRelayOperationSchema)
   .parse(dreamTranscriptReviewSourceProfile.allowedRelayOperations);
 const relayAllowedSourceFamilies = z
-  .array(WorkflowLivePreflightDreamSourceFamilySchema)
+  .array(WorkflowLivePreflightMemorySourceFamilySchema)
   .parse(dreamTranscriptReviewSourceProfile.sourceFamiliesExpected);
 const localProofRequiredSourceFamilies = relayAllowedSourceFamilies;
 
@@ -464,17 +464,17 @@ export const checkDreamRelayReadiness = async (input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
 }): Promise<WorkflowLivePreflightCheck> => {
-  const relayBaseUrl = input.env["DREAM_MEMORY_RELAY_BASE_URL"];
-  const relayToken = input.env["DREAM_MEMORY_RELAY_TOKEN"];
+  const relayBaseUrl = input.env["MEMORY_RELAY_BASE_URL"];
+  const relayToken = input.env["MEMORY_RELAY_TOKEN"];
   if (relayBaseUrl === undefined || relayBaseUrl.trim().length === 0) {
     return missingRelayReadinessCheck(
-      "Dream memory relay readiness was not checked because DREAM_MEMORY_RELAY_BASE_URL is missing."
+      "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing."
     );
   }
 
   if (relayToken === undefined || relayToken.trim().length === 0) {
     return missingRelayReadinessCheck(
-      "Dream memory relay readiness was not checked because DREAM_MEMORY_RELAY_TOKEN is missing."
+      "Dream memory relay readiness was not checked because MEMORY_RELAY_TOKEN is missing."
     );
   }
 
@@ -824,24 +824,24 @@ const requiredActionForCheck = (
     return "Set WORKFLOW_APP_MODEL for the Cloudflare Worker agent runtime.";
   }
 
-  if (check.checkId === "env:DREAM_MEMORY_RELAY_BASE_URL") {
-    return "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.";
+  if (check.checkId === "env:MEMORY_RELAY_BASE_URL") {
+    return "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.";
   }
 
-  if (check.checkId === "env:DREAM_MEMORY_RELAY_TOKEN") {
-    return "Provision DREAM_MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.";
+  if (check.checkId === "env:MEMORY_RELAY_TOKEN") {
+    return "Provision MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.";
   }
 
   if (check.checkId === "env:WZRRD_API_TOKEN") {
     return "Provision WZRRD_API_TOKEN so the Dream HITL report can be published as the required Wzrrd document.";
   }
 
-  if (check.checkId === "wrangler:DREAM_MEMORY_RELAY_BASE_URL") {
-    return "Add DREAM_MEMORY_RELAY_BASE_URL to Worker deploy configuration or deploy-time vars.";
+  if (check.checkId === "wrangler:MEMORY_RELAY_BASE_URL") {
+    return "Add MEMORY_RELAY_BASE_URL to Worker deploy configuration or deploy-time vars.";
   }
 
-  if (check.checkId === "deploy-secret:DREAM_MEMORY_RELAY_TOKEN") {
-    return "Add DREAM_MEMORY_RELAY_TOKEN to Worker secret propagation before deploying.";
+  if (check.checkId === "deploy-secret:MEMORY_RELAY_TOKEN") {
+    return "Add MEMORY_RELAY_TOKEN to Worker secret propagation before deploying.";
   }
 
   if (check.checkId === "relay:local-proof") {
@@ -909,7 +909,7 @@ const checkStatusFor = (
 const deployScriptSupportsDreamRelayWorkerVar = (
   deployScriptText: string
 ): boolean =>
-  deployScriptText.includes("DREAM_MEMORY_RELAY_BASE_URL") &&
+  deployScriptText.includes("MEMORY_RELAY_BASE_URL") &&
   deployScriptText.includes("dreamRelaySignoffPhrase");
 
 const workerRelayBaseUrlConfigured = (input: {
@@ -917,8 +917,8 @@ const workerRelayBaseUrlConfigured = (input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly wranglerConfigText: string;
 }): boolean =>
-  input.wranglerConfigText.includes("DREAM_MEMORY_RELAY_BASE_URL") ||
-  (isPresent(input.env["DREAM_MEMORY_RELAY_BASE_URL"]) &&
+  input.wranglerConfigText.includes("MEMORY_RELAY_BASE_URL") ||
+  (isPresent(input.env["MEMORY_RELAY_BASE_URL"]) &&
     deployScriptSupportsDreamRelayWorkerVar(input.deployScriptText));
 
 const checkDreamRelayWorkerBaseUrlConfig = (input: {
@@ -926,10 +926,10 @@ const checkDreamRelayWorkerBaseUrlConfig = (input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly wranglerConfigText: string;
 }): WorkflowLivePreflightCheck => ({
-  checkId: "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
+  checkId: "wrangler:MEMORY_RELAY_BASE_URL",
   message: workerRelayBaseUrlConfigured(input)
-    ? "Worker deploy config or signoff-gated deploy-time injection defines DREAM_MEMORY_RELAY_BASE_URL."
-    : "Worker deploy config does not define DREAM_MEMORY_RELAY_BASE_URL.",
+    ? "Worker deploy config or signoff-gated deploy-time injection defines MEMORY_RELAY_BASE_URL."
+    : "Worker deploy config does not define MEMORY_RELAY_BASE_URL.",
   redacted: true,
   required: true,
   requiredFor: ["dream-memory-relay-binding"],
@@ -944,15 +944,14 @@ const dreamRelayCapabilityFor = (input: {
   readonly wranglerConfigText: string;
 }): WorkflowLivePreflightRelayCapability => {
   const endpointConfigured =
-    isPresent(input.env["DREAM_MEMORY_RELAY_BASE_URL"]) ||
-    input.wranglerConfigText.includes("DREAM_MEMORY_RELAY_BASE_URL");
+    isPresent(input.env["MEMORY_RELAY_BASE_URL"]) ||
+    input.wranglerConfigText.includes("MEMORY_RELAY_BASE_URL");
   const tokenConfigured =
-    isPresent(input.env["DREAM_MEMORY_RELAY_TOKEN"]) ||
-    input.remoteSecretNames.has("DREAM_MEMORY_RELAY_TOKEN");
+    isPresent(input.env["MEMORY_RELAY_TOKEN"]) ||
+    input.remoteSecretNames.has("MEMORY_RELAY_TOKEN");
   const workerBaseUrlConfiguredForDeploy = workerRelayBaseUrlConfigured(input);
   const secretRef =
-    input.env["DREAM_MEMORY_RELAY_SECRET_REF"]?.trim() ||
-    "secretref:dream-memory-relay";
+    input.env["MEMORY_RELAY_SECRET_REF"]?.trim() || "secretref:memory-relay";
 
   return {
     allowedOperations: [...relayRequiredOperations],
@@ -962,11 +961,11 @@ const dreamRelayCapabilityFor = (input: {
       maxRows: 1000,
       maxTokens: 100_000,
     },
-    capability: "dream.memory.relay",
-    idempotencyKeyPrefix: "dream-memory-relay",
+    capability: "memory.relay",
+    idempotencyKeyPrefix: "memory-relay",
     lease: {
       required: true,
-      secretBindingName: "DREAM_MEMORY_RELAY_TOKEN",
+      secretBindingName: "MEMORY_RELAY_TOKEN",
       secretRef,
     },
     readiness: {
@@ -985,7 +984,7 @@ const dreamRelayCapabilityFor = (input: {
       noRawTranscripts: true,
     },
     relayReceiptsRequired: true,
-    traceCapability: "dream.memory.relay",
+    traceCapability: "memory.relay",
   };
 };
 
@@ -1003,13 +1002,12 @@ export const buildDreamLivePreflightReceipt = (
       wranglerConfigText: input.wranglerConfigText,
     }),
     checkSourceText({
-      checkId: "deploy-secret:DREAM_MEMORY_RELAY_TOKEN",
-      missingMessage:
-        "Deploy script does not propagate DREAM_MEMORY_RELAY_TOKEN.",
-      presentMessage: "Deploy script propagates DREAM_MEMORY_RELAY_TOKEN.",
+      checkId: "deploy-secret:MEMORY_RELAY_TOKEN",
+      missingMessage: "Deploy script does not propagate MEMORY_RELAY_TOKEN.",
+      presentMessage: "Deploy script propagates MEMORY_RELAY_TOKEN.",
       requiredFor: ["dream-memory-relay-lease"],
       sourceText: input.deployScriptText,
-      token: "DREAM_MEMORY_RELAY_TOKEN",
+      token: "MEMORY_RELAY_TOKEN",
     }),
     input.localRelayProofCheck,
     input.relayReadinessCheck,

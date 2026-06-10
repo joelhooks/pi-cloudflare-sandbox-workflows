@@ -26,12 +26,12 @@ const exactSignoffAction =
 const invalidSignoffAction =
   "Recorded relay exposure sign-off did not match the required phrase; provide the exact sign-off phrase before provisioning.";
 const localRelaySourceRootsAction =
-  "Set DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay.";
+  "Set MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay.";
 const localRelayTokenAction =
-  "Set DREAM_MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret.";
+  "Set MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret.";
 const localRelayStartupEnvNames = [
-  "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON",
-  "DREAM_MEMORY_RELAY_TOKEN",
+  "MEMORY_RELAY_SOURCE_ROOTS_JSON",
+  "MEMORY_RELAY_TOKEN",
 ] as const;
 const LocalRelayStartupEnvNameSchema = z.enum(localRelayStartupEnvNames);
 
@@ -60,9 +60,9 @@ export const DreamRelayProvisioningPlanSchema = z.object({
   approvalStatus: z.enum(["approved", "invalid", "required"]),
   noSideEffectsPerformed: z.literal(true),
   redacted: z.literal(true),
-  requiredSecretBindings: z.array(z.literal("DREAM_MEMORY_RELAY_TOKEN")),
+  requiredSecretBindings: z.array(z.literal("MEMORY_RELAY_TOKEN")),
   requiredSignoffPhrase: z.literal(signoffPhrase),
-  requiredWorkerVars: z.array(z.literal("DREAM_MEMORY_RELAY_BASE_URL")),
+  requiredWorkerVars: z.array(z.literal("MEMORY_RELAY_BASE_URL")),
   schemaVersion: z.literal("trusted.dream-memory-relay.provisioning-plan.v1"),
   selectedTransportCandidates: z.array(
     z.object({
@@ -580,7 +580,7 @@ const localRelayStartupSummary = (
       redacted: true,
       sourceRootCount: 0,
       status: "blocked",
-      tokenConfigured: (env["DREAM_MEMORY_RELAY_TOKEN"]?.length ?? 0) > 0,
+      tokenConfigured: (env["MEMORY_RELAY_TOKEN"]?.length ?? 0) > 0,
     };
   }
 
@@ -601,7 +601,7 @@ const localRelayStartupSummary = (
   } catch {
     return {
       ...summaryMetadata,
-      invalidEnv: ["DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"],
+      invalidEnv: ["MEMORY_RELAY_SOURCE_ROOTS_JSON"],
       missingEnv: [],
       redacted: true,
       sourceRootCount: 0,
@@ -672,16 +672,16 @@ const recommendedNextActions = (input: {
 
   if (
     input.localRelayStartup.missingEnv.includes(
-      "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"
+      "MEMORY_RELAY_SOURCE_ROOTS_JSON"
     ) ||
     input.localRelayStartup.invalidEnv.includes(
-      "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"
+      "MEMORY_RELAY_SOURCE_ROOTS_JSON"
     )
   ) {
     actions.push(localRelaySourceRootsAction);
   }
 
-  if (input.localRelayStartup.missingEnv.includes("DREAM_MEMORY_RELAY_TOKEN")) {
+  if (input.localRelayStartup.missingEnv.includes("MEMORY_RELAY_TOKEN")) {
     actions.push(localRelayTokenAction);
   }
 
@@ -706,21 +706,19 @@ const recommendedNextActions = (input: {
     );
   }
 
-  if (
-    input.livePreflight.missingCheckIds.includes("env:DREAM_MEMORY_RELAY_TOKEN")
-  ) {
+  if (input.livePreflight.missingCheckIds.includes("env:MEMORY_RELAY_TOKEN")) {
     actions.push(
-      "Provision DREAM_MEMORY_RELAY_TOKEN as a remote Worker secret without printing the token."
+      "Provision MEMORY_RELAY_TOKEN as a remote Worker secret without printing the token."
     );
   }
 
   if (
     input.livePreflight.missingCheckIds.includes(
-      "wrangler:DREAM_MEMORY_RELAY_BASE_URL"
+      "wrangler:MEMORY_RELAY_BASE_URL"
     )
   ) {
     actions.push(
-      "Add DREAM_MEMORY_RELAY_BASE_URL to Worker deploy configuration after the endpoint is approved."
+      "Add MEMORY_RELAY_BASE_URL to Worker deploy configuration after the endpoint is approved."
     );
   }
 
@@ -867,17 +865,15 @@ const buildProvisioningPlan = (input: {
   const relayConfigBlockers = [
     ...relayExposureBlockers,
     ...(input.livePreflight.missingCheckIds.includes(
-      "env:DREAM_MEMORY_RELAY_BASE_URL"
+      "env:MEMORY_RELAY_BASE_URL"
     )
       ? ["missing-dream-memory-relay-base-url"]
       : []),
-    ...(input.livePreflight.missingCheckIds.includes(
-      "env:DREAM_MEMORY_RELAY_TOKEN"
-    )
+    ...(input.livePreflight.missingCheckIds.includes("env:MEMORY_RELAY_TOKEN")
       ? ["missing-dream-memory-relay-token"]
       : []),
     ...(input.livePreflight.missingCheckIds.includes(
-      "wrangler:DREAM_MEMORY_RELAY_BASE_URL"
+      "wrangler:MEMORY_RELAY_BASE_URL"
     )
       ? ["missing-worker-relay-url-config"]
       : []),
@@ -890,9 +886,9 @@ const buildProvisioningPlan = (input: {
     approvalStatus: input.approvalStatus,
     noSideEffectsPerformed: true,
     redacted: true,
-    requiredSecretBindings: ["DREAM_MEMORY_RELAY_TOKEN"],
+    requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
     requiredSignoffPhrase: signoffPhrase,
-    requiredWorkerVars: ["DREAM_MEMORY_RELAY_BASE_URL"],
+    requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
     schemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
     selectedTransportCandidates: transportCandidatesFor(input.networkTools),
     steps: [
@@ -945,11 +941,10 @@ const buildProvisioningPlan = (input: {
       buildProvisioningStep({
         blockedBy: relayExposureBlockers,
         commandTemplate:
-          "printf '%s' \"$DREAM_MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put DREAM_MEMORY_RELAY_TOKEN --config wrangler.jsonc",
+          "printf '%s' \"$MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put MEMORY_RELAY_TOKEN --config wrangler.jsonc",
         description:
           "Provision the relay token as a remote Worker secret without printing token material.",
-        expectedReceipt:
-          "wrangler secret list includes DREAM_MEMORY_RELAY_TOKEN",
+        expectedReceipt: "wrangler secret list includes MEMORY_RELAY_TOKEN",
         requiresSignoff: true,
         sideEffectClass: "secret-write",
         stepId: "provision-worker-relay-token",
@@ -957,7 +952,7 @@ const buildProvisioningPlan = (input: {
       buildProvisioningStep({
         blockedBy: relayExposureBlockers,
         commandTemplate:
-          "deploy Worker with DREAM_MEMORY_RELAY_BASE_URL set to the approved HTTPS relay URL",
+          "deploy Worker with MEMORY_RELAY_BASE_URL set to the approved HTTPS relay URL",
         description:
           "Deploy or configure the Worker with the approved relay base URL.",
         expectedReceipt:

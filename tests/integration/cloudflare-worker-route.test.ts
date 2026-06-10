@@ -234,9 +234,9 @@ describe("Cloudflare Worker route", () => {
     const bindings =
       __cloudflareWorkerRouteTestHooks.WorkerEnvBindingSchema.parse(
         createWorkerEnv({
-          DREAM_MEMORY_RELAY_BASE_URL: "https://dream-relay.example.test",
-          DREAM_MEMORY_RELAY_SECRET_REF: "secretref:dream-memory-relay",
-          DREAM_MEMORY_RELAY_TOKEN: "relay-token",
+          MEMORY_RELAY_BASE_URL: "https://dream-relay.example.test",
+          MEMORY_RELAY_SECRET_REF: "secretref:memory-relay",
+          MEMORY_RELAY_TOKEN: "relay-token",
         })
       );
     const dependency =

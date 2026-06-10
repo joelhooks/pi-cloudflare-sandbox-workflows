@@ -9,11 +9,11 @@ import { z } from "zod";
 
 import { sha256Hex } from "../src/app/domain/hash.ts";
 import {
-  DreamLiveRunRequestReceiptSchema,
+  WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
 } from "../src/app/domain/schemas.ts";
 import type {
-  DreamLiveRunRequestReceipt,
+  WorkflowLiveRunRequestReceipt,
   WorkflowLivePreflightReceipt,
 } from "../src/app/domain/schemas.ts";
 
@@ -202,7 +202,7 @@ export interface DreamReadinessReportInput {
   readonly generatedAt: string;
   readonly localProof: LocalRelayProofReceipt;
   readonly preflight: WorkflowLivePreflightReceipt;
-  readonly runReceipt: DreamLiveRunRequestReceipt;
+  readonly runReceipt: WorkflowLiveRunRequestReceipt;
 }
 
 export interface RunDreamReadinessReportCliInput {
@@ -493,8 +493,8 @@ const workerFacingRelayAuditItem = (
     blockerRefs: input.runReceipt.blockedReasons,
     evidenceRefs: [
       ...auditEvidenceFor(input),
-      `preflight-check:env:DREAM_MEMORY_RELAY_BASE_URL:${preflightCheckStatus(input, "env:DREAM_MEMORY_RELAY_BASE_URL")}`,
-      `preflight-check:env:DREAM_MEMORY_RELAY_TOKEN:${preflightCheckStatus(input, "env:DREAM_MEMORY_RELAY_TOKEN")}`,
+      `preflight-check:env:MEMORY_RELAY_BASE_URL:${preflightCheckStatus(input, "env:MEMORY_RELAY_BASE_URL")}`,
+      `preflight-check:env:MEMORY_RELAY_TOKEN:${preflightCheckStatus(input, "env:MEMORY_RELAY_TOKEN")}`,
       `preflight-check:relay:healthz:${preflightCheckStatus(input, "relay:healthz")}`,
     ],
     requirement:
@@ -745,7 +745,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Recommendation",
     "",
-    "Approve the network boundary explicitly, provision `DREAM_MEMORY_RELAY_TOKEN`, deploy `DREAM_MEMORY_RELAY_BASE_URL` through the signoff-gated path, verify remote `/healthz`, then submit the existing Dream run request shape.",
+    "Approve the network boundary explicitly, provision `MEMORY_RELAY_TOKEN`, deploy `MEMORY_RELAY_BASE_URL` through the signoff-gated path, verify remote `/healthz`, then submit the existing Dream run request shape.",
     "",
     "### Keep the report honest",
     "",
@@ -1152,7 +1152,7 @@ export const runDreamReadinessReportCli = async (
     preflight: WorkflowLivePreflightReceiptSchema.parse(
       await readJsonFile(preflightPath)
     ),
-    runReceipt: DreamLiveRunRequestReceiptSchema.parse(
+    runReceipt: WorkflowLiveRunRequestReceiptSchema.parse(
       await readJsonFile(runReceiptPath)
     ),
   };

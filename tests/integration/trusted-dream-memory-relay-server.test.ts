@@ -74,10 +74,10 @@ const relayRequest = (input: {
     },
     idempotencyKey: `dream-relay-test:${run.runId}:${input.operation}`,
     lease: {
-      capability: "dream.memory.relay",
+      capability: "memory.relay",
       leaseId: `lease:dream-relay-test:${run.runId}:${input.operation}`,
       redacted: true,
-      secretRef: "secretref:dream-memory-relay",
+      secretRef: "secretref:memory-relay",
     },
     operation: input.operation,
     payload: input.payload,
@@ -235,10 +235,7 @@ describe("trusted Dream memory relay server", () => {
       captureRunCapturedRunId: run.runId,
       captureRunKind: "run",
       captureRunOperation: "capture-run",
-      leaseSecretRefs: [
-        "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
-      ],
+      leaseSecretRefs: ["secretref:memory-relay", "secretref:memory-relay"],
       responseLeaksToken: false,
       usedAt: timestamp,
     });

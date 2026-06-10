@@ -66,17 +66,17 @@ describe("Dream relay local startup env", () => {
     expect({
       docsApiConfigured: receipt.docsApiConfigured,
       envContainsRawRoot:
-        startupEnv["DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"]?.includes(
+        startupEnv["MEMORY_RELAY_SOURCE_ROOTS_JSON"]?.includes(
           rawAuthorityRoot
         ),
       receiptContainsRawRoot: serializedReceipt.includes(rawAuthorityRoot),
       receiptContainsToken: serializedReceipt.includes(
-        startupEnv["DREAM_MEMORY_RELAY_TOKEN"] ?? ""
+        startupEnv["MEMORY_RELAY_TOKEN"] ?? ""
       ),
       sourceRootCount: receipt.sourceRootCount,
       startupEnvMode,
       tokenGenerated: receipt.tokenGenerated,
-      tokenLength: startupEnv["DREAM_MEMORY_RELAY_TOKEN"]?.length,
+      tokenLength: startupEnv["MEMORY_RELAY_TOKEN"]?.length,
       tokenPreserved: receipt.tokenPreserved,
     }).toStrictEqual({
       docsApiConfigured: true,
@@ -90,9 +90,7 @@ describe("Dream relay local startup env", () => {
       tokenPreserved: false,
     });
     expect(serializedLogs).not.toContain(rawAuthorityRoot);
-    expect(serializedLogs).not.toContain(
-      startupEnv["DREAM_MEMORY_RELAY_TOKEN"]
-    );
+    expect(serializedLogs).not.toContain(startupEnv["MEMORY_RELAY_TOKEN"]);
   });
 
   it("preserves the existing token unless rotation is requested", async () => {
@@ -116,8 +114,8 @@ describe("Dream relay local startup env", () => {
       },
     ]);
     await writeJson(resolve(repoRoot, startupEnvPath), {
-      DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: "[]",
-      DREAM_MEMORY_RELAY_TOKEN: existingToken,
+      MEMORY_RELAY_SOURCE_ROOTS_JSON: "[]",
+      MEMORY_RELAY_TOKEN: existingToken,
     });
 
     const receipt = await runDreamRelayLocalStartupEnvCli({
@@ -130,7 +128,7 @@ describe("Dream relay local startup env", () => {
     const startupEnv = await readStartupEnv(resolve(repoRoot, startupEnvPath));
 
     expect({
-      token: startupEnv["DREAM_MEMORY_RELAY_TOKEN"],
+      token: startupEnv["MEMORY_RELAY_TOKEN"],
       tokenGenerated: receipt.tokenGenerated,
       tokenPreserved: receipt.tokenPreserved,
     }).toStrictEqual({

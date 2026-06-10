@@ -263,7 +263,7 @@ export const DreamMemoryRelayTimeWindowSchema = z.object({
 });
 
 export const DreamMemoryRelayLeaseRefSchema = z.object({
-  capability: z.literal("dream.memory.relay"),
+  capability: z.literal("memory.relay"),
   leaseId: z.string().min(1),
   redacted: z.literal(true),
   secretRef: z.string().min(1),

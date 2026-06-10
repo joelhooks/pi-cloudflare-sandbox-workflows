@@ -19,7 +19,7 @@ Stop for owner sign-off before exposing JoelClaw/Typesense over a new network bo
 const approvalSignoff =
   "exposing JoelClaw/Typesense over a new network boundary";
 const localRelayStartupEnv = {
-  DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+  MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
     {
       authorityRoot: "/tmp/dream-relay-test",
       family: "agent-transcripts",
@@ -31,7 +31,7 @@ const localRelayStartupEnv = {
       sourceSystem: "pi",
     },
   ]),
-  DREAM_MEMORY_RELAY_TOKEN: "relay-secret",
+  MEMORY_RELAY_TOKEN: "relay-secret",
 };
 const localRelayReadinessProof = JSON.stringify({
   boundHost: "127.0.0.1",
@@ -137,32 +137,31 @@ const livePreflightBlocked = JSON.stringify({
     {
       checkId: "relay:healthz",
       message:
-        "Dream memory relay readiness was not checked because DREAM_MEMORY_RELAY_BASE_URL is missing.",
+        "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-readiness"],
       status: "missing",
     },
     {
-      checkId: "env:DREAM_MEMORY_RELAY_BASE_URL",
-      message: "DREAM_MEMORY_RELAY_BASE_URL is not configured.",
+      checkId: "env:MEMORY_RELAY_BASE_URL",
+      message: "MEMORY_RELAY_BASE_URL is not configured.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-binding"],
       status: "missing",
     },
     {
-      checkId: "env:DREAM_MEMORY_RELAY_TOKEN",
-      message: "DREAM_MEMORY_RELAY_TOKEN is not configured.",
+      checkId: "env:MEMORY_RELAY_TOKEN",
+      message: "MEMORY_RELAY_TOKEN is not configured.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-lease"],
       status: "missing",
     },
     {
-      checkId: "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
-      message:
-        "Worker deploy config does not define DREAM_MEMORY_RELAY_BASE_URL.",
+      checkId: "wrangler:MEMORY_RELAY_BASE_URL",
+      message: "Worker deploy config does not define MEMORY_RELAY_BASE_URL.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-binding"],
@@ -503,20 +502,17 @@ describe("Dream relay provisioning preflight", () => {
     expect({
       localRelayStartup: receipt.localRelayStartup,
       sourceRootsAction: receipt.recommendedNextActions.includes(
-        "Set DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay."
+        "Set MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay."
       ),
       startRelayBlockers: stepsById.get("start-local-trusted-relay")?.blockedBy,
       status: receipt.status,
       tokenAction: receipt.recommendedNextActions.includes(
-        "Set DREAM_MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret."
+        "Set MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret."
       ),
     }).toStrictEqual({
       localRelayStartup: {
         invalidEnv: [],
-        missingEnv: [
-          "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON",
-          "DREAM_MEMORY_RELAY_TOKEN",
-        ],
+        missingEnv: ["MEMORY_RELAY_SOURCE_ROOTS_JSON", "MEMORY_RELAY_TOKEN"],
         redacted: true,
         sourceRootCount: 0,
         status: "blocked",
@@ -725,7 +721,7 @@ describe("Dream relay provisioning preflight", () => {
       JSON.parse(localRelayReadinessProof)
     );
     await writeJson(resolve(repoRoot, localRelayStartupEnvPath), {
-      DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+      MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
         {
           authorityRoot: rawAuthorityRoot,
           family: "agent-transcripts",
@@ -737,7 +733,7 @@ describe("Dream relay provisioning preflight", () => {
           sourceSystem: "codex",
         },
       ]),
-      DREAM_MEMORY_RELAY_TOKEN: relayToken,
+      MEMORY_RELAY_TOKEN: relayToken,
     });
 
     const receipt = await runDreamRelayProvisioningPreflightCli({

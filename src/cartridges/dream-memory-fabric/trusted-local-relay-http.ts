@@ -129,9 +129,7 @@ const parseSourceRootsJson = (
   try {
     parsed = JSON.parse(sourceRootsJson);
   } catch {
-    throw new TypeError(
-      "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON must be valid JSON."
-    );
+    throw new TypeError("MEMORY_RELAY_SOURCE_ROOTS_JSON must be valid JSON.");
   }
 
   return TrustedLocalDreamSourceRootsConfigSchema.parse(parsed).map(
@@ -177,12 +175,12 @@ export const trustedLocalDreamMemoryRelayHttpConfigFromEnv = (
   env: TrustedLocalDreamMemoryRelayEnvironment
 ): TrustedLocalDreamMemoryRelayHttpConfig => {
   const sourceRoots = parseSourceRootsJson(
-    requiredEnv({ env, name: "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON" })
+    requiredEnv({ env, name: "MEMORY_RELAY_SOURCE_ROOTS_JSON" })
   );
   const maxFilesPerSource = parsePositiveInt({
     fallback: DEFAULT_MAX_FILES_PER_SOURCE,
-    name: "DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE",
-    value: env["DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE"],
+    name: "MEMORY_RELAY_MAX_FILES_PER_SOURCE",
+    value: env["MEMORY_RELAY_MAX_FILES_PER_SOURCE"],
   });
 
   return {
@@ -199,13 +197,13 @@ export const trustedLocalDreamMemoryRelayHttpConfigFromEnv = (
         }),
     expectedBearerToken: requiredEnv({
       env,
-      name: "DREAM_MEMORY_RELAY_TOKEN",
+      name: "MEMORY_RELAY_TOKEN",
     }),
-    host: env["DREAM_MEMORY_RELAY_HOST"] ?? DEFAULT_RELAY_HOST,
+    host: env["MEMORY_RELAY_HOST"] ?? DEFAULT_RELAY_HOST,
     maxBodyBytes: parsePositiveInt({
       fallback: DEFAULT_MAX_BODY_BYTES,
-      name: "DREAM_MEMORY_RELAY_MAX_BODY_BYTES",
-      value: env["DREAM_MEMORY_RELAY_MAX_BODY_BYTES"],
+      name: "MEMORY_RELAY_MAX_BODY_BYTES",
+      value: env["MEMORY_RELAY_MAX_BODY_BYTES"],
     }),
     memoryFabric: {
       maxFilesPerSource,
@@ -213,8 +211,8 @@ export const trustedLocalDreamMemoryRelayHttpConfigFromEnv = (
     },
     port: parsePositiveInt({
       fallback: DEFAULT_RELAY_PORT,
-      name: "DREAM_MEMORY_RELAY_PORT",
-      value: env["DREAM_MEMORY_RELAY_PORT"],
+      name: "MEMORY_RELAY_PORT",
+      value: env["MEMORY_RELAY_PORT"],
     }),
   };
 };

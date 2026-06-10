@@ -8,7 +8,7 @@ import { z } from "zod";
 import { runDreamReadinessReportCli } from "../../scripts/workflow-app-dream-readiness-report.ts";
 import { buildDreamLiveRunRequest } from "../../scripts/workflow-app-dream-run.ts";
 import {
-  DreamLiveRunRequestReceiptSchema,
+  WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
 } from "../../src/app/domain/schemas.ts";
 
@@ -101,16 +101,16 @@ const preflight = () =>
     },
     checks: [
       {
-        checkId: "env:DREAM_MEMORY_RELAY_BASE_URL",
-        message: "DREAM_MEMORY_RELAY_BASE_URL is not configured.",
+        checkId: "env:MEMORY_RELAY_BASE_URL",
+        message: "MEMORY_RELAY_BASE_URL is not configured.",
         redacted: true,
         required: true,
         requiredFor: ["dream-memory-relay-binding"],
         status: "missing",
       },
       {
-        checkId: "env:DREAM_MEMORY_RELAY_TOKEN",
-        message: "DREAM_MEMORY_RELAY_TOKEN is not configured.",
+        checkId: "env:MEMORY_RELAY_TOKEN",
+        message: "MEMORY_RELAY_TOKEN is not configured.",
         redacted: true,
         required: true,
         requiredFor: ["dream-memory-relay-lease"],
@@ -144,12 +144,12 @@ const preflight = () =>
         maxRows: 1000,
         maxTokens: 100_000,
       },
-      capability: "dream.memory.relay",
-      idempotencyKeyPrefix: "dream-memory-relay",
+      capability: "memory.relay",
+      idempotencyKeyPrefix: "memory-relay",
       lease: {
         required: true,
-        secretBindingName: "DREAM_MEMORY_RELAY_TOKEN",
-        secretRef: "secretref:dream-memory-relay",
+        secretBindingName: "MEMORY_RELAY_TOKEN",
+        secretRef: "secretref:memory-relay",
       },
       readiness: {
         endpointConfigured: false,
@@ -167,7 +167,7 @@ const preflight = () =>
         noRawTranscripts: true,
       },
       relayReceiptsRequired: true,
-      traceCapability: "dream.memory.relay",
+      traceCapability: "memory.relay",
     },
     remoteRegistry: {
       command: [],
@@ -184,8 +184,8 @@ const preflight = () =>
       status: "queried",
     },
     requiredActions: [
-      "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
-      "Provision DREAM_MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
+      "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+      "Provision MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
       "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
     ],
     schemaVersion: "workflow.live-preflight.v1",
@@ -195,10 +195,10 @@ const preflight = () =>
   });
 
 const runReceipt = (input: { readonly submitAttempted: boolean }) =>
-  DreamLiveRunRequestReceiptSchema.parse({
+  WorkflowLiveRunRequestReceiptSchema.parse({
     blockedReasons: [
-      "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
-      "Provision DREAM_MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
+      "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+      "Provision MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
       "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
     ],
     checkedAt: "2026-06-10T11:00:20.000Z",
@@ -207,7 +207,7 @@ const runReceipt = (input: { readonly submitAttempted: boolean }) =>
       path: ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
       refreshed: true,
       requiredActions: [
-        "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+        "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
       ],
       status: "blocked",
     },
@@ -216,7 +216,7 @@ const runReceipt = (input: { readonly submitAttempted: boolean }) =>
     request: buildDreamLiveRunRequest({ runId }),
     requestPath: `.wrangler/workflow-app/dream-runs/${runId}-request.json`,
     runId,
-    schemaVersion: "workflow.dream-live-run-request.v1",
+    schemaVersion: "workflow.live-run-request.v1",
     status: "blocked",
     submit: {
       attempted: input.submitAttempted,

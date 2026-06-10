@@ -7,11 +7,11 @@ import { z } from "zod";
 
 import {
   buildDreamLiveRunRequest,
-  buildDreamLiveRunRequestReceipt,
+  buildWorkflowLiveRunRequestReceipt,
   runDreamLiveRunCli,
 } from "../../scripts/workflow-app-dream-run.ts";
 import {
-  DreamLiveRunRequestReceiptSchema,
+  WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
@@ -41,12 +41,12 @@ const readyRelayCapability = {
     maxRows: 1000,
     maxTokens: 100_000,
   },
-  capability: "dream.memory.relay",
-  idempotencyKeyPrefix: "dream-memory-relay",
+  capability: "memory.relay",
+  idempotencyKeyPrefix: "memory-relay",
   lease: {
     required: true,
-    secretBindingName: "DREAM_MEMORY_RELAY_TOKEN",
-    secretRef: "secretref:dream-memory-relay",
+    secretBindingName: "MEMORY_RELAY_TOKEN",
+    secretRef: "secretref:memory-relay",
   },
   readiness: {
     endpointConfigured: true,
@@ -64,7 +64,7 @@ const readyRelayCapability = {
     noRawTranscripts: true,
   },
   relayReceiptsRequired: true,
-  traceCapability: "dream.memory.relay",
+  traceCapability: "memory.relay",
 } as const;
 
 const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
@@ -89,7 +89,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
   },
   checks: [
     {
-      checkId: "env:DREAM_MEMORY_RELAY_BASE_URL",
+      checkId: "env:MEMORY_RELAY_BASE_URL",
       message: "Relay URL configured.",
       redacted: true,
       required: true,
@@ -97,7 +97,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       status: "present",
     },
     {
-      checkId: "env:DREAM_MEMORY_RELAY_TOKEN",
+      checkId: "env:MEMORY_RELAY_TOKEN",
       message: "Relay token configured.",
       redacted: true,
       required: true,
@@ -105,7 +105,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       status: "present",
     },
     {
-      checkId: "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
+      checkId: "wrangler:MEMORY_RELAY_BASE_URL",
       message: "Worker deploy config defines relay URL.",
       redacted: true,
       required: true,
@@ -164,7 +164,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
     command: ["pnpm", "exec", "wrangler", "secret", "list"],
     redacted: true,
     secretNames: [
-      "DREAM_MEMORY_RELAY_TOKEN",
+      "MEMORY_RELAY_TOKEN",
       "PI_AUTH_JSON_B64",
       "WORKFLOW_APP_ADMIN_TOKEN",
       "WORKFLOW_APP_MODEL",
@@ -289,7 +289,7 @@ describe("Dream live run request harness", () => {
     const request = buildDreamLiveRunRequest({
       runId: "run-live-dream-memory-fabric-blocked",
     });
-    const receipt = buildDreamLiveRunRequestReceipt({
+    const receipt = buildWorkflowLiveRunRequestReceipt({
       checkedAt: "2026-06-09T22:45:00.000Z",
       preflight: {
         receipt: blockedPreflight,
@@ -351,7 +351,7 @@ describe("Dream live run request harness", () => {
       const request = WorkflowRunRequestSchema.parse(
         JSON.parse(await readFile(resolve(repoRoot, "request.json"), "utf-8"))
       );
-      const writtenReceipt = DreamLiveRunRequestReceiptSchema.parse(
+      const writtenReceipt = WorkflowLiveRunRequestReceiptSchema.parse(
         JSON.parse(await readFile(resolve(repoRoot, "receipt.json"), "utf-8"))
       );
 
@@ -528,7 +528,7 @@ describe("Dream live run request harness", () => {
           return Promise.resolve(blockedPreflight);
         },
       });
-      const writtenReceipt = DreamLiveRunRequestReceiptSchema.parse(
+      const writtenReceipt = WorkflowLiveRunRequestReceiptSchema.parse(
         JSON.parse(await readFile(resolve(repoRoot, "receipt.json"), "utf-8"))
       );
 

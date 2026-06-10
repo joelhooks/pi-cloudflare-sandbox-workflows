@@ -77,16 +77,16 @@ const completeRemoteSecrets: WorkflowLivePreflightRemoteSecretInventory = {
 };
 
 const completeEnv = {
-  DREAM_MEMORY_RELAY_BASE_URL: "https://dream-relay.example.test",
-  DREAM_MEMORY_RELAY_TOKEN: "relay-secret",
+  MEMORY_RELAY_BASE_URL: "https://dream-relay.example.test",
+  MEMORY_RELAY_TOKEN: "relay-secret",
 } as const;
 
 const wranglerWithDreamRelay =
-  '"DREAM_MEMORY_RELAY_BASE_URL": "https://dream-relay.example.test"';
-const deployScriptWithDreamRelayToken = '"DREAM_MEMORY_RELAY_TOKEN"';
+  '"MEMORY_RELAY_BASE_URL": "https://dream-relay.example.test"';
+const deployScriptWithDreamRelayToken = '"MEMORY_RELAY_TOKEN"';
 const deployScriptWithSignoffGatedDreamRelayConfig = [
-  '"DREAM_MEMORY_RELAY_TOKEN"',
-  '"DREAM_MEMORY_RELAY_BASE_URL"',
+  '"MEMORY_RELAY_TOKEN"',
+  '"MEMORY_RELAY_BASE_URL"',
   "dreamRelaySignoffPhrase",
 ].join("\n");
 
@@ -103,7 +103,7 @@ const relayReadinessPassed: WorkflowLivePreflightCheck = {
 const relayReadinessMissing: WorkflowLivePreflightCheck = {
   checkId: "relay:healthz",
   message:
-    "Dream memory relay readiness was not checked because DREAM_MEMORY_RELAY_BASE_URL is missing.",
+    "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
   redacted: true,
   required: true,
   requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
@@ -258,10 +258,10 @@ Wrangler 4.97.0
       actionCount: 11,
       missingAdmin: true,
       relayCapability: {
-        capability: "dream.memory.relay",
+        capability: "memory.relay",
         endpointConfigured: false,
         healthzStatus: "missing",
-        leaseSecretRef: "secretref:dream-memory-relay",
+        leaseSecretRef: "secretref:memory-relay",
         localProofStatus: "missing",
         noRawTranscripts: true,
         operationCount: 6,
@@ -327,10 +327,10 @@ Wrangler 4.97.0
           "repo-outputs",
         ],
         healthzStatus: "passed",
-        idempotencyKeyPrefix: "dream-memory-relay",
-        secretBindingName: "DREAM_MEMORY_RELAY_TOKEN",
+        idempotencyKeyPrefix: "memory-relay",
+        secretBindingName: "MEMORY_RELAY_TOKEN",
         tokenConfigured: true,
-        traceCapability: "dream.memory.relay",
+        traceCapability: "memory.relay",
       },
       requiredActions: [],
       requiredGeneratedArtifacts: [
@@ -365,7 +365,7 @@ Wrangler 4.97.0
       wranglerConfigText: "",
     });
     const relayConfigCheck = receipt.checks.find(
-      (check) => check.checkId === "wrangler:DREAM_MEMORY_RELAY_BASE_URL"
+      (check) => check.checkId === "wrangler:MEMORY_RELAY_BASE_URL"
     );
 
     expect({
@@ -378,7 +378,7 @@ Wrangler 4.97.0
     }).toStrictEqual({
       leakedRelaySecret: false,
       relayConfigMessage:
-        "Worker deploy config or signoff-gated deploy-time injection defines DREAM_MEMORY_RELAY_BASE_URL.",
+        "Worker deploy config or signoff-gated deploy-time injection defines MEMORY_RELAY_BASE_URL.",
       relayConfigStatus: "passed",
       status: "ready",
       workerBaseUrlConfigured: true,

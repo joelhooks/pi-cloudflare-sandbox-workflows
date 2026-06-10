@@ -3365,7 +3365,7 @@ describe("workflow app integration contract", () => {
                 return {
                   ...disposition,
                   capabilityKinds: [
-                    "dream.memory.relay",
+                    "memory.relay",
                     "github.read",
                     "linear.read",
                     "slack.search",
@@ -3941,7 +3941,7 @@ describe("workflow app integration contract", () => {
             capabilityKinds: [],
             leaseRefs: [],
             missingCapabilityKinds: [
-              "dream.memory.relay",
+              "memory.relay",
               "github.read",
               "linear.read",
               "slack.search",
@@ -3951,7 +3951,7 @@ describe("workflow app integration contract", () => {
             reason:
               "Skipped until scoped source-pack leases are available for this generated run.",
             requiredCapabilityKinds: [
-              "dream.memory.relay",
+              "memory.relay",
               "github.read",
               "linear.read",
               "slack.search",
@@ -3975,7 +3975,7 @@ describe("workflow app integration contract", () => {
             reason:
               "Saved as a separate workflow candidate so support/comms surfaces do not alter transcript-review Dream readiness.",
             requiredCapabilityKinds: [
-              "dream.memory.relay",
+              "memory.relay",
               "front.read",
               "slack.search",
               "support.review",

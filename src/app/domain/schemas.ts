@@ -443,7 +443,7 @@ export const WorkflowLivePreflightRelayOperationSchema = z.enum([
   "signals",
 ]);
 
-export const WorkflowLivePreflightDreamSourceFamilySchema = z.enum([
+export const WorkflowLivePreflightMemorySourceFamilySchema = z.enum([
   "agent-transcripts",
   "brain",
   "cloudflare-runs",
@@ -457,18 +457,18 @@ export const WorkflowLivePreflightDreamSourceFamilySchema = z.enum([
 export const WorkflowLivePreflightRelayCapabilitySchema = z.object({
   allowedOperations: z.array(WorkflowLivePreflightRelayOperationSchema).min(1),
   allowedSourceFamilies: z
-    .array(WorkflowLivePreflightDreamSourceFamilySchema)
+    .array(WorkflowLivePreflightMemorySourceFamilySchema)
     .min(1),
   budget: z.object({
     maxFiles: z.number().int().min(1),
     maxRows: z.number().int().min(1),
     maxTokens: z.number().int().min(1),
   }),
-  capability: z.literal("dream.memory.relay"),
-  idempotencyKeyPrefix: z.literal("dream-memory-relay"),
+  capability: z.literal("memory.relay"),
+  idempotencyKeyPrefix: z.literal("memory-relay"),
   lease: z.object({
     required: z.literal(true),
-    secretBindingName: z.literal("DREAM_MEMORY_RELAY_TOKEN"),
+    secretBindingName: z.literal("MEMORY_RELAY_TOKEN"),
     secretRef: z.string().min(1),
   }),
   readiness: z.object({
@@ -487,7 +487,7 @@ export const WorkflowLivePreflightRelayCapabilitySchema = z.object({
     noRawTranscripts: z.literal(true),
   }),
   relayReceiptsRequired: z.literal(true),
-  traceCapability: z.literal("dream.memory.relay"),
+  traceCapability: z.literal("memory.relay"),
 });
 
 export const WorkflowLivePreflightReceiptSchema = z.object({
@@ -1906,7 +1906,7 @@ export const WorkflowRunRequestSchema = z.object({
   workItemId: z.string().min(1),
 });
 
-export const DreamLiveRunRequestReceiptSchema = z.object({
+export const WorkflowLiveRunRequestReceiptSchema = z.object({
   blockedReasons: z.array(z.string().min(1)).default([]),
   checkedAt: IsoDateTimeSchema,
   preflight: z.object({
@@ -1922,7 +1922,7 @@ export const DreamLiveRunRequestReceiptSchema = z.object({
   requestPath: z.string().min(1),
   responsePath: z.string().min(1).optional(),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.dream-live-run-request.v1"),
+  schemaVersion: z.literal("workflow.live-run-request.v1"),
   status: z.enum(["blocked", "failed", "prepared", "submitted"]),
   submit: z.object({
     attempted: z.boolean(),
@@ -2081,8 +2081,8 @@ export type WorkflowLivePreflightRemoteRegistry = z.infer<
 export type WorkflowLivePreflightRemoteSecretInventory = z.infer<
   typeof WorkflowLivePreflightRemoteSecretInventorySchema
 >;
-export type DreamLiveRunRequestReceipt = z.infer<
-  typeof DreamLiveRunRequestReceiptSchema
+export type WorkflowLiveRunRequestReceipt = z.infer<
+  typeof WorkflowLiveRunRequestReceiptSchema
 >;
 export type AgentAuthLease = z.infer<typeof AgentAuthLeaseSchema>;
 export type WorkflowTraceContext = z.infer<typeof WorkflowTraceContextSchema>;

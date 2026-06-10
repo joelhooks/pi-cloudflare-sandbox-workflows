@@ -140,7 +140,7 @@ const buildStartupEnv = (input: {
   readonly sourceRootsJson: string;
 }): StartupEnvBuildResult => {
   const { existingEnv, processEnv } = input;
-  const existingToken = existingEnv?.["DREAM_MEMORY_RELAY_TOKEN"];
+  const existingToken = existingEnv?.["MEMORY_RELAY_TOKEN"];
   const tokenPreserved =
     !input.rotateToken &&
     existingToken !== undefined &&
@@ -153,24 +153,24 @@ const buildStartupEnv = (input: {
       processEnv["DREAM_DOCS_API_BASE_URL"] ?? defaultDocsApiBaseUrl,
     DREAM_DOCS_API_USER_AGENT:
       processEnv["DREAM_DOCS_API_USER_AGENT"] ?? defaultDocsApiUserAgent,
-    DREAM_MEMORY_RELAY_HOST:
-      processEnv["DREAM_MEMORY_RELAY_HOST"] ??
-      existingEnv?.["DREAM_MEMORY_RELAY_HOST"] ??
+    MEMORY_RELAY_HOST:
+      processEnv["MEMORY_RELAY_HOST"] ??
+      existingEnv?.["MEMORY_RELAY_HOST"] ??
       "127.0.0.1",
-    DREAM_MEMORY_RELAY_MAX_BODY_BYTES:
-      processEnv["DREAM_MEMORY_RELAY_MAX_BODY_BYTES"] ??
-      existingEnv?.["DREAM_MEMORY_RELAY_MAX_BODY_BYTES"] ??
+    MEMORY_RELAY_MAX_BODY_BYTES:
+      processEnv["MEMORY_RELAY_MAX_BODY_BYTES"] ??
+      existingEnv?.["MEMORY_RELAY_MAX_BODY_BYTES"] ??
       "4000000",
-    DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE:
-      processEnv["DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ??
-      existingEnv?.["DREAM_MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ??
+    MEMORY_RELAY_MAX_FILES_PER_SOURCE:
+      processEnv["MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ??
+      existingEnv?.["MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ??
       "5000",
-    DREAM_MEMORY_RELAY_PORT:
-      processEnv["DREAM_MEMORY_RELAY_PORT"] ??
-      existingEnv?.["DREAM_MEMORY_RELAY_PORT"] ??
+    MEMORY_RELAY_PORT:
+      processEnv["MEMORY_RELAY_PORT"] ??
+      existingEnv?.["MEMORY_RELAY_PORT"] ??
       "8789",
-    DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: input.sourceRootsJson,
-    DREAM_MEMORY_RELAY_TOKEN: token,
+    MEMORY_RELAY_SOURCE_ROOTS_JSON: input.sourceRootsJson,
+    MEMORY_RELAY_TOKEN: token,
   });
 
   return { startupEnv, tokenPreserved };
