@@ -26,6 +26,19 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T09:42Z run attempt: Dream was pushed through the current local relay and live-run gates again. Local readiness/proof passed; live Cloudflare submit still correctly did not happen.
+
+Receipts:
+
+- `pnpm app:dream:relay:local-env` refreshed `.wrangler/workflow-app/dream-relay/latest-local-startup-env-receipt.json` at `2026-06-10T09:42:24.226Z`: `sourceRootCount=10`, `tokenConfigured=true`, `tokenPreserved=true`, `docsApiConfigured=true`, `rawCredentialsReturned=false`, `rawPathsReturned=false`.
+- `pnpm app:dream:relay:readiness` refreshed `.wrangler/workflow-app/dream-relay/latest-local-readiness.json` at `2026-06-10T09:42:24.581Z`: `status=passed`, 10 source roots, 10 supported operations, authenticated local `/healthz`, no raw path/credential return.
+- `pnpm app:dream:relay:proof` completed local proof `run:dream-relay-local-proof:20260610T094224922Z`: 10 source roots, 12 search hits, 12 hydrated redacted receipts, 48 correlation edges, 35 correlation nodes, no missing machine ids, no missing source families, and no raw credential/path leak flags.
+- `pnpm app:dream:relay:provisioning-preflight` refreshed `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json` at `2026-06-10T09:42:33.735Z`: local startup ready, local readiness passed, local proof passed, but status remains `blocked` because the Worker-facing relay gates and exact owner sign-off are missing.
+- New command `pnpm app:dream:relay:approved-provisioning` wrote `.wrangler/workflow-app/dream-relay/latest-approved-provisioning-request.json` at `2026-06-10T09:42:34.103Z`. The receipt is redacted, `noSideEffectsPerformed=true`, local readiness/startup/provisioning checks are good, and the blocked command templates are for Worker secret provisioning, Worker relay URL deploy, remote healthz verification, and live submit. Current blockers: `missing-exact-owner-signoff` and `missing-dream-memory-relay-base-url`.
+- `pnpm app:dream:run --submit` wrote run request `run-live-dream-memory-fabric-20260610T094234491Z-1084440b` with receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T094234491Z-1084440b-receipt.json`: `status=blocked`, `submit.attempted=false`. The generated request still asks for the installed Dream cartridge, generated `workflow.xstate-machine.v1`, generated harness, T-shaped horizons, native runtime coverage, canonical Wzrrd HITL report, HITL decision seed, and follow-up run request.
+
+This is still not a live Dream. It is a stronger honest run request: the local relay is ready and proven, the approval handoff is now explicit, and the live runner still refuses to fake Cloudflare execution without approved HTTPS relay URL, remote Worker token, Worker deploy config, authenticated remote `/healthz`, and exact network-boundary sign-off.
+
 2026-06-10T09:26Z run attempt: local relay readiness is now proven separately from Worker-facing relay readiness. Live Dream submit still correctly did not happen.
 
 Receipts:
