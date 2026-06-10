@@ -26,6 +26,19 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:35Z run attempt: Dreaming exercised the trusted local memory fabric and prepared a live Cloudflare Dream request, but did not submit because the Worker-facing relay boundary is still unconfigured.
+
+Receipts:
+
+- `pnpm app:dream:relay:proof` completed local proof `run:dream-relay-local-proof:20260610T103510004Z` and wrote `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- The redacted proof saw `sourceRootCount=10`, `sourceCount=10`, runtime coverage for `pi=4737`, `codex=259`, `claude=129`, and `cloudflare=211`, and machine coverage for `blaine`, `panda`, `flagg`, and `cloudflare`.
+- Source-family coverage was captured for `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; search returned 12 hits, hydrated 12 redacted receipts, mined 8 signal receipts, and built a correlation graph with 35 nodes and 48 edges.
+- The proof stayed inside the redaction envelope: `rawCredentialsReturned=false`, `rawPathsReturned=false`, and `rawPathLeaked=false`.
+- `pnpm app:dream:preflight --allow-missing` confirmed the live Dream cartridge is seeded in remote D1 with expected artifact ref/hash, and remote Worker secrets exist for `PI_AUTH_JSON_B64`, `WORKFLOW_APP_MODEL`, `WORKFLOW_APP_ADMIN_TOKEN`, and `WZRRD_API_TOKEN`.
+- `pnpm app:dream:run --refresh-preflight` wrote request `run-live-dream-memory-fabric-20260610T103545976Z-78082440` and receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T103545976Z-78082440-receipt.json`; status is `blocked`, `submit.attempted=false`.
+
+This is still not a live Cloudflare Dream. The honest blocker is unchanged: set Worker-facing `DREAM_MEMORY_RELAY_BASE_URL`, provision remote `DREAM_MEMORY_RELAY_TOKEN`, add relay URL to Worker config, verify authenticated remote `/healthz`, then submit only with explicit network-boundary approval.
+
 2026-06-10T10:33Z implementation progress: Dream integration fixture adapters moved out of app infrastructure and into the Dream cartridge.
 
 Receipts:
