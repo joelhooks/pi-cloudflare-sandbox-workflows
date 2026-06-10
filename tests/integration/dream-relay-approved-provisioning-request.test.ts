@@ -4,7 +4,8 @@ import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { runDreamRelayApprovedProvisioningRequestCli } from "../../scripts/workflow-app-dream-relay-approved-provisioning-request.ts";
+import { runMemoryRelayApprovedProvisioningRequestCli } from "../../scripts/workflow-app-relay-approved-provisioning-request.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
 const rawAuthorityRoot = "/private/tmp/dream-relay-approved-provisioning";
@@ -58,7 +59,7 @@ const localReadiness = () => ({
   rawCredentialsReturned: false,
   rawPathsReturned: false,
   redacted: true,
-  schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
+  schemaVersion: "trusted.memory-relay.local-readiness-proof.v1",
   sourceRootCount: 1,
   startupEnvRef:
     ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json",
@@ -93,7 +94,7 @@ const provisioningPreflight = () => ({
     rawCredentialsReturned: false,
     rawPathLeaked: false,
     rawPathsReturned: false,
-    runId: "run:dream-relay-local-proof:test",
+    runId: "run:memory-relay-local-proof:test",
     sourceRootCount: 1,
     status: "passed",
   },
@@ -134,13 +135,13 @@ const provisioningPreflight = () => ({
     requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
     requiredSignoffPhrase: signoffPhrase,
     requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
-    schemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
+    schemaVersion: "trusted.memory-relay.provisioning-plan.v1",
     selectedTransportCandidates: [],
     steps: [],
   },
   recommendedNextActions: [],
   redacted: true,
-  schemaVersion: "trusted.dream-memory-relay.provisioning-preflight.v1",
+  schemaVersion: "trusted.memory-relay.provisioning-preflight.v1",
   status: "blocked",
 });
 
@@ -180,8 +181,12 @@ describe("Memory relay approved provisioning request", () => {
 
     await writeFixtureFiles(repoRoot);
 
-    const receipt = await runDreamRelayApprovedProvisioningRequestCli({
-      argv: [`--relay-base-url=${relayBaseUrl}`],
+    const receipt = await runMemoryRelayApprovedProvisioningRequestCli({
+      argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
+        `--relay-base-url=${relayBaseUrl}`,
+      ],
       log: (message) => {
         logs.push(message);
       },
@@ -214,8 +219,10 @@ describe("Memory relay approved provisioning request", () => {
 
     await writeFixtureFiles(repoRoot);
 
-    const receipt = await runDreamRelayApprovedProvisioningRequestCli({
+    const receipt = await runMemoryRelayApprovedProvisioningRequestCli({
       argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
         `--approval-signoff=${signoffPhrase}`,
         `--relay-base-url=${relayBaseUrl}`,
       ],
@@ -254,8 +261,10 @@ describe("Memory relay approved provisioning request", () => {
 
     await writeFixtureFiles(repoRoot);
 
-    const receipt = await runDreamRelayApprovedProvisioningRequestCli({
+    const receipt = await runMemoryRelayApprovedProvisioningRequestCli({
       argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
         `--approval-signoff=${signoffPhrase}`,
         "--relay-base-url=http://localhost:8789",
       ],
@@ -270,7 +279,7 @@ describe("Memory relay approved provisioning request", () => {
       relayHttps: receipt.relayEndpoint.https,
       status: receipt.status,
     }).toStrictEqual({
-      blockers: ["dream-memory-relay-base-url-not-https"],
+      blockers: ["memory-relay-base-url-not-https"],
       relayHttps: false,
       status: "blocked",
     });

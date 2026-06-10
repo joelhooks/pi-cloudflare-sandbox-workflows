@@ -5,7 +5,8 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { runDreamRelayLocalStartupEnvCli } from "../../scripts/workflow-app-dream-relay-local-startup-env.ts";
+import { runMemoryRelayLocalStartupEnvCli } from "../../scripts/workflow-app-relay-local-startup-env.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());
 
@@ -51,8 +52,10 @@ describe("Memory relay local startup env", () => {
       },
     ]);
 
-    const receipt = await runDreamRelayLocalStartupEnvCli({
+    const receipt = await runMemoryRelayLocalStartupEnvCli({
       argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
         `--source-roots=${sourceRootsPath}`,
         `--out=${startupEnvPath}`,
         `--receipt=${receiptPath}`,
@@ -124,8 +127,13 @@ describe("Memory relay local startup env", () => {
       MEMORY_RELAY_TOKEN: existingToken,
     });
 
-    const receipt = await runDreamRelayLocalStartupEnvCli({
-      argv: [`--source-roots=${sourceRootsPath}`, `--out=${startupEnvPath}`],
+    const receipt = await runMemoryRelayLocalStartupEnvCli({
+      argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
+        `--source-roots=${sourceRootsPath}`,
+        `--out=${startupEnvPath}`,
+      ],
       log: () => {},
       now: () => "2026-06-10T09:31:00.000Z",
       processEnv: {},

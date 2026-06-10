@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import { requireInstalledSourceProfile } from "./workflow-app-profile.ts";
 
 const defaultSourceRootsPath =
   ".wrangler/workflow-app/memory-relay/source-roots.json";
@@ -17,11 +18,11 @@ const defaultReceiptPath =
   ".wrangler/workflow-app/memory-relay/latest-local-startup-env-receipt.json";
 const defaultDocsApiBaseUrl = "https://joelclaw.com/api/docs";
 const defaultDocsApiUserAgent =
-  "pi-cloudflare-sandbox-workflows-dream-relay/0.0.0";
+  "pi-cloudflare-sandbox-workflows-memory-relay/0.0.0";
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());
 
-export const DreamRelayLocalStartupEnvReceiptSchema = z.object({
+export const MemoryRelayLocalStartupEnvReceiptSchema = z.object({
   docsApiConfigured: z.boolean(),
   envRef: z.string().min(1),
   generatedAt: z.string().min(1),
@@ -30,9 +31,7 @@ export const DreamRelayLocalStartupEnvReceiptSchema = z.object({
   rawCredentialsReturned: z.literal(false),
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
-  schemaVersion: z.literal(
-    "trusted.dream-memory-relay.local-startup-env-receipt.v1"
-  ),
+  schemaVersion: z.literal("trusted.memory-relay.local-startup-env-receipt.v1"),
   sourceRootCount: z.number().int().min(1),
   sourceRootsRef: z.string().min(1),
   tokenConfigured: z.literal(true),
@@ -40,11 +39,11 @@ export const DreamRelayLocalStartupEnvReceiptSchema = z.object({
   tokenPreserved: z.boolean(),
 });
 
-export type DreamRelayLocalStartupEnvReceipt = z.infer<
-  typeof DreamRelayLocalStartupEnvReceiptSchema
+export type MemoryRelayLocalStartupEnvReceipt = z.infer<
+  typeof MemoryRelayLocalStartupEnvReceiptSchema
 >;
 
-export interface DreamRelayLocalStartupEnvCliInput {
+export interface MemoryRelayLocalStartupEnvCliInput {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly now?: () => string;
@@ -52,7 +51,7 @@ export interface DreamRelayLocalStartupEnvCliInput {
   readonly repoRoot: string;
 }
 
-interface DreamRelayLocalStartupEnvArgs {
+interface MemoryRelayLocalStartupEnvArgs {
   readonly receiptPath: string;
   readonly rotateToken: boolean;
   readonly sourceRootsPath: string;
@@ -89,7 +88,9 @@ const argValue = (
 const hasFlag = (argv: readonly string[], name: string): boolean =>
   argv.includes(name);
 
-const parseArgs = (argv: readonly string[]): DreamRelayLocalStartupEnvArgs => ({
+const parseArgs = (
+  argv: readonly string[]
+): MemoryRelayLocalStartupEnvArgs => ({
   receiptPath: argValue(argv, "--receipt") ?? defaultReceiptPath,
   rotateToken: hasFlag(argv, "--rotate-token"),
   sourceRootsPath: argValue(argv, "--source-roots") ?? defaultSourceRootsPath,
@@ -182,8 +183,8 @@ const receiptFor = (input: {
   readonly sourceRootsPath: string;
   readonly startupEnvPath: string;
   readonly tokenPreserved: boolean;
-}): DreamRelayLocalStartupEnvReceipt =>
-  DreamRelayLocalStartupEnvReceiptSchema.parse({
+}): MemoryRelayLocalStartupEnvReceipt =>
+  MemoryRelayLocalStartupEnvReceiptSchema.parse({
     docsApiConfigured: input.config.docsApi !== undefined,
     envRef: safeLocalArtifactRef(input.startupEnvPath),
     generatedAt: input.generatedAt,
@@ -192,7 +193,7 @@ const receiptFor = (input: {
     rawCredentialsReturned: false,
     rawPathsReturned: false,
     redacted: true,
-    schemaVersion: "trusted.dream-memory-relay.local-startup-env-receipt.v1",
+    schemaVersion: "trusted.memory-relay.local-startup-env-receipt.v1",
     sourceRootCount: input.config.memoryFabric.sourceRoots.length,
     sourceRootsRef: safeLocalArtifactRef(input.sourceRootsPath),
     tokenConfigured: true,
@@ -200,9 +201,10 @@ const receiptFor = (input: {
     tokenPreserved: input.tokenPreserved,
   });
 
-export const runDreamRelayLocalStartupEnvCli = async (
-  input: DreamRelayLocalStartupEnvCliInput
-): Promise<DreamRelayLocalStartupEnvReceipt> => {
+export const runMemoryRelayLocalStartupEnvCli = async (
+  input: MemoryRelayLocalStartupEnvCliInput
+): Promise<MemoryRelayLocalStartupEnvReceipt> => {
+  requireInstalledSourceProfile(input.argv);
   const args = parseArgs(input.argv);
   const sourceRootsPath = resolve(input.repoRoot, args.sourceRootsPath);
   const startupEnvPath = resolve(input.repoRoot, args.startupEnvPath);
@@ -236,7 +238,7 @@ export const runDreamRelayLocalStartupEnvCli = async (
 
 if (isMain()) {
   try {
-    await runDreamRelayLocalStartupEnvCli({
+    await runMemoryRelayLocalStartupEnvCli({
       argv: process.argv.slice(2),
       repoRoot: process.cwd(),
     });
@@ -245,7 +247,7 @@ if (isMain()) {
       JSON.stringify(
         {
           error: {
-            code: "dream_relay_local_startup_env_failed",
+            code: "memory_relay_local_startup_env_failed",
             message:
               error instanceof Error
                 ? error.message
@@ -253,8 +255,7 @@ if (isMain()) {
             redacted: true,
           },
           redacted: true,
-          schemaVersion:
-            "trusted.dream-memory-relay.local-startup-env-error.v1",
+          schemaVersion: "trusted.memory-relay.local-startup-env-error.v1",
           status: "failed",
         },
         null,

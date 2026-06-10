@@ -11,6 +11,7 @@ import {
   trustedLocalMemoryRelayHttpConfigFromEnv,
   trustedLocalMemoryRelayReadinessReceipt,
 } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import { requireInstalledSourceProfile } from "./workflow-app-profile.ts";
 
 const defaultLocalRelayStartupEnvPath =
   ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
@@ -48,6 +49,7 @@ const readStartupEnvArtifact = async (
 };
 
 const start = async (): Promise<void> => {
+  const profile = requireInstalledSourceProfile(process.argv.slice(2));
   const startupEnvPath = resolve(
     argValue("--local-relay-startup-env-path") ??
       defaultLocalRelayStartupEnvPath
@@ -57,15 +59,26 @@ const start = async (): Promise<void> => {
     ...startupEnvArtifact,
     ...process.env,
   });
-  const relay = await startTrustedLocalMemoryRelayHttpServer(config);
   const receipt = trustedLocalMemoryRelayReadinessReceipt({ config });
+  const supportedOperations = new Set<string>(receipt.supportedOperations);
+  const missingProfileOperations = profile.allowedRelayOperations.filter(
+    (operation) => !supportedOperations.has(operation)
+  );
+  if (missingProfileOperations.length > 0) {
+    throw new Error(
+      `Trusted local Memory relay does not support operations required by ${profile.profileId}: ${missingProfileOperations.join(", ")}.`
+    );
+  }
+
+  const relay = await startTrustedLocalMemoryRelayHttpServer(config);
 
   console.log(
     JSON.stringify(
       {
         healthUrl: `${relay.url}/healthz`,
+        profileId: profile.profileId,
         redacted: true,
-        schemaVersion: "trusted.dream-memory-relay.startup.v1",
+        schemaVersion: "trusted.memory-relay.startup.v1",
         sourceRootCount: receipt.adapter.sourceRoots.length,
         supportedOperations: receipt.supportedOperations,
         url: relay.url,
@@ -92,7 +105,7 @@ if (isMain()) {
             redacted: true,
           },
           redacted: true,
-          schemaVersion: "trusted.dream-memory-relay.startup-error.v1",
+          schemaVersion: "trusted.memory-relay.startup-error.v1",
         },
         null,
         2

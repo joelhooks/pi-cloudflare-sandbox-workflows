@@ -31,24 +31,23 @@ import type {
   MemoryReceiptRef,
   MemorySignalDocument,
 } from "../src/cartridges/memory-fabric/schemas.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
 import { trustedJoelClawSessionMachineCoverageFor } from "../src/cartridges/memory-fabric/trusted-joelclaw-session-source.ts";
 import {
   startTrustedLocalMemoryRelayHttpServer,
   trustedLocalMemoryRelayHttpConfigFromEnv,
   TrustedLocalMemoryRelayReadinessReceiptSchema,
 } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import { requireInstalledSourceProfile } from "./workflow-app-profile.ts";
 
 const DEFAULT_SOURCE_ROOTS_PATH =
   ".wrangler/workflow-app/memory-relay/source-roots.json";
 const DEFAULT_RECEIPT_PATH =
   ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const DEFAULT_DOCS_API_BASE_URL = "https://joelclaw.com/api/docs";
-const DEFAULT_QUERY = dreamTranscriptReviewSourceProfile.defaultQuery;
-const runId = `run:dream-relay-local-proof:${new Date()
+const runId = `run:memory-relay-local-proof:${new Date()
   .toISOString()
   .replaceAll(/[^0-9A-Za-z]+/gu, "")}`;
-const workItemId = "work:dream-relay-local-proof";
+const workItemId = "work:memory-relay-local-proof";
 const relaySecretRef = "secretref:memory-relay-local-proof";
 
 const SourceRootsJsonSchema = z.array(
@@ -114,7 +113,7 @@ const LocalRelayProofReceiptSchema = z.object({
     supportedOperations: z.array(z.string().min(1)),
   }),
   runId: z.string().min(1),
-  schemaVersion: z.literal("trusted.dream-memory-relay.local-proof.v1"),
+  schemaVersion: z.literal("trusted.memory-relay.local-proof.v1"),
   search: z.object({
     hitCount: z.number().int().min(0),
     hydratedCount: z.number().int().min(0),
@@ -168,23 +167,24 @@ const actor = ActorSchema.parse({
   id: "actor:joel",
   organizationId: "org:joelhooks",
   roleIds: ["owner", "operator"],
-  sessionId: "session:dream-relay-local-proof",
+  sessionId: "session:memory-relay-local-proof",
   trustTier: "manual",
   type: "human",
 });
 
-const dreamTranscriptReviewSourceFamilies =
-  dreamTranscriptReviewSourceProfile.sourceFamiliesExpected;
-
-const sourceFamiliesForPayload = (payload: {
-  readonly sourceFamilies?: readonly MemorySourceFamily[] | undefined;
-  readonly sourceFamiliesExpected?: readonly MemorySourceFamily[] | undefined;
-}): readonly MemorySourceFamily[] =>
+const sourceFamiliesForPayload = (
+  payload: {
+    readonly sourceFamilies?: readonly MemorySourceFamily[] | undefined;
+    readonly sourceFamiliesExpected?: readonly MemorySourceFamily[] | undefined;
+  },
+  expectedSourceFamilies: readonly MemorySourceFamily[]
+): readonly MemorySourceFamily[] =>
   payload.sourceFamilies ??
   payload.sourceFamiliesExpected ??
-  dreamTranscriptReviewSourceFamilies;
+  expectedSourceFamilies;
 
 const relayEnvelope = (input: {
+  readonly expectedSourceFamilies: readonly MemorySourceFamily[];
   readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
 }) => {
@@ -198,7 +198,12 @@ const relayEnvelope = (input: {
 
   return MemoryRelayRequestEnvelopeSchema.parse({
     actor,
-    allowedSourceFamilies: [...sourceFamiliesForPayload(payloadWithFamilies)],
+    allowedSourceFamilies: [
+      ...sourceFamiliesForPayload(
+        payloadWithFamilies,
+        input.expectedSourceFamilies
+      ),
+    ],
     budget: {
       maxFiles: 5000,
       maxRows: 1000,
@@ -207,7 +212,7 @@ const relayEnvelope = (input: {
     idempotencyKey: `${runId}:${input.operation}`,
     lease: {
       capability: "memory.relay",
-      leaseId: `lease:dream-memory-relay-local-proof:${input.operation}`,
+      leaseId: `lease:memory-relay-local-proof:${input.operation}`,
       redacted: true,
       secretRef: relaySecretRef,
     },
@@ -230,10 +235,10 @@ const relayEnvelope = (input: {
       label: "all-time",
     },
     traceContext: {
-      parentSpanId: "span:dream-relay-local-proof:workflow",
+      parentSpanId: "span:memory-relay-local-proof:workflow",
       redacted: true,
-      spanId: `span:dream-relay-local-proof:${input.operation}`,
-      traceId: "trace:dream-relay-local-proof",
+      spanId: `span:memory-relay-local-proof:${input.operation}`,
+      traceId: "trace:memory-relay-local-proof",
     },
     workItemId,
   });
@@ -242,6 +247,7 @@ const relayEnvelope = (input: {
 const postOperation = async <TDocument>(input: {
   readonly baseUrl: string;
   readonly documentSchema: z.ZodType<TDocument>;
+  readonly expectedSourceFamilies: readonly MemorySourceFamily[];
   readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
   readonly token: string;
@@ -251,6 +257,7 @@ const postOperation = async <TDocument>(input: {
     {
       body: JSON.stringify(
         relayEnvelope({
+          expectedSourceFamilies: input.expectedSourceFamilies,
           operation: input.operation,
           payload: input.payload,
         })
@@ -293,7 +300,7 @@ const healthz = async (input: {
 };
 
 const artifactRef = (name: string) =>
-  ArtifactRefSchema.parse(`artifact://local-dream-relay-proof/${name}.json`);
+  ArtifactRefSchema.parse(`artifact://memory-relay-local-proof/${name}.json`);
 
 const rawRootsFromConfig = (sourceRootsJson: string): readonly string[] => {
   const sourceRoots = SourceRootsJsonSchema.parse(JSON.parse(sourceRootsJson));
@@ -376,7 +383,7 @@ const sourceFamilyCoverageFor = (input: {
         ? {}
         : {
             missingReason:
-              "No trusted relay retrieval receipt covered this source family; report this as a Dream coverage caveat.",
+              "No trusted relay retrieval receipt covered this source family; report this as a run coverage caveat.",
           }),
       receiptCount,
       sourceIds,
@@ -391,11 +398,13 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 };
 
 const run = async (): Promise<void> => {
+  const profile = requireInstalledSourceProfile(process.argv.slice(2));
+  const expectedSourceFamilies = profile.sourceFamiliesExpected;
   const sourceRootsPath = resolve(
     argValue("--source-roots") ?? DEFAULT_SOURCE_ROOTS_PATH
   );
   const receiptPath = resolve(argValue("--out") ?? DEFAULT_RECEIPT_PATH);
-  const query = argValue("--query") ?? DEFAULT_QUERY;
+  const query = argValue("--query") ?? profile.defaultQuery;
   const sourceRootsJson = await readFile(sourceRootsPath, "utf-8");
   const token = randomBytes(32).toString("hex");
   const config = trustedLocalMemoryRelayHttpConfigFromEnv({
@@ -403,7 +412,7 @@ const run = async (): Promise<void> => {
       process.env["MEMORY_DOCS_API_BASE_URL"] ?? DEFAULT_DOCS_API_BASE_URL,
     MEMORY_DOCS_API_USER_AGENT:
       process.env["MEMORY_DOCS_API_USER_AGENT"] ??
-      "pi-cloudflare-sandbox-workflows-dream-relay-proof/0.0.0",
+      "pi-cloudflare-sandbox-workflows-memory-relay-proof/0.0.0",
     MEMORY_RELAY_MAX_FILES_PER_SOURCE:
       process.env["MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ?? "5000",
     MEMORY_RELAY_SOURCE_ROOTS_JSON: sourceRootsJson,
@@ -419,12 +428,13 @@ const run = async (): Promise<void> => {
     const captureRun = await postOperation<MemoryCaptureReceiptDocument>({
       baseUrl: relay.url,
       documentSchema: MemoryCaptureReceiptDocumentSchema,
+      expectedSourceFamilies,
       operation: "capture-run",
       payload: {
         actor,
         readability: "actor-private",
         runId,
-        sourceFamilies: dreamTranscriptReviewSourceFamilies,
+        sourceFamilies: expectedSourceFamilies,
         sourceSystem: "cloudflare-workflow-run",
         targetRunId: runId,
         workItemId,
@@ -434,6 +444,7 @@ const run = async (): Promise<void> => {
     const captureArtifact = await postOperation<MemoryCaptureReceiptDocument>({
       baseUrl: relay.url,
       documentSchema: MemoryCaptureReceiptDocumentSchema,
+      expectedSourceFamilies,
       operation: "capture-artifact",
       payload: {
         actor,
@@ -453,13 +464,14 @@ const run = async (): Promise<void> => {
     const signals = await postOperation<MemorySignalDocument>({
       baseUrl: relay.url,
       documentSchema: MemorySignalDocumentSchema,
+      expectedSourceFamilies,
       operation: "signals",
       payload: {
         actor,
         maxSignals: 8,
         query,
         runId,
-        sourceFamilies: dreamTranscriptReviewSourceFamilies,
+        sourceFamilies: expectedSourceFamilies,
         workItemId,
       },
       token,
@@ -467,13 +479,14 @@ const run = async (): Promise<void> => {
     const search = await postOperation<MemorySearchDocument>({
       baseUrl: relay.url,
       documentSchema: MemorySearchDocumentSchema,
+      expectedSourceFamilies,
       operation: "search",
       payload: {
         actor,
         maxHits: 12,
         query,
         runId,
-        sourceFamilies: dreamTranscriptReviewSourceFamilies,
+        sourceFamilies: expectedSourceFamilies,
         workItemId,
       },
       token,
@@ -491,6 +504,7 @@ const run = async (): Promise<void> => {
         : await postOperation<MemoryHydrationDocument>({
             baseUrl: relay.url,
             documentSchema: MemoryHydrationDocumentSchema,
+            expectedSourceFamilies,
             operation: "hydrate",
             payload: {
               actor,
@@ -503,6 +517,7 @@ const run = async (): Promise<void> => {
     const correlation = await postOperation<MemoryCorrelationGraphDocument>({
       baseUrl: relay.url,
       documentSchema: MemoryCorrelationGraphDocumentSchema,
+      expectedSourceFamilies,
       operation: "correlate",
       payload: {
         actor,
@@ -567,7 +582,7 @@ const run = async (): Promise<void> => {
         supportedOperations: readiness.supportedOperations,
       },
       runId,
-      schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-proof.v1",
       search: {
         hitCount: search.hits.length,
         hydratedCount: hydration.hydrated.length,
@@ -589,7 +604,7 @@ const run = async (): Promise<void> => {
           ...searchReceipts,
           ...hydration.hydrated.map((item) => item.receipt),
         ],
-        expectedSourceFamilies: dreamTranscriptReviewSourceFamilies,
+        expectedSourceFamilies,
       }),
       sourceRootCount: readiness.adapter.sourceRoots.length,
       workItemId,
@@ -602,7 +617,7 @@ const run = async (): Promise<void> => {
           receiptPath,
           redacted: true,
           runId,
-          schemaVersion: "trusted.dream-memory-relay.local-proof.completed.v1",
+          schemaVersion: "trusted.memory-relay.local-proof.completed.v1",
           status: "completed",
         },
         null,
@@ -630,7 +645,7 @@ if (isMain()) {
             redacted: true,
           },
           redacted: true,
-          schemaVersion: "trusted.dream-memory-relay.local-proof-error.v1",
+          schemaVersion: "trusted.memory-relay.local-proof-error.v1",
           status: "failed",
         },
         null,

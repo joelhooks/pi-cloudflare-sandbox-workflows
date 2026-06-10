@@ -25,10 +25,10 @@ const defaultReceiptPath =
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
 const packageSeedAdminAuthRetryDelaysMs = [2000, 5000, 10_000];
-const dreamRelaySignoffPhrase =
+const memoryRelaySignoffPhrase =
   "exposing JoelClaw/Typesense over a new network boundary";
-const dreamRelayGeneratedConfigPath =
-  ".wrangler/workflow-app/wrangler.dream-relay.jsonc";
+const memoryRelayGeneratedConfigPath =
+  ".wrangler/workflow-app/wrangler.memory-relay.jsonc";
 const deploySecretNames = [
   "PI_AUTH_JSON_B64",
   "WORKFLOW_APP_MODEL",
@@ -134,12 +134,12 @@ const redact = (value) => {
   return redacted;
 };
 
-const dreamRelayApprovalSignoff = () =>
-  getArgValue("--dream-relay-approval-signoff") ??
+const memoryRelayApprovalSignoff = () =>
+  getArgValue("--memory-relay-approval-signoff") ??
   env.MEMORY_RELAY_APPROVAL_SIGNOFF ??
   env.MEMORY_RELAY_PROVISIONING_SIGNOFF;
 
-const parseDreamRelayBaseUrl = () => {
+const parseMemoryRelayBaseUrl = () => {
   const raw = env.MEMORY_RELAY_BASE_URL?.trim();
   if (!raw) {
     return null;
@@ -159,15 +159,15 @@ const parseDreamRelayBaseUrl = () => {
   return url.toString().replace(/\/$/u, "");
 };
 
-const dreamRelayWorkerVars = () => {
-  const relayBaseUrl = parseDreamRelayBaseUrl();
+const memoryRelayWorkerVars = () => {
+  const relayBaseUrl = parseMemoryRelayBaseUrl();
   if (relayBaseUrl === null) {
     return null;
   }
 
-  if (dreamRelayApprovalSignoff() !== dreamRelaySignoffPhrase) {
+  if (memoryRelayApprovalSignoff() !== memoryRelaySignoffPhrase) {
     throw new Error(
-      `Refusing to deploy MEMORY_RELAY_BASE_URL without exact sign-off phrase: ${dreamRelaySignoffPhrase}`
+      `Refusing to deploy MEMORY_RELAY_BASE_URL without exact sign-off phrase: ${memoryRelaySignoffPhrase}`
     );
   }
 
@@ -177,11 +177,11 @@ const dreamRelayWorkerVars = () => {
       env.MEMORY_RELAY_SECRET_REF ?? "secretref:memory-relay",
     MEMORY_RELAY_USER_AGENT:
       env.MEMORY_RELAY_USER_AGENT ??
-      "pi-cloudflare-sandbox-workflows-dream-relay/0.0.0",
+      "pi-cloudflare-sandbox-workflows-memory-relay/0.0.0",
   };
 };
 
-const injectDreamRelayWorkerVars = (configText, vars) => {
+const injectMemoryRelayWorkerVars = (configText, vars) => {
   const varsMarker = /("vars"\s*:\s*\{\n)/u;
   if (!varsMarker.test(configText)) {
     throw new Error(
@@ -196,8 +196,8 @@ const injectDreamRelayWorkerVars = (configText, vars) => {
   return configText.replace(varsMarker, `$1${injected}\n`);
 };
 
-const writeDreamRelayWranglerConfig = async () => {
-  const workerVars = dreamRelayWorkerVars();
+const writeMemoryRelayWranglerConfig = async () => {
+  const workerVars = memoryRelayWorkerVars();
   if (workerVars === null) {
     return null;
   }
@@ -206,11 +206,11 @@ const writeDreamRelayWranglerConfig = async () => {
     resolve(repoRoot, configPath),
     "utf-8"
   );
-  const generatedConfigPath = resolve(repoRoot, dreamRelayGeneratedConfigPath);
+  const generatedConfigPath = resolve(repoRoot, memoryRelayGeneratedConfigPath);
   await mkdir(dirname(generatedConfigPath), { recursive: true });
   await writeFile(
     generatedConfigPath,
-    injectDreamRelayWorkerVars(sourceConfigText, workerVars),
+    injectMemoryRelayWorkerVars(sourceConfigText, workerVars),
     {
       encoding: "utf-8",
       mode: 0o600,
@@ -218,9 +218,9 @@ const writeDreamRelayWranglerConfig = async () => {
   );
 
   return {
-    configPath: dreamRelayGeneratedConfigPath,
+    configPath: memoryRelayGeneratedConfigPath,
     summary: {
-      generatedConfigPath: dreamRelayGeneratedConfigPath,
+      generatedConfigPath: memoryRelayGeneratedConfigPath,
       redacted: true,
       signoffStatus: "approved",
       vars: Object.keys(workerVars).map((name) => ({
@@ -525,7 +525,7 @@ let workerUrl =
   env.WORKFLOW_APP_URL ??
   (hasArg("--skip-deploy") ? defaultWorkerUrl : null);
 let deployedWithSecretsFile = false;
-let generatedDreamRelayConfig = null;
+let generatedMemoryRelayConfig = null;
 let status = "completed";
 try {
   if (!hasArg("--skip-migrations")) {
@@ -546,9 +546,9 @@ try {
   }
 
   if (!hasArg("--skip-deploy")) {
-    generatedDreamRelayConfig = await writeDreamRelayWranglerConfig();
-    if (generatedDreamRelayConfig !== null) {
-      addStep("dream-relay-worker-config", generatedDreamRelayConfig.summary);
+    generatedMemoryRelayConfig = await writeMemoryRelayWranglerConfig();
+    if (generatedMemoryRelayConfig !== null) {
+      addStep("memory-relay-worker-config", generatedMemoryRelayConfig.summary);
     }
     const deploySecretsPath = await writeDeploySecretsFile();
     deployedWithSecretsFile = deploySecretsPath !== null;
@@ -557,7 +557,7 @@ try {
       "wrangler",
       "deploy",
       "--config",
-      generatedDreamRelayConfig?.configPath ?? configPath,
+      generatedMemoryRelayConfig?.configPath ?? configPath,
       "--message",
       "deploy workflow app spine",
     ];
@@ -575,8 +575,8 @@ try {
       if (deploySecretsPath !== null) {
         await rm(deploySecretsPath, { force: true });
       }
-      if (generatedDreamRelayConfig !== null) {
-        await rm(resolve(repoRoot, generatedDreamRelayConfig.configPath), {
+      if (generatedMemoryRelayConfig !== null) {
+        await rm(resolve(repoRoot, generatedMemoryRelayConfig.configPath), {
           force: true,
         });
       }

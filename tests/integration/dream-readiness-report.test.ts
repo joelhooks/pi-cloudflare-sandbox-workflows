@@ -5,12 +5,18 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { runDreamReadinessReportCli } from "../../scripts/workflow-app-dream-readiness-report.ts";
-import { buildDreamLiveRunRequest } from "../../scripts/workflow-app-dream-run.ts";
+import { runWorkflowReadinessReportCli } from "../../scripts/workflow-app-readiness-report.ts";
+import { buildWorkflowLiveRunRequest } from "../../scripts/workflow-app-run.ts";
 import {
   WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
 } from "../../src/app/domain/schemas.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+
+const profileArgs = [
+  "--profile",
+  dreamTranscriptReviewSourceProfile.profileId,
+] as const;
 
 const rawPrivatePath = "/private/tmp/do-not-publish-dream-path";
 const rawRelayToken = "do-not-publish-dream-relay-token";
@@ -18,7 +24,7 @@ const rawRelayUrl = "https://private-relay.example.test";
 const runId = "run-live-memory-fabric-report-test";
 
 const WorkflowDefinitionOfDoneAuditSummarySchema = z.object({
-  schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
+  schemaVersion: z.literal("workflow.definition-of-done-audit.v1"),
   status: z.string().min(1),
   summary: z.object({
     blockedCount: z.number().int().min(0),
@@ -44,8 +50,8 @@ const localProof = () => ({
   rawPathLeaked: false,
   rawPathsReturned: false,
   redacted: true,
-  runId: "run:dream-relay-local-proof:report-test",
-  schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+  runId: "run:memory-relay-local-proof:report-test",
+  schemaVersion: "trusted.memory-relay.local-proof.v1",
   search: {
     hitCount: 12,
     hydratedCount: 12,
@@ -105,7 +111,7 @@ const preflight = () =>
         message: "MEMORY_RELAY_BASE_URL is not configured.",
         redacted: true,
         required: true,
-        requiredFor: ["dream-memory-relay-binding"],
+        requiredFor: ["memory-relay-binding"],
         status: "missing",
       },
       {
@@ -113,7 +119,7 @@ const preflight = () =>
         message: "MEMORY_RELAY_TOKEN is not configured.",
         redacted: true,
         required: true,
-        requiredFor: ["dream-memory-relay-lease"],
+        requiredFor: ["memory-relay-lease"],
         status: "missing",
       },
       {
@@ -121,7 +127,7 @@ const preflight = () =>
         message: "Trusted local Memory relay proof passed.",
         redacted: true,
         required: true,
-        requiredFor: ["dream-memory-relay-local-proof"],
+        requiredFor: ["memory-relay-local-proof"],
         status: "passed",
       },
       {
@@ -129,7 +135,7 @@ const preflight = () =>
         message: "Relay healthz missing.",
         redacted: true,
         required: true,
-        requiredFor: ["dream-memory-relay-readiness"],
+        requiredFor: ["memory-relay-readiness"],
         status: "missing",
       },
     ],
@@ -213,7 +219,10 @@ const runReceipt = (input: { readonly submitAttempted: boolean }) =>
     },
     redacted: true,
     relayCapability: preflight().relayCapability,
-    request: buildDreamLiveRunRequest({ runId }),
+    request: buildWorkflowLiveRunRequest({
+      profile: dreamTranscriptReviewSourceProfile,
+      runId,
+    }),
     requestPath: `.wrangler/workflow-app/dream-runs/${runId}-request.json`,
     runId,
     schemaVersion: "workflow.live-run-request.v1",
@@ -237,8 +246,9 @@ describe("Dream readiness report", () => {
     await writeJson(preflightPath, preflight());
     await writeJson(runReceiptPath, runReceipt({ submitAttempted: false }));
 
-    const receipt = await runDreamReadinessReportCli({
+    const receipt = await runWorkflowReadinessReportCli({
       argv: [
+        ...profileArgs,
         `--local-proof-path=${localProofPath}`,
         `--preflight-path=${preflightPath}`,
         `--run-receipt-path=${runReceiptPath}`,
@@ -284,7 +294,7 @@ describe("Dream readiness report", () => {
       auditCapturedCount: 4,
       auditMissingCount: 0,
       auditNotProvenCount: 0,
-      auditSchemaVersion: "workflow.dream-definition-of-done-audit.v1",
+      auditSchemaVersion: "workflow.definition-of-done-audit.v1",
       auditStatus: "blocked",
       auditTotalCount: 9,
       blockerCount: 3,
@@ -313,8 +323,9 @@ describe("Dream readiness report", () => {
     await writeJson(runReceiptPath, runReceipt({ submitAttempted: true }));
 
     await expect(
-      runDreamReadinessReportCli({
+      runWorkflowReadinessReportCli({
         argv: [
+          ...profileArgs,
           `--local-proof-path=${localProofPath}`,
           `--preflight-path=${preflightPath}`,
           `--run-receipt-path=${runReceiptPath}`,
@@ -324,7 +335,7 @@ describe("Dream readiness report", () => {
         repoRoot,
       })
     ).rejects.toThrow(
-      "Dream readiness report only renders blocked/pre-submit receipts."
+      "Workflow readiness report only renders blocked/pre-submit receipts."
     );
   });
 
@@ -341,8 +352,9 @@ describe("Dream readiness report", () => {
     await writeJson(preflightPath, preflight());
     await writeJson(runReceiptPath, runReceipt({ submitAttempted: false }));
 
-    const receipt = await runDreamReadinessReportCli({
+    const receipt = await runWorkflowReadinessReportCli({
       argv: [
+        ...profileArgs,
         `--local-proof-path=${localProofPath}`,
         `--preflight-path=${preflightPath}`,
         `--run-receipt-path=${runReceiptPath}`,
@@ -413,7 +425,7 @@ describe("Dream readiness report", () => {
           url: "https://dream-readiness-report-test.wzrrd.sh/",
         },
         runId,
-        schemaVersion: "workflow.dream-readiness-report.publish.v1",
+        schemaVersion: "workflow.readiness-report.publish.v1",
         status: "published",
       },
     });

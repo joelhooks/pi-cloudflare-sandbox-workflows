@@ -7,11 +7,13 @@ import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
 
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
 import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import {
+  requireInstalledSourceProfile,
+  workflowProfileWorkspacePaths,
+} from "./workflow-app-profile.ts";
 
-const defaultLivePreflightPath =
-  ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
   ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const defaultLocalRelayReadinessPath =
@@ -35,7 +37,7 @@ const localRelayStartupEnvNames = [
 ] as const;
 const LocalRelayStartupEnvNameSchema = z.enum(localRelayStartupEnvNames);
 
-const DreamRelayProvisioningPlanStepSchema = z.object({
+const MemoryRelayProvisioningPlanStepSchema = z.object({
   blockedBy: z.array(z.string().min(1)).default([]),
   commandTemplate: z.string().min(1).optional(),
   description: z.string().min(1),
@@ -56,14 +58,14 @@ const DreamRelayProvisioningPlanStepSchema = z.object({
   stepId: z.string().min(1),
 });
 
-export const DreamRelayProvisioningPlanSchema = z.object({
+export const MemoryRelayProvisioningPlanSchema = z.object({
   approvalStatus: z.enum(["approved", "invalid", "required"]),
   noSideEffectsPerformed: z.literal(true),
   redacted: z.literal(true),
   requiredSecretBindings: z.array(z.literal("MEMORY_RELAY_TOKEN")),
   requiredSignoffPhrase: z.literal(signoffPhrase),
   requiredWorkerVars: z.array(z.literal("MEMORY_RELAY_BASE_URL")),
-  schemaVersion: z.literal("trusted.dream-memory-relay.provisioning-plan.v1"),
+  schemaVersion: z.literal("trusted.memory-relay.provisioning-plan.v1"),
   selectedTransportCandidates: z.array(
     z.object({
       available: z.boolean(),
@@ -72,20 +74,17 @@ export const DreamRelayProvisioningPlanSchema = z.object({
       reason: z.string().min(1),
     })
   ),
-  steps: z.array(DreamRelayProvisioningPlanStepSchema),
+  steps: z.array(MemoryRelayProvisioningPlanStepSchema),
 });
 
-export type DreamRelayProvisioningPlan = z.infer<
-  typeof DreamRelayProvisioningPlanSchema
+export type MemoryRelayProvisioningPlan = z.infer<
+  typeof MemoryRelayProvisioningPlanSchema
 >;
 
 const RelayReceiptFamilyCountSchema = z.object({
   family: z.string().min(1),
   receiptCount: z.number().int().min(0),
 });
-
-const requiredSourceFamilies =
-  dreamTranscriptReviewSourceProfile.sourceFamiliesExpected;
 
 const SourceFamilyCoverageSchema = z.object({
   family: z.string().min(1),
@@ -105,7 +104,7 @@ const LocalRelayProofSchema = z.object({
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
   runId: z.string().min(1),
-  schemaVersion: z.literal("trusted.dream-memory-relay.local-proof.v1"),
+  schemaVersion: z.literal("trusted.memory-relay.local-proof.v1"),
   search: z.object({
     hitCount: z.number().int().min(1),
     hydratedCount: z.number().int().min(1),
@@ -141,7 +140,7 @@ const LivePreflightSchema = z.object({
   status: z.enum(["blocked", "ready"]),
 });
 
-export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
+export const MemoryRelayProvisioningPreflightReceiptSchema = z.object({
   approval: z.object({
     approvalRef: z.string().min(1).optional(),
     required: z.literal(true),
@@ -213,17 +212,15 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
       path: z.string().min(1).optional(),
     })
   ),
-  provisioningPlan: DreamRelayProvisioningPlanSchema,
+  provisioningPlan: MemoryRelayProvisioningPlanSchema,
   recommendedNextActions: z.array(z.string().min(1)),
   redacted: z.literal(true),
-  schemaVersion: z.literal(
-    "trusted.dream-memory-relay.provisioning-preflight.v1"
-  ),
+  schemaVersion: z.literal("trusted.memory-relay.provisioning-preflight.v1"),
   status: z.enum(["blocked", "ready-for-approved-provisioning"]),
 });
 
-export type DreamRelayProvisioningPreflightReceipt = z.infer<
-  typeof DreamRelayProvisioningPreflightReceiptSchema
+export type MemoryRelayProvisioningPreflightReceipt = z.infer<
+  typeof MemoryRelayProvisioningPreflightReceiptSchema
 >;
 
 interface ProvisioningPreflightArgs {
@@ -242,7 +239,7 @@ export interface CommandProbe {
   readonly path?: string;
 }
 
-export interface BuildDreamRelayProvisioningPreflightInput {
+export interface BuildMemoryRelayProvisioningPreflightInput {
   readonly approvalRef?: string;
   readonly approvalSignoff?: string;
   readonly checkedAt: string;
@@ -260,6 +257,7 @@ export interface BuildDreamRelayProvisioningPreflightInput {
     | "none"
     | "process";
   readonly networkTools: readonly CommandProbe[];
+  readonly profile: MemorySourceProfile;
   readonly visionText: string;
 }
 
@@ -284,9 +282,7 @@ const LocalRelayReadinessProofSchema = z.object({
   rawCredentialsReturned: z.literal(false),
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
-  schemaVersion: z.literal(
-    "trusted.dream-memory-relay.local-readiness-proof.v1"
-  ),
+  schemaVersion: z.literal("trusted.memory-relay.local-readiness-proof.v1"),
   sourceRootCount: z.number().int().min(1),
   startupEnvRef: z.string().min(1),
   status: z.literal("passed"),
@@ -317,6 +313,7 @@ const argValue = (
 };
 
 const missingSourceFamiliesFor = (
+  requiredSourceFamilies: readonly string[],
   sourceFamilyCoverage: readonly z.infer<typeof SourceFamilyCoverageSchema>[]
 ): string[] => {
   const coverageByFamily = new Map(
@@ -334,12 +331,16 @@ const missingSourceFamiliesFor = (
   });
 };
 
-const parseArgs = (argv: readonly string[]): ProvisioningPreflightArgs => {
+const parseArgs = (
+  argv: readonly string[],
+  profile: MemorySourceProfile
+): ProvisioningPreflightArgs => {
   const approvalRef = argValue(argv, "--approval-ref");
   const approvalSignoff = argValue(argv, "--approval-signoff");
   const args = {
     livePreflightPath:
-      argValue(argv, "--live-preflight-path") ?? defaultLivePreflightPath,
+      argValue(argv, "--live-preflight-path") ??
+      workflowProfileWorkspacePaths(profile.profileId).preflightReceiptPath,
     localRelayProofPath:
       argValue(argv, "--local-relay-proof-path") ?? defaultLocalRelayProofPath,
     localRelayReadinessPath:
@@ -417,8 +418,9 @@ const approvalStatusFor = (
 
 const localRelayProofSummary = (input: {
   readonly path: string;
+  readonly requiredSourceFamilies: readonly string[];
   readonly text: string;
-}): DreamRelayProvisioningPreflightReceipt["localRelayProof"] => {
+}): MemoryRelayProvisioningPreflightReceipt["localRelayProof"] => {
   const parsed = parseJsonOrNull(input.text);
   if (parsed === null) {
     return {
@@ -437,6 +439,7 @@ const localRelayProofSummary = (input: {
 
   const { data: proof } = proofResult;
   const missingSourceFamilies = missingSourceFamiliesFor(
+    input.requiredSourceFamilies,
     proof.sourceFamilyCoverage
   );
 
@@ -463,7 +466,7 @@ const localRelayProofSummary = (input: {
 const localRelayReadinessSummary = (input: {
   readonly path: string;
   readonly text: string;
-}): DreamRelayProvisioningPreflightReceipt["localRelayReadiness"] => {
+}): MemoryRelayProvisioningPreflightReceipt["localRelayReadiness"] => {
   const parsed = parseJsonOrNull(input.text);
   if (parsed === null) {
     return {
@@ -506,7 +509,7 @@ const localRelayReadinessSummary = (input: {
 const livePreflightSummary = (input: {
   readonly path: string;
   readonly text: string;
-}): DreamRelayProvisioningPreflightReceipt["livePreflight"] => {
+}): MemoryRelayProvisioningPreflightReceipt["livePreflight"] => {
   const parsed = parseJsonOrNull(input.text);
   if (parsed === null) {
     return {
@@ -559,7 +562,7 @@ const localRelayStartupSummary = (
       | "none"
       | "process";
   } = {}
-): DreamRelayProvisioningPreflightReceipt["localRelayStartup"] => {
+): MemoryRelayProvisioningPreflightReceipt["localRelayStartup"] => {
   const summaryMetadata = {
     ...(metadata.envRef === undefined ? {} : { envRef: metadata.envRef }),
     ...(metadata.envSource === undefined
@@ -632,11 +635,12 @@ const localRelayStartupEnvSourceFor = (input: {
 
 const recommendedNextActions = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
-  readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
-  readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
-  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
-  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
+  readonly livePreflight: MemoryRelayProvisioningPreflightReceipt["livePreflight"];
+  readonly localRelayProof: MemoryRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: MemoryRelayProvisioningPreflightReceipt["localRelayReadiness"];
+  readonly localRelayStartup: MemoryRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
+  readonly profileId: string;
   readonly visionHasSignoffRule: boolean;
 }): readonly string[] => {
   const actions: string[] = [];
@@ -649,7 +653,7 @@ const recommendedNextActions = (input: {
 
   if (input.localRelayProof.status !== "passed") {
     actions.push(
-      "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof receipt."
+      `Run pnpm app:relay:proof --profile ${input.profileId} and inspect the redacted local relay proof receipt.`
     );
   }
 
@@ -658,7 +662,7 @@ const recommendedNextActions = (input: {
     input.localRelayProof.missingSourceFamilies.length > 0
   ) {
     actions.push(
-      `Coverage caveat (reported, not blocking): missing source families ${input.localRelayProof.missingSourceFamilies.join(", ")} will appear in the dream report.`
+      `Coverage caveat (reported, not blocking): missing source families ${input.localRelayProof.missingSourceFamilies.join(", ")} will appear in the run report.`
     );
   }
 
@@ -690,7 +694,7 @@ const recommendedNextActions = (input: {
     input.localRelayReadiness.status !== "passed"
   ) {
     actions.push(
-      "Run pnpm app:dream:relay:readiness to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz."
+      `Run pnpm app:relay:readiness --profile ${input.profileId} to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz.`
     );
   }
 
@@ -729,7 +733,7 @@ const preferredTransportCommands = ["cloudflared", "ngrok", "tailscale"];
 
 const transportCandidatesFor = (
   networkTools: readonly CommandProbe[]
-): DreamRelayProvisioningPlan["selectedTransportCandidates"] => {
+): MemoryRelayProvisioningPlan["selectedTransportCandidates"] => {
   const toolsByCommand = new Map(
     networkTools.map((tool) => [tool.command, tool])
   );
@@ -751,10 +755,10 @@ const transportCandidatesFor = (
 
 const provisioningPlanBlockedBy = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
-  readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
-  readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
-  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
-  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
+  readonly livePreflight: MemoryRelayProvisioningPreflightReceipt["livePreflight"];
+  readonly localRelayProof: MemoryRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: MemoryRelayProvisioningPreflightReceipt["localRelayReadiness"];
+  readonly localRelayStartup: MemoryRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
 }): readonly string[] => {
@@ -797,10 +801,10 @@ const buildProvisioningStep = (input: {
   readonly expectedReceipt?: string;
   readonly requiresSignoff: boolean;
   readonly sideEffectClass: z.infer<
-    typeof DreamRelayProvisioningPlanStepSchema
+    typeof MemoryRelayProvisioningPlanStepSchema
   >["sideEffectClass"];
   readonly stepId: string;
-}): z.infer<typeof DreamRelayProvisioningPlanStepSchema> => {
+}): z.infer<typeof MemoryRelayProvisioningPlanStepSchema> => {
   const blockedBy = [...(input.blockedBy ?? [])];
   const status = (() => {
     if (blockedBy.length > 0) {
@@ -814,7 +818,7 @@ const buildProvisioningStep = (input: {
     return "ready";
   })();
 
-  return DreamRelayProvisioningPlanStepSchema.parse({
+  return MemoryRelayProvisioningPlanStepSchema.parse({
     blockedBy,
     ...(input.commandTemplate === undefined
       ? {}
@@ -833,8 +837,8 @@ const buildProvisioningStep = (input: {
 };
 
 const localRelayReadinessStepBlockers = (input: {
-  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
-  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
+  readonly localRelayReadiness: MemoryRelayProvisioningPreflightReceipt["localRelayReadiness"];
+  readonly localRelayStartup: MemoryRelayProvisioningPreflightReceipt["localRelayStartup"];
 }): readonly string[] => {
   if (input.localRelayStartup.status !== "ready") {
     return ["local-relay-startup-config-missing"];
@@ -849,13 +853,15 @@ const localRelayReadinessStepBlockers = (input: {
 
 const buildProvisioningPlan = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
-  readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
-  readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
-  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
-  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
+  readonly livePreflight: MemoryRelayProvisioningPreflightReceipt["livePreflight"];
+  readonly livePreflightPath: string;
+  readonly localRelayProof: MemoryRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: MemoryRelayProvisioningPreflightReceipt["localRelayReadiness"];
+  readonly localRelayStartup: MemoryRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
+  readonly profileId: string;
   readonly visionHasSignoffRule: boolean;
-}): DreamRelayProvisioningPlan => {
+}): MemoryRelayProvisioningPlan => {
   const baseBlockers = provisioningPlanBlockedBy(input);
   const localReadinessBlockers =
     input.localRelayReadiness.status === "passed"
@@ -867,10 +873,10 @@ const buildProvisioningPlan = (input: {
     ...(input.livePreflight.missingCheckIds.includes(
       "env:MEMORY_RELAY_BASE_URL"
     )
-      ? ["missing-dream-memory-relay-base-url"]
+      ? ["missing-memory-relay-base-url"]
       : []),
     ...(input.livePreflight.missingCheckIds.includes("env:MEMORY_RELAY_TOKEN")
-      ? ["missing-dream-memory-relay-token"]
+      ? ["missing-memory-relay-token"]
       : []),
     ...(input.livePreflight.missingCheckIds.includes(
       "wrangler:MEMORY_RELAY_BASE_URL"
@@ -881,15 +887,16 @@ const buildProvisioningPlan = (input: {
       ? []
       : ["relay-healthz-not-verified"]),
   ];
+  const { runReceiptDir } = workflowProfileWorkspacePaths(input.profileId);
 
-  return DreamRelayProvisioningPlanSchema.parse({
+  return MemoryRelayProvisioningPlanSchema.parse({
     approvalStatus: input.approvalStatus,
     noSideEffectsPerformed: true,
     redacted: true,
     requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
     requiredSignoffPhrase: signoffPhrase,
     requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
-    schemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
+    schemaVersion: "trusted.memory-relay.provisioning-plan.v1",
     selectedTransportCandidates: transportCandidatesFor(input.networkTools),
     steps: [
       buildProvisioningStep({
@@ -897,7 +904,7 @@ const buildProvisioningPlan = (input: {
           input.localRelayProof.status === "passed"
             ? []
             : ["local-relay-proof-not-passed"],
-        commandTemplate: "pnpm app:dream:relay:proof",
+        commandTemplate: `pnpm app:relay:proof --profile ${input.profileId}`,
         description:
           "Refresh the redacted local relay proof before any network exposure.",
         expectedReceipt:
@@ -908,7 +915,7 @@ const buildProvisioningPlan = (input: {
       }),
       buildProvisioningStep({
         blockedBy: baseBlockers,
-        commandTemplate: "pnpm app:dream:relay",
+        commandTemplate: `pnpm app:relay --profile ${input.profileId}`,
         description:
           "Start the trusted Memory relay bound to localhost with approved source roots and a non-printed token.",
         expectedReceipt: "trusted.memory-relay.readiness.v1",
@@ -918,7 +925,7 @@ const buildProvisioningPlan = (input: {
       }),
       buildProvisioningStep({
         blockedBy: localRelayReadinessStepBlockers(input),
-        commandTemplate: "pnpm app:dream:relay:readiness",
+        commandTemplate: `pnpm app:relay:readiness --profile ${input.profileId}`,
         description:
           "Start the trusted local relay transiently and prove authenticated /healthz from the generated startup env.",
         expectedReceipt:
@@ -955,46 +962,44 @@ const buildProvisioningPlan = (input: {
           "deploy Worker with MEMORY_RELAY_BASE_URL set to the approved HTTPS relay URL",
         description:
           "Deploy or configure the Worker with the approved relay base URL.",
-        expectedReceipt:
-          ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
+        expectedReceipt: input.livePreflightPath,
         requiresSignoff: true,
         sideEffectClass: "worker-config",
         stepId: "configure-worker-relay-url",
       }),
       buildProvisioningStep({
         blockedBy: relayConfigBlockers,
-        commandTemplate: "pnpm app:dream:preflight",
+        commandTemplate: `pnpm app:preflight --profile ${input.profileId}`,
         description:
-          "Verify authenticated /healthz and live Dream readiness after relay config is present.",
-        expectedReceipt:
-          ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
+          "Verify authenticated /healthz and live run readiness after relay config is present.",
+        expectedReceipt: input.livePreflightPath,
         requiresSignoff: true,
         sideEffectClass: "remote-verification",
         stepId: "verify-relay-healthz",
       }),
       buildProvisioningStep({
         blockedBy: relayConfigBlockers,
-        commandTemplate: "pnpm app:dream:run --submit",
+        commandTemplate: `pnpm app:run --profile ${input.profileId} --submit`,
         description:
-          "Submit the generated Cloudflare Dream workflow only after preflight is ready.",
-        expectedReceipt:
-          ".wrangler/workflow-app/dream-runs/<run-id>-receipt.json",
+          "Submit the generated Cloudflare workflow only after preflight is ready.",
+        expectedReceipt: `${runReceiptDir}/<run-id>-receipt.json`,
         requiresSignoff: true,
         sideEffectClass: "live-workflow-submit",
-        stepId: "submit-live-dream",
+        stepId: "submit-live-run",
       }),
     ],
   });
 };
 
-export const buildDreamRelayProvisioningPreflightReceipt = (
-  input: BuildDreamRelayProvisioningPreflightInput
-): DreamRelayProvisioningPreflightReceipt => {
+export const buildMemoryRelayProvisioningPreflightReceipt = (
+  input: BuildMemoryRelayProvisioningPreflightInput
+): MemoryRelayProvisioningPreflightReceipt => {
   const visionHasSignoffRule =
     input.visionText.includes("Needs Sign-Off") &&
     input.visionText.includes(signoffPhrase);
   const localRelayProof = localRelayProofSummary({
     path: input.localRelayProofPath,
+    requiredSourceFamilies: input.profile.sourceFamiliesExpected,
     text: input.localRelayProofText,
   });
   const localRelayReadiness = localRelayReadinessSummary({
@@ -1024,15 +1029,18 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     localRelayReadiness,
     localRelayStartup,
     networkTools: input.networkTools,
+    profileId: input.profile.profileId,
     visionHasSignoffRule,
   });
   const provisioningPlan = buildProvisioningPlan({
     approvalStatus,
     livePreflight,
+    livePreflightPath: input.livePreflightPath,
     localRelayProof,
     localRelayReadiness,
     localRelayStartup,
     networkTools: input.networkTools,
+    profileId: input.profile.profileId,
     visionHasSignoffRule,
   });
   const readyForApprovedProvisioning =
@@ -1043,7 +1051,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     localRelayStartup.status === "ready" &&
     input.networkTools.some((tool) => tool.available);
 
-  return DreamRelayProvisioningPreflightReceiptSchema.parse({
+  return MemoryRelayProvisioningPreflightReceiptSchema.parse({
     approval: {
       ...(input.approvalRef === undefined
         ? {}
@@ -1066,21 +1074,22 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     provisioningPlan,
     recommendedNextActions: actions,
     redacted: true,
-    schemaVersion: "trusted.dream-memory-relay.provisioning-preflight.v1",
+    schemaVersion: "trusted.memory-relay.provisioning-preflight.v1",
     status: readyForApprovedProvisioning
       ? "ready-for-approved-provisioning"
       : "blocked",
   });
 };
 
-export const runDreamRelayProvisioningPreflightCli = async (input: {
+export const runMemoryRelayProvisioningPreflightCli = async (input: {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly networkTools?: readonly CommandProbe[];
   readonly processEnv?: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
-}): Promise<DreamRelayProvisioningPreflightReceipt> => {
-  const args = parseArgs(input.argv);
+}): Promise<MemoryRelayProvisioningPreflightReceipt> => {
+  const profile = requireInstalledSourceProfile(input.argv);
+  const args = parseArgs(input.argv, profile);
   const livePreflightPath = resolve(input.repoRoot, args.livePreflightPath);
   const localRelayProofPath = resolve(input.repoRoot, args.localRelayProofPath);
   const localRelayReadinessPath = resolve(
@@ -1114,7 +1123,7 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
     artifactLoaded: startupEnvArtifactLoaded,
     processHasStartupEnv,
   });
-  const receipt = buildDreamRelayProvisioningPreflightReceipt({
+  const receipt = buildMemoryRelayProvisioningPreflightReceipt({
     ...(args.approvalRef === undefined
       ? {}
       : { approvalRef: args.approvalRef }),
@@ -1137,6 +1146,7 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
     ),
     localRelayStartupEnvSource,
     networkTools: input.networkTools ?? defaultNetworkToolProbes(),
+    profile,
     visionText: await readTextOrEmpty(resolve(input.repoRoot, "VISION.md")),
   });
   const log = input.log ?? console.log;
@@ -1151,7 +1161,7 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
 
 if (isMain()) {
   try {
-    await runDreamRelayProvisioningPreflightCli({
+    await runMemoryRelayProvisioningPreflightCli({
       argv: process.argv.slice(2),
       repoRoot: process.cwd(),
     });
@@ -1160,7 +1170,7 @@ if (isMain()) {
       JSON.stringify(
         {
           error: {
-            code: "dream_relay_provisioning_preflight_failed",
+            code: "memory_relay_provisioning_preflight_failed",
             message:
               error instanceof Error
                 ? error.message
@@ -1168,8 +1178,7 @@ if (isMain()) {
             redacted: true,
           },
           redacted: true,
-          schemaVersion:
-            "trusted.dream-memory-relay.provisioning-preflight-error.v1",
+          schemaVersion: "trusted.memory-relay.provisioning-preflight-error.v1",
           status: "failed",
         },
         null,

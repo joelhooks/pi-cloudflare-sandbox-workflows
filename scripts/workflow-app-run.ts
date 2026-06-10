@@ -17,25 +17,19 @@ import type {
   WorkflowLivePreflightReceipt,
   WorkflowRunRequest,
 } from "../src/app/domain/schemas.ts";
-import { memoryFabricPackageMetadata } from "../src/cartridges/memory-fabric/package-seed.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
-import { runDreamPreflightCli } from "./workflow-app-dream-preflight.ts";
+import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
+import { runWorkflowPreflightCli } from "./workflow-app-preflight.ts";
+import {
+  requireInstalledSourceProfile,
+  workflowProfileWorkspacePaths,
+} from "./workflow-app-profile.ts";
 
-const defaultPreflightPath =
-  ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
-const defaultRunDir = ".wrangler/workflow-app/dream-runs";
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
-const dreamRelaySignoffPhrase =
+const memoryRelaySignoffPhrase =
   "exposing JoelClaw/Typesense over a new network boundary";
 const missingSubmitSignoffAction =
-  "Provide the exact owner sign-off phrase before submitting a live Dream run that uses the trusted memory relay network boundary.";
-
-const requiredPackageIds = [
-  "badass-courses/claw-kernel",
-  "joelhooks/configured-familiar-kernel",
-  "workflow/memory-fabric",
-] as const;
+  "Provide the exact owner sign-off phrase before submitting a live workflow run that uses the trusted memory relay network boundary.";
 
 const requiredRelayCheckIds = [
   "env:MEMORY_RELAY_BASE_URL",
@@ -44,20 +38,7 @@ const requiredRelayCheckIds = [
   "relay:healthz",
 ] as const;
 
-const memoryWorkflowNodePalette = memoryFabricPackageMetadata.exports
-  .filter((exportRecord) => exportRecord.kind === "workflow-node")
-  .map((exportRecord) => exportRecord.nodeType)
-  .filter((nodeType): nodeType is string => nodeType !== undefined);
-
-const memorySourcePackPlannerSummary =
-  dreamTranscriptReviewSourceProfile.sourcePacks
-    .map(
-      (pack) =>
-        `${pack.packId} (${pack.selectionPolicy}; families ${pack.sourceFamilies.join(", ")}; surfaces ${pack.surfaces.join(", ")}; capabilities ${pack.requiredCapabilityKinds.join(", ")})`
-    )
-    .join("; ");
-
-interface DreamRunArgs {
+interface WorkflowRunArgs {
   readonly approvalSignoff?: string;
   readonly localRelayProofPath?: string;
   readonly preflightPath: string;
@@ -76,8 +57,9 @@ interface PreflightLoadResult {
   readonly status: "blocked" | "invalid" | "missing" | "ready";
 }
 
-export interface BuildDreamLiveRunRequestInput {
+export interface BuildWorkflowLiveRunRequestInput {
   readonly actor?: Actor;
+  readonly profile: MemorySourceProfile;
   readonly runId: string;
   readonly sessionId?: string;
 }
@@ -96,16 +78,16 @@ export interface BuildWorkflowLiveRunRequestReceiptInput {
   readonly workerUrl: string;
 }
 
-export interface RunDreamLiveRunCliInput {
+export interface RunWorkflowLiveRunCliInput {
   readonly argv: readonly string[];
   readonly fetch?: typeof fetch;
   readonly log?: (message: string) => void;
   readonly processEnv: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
-  readonly runPreflight?: DreamPreflightRunner;
+  readonly runPreflight?: WorkflowPreflightRunner;
 }
 
-type DreamPreflightRunner = (input: {
+type WorkflowPreflightRunner = (input: {
   readonly argv: readonly string[];
   readonly fetch?: typeof fetch;
   readonly log?: (message: string) => void;
@@ -121,7 +103,7 @@ const timestampSegment = (date: Date): string =>
   date.toISOString().replaceAll(/[-:.]/gu, "").replace("000Z", "Z");
 
 const defaultRunId = (date: Date): string =>
-  `run-live-memory-fabric-${timestampSegment(date)}-${randomUUID().slice(0, 8)}`;
+  `run-live-${timestampSegment(date)}-${randomUUID().slice(0, 8)}`;
 
 const argValue = (
   argv: readonly string[],
@@ -141,10 +123,11 @@ const argValue = (
   return argv[index + 1];
 };
 
-const parseArgs = (argv: readonly string[]): DreamRunArgs => {
-  const approvalSignoff =
-    argValue(argv, "--approval-signoff") ??
-    argValue(argv, "--dream-relay-approval-signoff");
+const parseArgs = (
+  argv: readonly string[],
+  profile: MemorySourceProfile
+): WorkflowRunArgs => {
+  const approvalSignoff = argValue(argv, "--approval-signoff");
   const runId = argValue(argv, "--run-id");
   const requestPath = argValue(argv, "--request-path");
   const receiptPath = argValue(argv, "--receipt-path");
@@ -159,7 +142,9 @@ const parseArgs = (argv: readonly string[]): DreamRunArgs => {
   return {
     ...(approvalSignoff === undefined ? {} : { approvalSignoff }),
     ...(localRelayProofPath === undefined ? {} : { localRelayProofPath }),
-    preflightPath: argValue(argv, "--preflight-path") ?? defaultPreflightPath,
+    preflightPath:
+      argValue(argv, "--preflight-path") ??
+      workflowProfileWorkspacePaths(profile.profileId).preflightReceiptPath,
     refreshPreflight,
     submit,
     ...(receiptPath === undefined ? {} : { receiptPath }),
@@ -178,12 +163,15 @@ const readTextOrEmpty = async (path: string): Promise<string> => {
   }
 };
 
-const readPreflight = async (path: string): Promise<PreflightLoadResult> => {
-  const text = await readTextOrEmpty(path);
+const readPreflight = async (input: {
+  readonly path: string;
+  readonly profileId: string;
+}): Promise<PreflightLoadResult> => {
+  const text = await readTextOrEmpty(input.path);
   if (text.trim().length === 0) {
     return {
       requiredActions: [
-        `Run pnpm app:dream:preflight before preparing a live Dream run request. Missing receipt: ${path}.`,
+        `Run pnpm app:preflight --profile ${input.profileId} before preparing a live workflow run request. Missing receipt: ${input.path}.`,
       ],
       status: "missing",
     };
@@ -200,7 +188,7 @@ const readPreflight = async (path: string): Promise<PreflightLoadResult> => {
   } catch {
     return {
       requiredActions: [
-        `Repair the Dream live preflight receipt before preparing a live Dream run request: ${path}.`,
+        `Repair the live preflight receipt before preparing a live workflow run request: ${input.path}.`,
       ],
       status: "invalid",
     };
@@ -222,12 +210,12 @@ const preflightLoadResultForReceipt = (
 const normalizeWorkerUrl = (value: string): string =>
   value.replaceAll(/\/+$/gu, "");
 
-const actorForDreamRun = (input: {
+const actorForLiveRun = (input: {
   readonly runId: string;
   readonly sessionId?: string;
 }): Actor =>
   ActorSchema.parse({
-    id: "actor:dream-live-operator",
+    id: "actor:workflow-live-operator",
     organizationId: "org:joelhooks",
     roleIds: ["workflow.operator", "wzrrd.publish"],
     sessionId: input.sessionId ?? `session:${input.runId}`,
@@ -235,41 +223,65 @@ const actorForDreamRun = (input: {
     type: "agent",
   });
 
-export const buildDreamLiveRunRequest = (
-  input: BuildDreamLiveRunRequestInput
-): WorkflowRunRequest =>
-  WorkflowRunRequestSchema.parse({
+const sourcePackPlannerSummaryFor = (profile: MemorySourceProfile): string =>
+  profile.sourcePacks
+    .map(
+      (pack) =>
+        `${pack.packId} (${pack.selectionPolicy}; families ${pack.sourceFamilies.join(", ")}; surfaces ${pack.surfaces.join(", ")}; capabilities ${pack.requiredCapabilityKinds.join(", ")})`
+    )
+    .join("; ");
+
+const profileStochasticNotesFor = (
+  profile: MemorySourceProfile
+): readonly string[] => {
+  const horizons = profile.timeHorizons.join(", ");
+  const sourcePackNotes =
+    profile.sourcePacks.length === 0
+      ? []
+      : [
+          `Source packs advertised by the installed profile: ${sourcePackPlannerSummaryFor(profile)}. Optional-lease packs may be used only when actor scope and leases allow them. Separate-workflow packs must be saved or linked as candidates, not silently folded into this profile's readiness.`,
+          "Generated planning steps must declare memorySourcePackDispositions for every advertised source pack with requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs. Optional-lease packs are selected-with-lease only when scoped leases cover their requiredCapabilityKinds and leaseRefs are present; otherwise they must be skipped-missing-lease with explicit missingCapabilityKinds. Separate-workflow packs are separate-workflow-candidate and must not clear this profile's readiness.",
+        ];
+
+  return [
+    `Use source profile ${profile.profileId}: families ${profile.sourceFamiliesExpected.join(", ")}; runtimes ${profile.requiredRuntimes.join(", ")}; horizons ${horizons}.`,
+    ...sourcePackNotes,
+    "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
+    `Generated retrieval and signal-mining steps must declare memoryCoverageHorizons covering: ${horizons}.`,
+    "Report runtime, machine, and source-family coverage gaps as explicit caveats in the run report; coverage caveats never block the run. Memory-fabric repair is a separate workflow.",
+    `Search across horizons: ${horizons}. Do not collapse the run into a recent-only summary.`,
+    "Cloudflare must access memory only through the trusted Memory relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
+    ...(profile.plannerGuidance?.stochasticNotes ?? []),
+  ];
+};
+
+export const buildWorkflowLiveRunRequest = (
+  input: BuildWorkflowLiveRunRequestInput
+): WorkflowRunRequest => {
+  const { profile } = input;
+  const guidance = profile.plannerGuidance;
+  const requestedPackageIds = [
+    ...new Set([...(guidance?.requestedPackageIds ?? []), profile.packageId]),
+  ];
+
+  return WorkflowRunRequestSchema.parse({
     actor:
       input.actor ??
-      actorForDreamRun({
+      actorForLiveRun({
         runId: input.runId,
         ...(input.sessionId === undefined
           ? {}
           : { sessionId: input.sessionId }),
       }),
     planProposal: {
-      intent:
-        "Run Dreaming as a real Cloudflare-generated dynamic workflow over the installed workflow/memory-fabric cartridge: mine redacted correction/friction/decision/workflow signals, search T-shaped across near-term and far-term memory, hydrate redacted receipts, correlate evidence, emit refinement proposals for kernel/package/workflow/schema/access-lease changes, render the canonical Dream HITL report, and publish the report through Wzrrd only after verifier acceptance.",
-      requestedPackageIds: [...requiredPackageIds],
-      stochasticNotes: [
-        "Use only generated workflow.node.invoke states for Dream cartridge work; do not use static Dream branches in the runner.",
-        `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        `Dream cartridge node palette: ${memoryWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
-        `Source packs advertised by the installed profile: ${memorySourcePackPlannerSummary}. Optional-lease packs may be used only when actor scope and leases allow them. Separate-workflow packs must be saved or linked as candidates, not silently folded into transcript-review Dream readiness.`,
-        "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
-        `Generated Dream retrieval and signal-mining steps must declare memoryCoverageHorizons covering: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        "Generated Dream planning steps must declare memorySourcePackDispositions for every advertised source pack with requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs. Optional-lease packs are selected-with-lease only when scoped leases cover their requiredCapabilityKinds and leaseRefs are present; otherwise they must be skipped-missing-lease with explicit missingCapabilityKinds. Separate-workflow packs are separate-workflow-candidate and must not clear transcript-review Dream readiness.",
-        "Report runtime, machine, and source-family coverage gaps as explicit caveats in the dream report; coverage caveats never block the run. Memory-fabric repair is a separate workflow.",
-        "Search across horizons: 24h, 7d, 30d, current quarter, and all-time. Do not collapse the dream into a recent-only summary.",
-        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
-        "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
-        "Cloudflare must access memory only through the trusted Memory relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
-        "Accepted dreams must be reviewable as memory.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce memory.hitl-decision-workflow-seed.v1 and draft memory.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
-      ],
+      intent: guidance?.intent ?? profile.purpose,
+      requestedPackageIds,
+      stochasticNotes: [...profileStochasticNotesFor(profile)],
     },
     runId: input.runId,
-    workItemId: "work-item:memory-fabric",
+    workItemId: guidance?.workItemId ?? `work-item:${profile.profileId}`,
   });
+};
 
 const missingReadyReasons = (
   preflight: PreflightLoadResult
@@ -294,7 +306,7 @@ const missingReadyReasons = (
 };
 
 const submitSignoffFor = (input: {
-  readonly args: DreamRunArgs;
+  readonly args: WorkflowRunArgs;
   readonly processEnv: Readonly<Record<string, string | undefined>>;
 }): string | undefined =>
   input.args.approvalSignoff ??
@@ -302,14 +314,14 @@ const submitSignoffFor = (input: {
   input.processEnv["MEMORY_RELAY_PROVISIONING_SIGNOFF"];
 
 const missingSubmitApprovalReasons = (input: {
-  readonly args: DreamRunArgs;
+  readonly args: WorkflowRunArgs;
   readonly processEnv: Readonly<Record<string, string | undefined>>;
 }): readonly string[] => {
   if (!input.args.submit) {
     return [];
   }
 
-  return submitSignoffFor(input) === dreamRelaySignoffPhrase
+  return submitSignoffFor(input) === memoryRelaySignoffPhrase
     ? []
     : [missingSubmitSignoffAction];
 };
@@ -393,8 +405,8 @@ const responseBody = async (response: Response): Promise<unknown> => {
   }
 };
 
-const submitLiveDreamRunIfAllowed = async (input: {
-  readonly args: DreamRunArgs;
+const submitLiveRunIfAllowed = async (input: {
+  readonly args: WorkflowRunArgs;
   readonly fetch?: typeof fetch;
   readonly preflight: PreflightLoadResult;
   readonly processEnv: Readonly<Record<string, string | undefined>>;
@@ -437,17 +449,20 @@ const submitLiveDreamRunIfAllowed = async (input: {
   };
 };
 
-export const runDreamLiveRunCli = async (
-  input: RunDreamLiveRunCliInput
+export const runWorkflowLiveRunCli = async (
+  input: RunWorkflowLiveRunCliInput
 ): Promise<WorkflowLiveRunRequestReceipt> => {
   const now = new Date();
-  const args = parseArgs(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv);
+  const args = parseArgs(input.argv, profile);
   const runId = args.runId ?? defaultRunId(now);
   const preflightPath = resolve(input.repoRoot, args.preflightPath);
   const preflight = args.refreshPreflight
     ? preflightLoadResultForReceipt(
-        await (input.runPreflight ?? runDreamPreflightCli)({
+        await (input.runPreflight ?? runWorkflowPreflightCli)({
           argv: [
+            "--profile",
+            profile.profileId,
             "--allow-missing",
             `--receipt-path=${args.preflightPath}`,
             ...(args.workerUrl === undefined
@@ -463,27 +478,31 @@ export const runDreamLiveRunCli = async (
           repoRoot: input.repoRoot,
         })
       )
-    : await readPreflight(preflightPath);
+    : await readPreflight({
+        path: preflightPath,
+        profileId: profile.profileId,
+      });
   const workerUrl = normalizeWorkerUrl(
     args.workerUrl ??
       preflight.receipt?.workerUrl ??
       input.processEnv["WORKFLOW_APP_URL"] ??
       defaultWorkerUrl
   );
-  const request = buildDreamLiveRunRequest({ runId });
+  const request = buildWorkflowLiveRunRequest({ profile, runId });
+  const runDir = workflowProfileWorkspacePaths(profile.profileId).runReceiptDir;
   const relativeRequestPath =
-    args.requestPath ?? `${defaultRunDir}/${runId}-request.json`;
+    args.requestPath ?? `${runDir}/${runId}-request.json`;
   const relativeReceiptPath =
-    args.receiptPath ?? `${defaultRunDir}/${runId}-receipt.json`;
+    args.receiptPath ?? `${runDir}/${runId}-receipt.json`;
   const relativeResponsePath =
-    args.responsePath ?? `${defaultRunDir}/${runId}-response.json`;
+    args.responsePath ?? `${runDir}/${runId}-response.json`;
   const requestPath = resolve(input.repoRoot, relativeRequestPath);
   const receiptPath = resolve(input.repoRoot, relativeReceiptPath);
   const responsePath = resolve(input.repoRoot, relativeResponsePath);
 
   await writeJson(requestPath, request);
 
-  const submitResult = await submitLiveDreamRunIfAllowed({
+  const submitResult = await submitLiveRunIfAllowed({
     args,
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     preflight,
@@ -517,9 +536,18 @@ export const runDreamLiveRunCli = async (
 };
 
 if (isMain()) {
-  await runDreamLiveRunCli({
-    argv: process.argv.slice(2),
-    processEnv: process.env,
-    repoRoot: resolve(import.meta.dirname, ".."),
-  });
+  try {
+    await runWorkflowLiveRunCli({
+      argv: process.argv.slice(2),
+      processEnv: process.env,
+      repoRoot: resolve(import.meta.dirname, ".."),
+    });
+  } catch (error) {
+    console.error(
+      error instanceof Error
+        ? error.message
+        : "Workflow live run request failed."
+    );
+    process.exitCode = 1;
+  }
 }

@@ -16,13 +16,14 @@ import type {
   WorkflowLiveRunRequestReceipt,
   WorkflowLivePreflightReceipt,
 } from "../src/app/domain/schemas.ts";
+import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
+import {
+  requireInstalledSourceProfile,
+  workflowProfileWorkspacePaths,
+} from "./workflow-app-profile.ts";
 
 const defaultLocalProofPath =
   ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
-const defaultPreflightPath =
-  ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
-const defaultRunReceiptDir = ".wrangler/workflow-app/dream-runs";
-const defaultOutRoot = ".wrangler/workflow-app/dream-reports";
 const defaultPublishExpiresIn = "24h";
 const defaultWzrrdBin = "wzrrd";
 
@@ -38,7 +39,7 @@ const LocalRelayProofReceiptSchema = z
     rawPathsReturned: z.literal(false),
     redacted: z.literal(true),
     runId: z.string().min(1),
-    schemaVersion: z.literal("trusted.dream-memory-relay.local-proof.v1"),
+    schemaVersion: z.literal("trusted.memory-relay.local-proof.v1"),
     search: z.object({
       hitCount: z.number().int().min(0),
       hydratedCount: z.number().int().min(0),
@@ -65,7 +66,7 @@ export type LocalRelayProofReceipt = z.infer<
   typeof LocalRelayProofReceiptSchema
 >;
 
-const DreamReadinessReportReceiptSchema = z.object({
+const WorkflowReadinessReportReceiptSchema = z.object({
   definitionOfDoneAuditPath: z.string().min(1),
   generatedAt: z.string().min(1),
   htmlHash: z.string().length(64),
@@ -77,7 +78,7 @@ const DreamReadinessReportReceiptSchema = z.object({
   redacted: z.literal(true),
   reportPath: z.string().min(1),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.dream-readiness-report.v1"),
+  schemaVersion: z.literal("workflow.readiness-report.v1"),
   siteDir: z.string().min(1),
   status: z.literal("rendered"),
   summary: z.object({
@@ -90,8 +91,8 @@ const DreamReadinessReportReceiptSchema = z.object({
   }),
 });
 
-export type DreamReadinessReportReceipt = z.infer<
-  typeof DreamReadinessReportReceiptSchema
+export type WorkflowReadinessReportReceipt = z.infer<
+  typeof WorkflowReadinessReportReceiptSchema
 >;
 
 const WorkflowDefinitionOfDoneAuditItemSchema = z.object({
@@ -108,7 +109,7 @@ const WorkflowDefinitionOfDoneAuditSchema = z.object({
   items: z.array(WorkflowDefinitionOfDoneAuditItemSchema).min(1),
   redacted: z.literal(true),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
+  schemaVersion: z.literal("workflow.definition-of-done-audit.v1"),
   status: z.enum(["blocked", "captured", "not-proven"]),
   summary: z.object({
     blockedCount: z.number().int().min(0),
@@ -154,7 +155,7 @@ const WzrrdCliPublishResultSchema = z
 
 export type WzrrdCliPublishResult = z.infer<typeof WzrrdCliPublishResultSchema>;
 
-const DreamReadinessReportPublishReceiptSchema = z.object({
+const WorkflowReadinessReportPublishReceiptSchema = z.object({
   command: z.array(z.string().min(1)),
   expiresIn: z.string().min(1),
   htmlHash: z.string().length(64),
@@ -175,17 +176,17 @@ const DreamReadinessReportPublishReceiptSchema = z.object({
     url: z.string().url(),
   }),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.dream-readiness-report.publish.v1"),
+  schemaVersion: z.literal("workflow.readiness-report.publish.v1"),
   siteDir: z.string().min(1),
   slug: z.string().min(1),
   status: z.literal("published"),
 });
 
-export type DreamReadinessReportPublishReceipt = z.infer<
-  typeof DreamReadinessReportPublishReceiptSchema
+export type WorkflowReadinessReportPublishReceipt = z.infer<
+  typeof WorkflowReadinessReportPublishReceiptSchema
 >;
 
-interface DreamReadinessReportArgs {
+interface WorkflowReadinessReportArgs {
   readonly localProofPath: string;
   readonly outRoot: string;
   readonly preflightPath: string;
@@ -198,14 +199,15 @@ interface DreamReadinessReportArgs {
   readonly wzrrdBin: string;
 }
 
-export interface DreamReadinessReportInput {
+export interface WorkflowReadinessReportInput {
   readonly generatedAt: string;
   readonly localProof: LocalRelayProofReceipt;
   readonly preflight: WorkflowLivePreflightReceipt;
+  readonly profile: MemorySourceProfile;
   readonly runReceipt: WorkflowLiveRunRequestReceipt;
 }
 
-export interface RunDreamReadinessReportCliInput {
+export interface RunWorkflowReadinessReportCliInput {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly now?: () => string;
@@ -242,7 +244,11 @@ const argValue = (
   return index === -1 ? undefined : argv[index + 1];
 };
 
-const parseArgs = (argv: readonly string[]): DreamReadinessReportArgs => {
+const parseArgs = (
+  argv: readonly string[],
+  profile: MemorySourceProfile
+): WorkflowReadinessReportArgs => {
+  const workspacePaths = workflowProfileWorkspacePaths(profile.profileId);
   const receiptPath = argValue(argv, "--receipt-path");
   const runReceiptPath = argValue(argv, "--run-receipt-path");
   const publishSlug =
@@ -251,8 +257,10 @@ const parseArgs = (argv: readonly string[]): DreamReadinessReportArgs => {
   return {
     localProofPath:
       argValue(argv, "--local-proof-path") ?? defaultLocalProofPath,
-    outRoot: argValue(argv, "--out-root") ?? defaultOutRoot,
-    preflightPath: argValue(argv, "--preflight-path") ?? defaultPreflightPath,
+    outRoot:
+      argValue(argv, "--out-root") ?? workspacePaths.readinessReportOutRoot,
+    preflightPath:
+      argValue(argv, "--preflight-path") ?? workspacePaths.preflightReceiptPath,
     publish: argv.includes("--publish"),
     publishExpiresIn:
       argValue(argv, "--publish-expires-in") ??
@@ -260,7 +268,8 @@ const parseArgs = (argv: readonly string[]): DreamReadinessReportArgs => {
       defaultPublishExpiresIn,
     ...(publishSlug === undefined ? {} : { publishSlug }),
     ...(receiptPath === undefined ? {} : { receiptPath }),
-    runReceiptDir: argValue(argv, "--run-receipt-dir") ?? defaultRunReceiptDir,
+    runReceiptDir:
+      argValue(argv, "--run-receipt-dir") ?? workspacePaths.runReceiptDir,
     ...(runReceiptPath === undefined ? {} : { runReceiptPath }),
     wzrrdBin: argValue(argv, "--wzrrd-bin") ?? defaultWzrrdBin,
   };
@@ -275,7 +284,7 @@ const latestRunReceiptPath = async (dir: string): Promise<string> => {
     entry.endsWith("-receipt.json")
   );
   if (receiptNames.length === 0) {
-    throw new Error(`No Dream run receipt files found in ${dir}.`);
+    throw new Error(`No workflow run receipt files found in ${dir}.`);
   }
 
   const candidates = await Promise.all(
@@ -293,7 +302,7 @@ const latestRunReceiptPath = async (dir: string): Promise<string> => {
     (left, right) => right.modifiedMs - left.modifiedMs
   );
   if (latest === undefined) {
-    throw new Error(`No Dream run receipt files found in ${dir}.`);
+    throw new Error(`No workflow run receipt files found in ${dir}.`);
   }
 
   return latest.path;
@@ -392,7 +401,7 @@ const renderMarkdownSubset = (content: string): string => {
   return html.join("\n");
 };
 
-const statusLineFor = (input: DreamReadinessReportInput): string =>
+const statusLineFor = (input: WorkflowReadinessReportInput): string =>
   [
     `source roots ${input.localProof.sourceRootCount}`,
     `source families ${input.localProof.sourceFamilyCoverage.length}`,
@@ -414,19 +423,19 @@ const sourceFamilyLine = (proof: LocalRelayProofReceipt): string =>
 const bulletList = (items: readonly string[]): string =>
   items.length === 0 ? "- None." : items.map((item) => `- ${item}`).join("\n");
 
-const auditEvidenceFor = (input: DreamReadinessReportInput): string[] => [
+const auditEvidenceFor = (input: WorkflowReadinessReportInput): string[] => [
   `local-proof:${input.localProof.runId}`,
   `preflight:${input.preflight.generatedAt}`,
   `run-receipt:${input.runReceipt.runId}`,
 ];
 
-const dreamCoverageCaptured = (proof: LocalRelayProofReceipt): boolean =>
+const retrievalCoverageCaptured = (proof: LocalRelayProofReceipt): boolean =>
   proof.search.hitCount > 0 &&
   proof.search.hydratedCount > 0 &&
   proof.correlation.edgeCount > 0;
 
 const preflightCheckStatus = (
-  input: DreamReadinessReportInput,
+  input: WorkflowReadinessReportInput,
   checkId: string
 ): string =>
   input.preflight.checks.find((check) => check.checkId === checkId)?.status ??
@@ -437,30 +446,31 @@ const parseAuditItem = (
 ): WorkflowDefinitionOfDoneAuditItem =>
   WorkflowDefinitionOfDoneAuditItemSchema.parse(item);
 
-const liveSubmittedFor = (input: DreamReadinessReportInput): boolean =>
+const liveSubmittedFor = (input: WorkflowReadinessReportInput): boolean =>
   input.runReceipt.submit.attempted && input.runReceipt.status === "submitted";
 
-const dreamCartridgePackageAuditItem = (
-  input: DreamReadinessReportInput
+const workflowCartridgePackageAuditItem = (
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const packageCaptured =
     input.preflight.remoteRegistry.status === "queried" &&
     input.preflight.remoteRegistry.expectedPackageSeeded === true;
+  const packageId = input.preflight.expectedCartridgePackageId;
 
   return parseAuditItem({
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "Dream is an installed artifact-backed workflow cartridge/package.",
-    requirementId: "dream-cartridge-package",
+      "The workflow is an installed artifact-backed workflow cartridge/package.",
+    requirementId: "workflow-cartridge-package",
     status: packageCaptured ? "captured" : "missing",
     summary: packageCaptured
-      ? "Remote registry has workflow/memory-fabric seeded for invocation."
-      : "Remote registry did not prove workflow/memory-fabric is seeded.",
+      ? `Remote registry has ${packageId} seeded for invocation.`
+      : `Remote registry did not prove ${packageId} is seeded.`,
   });
 };
 
 const trustedLocalRelayAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const localRelayCaptured =
     input.localProof.rawCredentialsReturned === false &&
@@ -481,7 +491,7 @@ const trustedLocalRelayAuditItem = (
 };
 
 const workerFacingRelayAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const relayReady =
     input.preflight.relayCapability.readiness.endpointConfigured &&
@@ -498,7 +508,7 @@ const workerFacingRelayAuditItem = (
       `preflight-check:relay:healthz:${preflightCheckStatus(input, "relay:healthz")}`,
     ],
     requirement:
-      "Cloudflare leases memory/search/hydration/backfill capabilities through a Worker-facing trusted relay.",
+      "Cloudflare leases memory/search/hydration capabilities through a Worker-facing trusted relay.",
     requirementId: "worker-facing-relay-capability-lease",
     status: relayReady ? "captured" : "blocked",
     summary: relayReady
@@ -508,7 +518,7 @@ const workerFacingRelayAuditItem = (
 };
 
 const liveCloudflareExecutionAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
@@ -516,7 +526,7 @@ const liveCloudflareExecutionAuditItem = (
     blockerRefs: input.runReceipt.blockedReasons,
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "Dream is submitted to and executed by the deployed Cloudflare workflow app.",
+      "The run request is submitted to and executed by the deployed Cloudflare workflow app.",
     requirementId: "live-cloudflare-execution",
     status: liveSubmitted ? "captured" : "blocked",
     summary: liveSubmitted
@@ -526,7 +536,7 @@ const liveCloudflareExecutionAuditItem = (
 };
 
 const generatedMachineAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
@@ -549,9 +559,9 @@ const generatedMachineAuditItem = (
 };
 
 const tShapedCoverageAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
-  const coverageCaptured = dreamCoverageCaptured(input.localProof);
+  const coverageCaptured = retrievalCoverageCaptured(input.localProof);
 
   const missingFamilies = input.localProof.sourceFamilyCoverage
     .filter((coverage) => coverage.status !== "captured")
@@ -564,7 +574,7 @@ const tShapedCoverageAuditItem = (
   return parseAuditItem({
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "Dream reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never gates.",
+      "The workflow reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never gates.",
     requirementId: "t-shaped-memory-coverage",
     status: coverageCaptured ? "captured" : "not-proven",
     summary: coverageCaptured
@@ -574,7 +584,7 @@ const tShapedCoverageAuditItem = (
 };
 
 const workflowOwnedWzrrdAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
@@ -582,17 +592,17 @@ const workflowOwnedWzrrdAuditItem = (
     blockerRefs: input.runReceipt.blockedReasons,
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "The Cloudflare Dream workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
+      "The Cloudflare workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
     requirementId: "workflow-owned-wzrrd-output",
     status: liveSubmitted ? "not-proven" : "blocked",
     summary: liveSubmitted
       ? "Live submit happened, but this readiness report has not inspected workflow-owned Wzrrd lease receipts."
-      : "Only the operator readiness report exists; no workflow-owned Wzrrd publish capability receipt exists for this Dream run.",
+      : "Only the operator readiness report exists; no workflow-owned Wzrrd publish capability receipt exists for this run.",
   });
 };
 
 const hitlRefinementLoopAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
@@ -600,17 +610,17 @@ const hitlRefinementLoopAuditItem = (
     blockerRefs: input.runReceipt.blockedReasons,
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "Accepted dreams produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
+      "Accepted findings produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
     requirementId: "hitl-refinement-loop",
     status: liveSubmitted ? "not-proven" : "blocked",
     summary: liveSubmitted
       ? "Live submit happened, but this readiness report has not inspected HITL decision/seed/follow-up artifacts."
-      : "The live Dream blocked before report, HITL decision seed, or follow-up run request artifacts could be generated.",
+      : "The live run blocked before report, HITL decision seed, or follow-up run request artifacts could be generated.",
   });
 };
 
 const publicPrivateBoundaryAuditItem = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAuditItem => {
   const redactionCaptured =
     input.localProof.rawCredentialsReturned === false &&
@@ -646,10 +656,10 @@ const auditStatusFor = (input: {
 };
 
 export const buildWorkflowDefinitionOfDoneAudit = (
-  input: DreamReadinessReportInput
+  input: WorkflowReadinessReportInput
 ): WorkflowDefinitionOfDoneAudit => {
   const parsedItems = [
-    dreamCartridgePackageAuditItem(input),
+    workflowCartridgePackageAuditItem(input),
     trustedLocalRelayAuditItem(input),
     workerFacingRelayAuditItem(input),
     liveCloudflareExecutionAuditItem(input),
@@ -677,7 +687,7 @@ export const buildWorkflowDefinitionOfDoneAudit = (
     items: parsedItems,
     redacted: true,
     runId: input.runReceipt.runId,
-    schemaVersion: "workflow.dream-definition-of-done-audit.v1",
+    schemaVersion: "workflow.definition-of-done-audit.v1",
     status: auditStatusFor({ blockedCount, missingCount, notProvenCount }),
     summary: {
       blockedCount,
@@ -692,30 +702,31 @@ export const buildWorkflowDefinitionOfDoneAudit = (
 const auditLineFor = (item: WorkflowDefinitionOfDoneAudit["items"][number]) =>
   `- ${item.requirementId}: ${item.status} — ${item.summary}`;
 
-export const renderDreamReadinessReportMdsvx = (
-  input: DreamReadinessReportInput
+export const renderWorkflowReadinessReportMdsvx = (
+  input: WorkflowReadinessReportInput
 ): string => {
   const audit = buildWorkflowDefinitionOfDoneAudit(input);
+  const reportTitle = `${input.profile.title} readiness report`;
 
   return [
     "---",
     'expiresIn: "24h"',
     "noindex: true",
     'template: "joel/tufte-mdsvx@0.1.0"',
-    'title: "Dream readiness report"',
+    `title: "${reportTitle}"`,
     "---",
     "",
-    "# Dream readiness report",
+    `# ${reportTitle}`,
     "",
-    "This is a readiness report for the Dream workflow, not a completed Dream run.",
+    `This is a readiness report for the ${input.profile.title} workflow (source profile ${input.profile.profileId}), not a completed run.`,
     "",
-    `The trusted local memory fabric proof passed. The live Cloudflare Dream submit did not happen because the Worker-facing relay boundary is still blocked. That is the correct outcome: no relay URL, no relay token, no authenticated remote health check, no live Dream.`,
+    `The trusted local memory fabric proof passed. The live Cloudflare submit did not happen because the Worker-facing relay boundary is still blocked. That is the correct outcome: no relay URL, no relay token, no authenticated remote health check, no live run.`,
     "",
     `Status: ${statusLineFor(input)}.`,
     "",
     "## The actual finding",
     "",
-    "The useful result is not that Dreaming is done. It is not done. The useful result is that the local relay can now see enough of the system to make the next Cloudflare run worth doing.",
+    "The useful result is not that the workflow is done. It is not done. The useful result is that the local relay can now see enough of the system to make the next Cloudflare run worth doing.",
     "",
     "Reasoning",
     "",
@@ -723,11 +734,11 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Rating",
     "",
-    "8/10 as a readiness artifact. 0/10 as proof of completed Cloudflare Dream execution.",
+    "8/10 as a readiness artifact. 0/10 as proof of completed Cloudflare execution.",
     "",
     "Recommendation",
     "",
-    "Turn this into the next operational task: approve and configure the Worker-facing trusted relay, then run the real Cloudflare Dream so the generated machine, harness, verifier proof, Wzrrd delivery, and HITL seed artifacts exist for real.",
+    "Turn this into the next operational task: approve and configure the Worker-facing trusted relay, then run the real Cloudflare workflow so the generated machine, harness, verifier proof, Wzrrd delivery, and HITL seed artifacts exist for real.",
     "",
     `Receipt: ${input.localProof.runId}.`,
     "",
@@ -737,7 +748,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Reasoning",
     "",
-    "The Dream cartridge is seeded and the local proof is useful, but Cloudflare cannot execute the cartridge nodes until it can reach the trusted relay through an approved HTTPS endpoint with the matching Worker secret.",
+    "The workflow cartridge is seeded and the local proof is useful, but Cloudflare cannot execute the cartridge nodes until it can reach the trusted relay through an approved HTTPS endpoint with the matching Worker secret.",
     "",
     "Rating",
     "",
@@ -745,7 +756,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Recommendation",
     "",
-    "Approve the network boundary explicitly, provision `MEMORY_RELAY_TOKEN`, deploy `MEMORY_RELAY_BASE_URL` through the signoff-gated path, verify remote `/healthz`, then submit the existing Dream run request shape.",
+    "Approve the network boundary explicitly, provision `MEMORY_RELAY_TOKEN`, deploy `MEMORY_RELAY_BASE_URL` through the signoff-gated path, verify remote `/healthz`, then submit the existing run request shape.",
     "",
     "### Keep the report honest",
     "",
@@ -759,7 +770,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Recommendation",
     "",
-    "Do not call this a Dream output. Use it as the HITL handoff for the blocked relay boundary, then replace it with the real generated Dream HITL report after Cloudflare execution.",
+    "Do not call this a workflow output. Use it as the HITL handoff for the blocked relay boundary, then replace it with the real generated HITL report after Cloudflare execution.",
     "",
     "## Proof",
     "",
@@ -793,10 +804,10 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "## What did not happen",
     "",
-    "- No live Cloudflare Dream was submitted.",
-    "- No real Pi planner generated a task-specific Dream state machine in this run attempt.",
+    "- No live Cloudflare run was submitted.",
+    "- No real Pi planner generated a task-specific state machine in this run attempt.",
     "- No `workflow.xstate-machine.v1`, generated TypeScript source, generated harness source, verifier proof, or cartridge invocation proof was produced by Cloudflare for this run request.",
-    "- No Wzrrd publication by the Dream workflow happened; this readiness report is a separate operator handoff artifact.",
+    "- No Wzrrd publication by the workflow happened; this readiness report is a separate operator handoff artifact.",
     "- No raw credentials, raw private paths, or raw transcripts were returned by the local relay proof.",
     "",
     "## Report standard",
@@ -805,17 +816,18 @@ export const renderDreamReadinessReportMdsvx = (
   ].join("\n");
 };
 
-export const renderDreamReadinessReportHtml = (input: {
+export const renderWorkflowReadinessReportHtml = (input: {
   readonly generatedAt: string;
   readonly mdsvx: string;
   readonly runId: string;
+  readonly title: string;
 }): string => `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>Dream readiness report</title>
+  <title>${htmlEscape(input.title)}</title>
   <style>
     :root {
       color-scheme: light;
@@ -897,7 +909,7 @@ export const renderDreamReadinessReportHtml = (input: {
   <main>
     <article>
       <header>
-        <h1>Dream readiness report</h1>
+        <h1>${htmlEscape(input.title)}</h1>
         <div class="meta">
           <div>Run <code>${htmlEscape(input.runId)}</code></div>
           <div>Generated <code>${htmlEscape(input.generatedAt)}</code></div>
@@ -917,7 +929,7 @@ export const renderDreamReadinessReportHtml = (input: {
 </html>`;
 
 const compactReceiptsFor = (
-  input: DreamReadinessReportInput,
+  input: WorkflowReadinessReportInput,
   audit: WorkflowDefinitionOfDoneAudit
 ) => ({
   definitionOfDoneAudit: audit,
@@ -965,7 +977,7 @@ const compactReceiptsFor = (
     submit: input.runReceipt.submit,
     workerUrl: input.runReceipt.workerUrl,
   },
-  schemaVersion: "workflow.dream-readiness-report.receipts.v1",
+  schemaVersion: "workflow.readiness-report.receipts.v1",
 });
 
 const writeText = async (path: string, value: string): Promise<void> => {
@@ -1003,17 +1015,17 @@ const runWzrrdPublishCommand = (
   );
 };
 
-const publishDreamReadinessReport = async (input: {
+const publishWorkflowReadinessReport = async (input: {
   readonly command?: (
     commandInput: WzrrdPublishCommandInput
   ) => Promise<WzrrdCliPublishResult>;
   readonly expiresIn: string;
   readonly now: () => string;
-  readonly receipt: DreamReadinessReportReceipt;
+  readonly receipt: WorkflowReadinessReportReceipt;
   readonly repoRoot: string;
   readonly slug: string;
   readonly wzrrdBin: string;
-}): Promise<DreamReadinessReportPublishReceipt> => {
+}): Promise<WorkflowReadinessReportPublishReceipt> => {
   const commandInput: WzrrdPublishCommandInput = {
     expiresIn: input.expiresIn,
     repoRoot: input.repoRoot,
@@ -1033,7 +1045,7 @@ const publishDreamReadinessReport = async (input: {
     input.receipt.siteDir,
     "publish-receipt.json"
   );
-  const publishReceipt = DreamReadinessReportPublishReceiptSchema.parse({
+  const publishReceipt = WorkflowReadinessReportPublishReceiptSchema.parse({
     command,
     expiresIn: input.expiresIn,
     htmlHash: input.receipt.htmlHash,
@@ -1058,7 +1070,7 @@ const publishDreamReadinessReport = async (input: {
       url: publishResult.result.url,
     },
     runId: input.receipt.runId,
-    schemaVersion: "workflow.dream-readiness-report.publish.v1",
+    schemaVersion: "workflow.readiness-report.publish.v1",
     siteDir: input.receipt.siteDir,
     slug: input.slug,
     status: "published",
@@ -1071,10 +1083,10 @@ const publishDreamReadinessReport = async (input: {
   return publishReceipt;
 };
 
-export const renderDreamReadinessReport = async (input: {
+export const renderWorkflowReadinessReport = async (input: {
   readonly outRoot: string;
-  readonly report: DreamReadinessReportInput;
-}): Promise<DreamReadinessReportReceipt> => {
+  readonly report: WorkflowReadinessReportInput;
+}): Promise<WorkflowReadinessReportReceipt> => {
   const siteDir = resolve(input.outRoot, input.report.runReceipt.runId);
   const definitionOfDoneAuditPath = join(
     siteDir,
@@ -1085,11 +1097,12 @@ export const renderDreamReadinessReport = async (input: {
   const receiptsPath = join(siteDir, "receipts.json");
   const receiptPath = join(siteDir, "render-receipt.json");
   const audit = buildWorkflowDefinitionOfDoneAudit(input.report);
-  const mdsvx = renderDreamReadinessReportMdsvx(input.report);
-  const html = renderDreamReadinessReportHtml({
+  const mdsvx = renderWorkflowReadinessReportMdsvx(input.report);
+  const html = renderWorkflowReadinessReportHtml({
     generatedAt: input.report.generatedAt,
     mdsvx,
     runId: input.report.runReceipt.runId,
+    title: `${input.report.profile.title} readiness report`,
   });
   const compactReceipts = compactReceiptsFor(input.report, audit);
 
@@ -1104,7 +1117,7 @@ export const renderDreamReadinessReport = async (input: {
     `${JSON.stringify(compactReceipts, null, 2)}\n`
   );
 
-  const receipt = DreamReadinessReportReceiptSchema.parse({
+  const receipt = WorkflowReadinessReportReceiptSchema.parse({
     definitionOfDoneAuditPath,
     generatedAt: input.report.generatedAt,
     htmlHash: sha256Hex(html),
@@ -1116,7 +1129,7 @@ export const renderDreamReadinessReport = async (input: {
     redacted: true,
     reportPath,
     runId: input.report.runReceipt.runId,
-    schemaVersion: "workflow.dream-readiness-report.v1",
+    schemaVersion: "workflow.readiness-report.v1",
     siteDir,
     status: "rendered",
     summary: {
@@ -1133,10 +1146,11 @@ export const renderDreamReadinessReport = async (input: {
   return receipt;
 };
 
-export const runDreamReadinessReportCli = async (
-  input: RunDreamReadinessReportCliInput
-): Promise<DreamReadinessReportReceipt> => {
-  const args = parseArgs(input.argv);
+export const runWorkflowReadinessReportCli = async (
+  input: RunWorkflowReadinessReportCliInput
+): Promise<WorkflowReadinessReportReceipt> => {
+  const profile = requireInstalledSourceProfile(input.argv);
+  const args = parseArgs(input.argv, profile);
   const localProofPath = resolve(input.repoRoot, args.localProofPath);
   const preflightPath = resolve(input.repoRoot, args.preflightPath);
   const runReceiptPath = resolve(
@@ -1144,7 +1158,7 @@ export const runDreamReadinessReportCli = async (
     args.runReceiptPath ??
       (await latestRunReceiptPath(resolve(input.repoRoot, args.runReceiptDir)))
   );
-  const reportInput: DreamReadinessReportInput = {
+  const reportInput: WorkflowReadinessReportInput = {
     generatedAt: input.now?.() ?? new Date().toISOString(),
     localProof: LocalRelayProofReceiptSchema.parse(
       await readJsonFile(localProofPath)
@@ -1152,17 +1166,18 @@ export const runDreamReadinessReportCli = async (
     preflight: WorkflowLivePreflightReceiptSchema.parse(
       await readJsonFile(preflightPath)
     ),
+    profile,
     runReceipt: WorkflowLiveRunRequestReceiptSchema.parse(
       await readJsonFile(runReceiptPath)
     ),
   };
   if (reportInput.runReceipt.submit.attempted) {
     throw new Error(
-      "Dream readiness report only renders blocked/pre-submit receipts."
+      "Workflow readiness report only renders blocked/pre-submit receipts."
     );
   }
 
-  const receipt = await renderDreamReadinessReport({
+  const receipt = await renderWorkflowReadinessReport({
     outRoot: resolve(input.repoRoot, args.outRoot),
     report: reportInput,
   });
@@ -1180,7 +1195,7 @@ export const runDreamReadinessReportCli = async (
   const publishSlug =
     args.publishSlug ?? basename(receipt.siteDir).toLowerCase();
   if (args.publish) {
-    const publishReceipt = await publishDreamReadinessReport({
+    const publishReceipt = await publishWorkflowReadinessReport({
       ...(input.publishCommand === undefined
         ? {}
         : { command: input.publishCommand }),
@@ -1204,8 +1219,17 @@ export const runDreamReadinessReportCli = async (
 };
 
 if (isMain()) {
-  await runDreamReadinessReportCli({
-    argv: process.argv.slice(2),
-    repoRoot: resolve(import.meta.dirname, ".."),
-  });
+  try {
+    await runWorkflowReadinessReportCli({
+      argv: process.argv.slice(2),
+      repoRoot: resolve(import.meta.dirname, ".."),
+    });
+  } catch (error) {
+    console.error(
+      error instanceof Error
+        ? error.message
+        : "Workflow readiness report failed."
+    );
+    process.exitCode = 1;
+  }
 }

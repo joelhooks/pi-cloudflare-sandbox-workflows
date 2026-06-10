@@ -6,16 +6,22 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
-  buildDreamLiveRunRequest,
+  buildWorkflowLiveRunRequest,
   buildWorkflowLiveRunRequestReceipt,
-  runDreamLiveRunCli,
-} from "../../scripts/workflow-app-dream-run.ts";
+  runWorkflowLiveRunCli,
+} from "../../scripts/workflow-app-run.ts";
 import {
   WorkflowLiveRunRequestReceiptSchema,
   WorkflowLivePreflightReceiptSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
 import type { WorkflowLivePreflightReceipt } from "../../src/app/domain/schemas.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+
+const profileArgs = [
+  "--profile",
+  dreamTranscriptReviewSourceProfile.profileId,
+] as const;
 
 const relayNetworkBoundarySignoff =
   "exposing JoelClaw/Typesense over a new network boundary";
@@ -83,7 +89,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "memory.hitl-follow-up-run-request.v1 draft artifact",
       "workflow.execution-proof.v1 Cloudflare execution proof",
       "workflow.cartridge-invocation-proof.v1 per-node proofs",
-      "wzrrd.site.publish capability receipt for the Dream report",
+      "wzrrd.site.publish capability receipt for the HITL report",
     ],
     sideEffectsRequireCapabilityLeases: true,
   },
@@ -93,7 +99,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       message: "Relay URL configured.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-binding"],
+      requiredFor: ["memory-relay-binding"],
       status: "present",
     },
     {
@@ -101,7 +107,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       message: "Relay token configured.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-lease"],
+      requiredFor: ["memory-relay-lease"],
       status: "present",
     },
     {
@@ -109,7 +115,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       message: "Worker deploy config defines relay URL.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-binding"],
+      requiredFor: ["memory-relay-binding"],
       status: "passed",
     },
     {
@@ -117,7 +123,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       message: "Relay healthz passed.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-readiness"],
+      requiredFor: ["memory-relay-readiness"],
       status: "passed",
     },
     {
@@ -125,7 +131,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       message: "Local relay proof passed.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-local-proof"],
+      requiredFor: ["memory-relay-local-proof"],
       status: "passed",
     },
   ],
@@ -221,7 +227,8 @@ const PostedResponseSchema = z.object({
 
 describe("Dream live run request harness", () => {
   it("builds a typed request that asks for generated Cloudflare Dreaming through the cartridge", () => {
-    const request = buildDreamLiveRunRequest({
+    const request = buildWorkflowLiveRunRequest({
+      profile: dreamTranscriptReviewSourceProfile,
       runId: "run-live-memory-fabric-test",
     });
 
@@ -286,7 +293,8 @@ describe("Dream live run request harness", () => {
   });
 
   it("blocks submission when the live preflight is not ready", () => {
-    const request = buildDreamLiveRunRequest({
+    const request = buildWorkflowLiveRunRequest({
+      profile: dreamTranscriptReviewSourceProfile,
       runId: "run-live-memory-fabric-blocked",
     });
     const receipt = buildWorkflowLiveRunRequestReceipt({
@@ -326,8 +334,9 @@ describe("Dream live run request harness", () => {
       await writePreflight(repoRoot, blockedPreflight);
       let fetchCalled = false;
 
-      const receipt = await runDreamLiveRunCli({
+      const receipt = await runWorkflowLiveRunCli({
         argv: [
+          ...profileArgs,
           "--submit",
           "--run-id",
           "run-live-memory-fabric-blocked",
@@ -380,8 +389,9 @@ describe("Dream live run request harness", () => {
       await writePreflight(repoRoot, readyPreflight);
       let fetchCalled = false;
 
-      const receipt = await runDreamLiveRunCli({
+      const receipt = await runWorkflowLiveRunCli({
         argv: [
+          ...profileArgs,
           "--submit",
           "--run-id",
           "run-live-memory-fabric-ready-no-signoff",
@@ -410,7 +420,7 @@ describe("Dream live run request harness", () => {
         submitAttempted: receipt.submit.attempted,
       }).toStrictEqual({
         blockedReasons: [
-          "Provide the exact owner sign-off phrase before submitting a live Dream run that uses the trusted memory relay network boundary.",
+          "Provide the exact owner sign-off phrase before submitting a live workflow run that uses the trusted memory relay network boundary.",
         ],
         fetchCalled: false,
         status: "blocked",
@@ -428,8 +438,9 @@ describe("Dream live run request harness", () => {
       await writePreflight(repoRoot, readyPreflight);
       let postedRequest: unknown;
 
-      const receipt = await runDreamLiveRunCli({
+      const receipt = await runWorkflowLiveRunCli({
         argv: [
+          ...profileArgs,
           "--submit",
           "--run-id",
           "run-live-memory-fabric-ready",
@@ -498,8 +509,9 @@ describe("Dream live run request harness", () => {
       let fetchCalled = false;
       let preflightCalled = false;
 
-      const receipt = await runDreamLiveRunCli({
+      const receipt = await runWorkflowLiveRunCli({
         argv: [
+          ...profileArgs,
           "--submit",
           "--run-id",
           "run-live-memory-fabric-refresh-blocked",
@@ -524,6 +536,9 @@ describe("Dream live run request harness", () => {
           preflightCalled = true;
           expect(input.argv).toContain("--allow-missing");
           expect(input.argv).toContain("--receipt-path=preflight.json");
+          expect(input.argv).toContain(
+            dreamTranscriptReviewSourceProfile.profileId
+          );
 
           return Promise.resolve(blockedPreflight);
         },

@@ -20,34 +20,19 @@ import type {
   WorkflowLivePreflightRemoteRegistry,
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../src/app/domain/schemas.ts";
-import { memoryFabricPackageMetadata } from "../src/cartridges/memory-fabric/package-seed.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
+import { packageMetadataForSeedTemplate } from "../src/app/infrastructure/cloudflare-package-seeder.ts";
+import { defaultPackageSeedTemplatesWithInstalledCartridges } from "../src/cartridges/cloudflare-workflow-cartridges.ts";
 import { TrustedLocalMemoryRelayReadinessReceiptSchema } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import {
+  requireInstalledSourceProfile,
+  workflowProfileWorkspacePaths,
+} from "./workflow-app-profile.ts";
 
-const defaultReceiptPath =
-  ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
   ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
-const expectedCartridgePackageId = "workflow/memory-fabric";
-const workflowId = "dream.memory-fabric";
-if (memoryFabricPackageMetadata.packageId !== expectedCartridgePackageId) {
-  throw new Error(
-    `Expected package seed template not found: ${expectedCartridgePackageId}`
-  );
-}
-
-const expectedCartridgeArtifactRef =
-  memoryFabricPackageMetadata.latestArtifactRef;
-const expectedCartridgeManifestHash = hashJson(memoryFabricPackageMetadata);
-const expectedCartridgeWorkflowNodeTypes = memoryFabricPackageMetadata.exports
-  .filter((exportRecord) => exportRecord.kind === "workflow-node")
-  .map((exportRecord) => exportRecord.nodeType)
-  .filter((nodeType): nodeType is string => nodeType !== undefined);
-const expectedCartridgeSchemaExportIds = memoryFabricPackageMetadata.exports
-  .filter((exportRecord) => exportRecord.kind === "schema")
-  .map((exportRecord) => exportRecord.exportId);
 
 const RelayReceiptFamilyCountSchema = z.object({
   family: z.string().min(1),
@@ -73,7 +58,7 @@ interface CommandResult {
   readonly stdout: string;
 }
 
-interface DreamPreflightArgs {
+interface WorkflowPreflightArgs {
   readonly allowMissing: boolean;
   readonly checkRemote: boolean;
   readonly localRelayProofPath: string;
@@ -87,11 +72,20 @@ interface EnvRequirement {
   readonly requiredFor: readonly string[];
 }
 
-interface BuildDreamLivePreflightReceiptInput {
+interface CartridgeExpectations {
+  readonly expectedCartridgeArtifactRef: string;
+  readonly expectedCartridgeManifestHash: string;
+  readonly expectedCartridgePackageId: string;
+  readonly expectedCartridgeSchemaExportIds: readonly string[];
+  readonly expectedCartridgeWorkflowNodeTypes: readonly string[];
+}
+
+interface BuildWorkflowLivePreflightReceiptInput {
   readonly deployScriptText: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly generatedAt: string;
   readonly localRelayProofCheck: WorkflowLivePreflightCheck;
+  readonly profile: MemorySourceProfile;
   readonly relayReadinessCheck: WorkflowLivePreflightCheck;
   readonly remoteRegistry: WorkflowLivePreflightRemoteRegistry;
   readonly remoteSecrets: WorkflowLivePreflightRemoteSecretInventory;
@@ -124,12 +118,12 @@ const envRequirements: readonly EnvRequirement[] = [
   {
     name: "MEMORY_RELAY_BASE_URL",
     required: true,
-    requiredFor: ["dream-memory-relay-binding"],
+    requiredFor: ["memory-relay-binding"],
   },
   {
     name: "MEMORY_RELAY_TOKEN",
     required: true,
-    requiredFor: ["dream-memory-relay-lease"],
+    requiredFor: ["memory-relay-lease"],
   },
   {
     name: "DISCORD_BOT_TOKEN",
@@ -165,13 +159,43 @@ const remoteSecretInventoryCommand = [
   "wrangler.jsonc",
 ] as const;
 
-const relayRequiredOperations = z
-  .array(WorkflowLivePreflightRelayOperationSchema)
-  .parse(dreamTranscriptReviewSourceProfile.allowedRelayOperations);
-const relayAllowedSourceFamilies = z
-  .array(WorkflowLivePreflightMemorySourceFamilySchema)
-  .parse(dreamTranscriptReviewSourceProfile.sourceFamiliesExpected);
-const localProofRequiredSourceFamilies = relayAllowedSourceFamilies;
+const cartridgeExpectationsFor = (
+  profile: MemorySourceProfile
+): CartridgeExpectations => {
+  const seedTemplate = defaultPackageSeedTemplatesWithInstalledCartridges.find(
+    (template) => template.packageId === profile.packageId
+  );
+  if (seedTemplate === undefined) {
+    throw new Error(
+      `No installed package seed template found for ${profile.packageId}.`
+    );
+  }
+
+  const metadata = packageMetadataForSeedTemplate(seedTemplate);
+
+  return {
+    expectedCartridgeArtifactRef: metadata.latestArtifactRef,
+    expectedCartridgeManifestHash: hashJson(metadata),
+    expectedCartridgePackageId: profile.packageId,
+    expectedCartridgeSchemaExportIds: metadata.exports
+      .filter((exportRecord) => exportRecord.kind === "schema")
+      .map((exportRecord) => exportRecord.exportId),
+    expectedCartridgeWorkflowNodeTypes: metadata.exports
+      .filter((exportRecord) => exportRecord.kind === "workflow-node")
+      .map((exportRecord) => exportRecord.nodeType)
+      .filter((nodeType): nodeType is string => nodeType !== undefined),
+  };
+};
+
+const relayRequiredOperationsFor = (profile: MemorySourceProfile) =>
+  z
+    .array(WorkflowLivePreflightRelayOperationSchema)
+    .parse(profile.allowedRelayOperations);
+
+const relayAllowedSourceFamiliesFor = (profile: MemorySourceProfile) =>
+  z
+    .array(WorkflowLivePreflightMemorySourceFamilySchema)
+    .parse(profile.sourceFamiliesExpected);
 
 const LocalProofSourceFamilyCoverageSchema = z.object({
   family: z.string().min(1),
@@ -192,7 +216,7 @@ const LocalRelayProofReceiptSchema = z.object({
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
   runId: z.string().min(1),
-  schemaVersion: z.literal("trusted.dream-memory-relay.local-proof.v1"),
+  schemaVersion: z.literal("trusted.memory-relay.local-proof.v1"),
   search: z.object({
     hitCount: z.number().int().min(1),
     hydratedCount: z.number().int().min(1),
@@ -441,7 +465,7 @@ const missingRelayReadinessCheck = (
   message,
   redacted: true,
   required: true,
-  requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
+  requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
   status: "missing",
 });
 
@@ -452,13 +476,14 @@ const failedRelayReadinessCheck = (
   message,
   redacted: true,
   required: true,
-  requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
+  requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
   status: "failed",
 });
 
-export const checkDreamRelayReadiness = async (input: {
+export const checkMemoryRelayReadiness = async (input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly fetch?: typeof fetch;
+  readonly requiredOperations: readonly string[];
 }): Promise<WorkflowLivePreflightCheck> => {
   const relayBaseUrl = input.env["MEMORY_RELAY_BASE_URL"];
   const relayToken = input.env["MEMORY_RELAY_TOKEN"];
@@ -500,8 +525,8 @@ export const checkDreamRelayReadiness = async (input: {
     }
 
     const { data: readiness } = readinessResult;
-    const supportedOperations = new Set(readiness.supportedOperations);
-    const missingOperations = relayRequiredOperations.filter(
+    const supportedOperations = new Set<string>(readiness.supportedOperations);
+    const missingOperations = input.requiredOperations.filter(
       (operation) => !supportedOperations.has(operation)
     );
     if (missingOperations.length > 0) {
@@ -522,7 +547,7 @@ export const checkDreamRelayReadiness = async (input: {
         "Memory relay /healthz returned a redacted readiness receipt with required operations.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
+      requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
       status: "passed",
     };
   } catch (error) {
@@ -544,8 +569,8 @@ const missingLocalRelayProofCheck = (
   redacted: true,
   required: true,
   requiredFor: [
-    "dream-memory-relay-local-proof",
-    "dream-memory-relay-network-exposure-safety",
+    "memory-relay-local-proof",
+    "memory-relay-network-exposure-safety",
   ],
   status: "missing",
 });
@@ -558,8 +583,8 @@ const failedLocalRelayProofCheck = (
   redacted: true,
   required: true,
   requiredFor: [
-    "dream-memory-relay-local-proof",
-    "dream-memory-relay-network-exposure-safety",
+    "memory-relay-local-proof",
+    "memory-relay-network-exposure-safety",
   ],
   status: "failed",
 });
@@ -576,13 +601,14 @@ const receiptFamilySummary = (
     .join(", ");
 };
 
-export const checkLocalRelayProof = async (
-  proofPath: string
-): Promise<WorkflowLivePreflightCheck> => {
-  const proofText = await readTextOrEmpty(proofPath);
+export const checkLocalRelayProof = async (input: {
+  readonly proofPath: string;
+  readonly requiredSourceFamilies: readonly string[];
+}): Promise<WorkflowLivePreflightCheck> => {
+  const proofText = await readTextOrEmpty(input.proofPath);
   if (proofText.trim().length === 0) {
     return missingLocalRelayProofCheck(
-      `Trusted local Memory relay proof receipt is missing at ${proofPath}.`
+      `Trusted local Memory relay proof receipt is missing at ${input.proofPath}.`
     );
   }
 
@@ -606,7 +632,7 @@ export const checkLocalRelayProof = async (
   const coverageBySourceFamily = new Map(
     proof.sourceFamilyCoverage.map((coverage) => [coverage.family, coverage])
   );
-  const missingSourceFamilies = localProofRequiredSourceFamilies.filter(
+  const missingSourceFamilies = input.requiredSourceFamilies.filter(
     (family) => {
       const coverage = coverageBySourceFamily.get(family);
 
@@ -646,8 +672,8 @@ export const checkLocalRelayProof = async (
     redacted: true,
     required: true,
     requiredFor: [
-      "dream-memory-relay-local-proof",
-      "dream-memory-relay-network-exposure-safety",
+      "memory-relay-local-proof",
+      "memory-relay-network-exposure-safety",
     ],
     status: "passed",
   };
@@ -696,32 +722,37 @@ const runCommand = (input: RunCommandInput): CommandResult => {
   });
 };
 
-const expectedRemoteRegistryFields = () => ({
-  expectedPackageArtifactRef: expectedCartridgeArtifactRef,
-  expectedPackageManifestHash: expectedCartridgeManifestHash,
-  expectedSchemaExportIds: expectedCartridgeSchemaExportIds,
-  expectedWorkflowNodeTypes: expectedCartridgeWorkflowNodeTypes,
+const expectedRemoteRegistryFields = (expectations: CartridgeExpectations) => ({
+  expectedPackageArtifactRef: expectations.expectedCartridgeArtifactRef,
+  expectedPackageManifestHash: expectations.expectedCartridgeManifestHash,
+  expectedSchemaExportIds: [...expectations.expectedCartridgeSchemaExportIds],
+  expectedWorkflowNodeTypes: [
+    ...expectations.expectedCartridgeWorkflowNodeTypes,
+  ],
 });
 
 const buildRemoteRegistryFromResult = (
-  result: CommandResult
+  result: CommandResult,
+  expectations: CartridgeExpectations
 ): WorkflowLivePreflightRemoteRegistry => {
   const packageRows = extractPackageRowsFromD1Output(result.stdout);
   const expectedPackageRow = packageRows.find(
-    (row) => row.packageId === expectedCartridgePackageId
+    (row) => row.packageId === expectations.expectedCartridgePackageId
   );
   const expectedPackageSeeded = expectedPackageRow !== undefined;
   const expectedPackageArtifactRefMatched =
-    expectedPackageRow?.artifactRef === expectedCartridgeArtifactRef;
+    expectedPackageRow?.artifactRef ===
+    expectations.expectedCartridgeArtifactRef;
   const expectedPackageManifestHashMatched =
-    expectedPackageRow?.manifestHash === expectedCartridgeManifestHash;
+    expectedPackageRow?.manifestHash ===
+    expectations.expectedCartridgeManifestHash;
   if (result.exitCode !== 0) {
     return {
       command: [...result.command],
       errorMessage: "Remote Cloudflare D1 package registry query failed.",
-      ...expectedRemoteRegistryFields(),
+      ...expectedRemoteRegistryFields(expectations),
       expectedPackageArtifactRefMatched,
-      expectedPackageId: expectedCartridgePackageId,
+      expectedPackageId: expectations.expectedCartridgePackageId,
       expectedPackageManifestHashMatched,
       expectedPackageSeeded,
       packageIds: packageRows.map((row) => row.packageId),
@@ -735,9 +766,9 @@ const buildRemoteRegistryFromResult = (
 
   return {
     command: [...result.command],
-    ...expectedRemoteRegistryFields(),
+    ...expectedRemoteRegistryFields(expectations),
     expectedPackageArtifactRefMatched,
-    expectedPackageId: expectedCartridgePackageId,
+    expectedPackageId: expectations.expectedCartridgePackageId,
     expectedPackageManifestHashMatched,
     expectedPackageSeeded,
     packageIds: packageRows.map((row) => row.packageId),
@@ -749,12 +780,14 @@ const buildRemoteRegistryFromResult = (
   };
 };
 
-const skippedRemoteRegistry = (): WorkflowLivePreflightRemoteRegistry => ({
+const skippedRemoteRegistry = (
+  expectations: CartridgeExpectations
+): WorkflowLivePreflightRemoteRegistry => ({
   command: [],
   errorMessage: "Remote Cloudflare D1 package registry query was skipped.",
-  ...expectedRemoteRegistryFields(),
+  ...expectedRemoteRegistryFields(expectations),
   expectedPackageArtifactRefMatched: false,
-  expectedPackageId: expectedCartridgePackageId,
+  expectedPackageId: expectations.expectedCartridgePackageId,
   expectedPackageManifestHashMatched: false,
   expectedPackageSeeded: false,
   packageIds: [],
@@ -799,7 +832,8 @@ const skippedRemoteSecretInventory =
   });
 
 const requiredActionForCheck = (
-  check: WorkflowLivePreflightCheck
+  check: WorkflowLivePreflightCheck,
+  profileId: string
 ): null | string => {
   if (
     !check.required ||
@@ -829,7 +863,7 @@ const requiredActionForCheck = (
   }
 
   if (check.checkId === "env:WZRRD_API_TOKEN") {
-    return "Provision WZRRD_API_TOKEN so the Dream HITL report can be published as the required Wzrrd document.";
+    return "Provision WZRRD_API_TOKEN so the HITL report can be published as the required Wzrrd document.";
   }
 
   if (check.checkId === "wrangler:MEMORY_RELAY_BASE_URL") {
@@ -841,7 +875,7 @@ const requiredActionForCheck = (
   }
 
   if (check.checkId === "relay:local-proof") {
-    return "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof before exposing the relay to Cloudflare.";
+    return `Run pnpm app:relay:proof --profile ${profileId} and inspect the redacted local relay proof before exposing the relay to Cloudflare.`;
   }
 
   if (check.checkId === "relay:healthz") {
@@ -868,7 +902,7 @@ const requiredActionsForRemoteRegistry = (
 
   if (remoteRegistry.expectedPackageSeeded !== true) {
     return [
-      `Deploy current Worker code and seed packages so ${expectedCartridgePackageId} exists in remote Cloudflare D1/artifacts.`,
+      `Deploy current Worker code and seed packages so ${remoteRegistry.expectedPackageId} exists in remote Cloudflare D1/artifacts.`,
     ];
   }
 
@@ -882,7 +916,7 @@ const requiredActionsForRemoteRegistry = (
     ].join(", ");
 
     return [
-      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including ${expectedContractSummary}.`,
+      `Re-seed ${remoteRegistry.expectedPackageId} so the remote artifact ref and manifest hash match the current cartridge manifest, including ${expectedContractSummary}.`,
     ];
   }
 
@@ -890,10 +924,11 @@ const requiredActionsForRemoteRegistry = (
 };
 
 const requiredActionsForChecks = (
-  checks: readonly WorkflowLivePreflightCheck[]
+  checks: readonly WorkflowLivePreflightCheck[],
+  profileId: string
 ): readonly string[] =>
   checks
-    .map((check) => requiredActionForCheck(check))
+    .map((check) => requiredActionForCheck(check, profileId))
     .filter((action): action is string => action !== null);
 
 const checkStatusFor = (
@@ -902,11 +937,11 @@ const checkStatusFor = (
 ): WorkflowLivePreflightCheck["status"] =>
   checks.find((check) => check.checkId === checkId)?.status ?? "missing";
 
-const deployScriptSupportsDreamRelayWorkerVar = (
+const deployScriptSupportsMemoryRelayWorkerVar = (
   deployScriptText: string
 ): boolean =>
   deployScriptText.includes("MEMORY_RELAY_BASE_URL") &&
-  deployScriptText.includes("dreamRelaySignoffPhrase");
+  deployScriptText.includes("memoryRelaySignoffPhrase");
 
 const workerRelayBaseUrlConfigured = (input: {
   readonly deployScriptText: string;
@@ -915,9 +950,9 @@ const workerRelayBaseUrlConfigured = (input: {
 }): boolean =>
   input.wranglerConfigText.includes("MEMORY_RELAY_BASE_URL") ||
   (isPresent(input.env["MEMORY_RELAY_BASE_URL"]) &&
-    deployScriptSupportsDreamRelayWorkerVar(input.deployScriptText));
+    deployScriptSupportsMemoryRelayWorkerVar(input.deployScriptText));
 
-const checkDreamRelayWorkerBaseUrlConfig = (input: {
+const checkMemoryRelayWorkerBaseUrlConfig = (input: {
   readonly deployScriptText: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly wranglerConfigText: string;
@@ -928,14 +963,15 @@ const checkDreamRelayWorkerBaseUrlConfig = (input: {
     : "Worker deploy config does not define MEMORY_RELAY_BASE_URL.",
   redacted: true,
   required: true,
-  requiredFor: ["dream-memory-relay-binding"],
+  requiredFor: ["memory-relay-binding"],
   status: workerRelayBaseUrlConfigured(input) ? "passed" : "missing",
 });
 
-const dreamRelayCapabilityFor = (input: {
+const memoryRelayCapabilityFor = (input: {
   readonly checks: readonly WorkflowLivePreflightCheck[];
   readonly deployScriptText: string;
   readonly env: Readonly<Record<string, string | undefined>>;
+  readonly profile: MemorySourceProfile;
   readonly remoteSecretNames: ReadonlySet<string>;
   readonly wranglerConfigText: string;
 }): WorkflowLivePreflightRelayCapability => {
@@ -950,8 +986,8 @@ const dreamRelayCapabilityFor = (input: {
     input.env["MEMORY_RELAY_SECRET_REF"]?.trim() || "secretref:memory-relay";
 
   return {
-    allowedOperations: [...relayRequiredOperations],
-    allowedSourceFamilies: [...relayAllowedSourceFamilies],
+    allowedOperations: [...relayRequiredOperationsFor(input.profile)],
+    allowedSourceFamilies: [...relayAllowedSourceFamiliesFor(input.profile)],
     budget: {
       maxFiles: 500,
       maxRows: 1000,
@@ -984,15 +1020,15 @@ const dreamRelayCapabilityFor = (input: {
   };
 };
 
-export const buildDreamLivePreflightReceipt = (
-  input: BuildDreamLivePreflightReceiptInput
+export const buildWorkflowLivePreflightReceipt = (
+  input: BuildWorkflowLivePreflightReceiptInput
 ): WorkflowLivePreflightReceipt => {
   const remoteSecretNames = new Set(input.remoteSecrets.secretNames);
   const checks = [
     ...envRequirements.map((requirement) =>
       checkEnvRequirement(input.env, requirement, remoteSecretNames)
     ),
-    checkDreamRelayWorkerBaseUrlConfig({
+    checkMemoryRelayWorkerBaseUrlConfig({
       deployScriptText: input.deployScriptText,
       env: input.env,
       wranglerConfigText: input.wranglerConfigText,
@@ -1001,7 +1037,7 @@ export const buildDreamLivePreflightReceipt = (
       checkId: "deploy-secret:MEMORY_RELAY_TOKEN",
       missingMessage: "Deploy script does not propagate MEMORY_RELAY_TOKEN.",
       presentMessage: "Deploy script propagates MEMORY_RELAY_TOKEN.",
-      requiredFor: ["dream-memory-relay-lease"],
+      requiredFor: ["memory-relay-lease"],
       sourceText: input.deployScriptText,
       token: "MEMORY_RELAY_TOKEN",
     }),
@@ -1009,7 +1045,7 @@ export const buildDreamLivePreflightReceipt = (
     input.relayReadinessCheck,
   ];
   const requiredActions = [
-    ...requiredActionsForChecks(checks),
+    ...requiredActionsForChecks(checks, input.profile.profileId),
     ...requiredActionsForRemoteRegistry(input.remoteRegistry),
   ];
   const requiredChecksReady = checks.every(
@@ -1039,18 +1075,19 @@ export const buildDreamLivePreflightReceipt = (
         "memory.hitl-follow-up-run-request.v1 draft artifact",
         "workflow.execution-proof.v1 Cloudflare execution proof",
         "workflow.cartridge-invocation-proof.v1 per-node proofs",
-        "wzrrd.site.publish capability receipt for the Dream report",
+        "wzrrd.site.publish capability receipt for the HITL report",
       ],
       sideEffectsRequireCapabilityLeases: true,
     },
     checks,
-    expectedCartridgePackageId,
+    expectedCartridgePackageId: input.profile.packageId,
     generatedAt: input.generatedAt,
     redacted: true,
-    relayCapability: dreamRelayCapabilityFor({
+    relayCapability: memoryRelayCapabilityFor({
       checks,
       deployScriptText: input.deployScriptText,
       env: input.env,
+      profile: input.profile,
       remoteSecretNames,
       wranglerConfigText: input.wranglerConfigText,
     }),
@@ -1060,11 +1097,14 @@ export const buildDreamLivePreflightReceipt = (
     schemaVersion: "workflow.live-preflight.v1",
     status: requiredChecksReady && remoteReady ? "ready" : "blocked",
     workerUrl: input.workerUrl,
-    workflowId,
+    workflowId: input.profile.workflowId,
   });
 };
 
-const parseArgs = (argv: readonly string[]): DreamPreflightArgs => {
+const parseArgs = (
+  argv: readonly string[],
+  profile: MemorySourceProfile
+): WorkflowPreflightArgs => {
   const hasArg = (name: string): boolean => argv.includes(name);
   const getArgValue = (name: string): string | undefined => {
     const prefix = `${name}=`;
@@ -1077,7 +1117,9 @@ const parseArgs = (argv: readonly string[]): DreamPreflightArgs => {
     checkRemote: !hasArg("--skip-remote"),
     localRelayProofPath:
       getArgValue("--local-relay-proof-path") ?? defaultLocalRelayProofPath,
-    receiptPath: getArgValue("--receipt-path") ?? defaultReceiptPath,
+    receiptPath:
+      getArgValue("--receipt-path") ??
+      workflowProfileWorkspacePaths(profile.profileId).preflightReceiptPath,
   };
 
   if (workerUrl === undefined) {
@@ -1096,6 +1138,7 @@ const readDotEnvLocal = async (
   parseDotEnvContent(await readTextOrEmpty(resolve(repoRoot, ".env.local")));
 
 const queryRemoteRegistry = (input: {
+  readonly expectations: CartridgeExpectations;
   readonly repoRoot: string;
   readonly secretValues: readonly string[];
 }): WorkflowLivePreflightRemoteRegistry =>
@@ -1104,7 +1147,8 @@ const queryRemoteRegistry = (input: {
       args: remoteRegistryCommand,
       cwd: input.repoRoot,
       secretValues: input.secretValues,
-    })
+    }),
+    input.expectations
   );
 
 const queryRemoteSecretInventory = (input: {
@@ -1119,14 +1163,16 @@ const queryRemoteSecretInventory = (input: {
     })
   );
 
-export const runDreamPreflightCli = async (input: {
+export const runWorkflowPreflightCli = async (input: {
   readonly argv: readonly string[];
   readonly fetch?: typeof fetch;
   readonly log?: (message: string) => void;
   readonly processEnv: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
 }): Promise<WorkflowLivePreflightReceipt> => {
-  const args = parseArgs(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv);
+  const args = parseArgs(input.argv, profile);
+  const expectations = cartridgeExpectationsFor(profile);
   const dotEnv = await readDotEnvLocal(input.repoRoot);
   const env = {
     ...dotEnv,
@@ -1139,26 +1185,30 @@ export const runDreamPreflightCli = async (input: {
   const log = input.log ?? console.log;
   const remoteRegistry = args.checkRemote
     ? queryRemoteRegistry({
+        expectations,
         repoRoot: input.repoRoot,
         secretValues,
       })
-    : skippedRemoteRegistry();
+    : skippedRemoteRegistry(expectations);
   const remoteSecrets = args.checkRemote
     ? queryRemoteSecretInventory({
         repoRoot: input.repoRoot,
         secretValues,
       })
     : skippedRemoteSecretInventory();
-  const receipt = buildDreamLivePreflightReceipt({
+  const receipt = buildWorkflowLivePreflightReceipt({
     deployScriptText,
     env,
     generatedAt: new Date().toISOString(),
-    localRelayProofCheck: await checkLocalRelayProof(
-      resolve(input.repoRoot, args.localRelayProofPath)
-    ),
-    relayReadinessCheck: await checkDreamRelayReadiness({
+    localRelayProofCheck: await checkLocalRelayProof({
+      proofPath: resolve(input.repoRoot, args.localRelayProofPath),
+      requiredSourceFamilies: profile.sourceFamiliesExpected,
+    }),
+    profile,
+    relayReadinessCheck: await checkMemoryRelayReadiness({
       env,
       ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+      requiredOperations: profile.allowedRelayOperations,
     }),
     remoteRegistry,
     remoteSecrets,
@@ -1186,9 +1236,16 @@ const isMainModule = (): boolean =>
   import.meta.filename === resolve(process.argv[1]);
 
 if (isMainModule()) {
-  await runDreamPreflightCli({
-    argv: process.argv.slice(2),
-    processEnv: process.env,
-    repoRoot: resolve(import.meta.dirname, ".."),
-  });
+  try {
+    await runWorkflowPreflightCli({
+      argv: process.argv.slice(2),
+      processEnv: process.env,
+      repoRoot: resolve(import.meta.dirname, ".."),
+    });
+  } catch (error) {
+    console.error(
+      error instanceof Error ? error.message : "Workflow preflight failed."
+    );
+    process.exitCode = 1;
+  }
 }

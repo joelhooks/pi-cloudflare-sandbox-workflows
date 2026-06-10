@@ -5,14 +5,14 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildDreamLivePreflightReceipt,
+  buildWorkflowLivePreflightReceipt,
   checkLocalRelayProof,
-  checkDreamRelayReadiness,
+  checkMemoryRelayReadiness,
   extractPackageIdsFromD1Output,
   extractPackageRowsFromD1Output,
   extractSecretNamesFromWranglerOutput,
-  runDreamPreflightCli,
-} from "../../scripts/workflow-app-dream-preflight.ts";
+  runWorkflowPreflightCli,
+} from "../../scripts/workflow-app-preflight.ts";
 import { WorkflowLivePreflightReceiptSchema } from "../../src/app/domain/schemas.ts";
 import type {
   WorkflowLivePreflightCheck,
@@ -20,6 +20,7 @@ import type {
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../../src/app/domain/schemas.ts";
 import { memoryRelayEndpointCatalog } from "../../src/cartridges/memory-fabric/cloudflare-relay.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   command: ["pnpm", "exec", "wrangler", "d1", "execute"],
@@ -87,7 +88,7 @@ const deployScriptWithDreamRelayToken = '"MEMORY_RELAY_TOKEN"';
 const deployScriptWithSignoffGatedDreamRelayConfig = [
   '"MEMORY_RELAY_TOKEN"',
   '"MEMORY_RELAY_BASE_URL"',
-  "dreamRelaySignoffPhrase",
+  "memoryRelaySignoffPhrase",
 ].join("\n");
 
 const relayReadinessPassed: WorkflowLivePreflightCheck = {
@@ -96,7 +97,7 @@ const relayReadinessPassed: WorkflowLivePreflightCheck = {
     "Memory relay /healthz returned a redacted readiness receipt with required operations.",
   redacted: true,
   required: true,
-  requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
+  requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
   status: "passed",
 };
 
@@ -106,7 +107,7 @@ const relayReadinessMissing: WorkflowLivePreflightCheck = {
     "Memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
   redacted: true,
   required: true,
-  requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
+  requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
   status: "missing",
 };
 
@@ -117,8 +118,8 @@ const localRelayProofPassed: WorkflowLivePreflightCheck = {
   redacted: true,
   required: true,
   requiredFor: [
-    "dream-memory-relay-local-proof",
-    "dream-memory-relay-network-exposure-safety",
+    "memory-relay-local-proof",
+    "memory-relay-network-exposure-safety",
   ],
   status: "passed",
 };
@@ -130,8 +131,8 @@ const localRelayProofMissing: WorkflowLivePreflightCheck = {
   redacted: true,
   required: true,
   requiredFor: [
-    "dream-memory-relay-local-proof",
-    "dream-memory-relay-network-exposure-safety",
+    "memory-relay-local-proof",
+    "memory-relay-network-exposure-safety",
   ],
   status: "missing",
 };
@@ -219,11 +220,12 @@ Wrangler 4.97.0
   });
 
   it("blocks Dream live readiness when Cloudflare package or relay gates are missing", () => {
-    const receipt = buildDreamLivePreflightReceipt({
+    const receipt = buildWorkflowLivePreflightReceipt({
       deployScriptText: "",
       env: {},
       generatedAt: "2026-06-09T10:00:00.000Z",
       localRelayProofCheck: localRelayProofMissing,
+      profile: dreamTranscriptReviewSourceProfile,
       relayReadinessCheck: relayReadinessMissing,
       remoteRegistry: queriedRemoteRegistry,
       remoteSecrets: emptyRemoteSecrets,
@@ -272,11 +274,12 @@ Wrangler 4.97.0
   });
 
   it("marks Dream live readiness only when the cartridge artifact and leases are proven", () => {
-    const receipt = buildDreamLivePreflightReceipt({
+    const receipt = buildWorkflowLivePreflightReceipt({
       deployScriptText: deployScriptWithDreamRelayToken,
       env: completeEnv,
       generatedAt: "2026-06-09T10:00:00.000Z",
       localRelayProofCheck: localRelayProofPassed,
+      profile: dreamTranscriptReviewSourceProfile,
       relayReadinessCheck: relayReadinessPassed,
       remoteRegistry: seededRemoteRegistry,
       remoteSecrets: completeRemoteSecrets,
@@ -344,18 +347,19 @@ Wrangler 4.97.0
         "memory.hitl-follow-up-run-request.v1 draft artifact",
         "workflow.execution-proof.v1 Cloudflare execution proof",
         "workflow.cartridge-invocation-proof.v1 per-node proofs",
-        "wzrrd.site.publish capability receipt for the Dream report",
+        "wzrrd.site.publish capability receipt for the HITL report",
       ],
       status: "ready",
     });
   });
 
   it("accepts signoff-gated deploy-time relay URL injection without hardcoding the URL into wrangler", () => {
-    const receipt = buildDreamLivePreflightReceipt({
+    const receipt = buildWorkflowLivePreflightReceipt({
       deployScriptText: deployScriptWithSignoffGatedDreamRelayConfig,
       env: completeEnv,
       generatedAt: "2026-06-09T10:00:00.000Z",
       localRelayProofCheck: localRelayProofPassed,
+      profile: dreamTranscriptReviewSourceProfile,
       relayReadinessCheck: relayReadinessPassed,
       remoteRegistry: seededRemoteRegistry,
       remoteSecrets: completeRemoteSecrets,
@@ -385,11 +389,12 @@ Wrangler 4.97.0
   });
 
   it("blocks Dream live readiness when the remote package manifest is stale", () => {
-    const receipt = buildDreamLivePreflightReceipt({
+    const receipt = buildWorkflowLivePreflightReceipt({
       deployScriptText: deployScriptWithDreamRelayToken,
       env: completeEnv,
       generatedAt: "2026-06-09T10:00:00.000Z",
       localRelayProofCheck: localRelayProofPassed,
+      profile: dreamTranscriptReviewSourceProfile,
       relayReadinessCheck: relayReadinessPassed,
       remoteRegistry: {
         ...seededRemoteRegistry,
@@ -406,7 +411,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.memory.capture-run, joelclaw.memory.capture-artifact, joelclaw.memory.search, joelclaw.memory.signals, joelclaw.memory.hydrate, joelclaw.memory.correlate, joelclaw.memory.refinement-proposals, joelclaw.memory.hitl-report, joelclaw.memory.hitl-decision-seed, joelclaw.memory.hitl-follow-up-run-request, memory-hitl-decision-schema.",
+        "Re-seed workflow/memory-fabric so the remote artifact ref and manifest hash match the current cartridge manifest, including joelclaw.memory.capture-run, joelclaw.memory.capture-artifact, joelclaw.memory.search, joelclaw.memory.signals, joelclaw.memory.hydrate, joelclaw.memory.correlate, joelclaw.memory.refinement-proposals, joelclaw.memory.hitl-report, joelclaw.memory.hitl-decision-seed, joelclaw.memory.hitl-follow-up-run-request, memory-hitl-decision-schema.",
       status: "blocked",
     });
   });
@@ -420,9 +425,11 @@ Wrangler 4.97.0
         Response.json(relayReadinessReceipt({ rawPathsReturned: false }))
       );
     };
-    const check = await checkDreamRelayReadiness({
+    const check = await checkMemoryRelayReadiness({
       env: completeEnv,
       fetch: fetcher,
+      requiredOperations:
+        dreamTranscriptReviewSourceProfile.allowedRelayOperations,
     });
 
     expect({
@@ -452,7 +459,7 @@ Wrangler 4.97.0
       rawPathsReturned: false,
       redacted: true,
       runId: "run:dream-relay-local-proof:test",
-      schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-proof.v1",
       search: {
         hitCount: 12,
         hydratedCount: 12,
@@ -498,9 +505,15 @@ Wrangler 4.97.0
       sourceRootCount: 8,
     };
 
+    const requiredSourceFamilies =
+      dreamTranscriptReviewSourceProfile.sourceFamiliesExpected;
+
     try {
       await writeFile(proofPath, JSON.stringify(validProof), "utf-8");
-      const passed = await checkLocalRelayProof(proofPath);
+      const passed = await checkLocalRelayProof({
+        proofPath,
+        requiredSourceFamilies,
+      });
       await writeFile(
         proofPath,
         JSON.stringify({
@@ -511,7 +524,10 @@ Wrangler 4.97.0
         }),
         "utf-8"
       );
-      const missingSourceFamilyCoverage = await checkLocalRelayProof(proofPath);
+      const missingSourceFamilyCoverage = await checkLocalRelayProof({
+        proofPath,
+        requiredSourceFamilies,
+      });
       await writeFile(
         proofPath,
         JSON.stringify({
@@ -520,7 +536,10 @@ Wrangler 4.97.0
         }),
         "utf-8"
       );
-      const staleProof = await checkLocalRelayProof(proofPath);
+      const staleProof = await checkLocalRelayProof({
+        proofPath,
+        requiredSourceFamilies,
+      });
 
       expect({
         missingSourceFamilyCoverageMessage: missingSourceFamilyCoverage.message,
@@ -550,12 +569,16 @@ Wrangler 4.97.0
       Promise.resolve(
         Response.json(relayReadinessReceipt({ rawPathsReturned: true }))
       );
-    const missing = await checkDreamRelayReadiness({
+    const missing = await checkMemoryRelayReadiness({
       env: {},
+      requiredOperations:
+        dreamTranscriptReviewSourceProfile.allowedRelayOperations,
     });
-    const unsafe = await checkDreamRelayReadiness({
+    const unsafe = await checkMemoryRelayReadiness({
       env: completeEnv,
       fetch: unsafeFetcher,
+      requiredOperations:
+        dreamTranscriptReviewSourceProfile.allowedRelayOperations,
     });
 
     expect({
@@ -585,8 +608,10 @@ Wrangler 4.97.0
         "utf-8"
       );
       const receiptPath = "receipts/dream-preflight.json";
-      await runDreamPreflightCli({
+      await runWorkflowPreflightCli({
         argv: [
+          "--profile",
+          dreamTranscriptReviewSourceProfile.profileId,
           "--allow-missing",
           "--skip-remote",
           `--receipt-path=${receiptPath}`,

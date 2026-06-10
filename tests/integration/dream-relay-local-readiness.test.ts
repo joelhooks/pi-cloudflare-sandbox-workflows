@@ -4,7 +4,8 @@ import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { runDreamRelayLocalReadinessCli } from "../../scripts/workflow-app-dream-relay-local-readiness.ts";
+import { runMemoryRelayLocalReadinessCli } from "../../scripts/workflow-app-relay-local-readiness.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const writeJson = async (path: string, value: unknown): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
@@ -45,8 +46,10 @@ describe("Memory relay local readiness", () => {
       MEMORY_RELAY_TOKEN: relayToken,
     });
 
-    const receipt = await runDreamRelayLocalReadinessCli({
+    const receipt = await runMemoryRelayLocalReadinessCli({
       argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
         `--local-relay-startup-env-path=${startupEnvPath}`,
         `--out=${receiptPath}`,
       ],

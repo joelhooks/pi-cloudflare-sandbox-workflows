@@ -174,6 +174,13 @@ export const MemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.memory.signals",
 ]);
 
+export const MemorySourceProfilePlannerGuidanceSchema = z.object({
+  intent: z.string().min(1),
+  requestedPackageIds: z.array(z.string().min(1)).min(1),
+  stochasticNotes: z.array(z.string().min(1)).default([]),
+  workItemId: z.string().min(1),
+});
+
 export const MemorySourceProfileSchema = z
   .object({
     allowedRelayOperations: z.array(MemoryRelayOperationSchema).min(1),
@@ -185,6 +192,7 @@ export const MemorySourceProfileSchema = z
       noRawTranscripts: z.literal(true),
     }),
     packageId: z.string().min(1),
+    plannerGuidance: MemorySourceProfilePlannerGuidanceSchema.optional(),
     profileId: z.string().min(1),
     purpose: z.string().min(1),
     requiredRuntimes: z.array(MemoryRuntimeSchema).min(1),
@@ -227,6 +235,9 @@ export type MemorySourcePackSelectionPolicy = z.infer<
   typeof MemorySourcePackSelectionPolicySchema
 >;
 export type MemorySourceProfile = z.infer<typeof MemorySourceProfileSchema>;
+export type MemorySourceProfilePlannerGuidance = z.infer<
+  typeof MemorySourceProfilePlannerGuidanceSchema
+>;
 export type MemorySourceScope = z.infer<typeof MemorySourceScopeSchema>;
 export type MemorySourceSurface = z.infer<typeof MemorySourceSurfaceSchema>;
 export type MemoryWorkflowEffect = z.infer<typeof MemoryWorkflowEffectSchema>;

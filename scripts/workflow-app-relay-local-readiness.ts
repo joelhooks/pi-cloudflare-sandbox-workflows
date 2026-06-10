@@ -11,6 +11,7 @@ import {
   trustedLocalMemoryRelayHttpConfigFromEnv,
   TrustedLocalMemoryRelayReadinessReceiptSchema,
 } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import { requireInstalledSourceProfile } from "./workflow-app-profile.ts";
 
 const defaultLocalRelayStartupEnvPath =
   ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
@@ -19,7 +20,7 @@ const defaultReceiptPath =
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());
 
-export const DreamRelayLocalReadinessProofReceiptSchema = z.object({
+export const MemoryRelayLocalReadinessProofReceiptSchema = z.object({
   boundHost: z.string().min(1),
   boundPort: z.number().int().min(1),
   checkedAt: z.string().min(1),
@@ -38,9 +39,7 @@ export const DreamRelayLocalReadinessProofReceiptSchema = z.object({
   rawCredentialsReturned: z.literal(false),
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
-  schemaVersion: z.literal(
-    "trusted.dream-memory-relay.local-readiness-proof.v1"
-  ),
+  schemaVersion: z.literal("trusted.memory-relay.local-readiness-proof.v1"),
   sourceRootCount: z.number().int().min(1),
   startupEnvRef: z.string().min(1),
   status: z.literal("passed"),
@@ -48,11 +47,11 @@ export const DreamRelayLocalReadinessProofReceiptSchema = z.object({
   usedConfiguredPort: z.boolean(),
 });
 
-export type DreamRelayLocalReadinessProofReceipt = z.infer<
-  typeof DreamRelayLocalReadinessProofReceiptSchema
+export type MemoryRelayLocalReadinessProofReceipt = z.infer<
+  typeof MemoryRelayLocalReadinessProofReceiptSchema
 >;
 
-export interface DreamRelayLocalReadinessCliInput {
+export interface MemoryRelayLocalReadinessCliInput {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly now?: () => string;
@@ -60,7 +59,7 @@ export interface DreamRelayLocalReadinessCliInput {
   readonly repoRoot: string;
 }
 
-interface DreamRelayLocalReadinessArgs {
+interface MemoryRelayLocalReadinessArgs {
   readonly bindConfiguredPort: boolean;
   readonly receiptPath: string;
   readonly startupEnvPath: string;
@@ -91,7 +90,7 @@ const argValue = (
 const hasFlag = (argv: readonly string[], name: string): boolean =>
   argv.includes(name);
 
-const parseArgs = (argv: readonly string[]): DreamRelayLocalReadinessArgs => ({
+const parseArgs = (argv: readonly string[]): MemoryRelayLocalReadinessArgs => ({
   bindConfiguredPort: hasFlag(argv, "--bind-configured-port"),
   receiptPath: argValue(argv, "--out") ?? defaultReceiptPath,
   startupEnvPath:
@@ -134,9 +133,10 @@ const fetchHealthz = async (input: {
   );
 };
 
-export const runDreamRelayLocalReadinessCli = async (
-  input: DreamRelayLocalReadinessCliInput
-): Promise<DreamRelayLocalReadinessProofReceipt> => {
+export const runMemoryRelayLocalReadinessCli = async (
+  input: MemoryRelayLocalReadinessCliInput
+): Promise<MemoryRelayLocalReadinessProofReceipt> => {
+  const profile = requireInstalledSourceProfile(input.argv);
   const args = parseArgs(input.argv);
   const startupEnv = {
     ...(await readStartupEnvArtifact(
@@ -156,8 +156,18 @@ export const runDreamRelayLocalReadinessCli = async (
       relayUrl: relay.url,
       token: config.expectedBearerToken,
     });
+    const supportedOperations = new Set<string>(readiness.supportedOperations);
+    const missingProfileOperations = profile.allowedRelayOperations.filter(
+      (operation) => !supportedOperations.has(operation)
+    );
+    if (missingProfileOperations.length > 0) {
+      throw new Error(
+        `Local Memory relay does not support operations required by ${profile.profileId}: ${missingProfileOperations.join(", ")}.`
+      );
+    }
+
     const url = new URL(relay.url);
-    const receipt = DreamRelayLocalReadinessProofReceiptSchema.parse({
+    const receipt = MemoryRelayLocalReadinessProofReceiptSchema.parse({
       boundHost: url.hostname,
       boundPort: Number.parseInt(url.port, 10),
       checkedAt: input.now?.() ?? new Date().toISOString(),
@@ -176,7 +186,7 @@ export const runDreamRelayLocalReadinessCli = async (
       rawCredentialsReturned: readiness.rawCredentialsReturned,
       rawPathsReturned: readiness.rawPathsReturned,
       redacted: true,
-      schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-readiness-proof.v1",
       sourceRootCount: readiness.adapter.sourceRoots.length,
       startupEnvRef: safeLocalArtifactRef(args.startupEnvPath),
       status: "passed",
@@ -198,7 +208,7 @@ export const runDreamRelayLocalReadinessCli = async (
 
 if (isMain()) {
   try {
-    await runDreamRelayLocalReadinessCli({
+    await runMemoryRelayLocalReadinessCli({
       argv: process.argv.slice(2),
       repoRoot: process.cwd(),
     });
@@ -207,7 +217,7 @@ if (isMain()) {
       JSON.stringify(
         {
           error: {
-            code: "dream_relay_local_readiness_failed",
+            code: "memory_relay_local_readiness_failed",
             message:
               error instanceof Error
                 ? error.message
@@ -215,7 +225,7 @@ if (isMain()) {
             redacted: true,
           },
           redacted: true,
-          schemaVersion: "trusted.dream-memory-relay.local-readiness-error.v1",
+          schemaVersion: "trusted.memory-relay.local-readiness-error.v1",
           status: "failed",
         },
         null,

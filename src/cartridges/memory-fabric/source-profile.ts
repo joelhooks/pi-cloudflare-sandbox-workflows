@@ -5,7 +5,9 @@ import type {
   MemoryRuntime,
   MemorySourceFamily,
   MemorySourcePack,
+  MemorySourceProfile,
 } from "../../app/domain/source-profile.ts";
+import { memoryFabricPackageMetadata } from "./package-seed.ts";
 
 export const dreamTranscriptReviewSourceFamilies = [
   "agent-transcripts",
@@ -83,6 +85,11 @@ export const dreamTranscriptReviewSourcePacks = [
   },
 ] as const satisfies readonly MemorySourcePack[];
 
+const memoryFabricWorkflowNodePalette = memoryFabricPackageMetadata.exports
+  .filter((exportRecord) => exportRecord.kind === "workflow-node")
+  .map((exportRecord) => exportRecord.nodeType)
+  .filter((nodeType): nodeType is string => nodeType !== undefined);
+
 export const dreamTranscriptReviewSourceProfile =
   MemorySourceProfileSchema.parse({
     allowedRelayOperations: [...dreamTranscriptReviewRelayOperations],
@@ -94,6 +101,23 @@ export const dreamTranscriptReviewSourceProfile =
       noRawTranscripts: true,
     },
     packageId: "workflow/memory-fabric",
+    plannerGuidance: {
+      intent:
+        "Run Dreaming as a real Cloudflare-generated dynamic workflow over the installed workflow/memory-fabric cartridge: mine redacted correction/friction/decision/workflow signals, search T-shaped across near-term and far-term memory, hydrate redacted receipts, correlate evidence, emit refinement proposals for kernel/package/workflow/schema/access-lease changes, render the canonical Dream HITL report, and publish the report through Wzrrd only after verifier acceptance.",
+      requestedPackageIds: [
+        "badass-courses/claw-kernel",
+        "joelhooks/configured-familiar-kernel",
+        "workflow/memory-fabric",
+      ],
+      stochasticNotes: [
+        "Use only generated workflow.node.invoke states for Dream cartridge work; do not use static Dream branches in the runner.",
+        `Dream cartridge node palette: ${memoryFabricWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
+        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
+        "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
+        "Accepted dreams must be reviewable as memory.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce memory.hitl-decision-workflow-seed.v1 and draft memory.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
+      ],
+      workItemId: "work-item:memory-fabric",
+    },
     profileId: "joelhooks/dream-transcript-review",
     purpose:
       "Review agent transcripts and adjacent agent-run artifacts across the JoelClaw network, then surface source-backed kernel/package/workflow refinements.",
@@ -105,3 +129,7 @@ export const dreamTranscriptReviewSourceProfile =
     title: "Dream Transcript Review",
     workflowId: "dream.memory-fabric",
   });
+
+export const memoryFabricSourceProfiles = [
+  dreamTranscriptReviewSourceProfile,
+] as const satisfies readonly MemorySourceProfile[];

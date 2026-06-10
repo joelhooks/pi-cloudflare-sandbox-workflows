@@ -8,8 +8,9 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
-import { DreamRelayLocalReadinessProofReceiptSchema } from "./workflow-app-dream-relay-local-readiness.ts";
-import { DreamRelayProvisioningPreflightReceiptSchema } from "./workflow-app-dream-relay-provisioning-preflight.ts";
+import { requireInstalledSourceProfile } from "./workflow-app-profile.ts";
+import { MemoryRelayLocalReadinessProofReceiptSchema } from "./workflow-app-relay-local-readiness.ts";
+import { MemoryRelayProvisioningPreflightReceiptSchema } from "./workflow-app-relay-provisioning-preflight.ts";
 
 const defaultLocalRelayReadinessPath =
   ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
@@ -38,7 +39,7 @@ const ProvisioningCommandSchema = z.object({
   stepId: z.string().min(1),
 });
 
-export const DreamRelayApprovedProvisioningRequestReceiptSchema = z.object({
+export const MemoryRelayApprovedProvisioningRequestReceiptSchema = z.object({
   approval: z.object({
     required: z.literal(true),
     signoffPhrase: z.literal(signoffPhrase),
@@ -70,16 +71,16 @@ export const DreamRelayApprovedProvisioningRequestReceiptSchema = z.object({
   requiredSecretBindings: z.array(z.literal("MEMORY_RELAY_TOKEN")),
   requiredWorkerVars: z.array(z.literal("MEMORY_RELAY_BASE_URL")),
   schemaVersion: z.literal(
-    "trusted.dream-memory-relay.approved-provisioning-request.v1"
+    "trusted.memory-relay.approved-provisioning-request.v1"
   ),
   status: z.enum(["blocked", "ready-to-provision"]),
 });
 
-export type DreamRelayApprovedProvisioningRequestReceipt = z.infer<
-  typeof DreamRelayApprovedProvisioningRequestReceiptSchema
+export type MemoryRelayApprovedProvisioningRequestReceipt = z.infer<
+  typeof MemoryRelayApprovedProvisioningRequestReceiptSchema
 >;
 
-export interface DreamRelayApprovedProvisioningRequestCliInput {
+export interface MemoryRelayApprovedProvisioningRequestCliInput {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly now?: () => string;
@@ -163,11 +164,11 @@ const relayUrlSummary = (
   relayBaseUrl: string | undefined
 ): {
   readonly blockers: readonly string[];
-  readonly summary: DreamRelayApprovedProvisioningRequestReceipt["relayEndpoint"];
+  readonly summary: MemoryRelayApprovedProvisioningRequestReceipt["relayEndpoint"];
 } => {
   if (relayBaseUrl === undefined || relayBaseUrl.trim().length === 0) {
     return {
-      blockers: ["missing-dream-memory-relay-base-url"],
+      blockers: ["missing-memory-relay-base-url"],
       summary: {
         configured: false,
         https: false,
@@ -181,7 +182,7 @@ const relayUrlSummary = (
     const https = url.protocol === "https:";
 
     return {
-      blockers: https ? [] : ["dream-memory-relay-base-url-not-https"],
+      blockers: https ? [] : ["memory-relay-base-url-not-https"],
       summary: {
         configured: true,
         hostHash: sha256(url.host),
@@ -191,7 +192,7 @@ const relayUrlSummary = (
     };
   } catch {
     return {
-      blockers: ["invalid-dream-memory-relay-base-url"],
+      blockers: ["invalid-memory-relay-base-url"],
       summary: {
         configured: true,
         https: false,
@@ -262,7 +263,7 @@ const readinessSummary = async (
     };
   }
 
-  const result = DreamRelayLocalReadinessProofReceiptSchema.safeParse(parsed);
+  const result = MemoryRelayLocalReadinessProofReceiptSchema.safeParse(parsed);
   if (!result.success || result.data.status !== "passed") {
     return {
       blockers: ["local-relay-readiness-not-passed"],
@@ -291,7 +292,8 @@ const provisioningPreflightSummary = async (
     };
   }
 
-  const result = DreamRelayProvisioningPreflightReceiptSchema.safeParse(parsed);
+  const result =
+    MemoryRelayProvisioningPreflightReceiptSchema.safeParse(parsed);
   if (!result.success) {
     return {
       blockers: ["provisioning-preflight-invalid"],
@@ -331,8 +333,9 @@ const approvalBlockersFor = (
 };
 
 const provisioningCommands = (
-  blockers: readonly string[]
-): DreamRelayApprovedProvisioningRequestReceipt["commands"] => {
+  blockers: readonly string[],
+  profileId: string
+): MemoryRelayApprovedProvisioningRequestReceipt["commands"] => {
   const commandBlockers = [...blockers];
   const status =
     commandBlockers.length === 0 ? "ready-after-signoff" : "blocked";
@@ -351,7 +354,7 @@ const provisioningCommands = (
     {
       blockedBy: commandBlockers,
       commandTemplate:
-        'MEMORY_RELAY_BASE_URL="$MEMORY_RELAY_BASE_URL" MEMORY_RELAY_APPROVAL_SIGNOFF="$MEMORY_RELAY_APPROVAL_SIGNOFF" pnpm app:deploy -- --skip-migrations --skip-secrets --skip-seed --dream-relay-approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"',
+        'MEMORY_RELAY_BASE_URL="$MEMORY_RELAY_BASE_URL" MEMORY_RELAY_APPROVAL_SIGNOFF="$MEMORY_RELAY_APPROVAL_SIGNOFF" pnpm app:deploy -- --skip-migrations --skip-secrets --skip-seed --memory-relay-approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"',
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "worker-config",
@@ -360,7 +363,7 @@ const provisioningCommands = (
     },
     {
       blockedBy: commandBlockers,
-      commandTemplate: "pnpm app:dream:preflight",
+      commandTemplate: `pnpm app:preflight --profile ${profileId}`,
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "remote-verification",
@@ -369,13 +372,12 @@ const provisioningCommands = (
     },
     {
       blockedBy: commandBlockers,
-      commandTemplate:
-        'pnpm app:dream:run --submit --dream-relay-approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"',
+      commandTemplate: `pnpm app:run --profile ${profileId} --submit --approval-signoff="$MEMORY_RELAY_APPROVAL_SIGNOFF"`,
       redacted: true,
       requiresSignoff: true,
       sideEffectClass: "live-workflow-submit",
       status,
-      stepId: "submit-live-dream",
+      stepId: "submit-live-run",
     },
   ];
 };
@@ -385,9 +387,10 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 };
 
-export const runDreamRelayApprovedProvisioningRequestCli = async (
-  input: DreamRelayApprovedProvisioningRequestCliInput
-): Promise<DreamRelayApprovedProvisioningRequestReceipt> => {
+export const runMemoryRelayApprovedProvisioningRequestCli = async (
+  input: MemoryRelayApprovedProvisioningRequestCliInput
+): Promise<MemoryRelayApprovedProvisioningRequestReceipt> => {
+  const profile = requireInstalledSourceProfile(input.argv);
   const processEnv = input.processEnv ?? process.env;
   const args = parseArgs(input.argv, processEnv);
   const approvalStatus = approvalStatusFor(args.approvalSignoff);
@@ -409,7 +412,7 @@ export const runDreamRelayApprovedProvisioningRequestCli = async (
     ...provisioningPreflight.blockers,
   ];
   const uniqueBlockers = [...new Set(blockers)];
-  const receipt = DreamRelayApprovedProvisioningRequestReceiptSchema.parse({
+  const receipt = MemoryRelayApprovedProvisioningRequestReceiptSchema.parse({
     approval: {
       required: true,
       signoffPhrase,
@@ -418,7 +421,7 @@ export const runDreamRelayApprovedProvisioningRequestCli = async (
     },
     blockers: uniqueBlockers,
     checkedAt: input.now?.() ?? new Date().toISOString(),
-    commands: provisioningCommands(uniqueBlockers),
+    commands: provisioningCommands(uniqueBlockers, profile.profileId),
     localRelay: {
       localReadinessPath: safeLocalArtifactRef(args.localRelayReadinessPath),
       localReadinessStatus: readiness.status,
@@ -439,8 +442,7 @@ export const runDreamRelayApprovedProvisioningRequestCli = async (
     relayEndpoint: relayEndpoint.summary,
     requiredSecretBindings: ["MEMORY_RELAY_TOKEN"],
     requiredWorkerVars: ["MEMORY_RELAY_BASE_URL"],
-    schemaVersion:
-      "trusted.dream-memory-relay.approved-provisioning-request.v1",
+    schemaVersion: "trusted.memory-relay.approved-provisioning-request.v1",
     status: uniqueBlockers.length === 0 ? "ready-to-provision" : "blocked",
   });
 
@@ -456,7 +458,7 @@ export const runDreamRelayApprovedProvisioningRequestCli = async (
 
 if (isMain()) {
   try {
-    await runDreamRelayApprovedProvisioningRequestCli({
+    await runMemoryRelayApprovedProvisioningRequestCli({
       argv: process.argv.slice(2),
       repoRoot: process.cwd(),
     });
@@ -465,7 +467,7 @@ if (isMain()) {
       JSON.stringify(
         {
           error: {
-            code: "dream_relay_approved_provisioning_request_failed",
+            code: "memory_relay_approved_provisioning_request_failed",
             message:
               error instanceof Error
                 ? error.message
@@ -474,7 +476,7 @@ if (isMain()) {
           },
           redacted: true,
           schemaVersion:
-            "trusted.dream-memory-relay.approved-provisioning-request-error.v1",
+            "trusted.memory-relay.approved-provisioning-request-error.v1",
           status: "failed",
         },
         null,

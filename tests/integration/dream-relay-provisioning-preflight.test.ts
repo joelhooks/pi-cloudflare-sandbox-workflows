@@ -5,9 +5,10 @@ import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildDreamRelayProvisioningPreflightReceipt,
-  runDreamRelayProvisioningPreflightCli,
-} from "../../scripts/workflow-app-dream-relay-provisioning-preflight.ts";
+  buildMemoryRelayProvisioningPreflightReceipt,
+  runMemoryRelayProvisioningPreflightCli,
+} from "../../scripts/workflow-app-relay-provisioning-preflight.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const visionWithSignoffRule = `
 # Vision
@@ -50,7 +51,7 @@ const localRelayReadinessProof = JSON.stringify({
   rawCredentialsReturned: false,
   rawPathsReturned: false,
   redacted: true,
-  schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
+  schemaVersion: "trusted.memory-relay.local-readiness-proof.v1",
   sourceRootCount: 1,
   startupEnvRef:
     ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json",
@@ -103,7 +104,7 @@ const localRelayProof = JSON.stringify({
   rawPathsReturned: false,
   redacted: true,
   runId: "run:dream-relay-local-proof:test",
-  schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+  schemaVersion: "trusted.memory-relay.local-proof.v1",
   search: {
     hitCount: 12,
     hydratedCount: 12,
@@ -180,7 +181,7 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 
 describe("Memory relay provisioning preflight", () => {
   it("blocks network exposure until owner sign-off is present", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       checkedAt: "2026-06-09T10:00:00.000Z",
       livePreflightPath: "dream-preflight.json",
       livePreflightText: livePreflightBlocked,
@@ -193,6 +194,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -213,7 +215,7 @@ describe("Memory relay provisioning preflight", () => {
       correlationEdgeCount: 48,
       localProofStatus: "passed",
       noSideEffectsPerformed: true,
-      planSchemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
+      planSchemaVersion: "trusted.memory-relay.provisioning-plan.v1",
       recommendedSignoff: true,
       signalCount: 3,
       signoffProvided: false,
@@ -222,7 +224,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("does not treat an approval ref as the required exact sign-off phrase", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       checkedAt: "2026-06-09T10:00:00.000Z",
       livePreflightPath: "dream-preflight.json",
@@ -236,6 +238,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -253,7 +256,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("rejects a non-matching relay exposure sign-off phrase", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff: "sure go ahead",
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -268,6 +271,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -294,7 +298,7 @@ describe("Memory relay provisioning preflight", () => {
       rawPathsReturned: false,
       redacted: true,
       runId: "run:dream-relay-local-proof:stale",
-      schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-proof.v1",
       search: {
         hitCount: 12,
         hydratedCount: 12,
@@ -302,7 +306,7 @@ describe("Memory relay provisioning preflight", () => {
       sourceFamilyCoverage,
       sourceRootCount: 8,
     });
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -317,6 +321,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -326,7 +331,7 @@ describe("Memory relay provisioning preflight", () => {
       status: receipt.status,
     }).toStrictEqual({
       action:
-        "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof receipt.",
+        "Run pnpm app:relay:proof --profile joelhooks/dream-transcript-review and inspect the redacted local relay proof receipt.",
       localProofStatus: "failed",
       status: "blocked",
     });
@@ -344,7 +349,7 @@ describe("Memory relay provisioning preflight", () => {
       rawPathsReturned: false,
       redacted: true,
       runId: "run:dream-relay-local-proof:missing-families",
-      schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-proof.v1",
       search: {
         hitCount: 12,
         hydratedCount: 12,
@@ -354,7 +359,7 @@ describe("Memory relay provisioning preflight", () => {
       ),
       sourceRootCount: 8,
     });
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -369,12 +374,13 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
     expect({
       caveatAction: receipt.recommendedNextActions.includes(
-        "Coverage caveat (reported, not blocking): missing source families agent-transcripts will appear in the dream report."
+        "Coverage caveat (reported, not blocking): missing source families agent-transcripts will appear in the run report."
       ),
       localProofStatus: receipt.localRelayProof.status,
       missingSourceFamilies: receipt.localRelayProof.missingSourceFamilies,
@@ -386,7 +392,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("marks the relay ready for approved provisioning after sign-off and local proof", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -404,6 +410,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -437,7 +444,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("keeps approved provisioning blocked until local relay readiness is proven", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -453,6 +460,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
     const stepsById = new Map(
@@ -461,7 +469,7 @@ describe("Memory relay provisioning preflight", () => {
 
     expect({
       readinessAction: receipt.recommendedNextActions.includes(
-        "Run pnpm app:dream:relay:readiness to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz."
+        "Run pnpm app:relay:readiness --profile joelhooks/dream-transcript-review to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz."
       ),
       readinessStatus: receipt.localRelayReadiness.status,
       status: receipt.status,
@@ -476,7 +484,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("keeps approved provisioning blocked until local relay startup env is configured", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -491,6 +499,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
     const stepsById = new Map(
@@ -524,7 +533,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("emits a non-executed provisioning plan with blocked live submit steps", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -546,6 +555,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -564,7 +574,7 @@ describe("Memory relay provisioning preflight", () => {
           ?.sideEffectClass,
         status: stepsById.get("provision-worker-relay-token")?.status,
       },
-      submitBlockers: stepsById.get("submit-live-dream")?.blockedBy,
+      submitBlockers: stepsById.get("submit-live-run")?.blockedBy,
       transportCandidates: receipt.provisioningPlan.selectedTransportCandidates,
     }).toStrictEqual({
       allStepsNonExecuted: true,
@@ -575,8 +585,8 @@ describe("Memory relay provisioning preflight", () => {
         status: "ready-after-signoff",
       },
       submitBlockers: [
-        "missing-dream-memory-relay-base-url",
-        "missing-dream-memory-relay-token",
+        "missing-memory-relay-base-url",
+        "missing-memory-relay-token",
         "missing-worker-relay-url-config",
         "relay-healthz-not-verified",
       ],
@@ -615,7 +625,7 @@ describe("Memory relay provisioning preflight", () => {
       rawPathsReturned: false,
       redacted: true,
       runId: "run:dream-relay-local-proof:missing-source-families",
-      schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+      schemaVersion: "trusted.memory-relay.local-proof.v1",
       search: {
         hitCount: 12,
         hydratedCount: 12,
@@ -641,7 +651,7 @@ describe("Memory relay provisioning preflight", () => {
       ],
       sourceRootCount: 8,
     });
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
       livePreflightPath: "dream-preflight.json",
@@ -655,6 +665,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -668,7 +679,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("blocks when local relay proof is missing or unsafe", () => {
-    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+    const receipt = buildMemoryRelayProvisioningPreflightReceipt({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalSignoff,
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -683,6 +694,7 @@ describe("Memory relay provisioning preflight", () => {
           path: "/opt/homebrew/bin/ngrok",
         },
       ],
+      profile: dreamTranscriptReviewSourceProfile,
       visionText: visionWithSignoffRule,
     });
 
@@ -692,7 +704,7 @@ describe("Memory relay provisioning preflight", () => {
       status: receipt.status,
     }).toStrictEqual({
       action:
-        "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof receipt.",
+        "Run pnpm app:relay:proof --profile joelhooks/dream-transcript-review and inspect the redacted local relay proof receipt.",
       localProofStatus: "missing",
       status: "blocked",
     });
@@ -741,8 +753,10 @@ describe("Memory relay provisioning preflight", () => {
       MEMORY_RELAY_TOKEN: relayToken,
     });
 
-    const receipt = await runDreamRelayProvisioningPreflightCli({
+    const receipt = await runMemoryRelayProvisioningPreflightCli({
       argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
         "--approval-ref=approval:joel:2026-06-09:dream-relay-network-boundary",
         `--approval-signoff=${approvalSignoff}`,
         "--live-preflight-path=dream-preflight.json",
