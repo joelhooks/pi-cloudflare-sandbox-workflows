@@ -71,7 +71,7 @@ describe("Dream relay local readiness", () => {
       rawPathsReturned: false,
       sourceRootCount: 1,
       status: "passed",
-      supportedOperationCount: 10,
+      supportedOperationCount: 6,
       tokenConfigured: true,
       usedConfiguredPort: false,
     });

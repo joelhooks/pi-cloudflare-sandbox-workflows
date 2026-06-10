@@ -61,98 +61,44 @@ const localRelayReadinessProof = JSON.stringify({
   usedConfiguredPort: false,
 });
 
-const machineCoverage = [
-  {
-    authorityCount: 21,
-    machineId: "blaine",
-    sourceCount: 3,
-    sourceIds: [
-      "source:agent-transcripts:pi:blaine",
-      "source:agent-transcripts:codex:blaine",
-      "source:agent-transcripts:claude:blaine",
-    ],
-    status: "captured",
-  },
-  {
-    authorityCount: 5,
-    machineId: "panda",
-    sourceCount: 1,
-    sourceIds: ["source:agent-transcripts:pi:panda"],
-    status: "captured",
-  },
-  {
-    authorityCount: 4,
-    machineId: "flagg",
-    sourceCount: 1,
-    sourceIds: ["source:agent-transcripts:pi:flagg"],
-    status: "captured",
-  },
-  {
-    authorityCount: 4,
-    machineId: "cloudflare",
-    sourceCount: 1,
-    sourceIds: ["source:cloudflare-runs:workflow-app"],
-    status: "captured",
-  },
-] as const;
-
 const sourceFamilyCoverage = [
   {
-    authorityCount: 21,
     family: "agent-transcripts",
-    sourceCount: 3,
-    sourceIds: [
-      "source:agent-transcripts:pi:blaine",
-      "source:agent-transcripts:codex:blaine",
-      "source:agent-transcripts:claude:blaine",
-    ],
+    receiptCount: 21,
+    sourceIds: ["source:agent-transcripts:joelclaw"],
     status: "captured",
   },
   {
-    authorityCount: 3,
     family: "brain",
-    sourceCount: 1,
+    receiptCount: 3,
     sourceIds: ["source:brain:pi-cloudflare-sandbox-workflows"],
     status: "captured",
   },
   {
-    authorityCount: 4,
     family: "cloudflare-runs",
-    sourceCount: 1,
+    receiptCount: 4,
     sourceIds: ["source:cloudflare-runs:workflow-app"],
     status: "captured",
   },
   {
-    authorityCount: 5,
     family: "docs-pdf-brain",
-    sourceCount: 1,
+    receiptCount: 5,
     sourceIds: ["source:docs-pdf-brain:joelclaw-api"],
     status: "captured",
   },
   {
-    authorityCount: 6,
     family: "repo-outputs",
-    sourceCount: 1,
+    receiptCount: 6,
     sourceIds: ["source:repo-outputs:pi-cloudflare-sandbox-workflows"],
     status: "captured",
   },
 ] as const;
 
 const localRelayProof = JSON.stringify({
-  backfillRun: {
-    blockedCount: 0,
-    completedCount: 0,
-    failedCount: 0,
-    skippedCount: 9,
-  },
   checkedAt: "2026-06-09T10:00:00.000Z",
   correlation: {
     edgeCount: 48,
     nodeCount: 33,
-  },
-  inventory: {
-    machineCoverage,
-    sourceFamilyCoverage,
   },
   rawCredentialsReturned: false,
   rawPathLeaked: false,
@@ -174,6 +120,7 @@ const localRelayProof = JSON.stringify({
     signalCount: 3,
     signalKinds: ["workflow-pattern"],
   },
+  sourceFamilyCoverage,
   sourceRootCount: 8,
 });
 
@@ -254,7 +201,6 @@ describe("Dream relay provisioning preflight", () => {
 
     expect({
       approvalStatus: receipt.approval.status,
-      backfillRunSkippedCount: receipt.localRelayProof.backfillRunSkippedCount,
       correlationEdgeCount: receipt.localRelayProof.correlationEdgeCount,
       localProofStatus: receipt.localRelayProof.status,
       noSideEffectsPerformed: receipt.provisioningPlan.noSideEffectsPerformed,
@@ -267,7 +213,6 @@ describe("Dream relay provisioning preflight", () => {
       status: receipt.status,
     }).toStrictEqual({
       approvalStatus: "required",
-      backfillRunSkippedCount: 9,
       correlationEdgeCount: 48,
       localProofStatus: "passed",
       noSideEffectsPerformed: true,
@@ -346,17 +291,7 @@ describe("Dream relay provisioning preflight", () => {
 
   it("rejects stale local relay proofs without correlation graph counts", () => {
     const staleLocalRelayProof = JSON.stringify({
-      backfillRun: {
-        blockedCount: 0,
-        completedCount: 0,
-        failedCount: 0,
-        skippedCount: 9,
-      },
       checkedAt: "2026-06-09T10:00:00.000Z",
-      inventory: {
-        machineCoverage,
-        sourceFamilyCoverage,
-      },
       rawCredentialsReturned: false,
       rawPathLeaked: false,
       rawPathsReturned: false,
@@ -367,6 +302,7 @@ describe("Dream relay provisioning preflight", () => {
         hitCount: 12,
         hydratedCount: 12,
       },
+      sourceFamilyCoverage,
       sourceRootCount: 8,
     });
     const receipt = buildDreamRelayProvisioningPreflightReceipt({
@@ -399,36 +335,26 @@ describe("Dream relay provisioning preflight", () => {
     });
   });
 
-  it("rejects local relay proofs missing required machine coverage", () => {
-    const missingMachineLocalRelayProof = JSON.stringify({
-      backfillRun: {
-        blockedCount: 0,
-        completedCount: 0,
-        failedCount: 0,
-        skippedCount: 9,
-      },
+  it("reports missing source families as a non-blocking coverage caveat", () => {
+    const missingFamilyLocalRelayProof = JSON.stringify({
       checkedAt: "2026-06-09T10:00:00.000Z",
       correlation: {
         edgeCount: 48,
         nodeCount: 33,
       },
-      inventory: {
-        machineCoverage: machineCoverage.filter(
-          (coverage) =>
-            coverage.machineId !== "panda" && coverage.machineId !== "flagg"
-        ),
-        sourceFamilyCoverage,
-      },
       rawCredentialsReturned: false,
       rawPathLeaked: false,
       rawPathsReturned: false,
       redacted: true,
-      runId: "run:dream-relay-local-proof:missing-machines",
+      runId: "run:dream-relay-local-proof:missing-families",
       schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
       search: {
         hitCount: 12,
         hydratedCount: 12,
       },
+      sourceFamilyCoverage: sourceFamilyCoverage.filter(
+        (coverage) => coverage.family !== "agent-transcripts"
+      ),
       sourceRootCount: 8,
     });
     const receipt = buildDreamRelayProvisioningPreflightReceipt({
@@ -438,7 +364,7 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightPath: "dream-preflight.json",
       livePreflightText: livePreflightBlocked,
       localRelayProofPath: "local-proof.json",
-      localRelayProofText: missingMachineLocalRelayProof,
+      localRelayProofText: missingFamilyLocalRelayProof,
       networkTools: [
         {
           available: true,
@@ -450,13 +376,15 @@ describe("Dream relay provisioning preflight", () => {
     });
 
     expect({
+      caveatAction: receipt.recommendedNextActions.includes(
+        "Coverage caveat (reported, not blocking): missing source families agent-transcripts will appear in the dream report."
+      ),
       localProofStatus: receipt.localRelayProof.status,
-      missingMachineIds: receipt.localRelayProof.missingMachineIds,
-      status: receipt.status,
+      missingSourceFamilies: receipt.localRelayProof.missingSourceFamilies,
     }).toStrictEqual({
-      localProofStatus: "failed",
-      missingMachineIds: ["panda", "flagg"],
-      status: "blocked",
+      caveatAction: true,
+      localProofStatus: "passed",
+      missingSourceFamilies: ["agent-transcripts"],
     });
   });
 
@@ -683,40 +611,10 @@ describe("Dream relay provisioning preflight", () => {
 
   it("does not treat optional support/comms source packs as Dreamer provisioning blockers", () => {
     const optionalFamilyGapProof = JSON.stringify({
-      backfillRun: {
-        blockedCount: 0,
-        completedCount: 0,
-        failedCount: 0,
-        skippedCount: 9,
-      },
       checkedAt: "2026-06-09T10:00:00.000Z",
       correlation: {
         edgeCount: 48,
         nodeCount: 33,
-      },
-      inventory: {
-        machineCoverage,
-        sourceFamilyCoverage: [
-          ...sourceFamilyCoverage,
-          {
-            authorityCount: 0,
-            family: "comms",
-            missingReason:
-              "No scoped capability lease is configured for this optional source family.",
-            sourceCount: 0,
-            sourceIds: [],
-            status: "missing",
-          },
-          {
-            authorityCount: 0,
-            family: "support",
-            missingReason:
-              "No scoped capability lease is configured for this optional source family.",
-            sourceCount: 0,
-            sourceIds: [],
-            status: "missing",
-          },
-        ],
       },
       rawCredentialsReturned: false,
       rawPathLeaked: false,
@@ -728,6 +626,25 @@ describe("Dream relay provisioning preflight", () => {
         hitCount: 12,
         hydratedCount: 12,
       },
+      sourceFamilyCoverage: [
+        ...sourceFamilyCoverage,
+        {
+          family: "comms",
+          missingReason:
+            "No scoped capability lease is configured for this optional source family.",
+          receiptCount: 0,
+          sourceIds: [],
+          status: "missing",
+        },
+        {
+          family: "support",
+          missingReason:
+            "No scoped capability lease is configured for this optional source family.",
+          receiptCount: 0,
+          sourceIds: [],
+          status: "missing",
+        },
+      ],
       sourceRootCount: 8,
     });
     const receipt = buildDreamRelayProvisioningPreflightReceipt({
@@ -749,13 +666,9 @@ describe("Dream relay provisioning preflight", () => {
 
     expect({
       missingSourceFamilies: receipt.localRelayProof.missingSourceFamilies,
-      sourceFamilyAction: receipt.recommendedNextActions.includes(
-        "Provision scoped Dream source adapters or capability leases for missing source families: comms, support."
-      ),
       status: receipt.localRelayProof.status,
     }).toStrictEqual({
       missingSourceFamilies: [],
-      sourceFamilyAction: false,
       status: "passed",
     });
   });

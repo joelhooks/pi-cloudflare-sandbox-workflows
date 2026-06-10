@@ -22,18 +22,7 @@ export const dreamTranscriptReviewRequiredRuntimes = [
   "cloudflare",
 ] as const satisfies readonly DreamRuntime[];
 
-export const dreamTranscriptReviewRequiredMachineIds = [
-  "blaine",
-  "panda",
-  "flagg",
-  "cloudflare",
-] as const;
-
 export const dreamTranscriptReviewRelayOperations = [
-  "inventory",
-  "source-health",
-  "backfill-plan",
-  "backfill-run",
   "capture-run",
   "capture-artifact",
   "signals",
@@ -108,7 +97,6 @@ export const dreamTranscriptReviewSourceProfile =
     profileId: "joelhooks/dream-transcript-review",
     purpose:
       "Review agent transcripts and adjacent agent-run artifacts across the JoelClaw network, then surface source-backed kernel/package/workflow refinements.",
-    requiredMachineIds: [...dreamTranscriptReviewRequiredMachineIds],
     requiredRuntimes: [...dreamTranscriptReviewRequiredRuntimes],
     schemaVersion: "dream.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],

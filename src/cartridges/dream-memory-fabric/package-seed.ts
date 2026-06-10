@@ -7,38 +7,13 @@ import type { PackageSeedTemplate } from "../../app/infrastructure/cloudflare-pa
 export const dreamMemoryFabricPackageSeedTemplate: PackageSeedTemplate =
   PackageSeedTemplateSchema.parse({
     description:
-      "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, run/artifact capture receipts, memory search, redacted hydration, HITL reports, HITL decision receipts, HITL decision workflow seeds, and HITL follow-up run request drafts.",
+      "Dream memory fabric workflow nodes for run/artifact capture receipts, memory search, redacted hydration, correlation, refinement proposals, HITL reports, HITL decision receipts, HITL decision workflow seeds, and HITL follow-up run request drafts.",
     exports: [
       {
         contractRef:
           "contract://workflow/dream-memory-fabric/source-profile/dream-transcript-review.v1",
         exportId: "dream-transcript-review-source-profile",
         kind: "source-profile",
-      },
-      {
-        contractRef:
-          "contract://workflow/dream-memory-fabric/source-inventory.v1",
-        exportId: "dream-source-inventory",
-        kind: "workflow-node",
-        nodeType: "joelclaw.dream.source-inventory",
-      },
-      {
-        contractRef: "contract://workflow/dream-memory-fabric/source-health.v1",
-        exportId: "dream-source-health",
-        kind: "workflow-node",
-        nodeType: "joelclaw.dream.source-health",
-      },
-      {
-        contractRef: "contract://workflow/dream-memory-fabric/backfill-plan.v1",
-        exportId: "dream-backfill-plan",
-        kind: "workflow-node",
-        nodeType: "joelclaw.dream.backfill-plan",
-      },
-      {
-        contractRef: "contract://workflow/dream-memory-fabric/backfill-run.v1",
-        exportId: "dream-backfill-run",
-        kind: "workflow-node",
-        nodeType: "joelclaw.dream.backfill-run",
       },
       {
         contractRef: "contract://workflow/dream-memory-fabric/capture-run.v1",

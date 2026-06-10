@@ -27,10 +27,6 @@ const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   expectedPackageSeeded: false,
   expectedSchemaExportIds: ["dream-hitl-decision-schema"],
   expectedWorkflowNodeTypes: [
-    "joelclaw.dream.source-inventory",
-    "joelclaw.dream.source-health",
-    "joelclaw.dream.backfill-plan",
-    "joelclaw.dream.backfill-run",
     "joelclaw.dream.capture-run",
     "joelclaw.dream.capture-artifact",
     "joelclaw.dream.memory-search",
@@ -117,7 +113,7 @@ const relayReadinessMissing: WorkflowLivePreflightCheck = {
 const localRelayProofPassed: WorkflowLivePreflightCheck = {
   checkId: "relay:local-proof",
   message:
-    "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+    "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
   redacted: true,
   required: true,
   requiredFor: [
@@ -147,7 +143,6 @@ const relayReadinessReceipt = (input: {
     port: "TrustedLocalDreamMemoryFabricPort",
     sourceRoots: [
       {
-        derivedIndexCount: 1,
         family: "agent-transcripts",
         includeExtensionCount: 1,
         privacyTier: "private",
@@ -168,10 +163,6 @@ const relayReadinessReceipt = (input: {
   redacted: true,
   schemaVersion: "trusted.dream-memory-relay.readiness.v1",
   supportedOperations: [
-    "inventory",
-    "source-health",
-    "backfill-plan",
-    "backfill-run",
     "capture-run",
     "capture-artifact",
     "signals",
@@ -273,7 +264,7 @@ Wrangler 4.97.0
         leaseSecretRef: "secretref:dream-memory-relay",
         localProofStatus: "missing",
         noRawTranscripts: true,
-        operationCount: 10,
+        operationCount: 6,
         tokenConfigured: false,
       },
       remoteSeeded: false,
@@ -321,10 +312,6 @@ Wrangler 4.97.0
       leakedWzrrdSecret: false,
       relayCapability: {
         allowedOperations: [
-          "inventory",
-          "source-health",
-          "backfill-plan",
-          "backfill-run",
           "capture-run",
           "capture-artifact",
           "signals",
@@ -420,7 +407,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.source-inventory, joelclaw.dream.source-health, joelclaw.dream.backfill-plan, joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, joelclaw.dream.hitl-decision-seed, joelclaw.dream.hitl-follow-up-run-request, dream-hitl-decision-schema.",
+        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, joelclaw.dream.hitl-decision-seed, joelclaw.dream.hitl-follow-up-run-request, dream-hitl-decision-schema.",
       status: "blocked",
     });
   });
@@ -456,110 +443,10 @@ Wrangler 4.97.0
     );
     const proofPath = resolve(proofRoot, "proof.json");
     const validProof = {
-      backfill: {
-        actionCount: 9,
-        captureFixCount: 0,
-        status: "backfill-required",
-      },
-      backfillRun: {
-        blockedCount: 0,
-        completedCount: 0,
-        failedCount: 0,
-        skippedCount: 9,
-      },
       checkedAt: "2026-06-09T10:00:00.000Z",
       correlation: {
         edgeCount: 24,
         nodeCount: 40,
-      },
-      health: {
-        blindSpotCount: 1,
-        degradedSourceCount: 1,
-        status: "degraded",
-      },
-      inventory: {
-        machineCoverage: [
-          {
-            authorityCount: 21,
-            machineId: "blaine",
-            sourceCount: 3,
-            sourceIds: [
-              "source:agent-transcripts:pi:blaine",
-              "source:agent-transcripts:codex:blaine",
-              "source:agent-transcripts:claude:blaine",
-            ],
-            status: "captured",
-          },
-          {
-            authorityCount: 5,
-            machineId: "panda",
-            sourceCount: 1,
-            sourceIds: ["source:agent-transcripts:pi:panda"],
-            status: "captured",
-          },
-          {
-            authorityCount: 4,
-            machineId: "flagg",
-            sourceCount: 1,
-            sourceIds: ["source:agent-transcripts:pi:flagg"],
-            status: "captured",
-          },
-          {
-            authorityCount: 4,
-            machineId: "cloudflare",
-            sourceCount: 1,
-            sourceIds: ["source:cloudflare-runs:workflow-app"],
-            status: "captured",
-          },
-        ],
-        runtimeCoverage: [
-          { count: 10, runtime: "pi", status: "captured" },
-          { count: 8, runtime: "codex", status: "captured" },
-          { count: 3, runtime: "claude", status: "captured" },
-          { count: 4, runtime: "cloudflare", status: "captured" },
-        ],
-        sourceCount: 8,
-        sourceFamilyCoverage: [
-          {
-            authorityCount: 21,
-            family: "agent-transcripts",
-            sourceCount: 3,
-            sourceIds: [
-              "source:agent-transcripts:pi:blaine",
-              "source:agent-transcripts:codex:blaine",
-              "source:agent-transcripts:claude:blaine",
-            ],
-            status: "captured",
-          },
-          {
-            authorityCount: 3,
-            family: "brain",
-            sourceCount: 1,
-            sourceIds: ["source:brain:pi-cloudflare-sandbox-workflows"],
-            status: "captured",
-          },
-          {
-            authorityCount: 4,
-            family: "cloudflare-runs",
-            sourceCount: 1,
-            sourceIds: ["source:cloudflare-runs:workflow-app"],
-            status: "captured",
-          },
-          {
-            authorityCount: 5,
-            family: "docs-pdf-brain",
-            sourceCount: 1,
-            sourceIds: ["source:docs-pdf-brain:joelclaw-api"],
-            status: "captured",
-          },
-          {
-            authorityCount: 6,
-            family: "repo-outputs",
-            sourceCount: 1,
-            sourceIds: ["source:repo-outputs:pi-cloudflare-sandbox-workflows"],
-            status: "captured",
-          },
-        ],
       },
       rawCredentialsReturned: false,
       rawPathLeaked: false,
@@ -577,6 +464,38 @@ Wrangler 4.97.0
         signalCount: 3,
         signalKinds: ["workflow-pattern"],
       },
+      sourceFamilyCoverage: [
+        {
+          family: "agent-transcripts",
+          receiptCount: 21,
+          sourceIds: ["source:agent-transcripts:joelclaw"],
+          status: "captured",
+        },
+        {
+          family: "brain",
+          receiptCount: 3,
+          sourceIds: ["source:brain:pi-cloudflare-sandbox-workflows"],
+          status: "captured",
+        },
+        {
+          family: "cloudflare-runs",
+          receiptCount: 4,
+          sourceIds: ["source:cloudflare-runs:workflow-app"],
+          status: "captured",
+        },
+        {
+          family: "docs-pdf-brain",
+          receiptCount: 5,
+          sourceIds: ["source:docs-pdf-brain:joelclaw-api"],
+          status: "captured",
+        },
+        {
+          family: "repo-outputs",
+          receiptCount: 6,
+          sourceIds: ["source:repo-outputs:pi-cloudflare-sandbox-workflows"],
+          status: "captured",
+        },
+      ],
       sourceRootCount: 8,
     };
 
@@ -587,105 +506,40 @@ Wrangler 4.97.0
         proofPath,
         JSON.stringify({
           ...validProof,
-          backfill: {
-            ...validProof.backfill,
-            captureFixCount: 1,
-          },
-        }),
-        "utf-8"
-      );
-      const captureFixMismatch = await checkLocalRelayProof(proofPath);
-      await writeFile(
-        proofPath,
-        JSON.stringify({
-          ...validProof,
-          backfill: {
-            ...validProof.backfill,
-            captureFixCount: 1,
-          },
-          backfillRun: {
-            ...validProof.backfillRun,
-            captureFixBlockedCount: 1,
-          },
-        }),
-        "utf-8"
-      );
-      const passedWithCaptureFix = await checkLocalRelayProof(proofPath);
-      await writeFile(
-        proofPath,
-        JSON.stringify({
-          ...validProof,
-          inventory: {
-            ...validProof.inventory,
-            runtimeCoverage: [{ count: 10, runtime: "pi", status: "captured" }],
-          },
-        }),
-        "utf-8"
-      );
-      const missingCoverage = await checkLocalRelayProof(proofPath);
-      await writeFile(
-        proofPath,
-        JSON.stringify({
-          ...validProof,
-          inventory: {
-            ...validProof.inventory,
-            machineCoverage: validProof.inventory.machineCoverage.filter(
-              (coverage) =>
-                coverage.machineId !== "panda" && coverage.machineId !== "flagg"
-            ),
-          },
-        }),
-        "utf-8"
-      );
-      const missingMachineCoverage = await checkLocalRelayProof(proofPath);
-      await writeFile(
-        proofPath,
-        JSON.stringify({
-          ...validProof,
-          inventory: {
-            ...validProof.inventory,
-            sourceFamilyCoverage:
-              validProof.inventory.sourceFamilyCoverage.filter(
-                (coverage) => coverage.family !== "docs-pdf-brain"
-              ),
-          },
+          sourceFamilyCoverage: validProof.sourceFamilyCoverage.filter(
+            (coverage) => coverage.family !== "docs-pdf-brain"
+          ),
         }),
         "utf-8"
       );
       const missingSourceFamilyCoverage = await checkLocalRelayProof(proofPath);
+      await writeFile(
+        proofPath,
+        JSON.stringify({
+          ...validProof,
+          correlation: undefined,
+        }),
+        "utf-8"
+      );
+      const staleProof = await checkLocalRelayProof(proofPath);
 
       expect({
-        captureFixMismatchMessage: captureFixMismatch.message,
-        captureFixMismatchStatus: captureFixMismatch.status,
-        missingCoverageMessage: missingCoverage.message,
-        missingCoverageStatus: missingCoverage.status,
-        missingMachineCoverageMessage: missingMachineCoverage.message,
-        missingMachineCoverageStatus: missingMachineCoverage.status,
         missingSourceFamilyCoverageMessage: missingSourceFamilyCoverage.message,
         missingSourceFamilyCoverageStatus: missingSourceFamilyCoverage.status,
         passedMessage: passed.message,
         passedStatus: passed.status,
-        passedWithCaptureFixMessage: passedWithCaptureFix.message,
-        passedWithCaptureFixStatus: passedWithCaptureFix.status,
+        staleProofMessage: staleProof.message,
+        staleProofStatus: staleProof.status,
       }).toStrictEqual({
-        captureFixMismatchMessage:
-          "Trusted local Dream relay proof capture-fix receipt does not match the planned capture-fix count.",
-        captureFixMismatchStatus: "failed",
-        missingCoverageMessage:
-          "Trusted local Dream relay proof is missing captured native runtime coverage for: codex, claude, cloudflare.",
-        missingCoverageStatus: "failed",
-        missingMachineCoverageMessage:
-          "Trusted local Dream relay proof is missing required machine coverage for: panda, flagg.",
-        missingMachineCoverageStatus: "failed",
         missingSourceFamilyCoverageMessage:
-          "Trusted local Dream relay proof is missing explicit source-family coverage for: docs-pdf-brain.",
-        missingSourceFamilyCoverageStatus: "failed",
+          "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges. Coverage caveat (reported, not blocking): missing source families docs-pdf-brain.",
+        missingSourceFamilyCoverageStatus: "passed",
         passedMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+          "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
         passedStatus: "passed",
-        passedWithCaptureFixMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 1 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
-        passedWithCaptureFixStatus: "passed",
+        staleProofMessage:
+          "Trusted local Dream relay proof receipt failed schema validation.",
+        staleProofStatus: "failed",
       });
     } finally {
       await rm(proofRoot, { force: true, recursive: true });

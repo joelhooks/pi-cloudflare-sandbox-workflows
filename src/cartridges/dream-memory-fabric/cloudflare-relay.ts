@@ -2,11 +2,7 @@
 
 import type { z } from "zod";
 
-import type {
-  Actor,
-  ArtifactRef,
-  CapabilityBlocker,
-} from "../../app/domain/schemas.ts";
+import type { CapabilityBlocker } from "../../app/domain/schemas.ts";
 import { workflowTraceContextForCapability } from "../../app/domain/trace-context.ts";
 import {
   DreamCorrelationGraphDocumentSchema,
@@ -17,21 +13,14 @@ import {
   DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemorySearchDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
-  DreamMemoryRelayBackfillRunPayloadSchema,
   DreamMemoryRelayEndpointCatalogSchema,
   DreamMemoryRelayOperationSchema,
   DreamMemoryRelaySignalsPayloadSchema,
   DreamSignalDocumentSchema,
   DreamSourceFamilySchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
 } from "./schemas.ts";
 import type {
-  DreamBackfillPlanDocument,
-  DreamBackfillRunReceiptDocument,
   DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHydrationDocument,
@@ -41,20 +30,15 @@ import type {
   DreamMemoryRelayOperation,
   DreamMemoryRelayHydrationPayload,
   DreamMemoryRelaySearchPayload,
-  DreamMemoryRelayBackfillRunPayload,
   DreamMemoryRelaySignalsPayload,
   DreamMemorySearchDocument,
   DreamReceiptRef,
   DreamSignalDocument,
-  DreamSourceHealthDocument,
   DreamSourceFamily,
-  DreamSourceInventoryDocument,
 } from "./schemas.ts";
 import type {
-  DreamMemoryBackfillPort,
   DreamMemoryCapturePort,
   DreamMemoryCorrelationPort,
-  DreamMemoryFabricPort,
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
   DreamMemorySignalPort,
@@ -95,40 +79,13 @@ export interface CloudflareDreamMemoryFabricRelayConfig {
   readonly userAgent: string;
 }
 
-interface DreamRelayPayloadBase {
-  readonly actor: Actor;
-  readonly runId: string;
-  readonly workItemId: string;
-}
-
-interface DreamRelayInventoryPayload extends DreamRelayPayloadBase {
-  readonly requiredRuntimes: readonly string[];
-  readonly sourceFamiliesExpected: readonly DreamSourceFamily[];
-}
-
-interface DreamRelaySourceHealthPayload extends DreamRelayPayloadBase {
-  readonly inventory: DreamSourceInventoryDocument;
-  readonly inventoryRef: ArtifactRef;
-}
-
-interface DreamRelayBackfillPlanPayload extends DreamRelayPayloadBase {
-  readonly health: DreamSourceHealthDocument;
-  readonly healthRef: ArtifactRef;
-  readonly inventory: DreamSourceInventoryDocument;
-  readonly inventoryRef: ArtifactRef;
-}
-
 type DreamRelayPayload =
-  | DreamRelayBackfillPlanPayload
-  | DreamMemoryRelayBackfillRunPayload
   | DreamMemoryRelayCaptureArtifactPayload
   | DreamMemoryRelayCaptureRunPayload
   | DreamMemoryRelayCorrelationPayload
   | DreamMemoryRelayHydrationPayload
   | DreamMemoryRelaySearchPayload
-  | DreamMemoryRelaySignalsPayload
-  | DreamRelayInventoryPayload
-  | DreamRelaySourceHealthPayload;
+  | DreamMemoryRelaySignalsPayload;
 
 const allDreamSourceFamilies = DreamSourceFamilySchema.options;
 
@@ -172,16 +129,12 @@ const blockerForRelayStatus = <TDocument>(
 };
 
 const operationPaths: Readonly<Record<DreamMemoryRelayOperation, string>> = {
-  "backfill-plan": "/memory/backfill/plan",
-  "backfill-run": "/memory/backfill/run",
   "capture-artifact": "/memory/capture/artifact",
   "capture-run": "/memory/capture/run",
   correlate: "/memory/correlate",
   hydrate: "/memory/hydrate",
-  inventory: "/memory/inventory",
   search: "/memory/search",
   signals: "/memory/signals",
-  "source-health": "/memory/source-health",
 };
 
 export const dreamMemoryRelayEndpointCatalog =
@@ -205,10 +158,6 @@ const uniqueReceiptFamilies = (
 const payloadSourceFamilies = (
   payload: DreamRelayPayload
 ): readonly DreamSourceFamily[] => {
-  if ("sourceFamiliesExpected" in payload) {
-    return payload.sourceFamiliesExpected;
-  }
-
   if ("query" in payload) {
     return payload.sourceFamilies ?? allDreamSourceFamilies;
   }
@@ -227,32 +176,12 @@ const payloadSourceFamilies = (
     );
   }
 
-  if ("plan" in payload) {
-    const plannedFamilies = payload.plan.actions.map(
-      (action) => action.sourceFamily
-    );
-
-    return plannedFamilies.length === 0
-      ? allDreamSourceFamilies
-      : [...new Set(plannedFamilies)];
-  }
-
-  if ("inventory" in payload) {
-    return payload.inventory.sourceFamiliesExpected;
-  }
-
   return allDreamSourceFamilies;
 };
 
-const payloadScope = (payload: DreamRelayPayload) => {
-  if ("inventory" in payload) {
-    return payload.inventory.scope;
-  }
-
-  return {
-    organizationId: payload.actor.organizationId,
-  };
-};
+const payloadScope = (payload: DreamRelayPayload) => ({
+  organizationId: payload.actor.organizationId,
+});
 
 const relayRequestEnvelope = (input: {
   readonly budget: CloudflareDreamMemoryFabricRelayConfig["budget"];
@@ -320,9 +249,7 @@ export const createCloudflareDreamMemoryRelayTokenResolver = (
 export const createCloudflareDreamMemoryFabricRelay = (
   config: CloudflareDreamMemoryFabricRelayConfig
 ): DreamMemoryCorrelationPort &
-  DreamMemoryBackfillPort &
   DreamMemoryCapturePort &
-  DreamMemoryFabricPort &
   DreamMemoryRetrievalPort &
   DreamMemorySignalPort => {
   const fetcher = config.fetch ?? fetch;
@@ -416,15 +343,6 @@ export const createCloudflareDreamMemoryFabricRelay = (
         workItemId: input.workItemId,
       });
     },
-    checkSourceHealth(input) {
-      return postRelay<DreamSourceHealthDocument>({
-        body: input,
-        documentSchema: DreamSourceHealthDocumentSchema,
-        operation: "source-health",
-        runId: input.runId,
-        workItemId: input.workItemId,
-      });
-    },
     correlateMemories(input) {
       return postRelay<DreamCorrelationGraphDocument>({
         body: DreamMemoryRelayCorrelationPayloadSchema.parse(input),
@@ -443,38 +361,11 @@ export const createCloudflareDreamMemoryFabricRelay = (
         workItemId: input.workItemId,
       });
     },
-    inventorySources(input) {
-      return postRelay<DreamSourceInventoryDocument>({
-        body: input,
-        documentSchema: DreamSourceInventoryDocumentSchema,
-        operation: "inventory",
-        runId: input.runId,
-        workItemId: input.workItemId,
-      });
-    },
     mineSignals(input) {
       return postRelay<DreamSignalDocument>({
         body: DreamMemoryRelaySignalsPayloadSchema.parse(input),
         documentSchema: DreamSignalDocumentSchema,
         operation: "signals",
-        runId: input.runId,
-        workItemId: input.workItemId,
-      });
-    },
-    planBackfill(input) {
-      return postRelay<DreamBackfillPlanDocument>({
-        body: input,
-        documentSchema: DreamBackfillPlanDocumentSchema,
-        operation: "backfill-plan",
-        runId: input.runId,
-        workItemId: input.workItemId,
-      });
-    },
-    runBackfill(input) {
-      return postRelay<DreamBackfillRunReceiptDocument>({
-        body: DreamMemoryRelayBackfillRunPayloadSchema.parse(input),
-        documentSchema: DreamBackfillRunReceiptDocumentSchema,
-        operation: "backfill-run",
         runId: input.runId,
         workItemId: input.workItemId,
       });

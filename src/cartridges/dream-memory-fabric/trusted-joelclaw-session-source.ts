@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { sha256Hex } from "../../app/domain/hash.ts";
 import type {
-  DreamAdapterHealthStatus,
   DreamCoverageHorizon,
   DreamMemorySearchHit,
   DreamReceiptRef,
@@ -30,12 +29,6 @@ export type TrustedJoelClawSessionBridgeCommand = (
   readonly stdout: string;
 }>;
 
-export interface TrustedJoelClawSessionScan {
-  readonly count: number;
-  readonly health: DreamAdapterHealthStatus;
-  readonly truncated: boolean;
-}
-
 export interface TrustedJoelClawSessionHydrationRecord {
   readonly receipt: DreamReceiptRef;
   readonly redactedExcerpt: string;
@@ -49,7 +42,6 @@ export interface TrustedJoelClawSessionSearchResult {
 }
 
 const JOELCLAW_SSH_PROTOCOL = "joelclaw+ssh:";
-const DEFAULT_SCAN_QUERY = "agent memory workflow transcript";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER_BYTES = 4_000_000;
 const REDACTED_TOKEN = "[redacted-token]";
@@ -226,36 +218,6 @@ const runSearch = async (input: {
   return JoelClawSessionSearchOutputSchema.parse(
     JSON.parse(stripAnsi(result.stdout))
   );
-};
-
-export const scanTrustedJoelClawSessionSource = async (input: {
-  readonly command?: TrustedJoelClawSessionBridgeCommand;
-  readonly maxFiles: number;
-  readonly source: TrustedJoelClawSessionSourceConfig;
-}): Promise<TrustedJoelClawSessionScan> => {
-  try {
-    const result = await runSearch({
-      ...(input.command === undefined ? {} : { command: input.command }),
-      limit: 1,
-      maxFiles: input.source.maxFiles ?? input.maxFiles,
-      query: DEFAULT_SCAN_QUERY,
-      source: input.source,
-    });
-    const searchedFiles = result.result.ssh?.searchedFiles ?? 0;
-    const count = Math.max(searchedFiles, result.result.hits.length);
-
-    return {
-      count,
-      health: count > 0 ? "healthy" : "stale",
-      truncated: searchedFiles >= (input.source.maxFiles ?? input.maxFiles),
-    };
-  } catch {
-    return {
-      count: 0,
-      health: "unavailable",
-      truncated: false,
-    };
-  }
 };
 
 const redactJoelClawSessionText = (input: string): string =>

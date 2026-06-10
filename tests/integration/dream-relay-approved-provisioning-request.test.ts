@@ -81,7 +81,6 @@ const provisioningPreflight = () => ({
     status: "blocked",
   },
   localRelayProof: {
-    missingMachineIds: [],
     missingSourceFamilies: [],
     path: ".wrangler/workflow-app/dream-relay/latest-local-proof.json",
     rawCredentialsReturned: false,

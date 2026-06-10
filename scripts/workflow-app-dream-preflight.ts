@@ -175,69 +175,21 @@ const relayRequiredOperations = z
 const relayAllowedSourceFamilies = z
   .array(WorkflowLivePreflightDreamSourceFamilySchema)
   .parse(dreamTranscriptReviewSourceProfile.sourceFamiliesExpected);
-const localProofRequiredRuntimes =
-  dreamTranscriptReviewSourceProfile.requiredRuntimes;
-const localProofRequiredMachineIds =
-  dreamTranscriptReviewSourceProfile.requiredMachineIds;
 const localProofRequiredSourceFamilies = relayAllowedSourceFamilies;
 
-const LocalProofMachineCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
-  machineId: z.string().min(1),
-  missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
-  sourceIds: z.array(z.string().min(1)).default([]),
-  status: z.enum(["captured", "missing"]),
-});
-
 const LocalProofSourceFamilyCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
   family: z.string().min(1),
   missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
+  receiptCount: z.number().int().min(0),
   sourceIds: z.array(z.string().min(1)).default([]),
   status: z.enum(["captured", "missing"]),
 });
 
 const LocalRelayProofReceiptSchema = z.object({
-  backfill: z.object({
-    actionCount: z.number().int().min(0),
-    captureFixCount: z.number().int().min(0),
-    status: z.string().min(1),
-  }),
-  backfillRun: z.object({
-    blockedCount: z.number().int().min(0),
-    captureFixBlockedCount: z.number().int().min(0).optional(),
-    captureFixCompletedCount: z.number().int().min(0).optional(),
-    captureFixFailedCount: z.number().int().min(0).optional(),
-    captureFixSkippedCount: z.number().int().min(0).optional(),
-    completedCount: z.number().int().min(0),
-    failedCount: z.number().int().min(0),
-    skippedCount: z.number().int().min(0),
-  }),
   checkedAt: z.string().min(1),
   correlation: z.object({
     edgeCount: z.number().int().min(1),
     nodeCount: z.number().int().min(1),
-  }),
-  health: z.object({
-    blindSpotCount: z.number().int().min(0),
-    degradedSourceCount: z.number().int().min(0),
-    status: z.string().min(1),
-  }),
-  inventory: z.object({
-    machineCoverage: z.array(LocalProofMachineCoverageSchema).default([]),
-    runtimeCoverage: z.array(
-      z.object({
-        count: z.number().int().min(0),
-        runtime: z.string().min(1),
-        status: z.string().min(1),
-      })
-    ),
-    sourceCount: z.number().int().min(1),
-    sourceFamilyCoverage: z
-      .array(LocalProofSourceFamilyCoverageSchema)
-      .default([]),
   }),
   rawCredentialsReturned: z.literal(false),
   rawPathLeaked: z.literal(false),
@@ -262,6 +214,9 @@ const LocalRelayProofReceiptSchema = z.object({
       signalCount: 0,
       signalKinds: [],
     }),
+  sourceFamilyCoverage: z
+    .array(LocalProofSourceFamilyCoverageSchema)
+    .default([]),
   sourceRootCount: z.number().int().min(1),
 });
 
@@ -652,63 +607,9 @@ export const checkLocalRelayProof = async (
   }
 
   const { data: proof } = proofResult;
-  const coverageByRuntime = new Map(
-    proof.inventory.runtimeCoverage.map((coverage) => [
-      coverage.runtime,
-      coverage,
-    ])
-  );
-  const missingRuntimes = localProofRequiredRuntimes.filter((runtime) => {
-    const coverage = coverageByRuntime.get(runtime);
-
-    return (
-      coverage === undefined ||
-      coverage.status !== "captured" ||
-      coverage.count <= 0
-    );
-  });
-  if (missingRuntimes.length > 0) {
-    return failedLocalRelayProofCheck(
-      `Trusted local Dream relay proof is missing captured native runtime coverage for: ${missingRuntimes.join(", ")}.`
-    );
-  }
-
-  const coverageByMachine = new Map(
-    proof.inventory.machineCoverage.map((coverage) => [
-      coverage.machineId,
-      coverage,
-    ])
-  );
-  const missingMachines = localProofRequiredMachineIds.filter((machineId) => {
-    const coverage = coverageByMachine.get(machineId);
-
-    return (
-      coverage === undefined ||
-      coverage.status !== "captured" ||
-      coverage.sourceCount <= 0 ||
-      coverage.authorityCount <= 0
-    );
-  });
-  if (missingMachines.length > 0) {
-    return failedLocalRelayProofCheck(
-      `Trusted local Dream relay proof is missing required machine coverage for: ${missingMachines.join(", ")}.`
-    );
-  }
-
   const coverageBySourceFamily = new Map(
-    proof.inventory.sourceFamilyCoverage.map((coverage) => [
-      coverage.family,
-      coverage,
-    ])
+    proof.sourceFamilyCoverage.map((coverage) => [coverage.family, coverage])
   );
-  const unreportedSourceFamilies = localProofRequiredSourceFamilies.filter(
-    (family) => !coverageBySourceFamily.has(family)
-  );
-  if (unreportedSourceFamilies.length > 0) {
-    return failedLocalRelayProofCheck(
-      `Trusted local Dream relay proof is missing explicit source-family coverage for: ${unreportedSourceFamilies.join(", ")}.`
-    );
-  }
   const missingSourceFamilies = localProofRequiredSourceFamilies.filter(
     (family) => {
       const coverage = coverageBySourceFamily.get(family);
@@ -716,8 +617,7 @@ export const checkLocalRelayProof = async (
       return (
         coverage === undefined ||
         coverage.status !== "captured" ||
-        coverage.sourceCount <= 0 ||
-        coverage.authorityCount <= 0
+        coverage.receiptCount <= 0
       );
     }
   );
@@ -734,28 +634,6 @@ export const checkLocalRelayProof = async (
     );
   }
 
-  const backfillRunResultCount =
-    proof.backfillRun.blockedCount +
-    proof.backfillRun.completedCount +
-    proof.backfillRun.failedCount +
-    proof.backfillRun.skippedCount;
-  if (backfillRunResultCount !== proof.backfill.actionCount) {
-    return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof backfill-run receipt does not match the planned action count."
-    );
-  }
-
-  const captureFixRunResultCount =
-    (proof.backfillRun.captureFixBlockedCount ?? 0) +
-    (proof.backfillRun.captureFixCompletedCount ?? 0) +
-    (proof.backfillRun.captureFixFailedCount ?? 0) +
-    (proof.backfillRun.captureFixSkippedCount ?? 0);
-  if (captureFixRunResultCount !== proof.backfill.captureFixCount) {
-    return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof capture-fix receipt does not match the planned capture-fix count."
-    );
-  }
-
   const familySummary = receiptFamilySummary(proof.search.hydratedFamilyCounts);
   const summarySuffix =
     familySummary === null
@@ -764,11 +642,11 @@ export const checkLocalRelayProof = async (
   const missingSourceFamilySuffix =
     missingSourceFamilies.length === 0
       ? ""
-      : ` Missing source families are explicitly reported: ${missingSourceFamilies.join(", ")}.`;
+      : ` Coverage caveat (reported, not blocking): missing source families ${missingSourceFamilies.join(", ")}.`;
 
   return {
     checkId: "relay:local-proof",
-    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.backfill.actionCount} backfill action receipt(s), ${proof.backfill.captureFixCount} capture-fix receipt(s), ${proof.signals.signalCount} signal receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
+    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.signals.signalCount} signal receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
     redacted: true,
     required: true,
     requiredFor: [
@@ -967,14 +845,6 @@ const requiredActionForCheck = (
   }
 
   if (check.checkId === "relay:local-proof") {
-    if (check.message?.includes("missing required machine coverage")) {
-      const missingMachineIds =
-        check.message.split("for: ").at(1)?.replace(/\.$/u, "") ??
-        "required machines";
-
-      return `Add or provision trusted Dream source roots for missing machine coverage (${missingMachineIds}) before exposing the relay to Cloudflare.`;
-    }
-
     return "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof before exposing the relay to Cloudflare.";
   }
 

@@ -84,46 +84,21 @@ const RelayReceiptFamilyCountSchema = z.object({
   receiptCount: z.number().int().min(0),
 });
 
-const { requiredMachineIds } = dreamTranscriptReviewSourceProfile;
 const requiredSourceFamilies =
   dreamTranscriptReviewSourceProfile.sourceFamiliesExpected;
 
-const MachineCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
-  machineId: z.string().min(1),
-  missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
-  sourceIds: z.array(z.string().min(1)).default([]),
-  status: z.enum(["captured", "missing"]),
-});
-
 const SourceFamilyCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
   family: z.string().min(1),
   missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
+  receiptCount: z.number().int().min(0),
   sourceIds: z.array(z.string().min(1)).default([]),
   status: z.enum(["captured", "missing"]),
 });
 
 const LocalRelayProofSchema = z.object({
-  backfillRun: z.object({
-    blockedCount: z.number().int().min(0),
-    captureFixBlockedCount: z.number().int().min(0).optional(),
-    captureFixCompletedCount: z.number().int().min(0).optional(),
-    captureFixFailedCount: z.number().int().min(0).optional(),
-    captureFixSkippedCount: z.number().int().min(0).optional(),
-    completedCount: z.number().int().min(0),
-    failedCount: z.number().int().min(0),
-    skippedCount: z.number().int().min(0),
-  }),
   correlation: z.object({
     edgeCount: z.number().int().min(1),
     nodeCount: z.number().int().min(1),
-  }),
-  inventory: z.object({
-    machineCoverage: z.array(MachineCoverageSchema),
-    sourceFamilyCoverage: z.array(SourceFamilyCoverageSchema).default([]),
   }),
   rawCredentialsReturned: z.literal(false),
   rawPathLeaked: z.literal(false),
@@ -147,6 +122,7 @@ const LocalRelayProofSchema = z.object({
       signalCount: 0,
       signalKinds: [],
     }),
+  sourceFamilyCoverage: z.array(SourceFamilyCoverageSchema).default([]),
   sourceRootCount: z.number().int().min(1),
 });
 
@@ -182,20 +158,10 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     status: z.enum(["blocked", "failed", "missing", "ready"]),
   }),
   localRelayProof: z.object({
-    backfillRunBlockedCount: z.number().int().min(0).optional(),
-    backfillRunCompletedCount: z.number().int().min(0).optional(),
-    backfillRunFailedCount: z.number().int().min(0).optional(),
-    backfillRunSkippedCount: z.number().int().min(0).optional(),
-    captureFixBlockedCount: z.number().int().min(0).optional(),
-    captureFixCompletedCount: z.number().int().min(0).optional(),
-    captureFixFailedCount: z.number().int().min(0).optional(),
-    captureFixSkippedCount: z.number().int().min(0).optional(),
     correlationEdgeCount: z.number().int().min(0).optional(),
     correlationNodeCount: z.number().int().min(0).optional(),
     hydratedCount: z.number().int().min(0).optional(),
     hydratedFamilyCounts: z.array(RelayReceiptFamilyCountSchema).optional(),
-    machineCoverage: z.array(MachineCoverageSchema).optional(),
-    missingMachineIds: z.array(z.string().min(1)).optional(),
     missingSourceFamilies: z.array(z.string().min(1)).optional(),
     path: z.string().min(1),
     rawCredentialsReturned: z.literal(false).optional(),
@@ -205,6 +171,7 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     searchHitCount: z.number().int().min(0).optional(),
     signalCount: z.number().int().min(0).optional(),
     signalKinds: z.array(z.string().min(1)).optional(),
+    sourceFamilyCoverage: z.array(SourceFamilyCoverageSchema).optional(),
     sourceRootCount: z.number().int().min(0).optional(),
     status: z.enum(["failed", "missing", "passed"]),
   }),
@@ -349,25 +316,6 @@ const argValue = (
   return undefined;
 };
 
-const missingMachineIdsFor = (
-  machineCoverage: readonly z.infer<typeof MachineCoverageSchema>[]
-): string[] => {
-  const coverageByMachine = new Map(
-    machineCoverage.map((coverage) => [coverage.machineId, coverage])
-  );
-
-  return requiredMachineIds.filter((machineId) => {
-    const coverage = coverageByMachine.get(machineId);
-
-    return (
-      coverage === undefined ||
-      coverage.status !== "captured" ||
-      coverage.sourceCount <= 0 ||
-      coverage.authorityCount <= 0
-    );
-  });
-};
-
 const missingSourceFamiliesFor = (
   sourceFamilyCoverage: readonly z.infer<typeof SourceFamilyCoverageSchema>[]
 ): string[] => {
@@ -381,22 +329,9 @@ const missingSourceFamiliesFor = (
     return (
       coverage === undefined ||
       coverage.status !== "captured" ||
-      coverage.sourceCount <= 0 ||
-      coverage.authorityCount <= 0
+      coverage.receiptCount <= 0
     );
   });
-};
-
-const unreportedSourceFamiliesFor = (
-  sourceFamilyCoverage: readonly z.infer<typeof SourceFamilyCoverageSchema>[]
-): string[] => {
-  const reportedFamilies = new Set(
-    sourceFamilyCoverage.map((coverage) => coverage.family)
-  );
-
-  return requiredSourceFamilies.filter(
-    (family) => !reportedFamilies.has(family)
-  );
 };
 
 const parseArgs = (argv: readonly string[]): ProvisioningPreflightArgs => {
@@ -501,31 +436,15 @@ const localRelayProofSummary = (input: {
   }
 
   const { data: proof } = proofResult;
-  const missingMachineIds = missingMachineIdsFor(
-    proof.inventory.machineCoverage
-  );
   const missingSourceFamilies = missingSourceFamiliesFor(
-    proof.inventory.sourceFamilyCoverage
-  );
-  const unreportedSourceFamilies = unreportedSourceFamiliesFor(
-    proof.inventory.sourceFamilyCoverage
+    proof.sourceFamilyCoverage
   );
 
   return {
-    backfillRunBlockedCount: proof.backfillRun.blockedCount,
-    backfillRunCompletedCount: proof.backfillRun.completedCount,
-    backfillRunFailedCount: proof.backfillRun.failedCount,
-    backfillRunSkippedCount: proof.backfillRun.skippedCount,
-    captureFixBlockedCount: proof.backfillRun.captureFixBlockedCount ?? 0,
-    captureFixCompletedCount: proof.backfillRun.captureFixCompletedCount ?? 0,
-    captureFixFailedCount: proof.backfillRun.captureFixFailedCount ?? 0,
-    captureFixSkippedCount: proof.backfillRun.captureFixSkippedCount ?? 0,
     correlationEdgeCount: proof.correlation.edgeCount,
     correlationNodeCount: proof.correlation.nodeCount,
     hydratedCount: proof.search.hydratedCount,
     hydratedFamilyCounts: proof.search.hydratedFamilyCounts,
-    machineCoverage: proof.inventory.machineCoverage,
-    missingMachineIds,
     missingSourceFamilies,
     path: input.path,
     rawCredentialsReturned: proof.rawCredentialsReturned,
@@ -535,11 +454,9 @@ const localRelayProofSummary = (input: {
     searchHitCount: proof.search.hitCount,
     signalCount: proof.signals.signalCount,
     signalKinds: proof.signals.signalKinds,
+    sourceFamilyCoverage: proof.sourceFamilyCoverage,
     sourceRootCount: proof.sourceRootCount,
-    status:
-      missingMachineIds.length === 0 && unreportedSourceFamilies.length === 0
-        ? "passed"
-        : "failed",
+    status: "passed",
   };
 };
 
@@ -731,18 +648,9 @@ const recommendedNextActions = (input: {
   }
 
   if (input.localRelayProof.status !== "passed") {
-    if (
-      input.localRelayProof.missingMachineIds !== undefined &&
-      input.localRelayProof.missingMachineIds.length > 0
-    ) {
-      actions.push(
-        `Add or provision trusted Dream source roots for missing machine coverage: ${input.localRelayProof.missingMachineIds.join(", ")}.`
-      );
-    } else {
-      actions.push(
-        "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof receipt."
-      );
-    }
+    actions.push(
+      "Run pnpm app:dream:relay:proof and inspect the redacted local relay proof receipt."
+    );
   }
 
   if (
@@ -750,7 +658,7 @@ const recommendedNextActions = (input: {
     input.localRelayProof.missingSourceFamilies.length > 0
   ) {
     actions.push(
-      `Provision scoped Dream source adapters or capability leases for missing source families: ${input.localRelayProof.missingSourceFamilies.join(", ")}.`
+      `Coverage caveat (reported, not blocking): missing source families ${input.localRelayProof.missingSourceFamilies.join(", ")} will appear in the dream report.`
     );
   }
 

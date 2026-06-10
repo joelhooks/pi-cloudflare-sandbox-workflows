@@ -10,8 +10,6 @@ import { z } from "zod";
 import { ActorSchema, ArtifactRefSchema } from "../src/app/domain/schemas.ts";
 import { dreamMemoryRelayEndpointCatalog } from "../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 import {
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
@@ -19,13 +17,9 @@ import {
   DreamMemorySearchDocumentSchema,
   DreamSignalDocumentSchema,
   DreamSourceFamilySchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
 } from "../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
-  DreamBackfillPlanDocument,
-  DreamBackfillRunReceiptDocument,
   DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHydrationDocument,
@@ -34,13 +28,8 @@ import type {
   DreamReceiptRef,
   DreamSignalDocument,
   DreamSourceFamily,
-  DreamSourceHealthDocument,
-  DreamSourceInventoryDocument,
 } from "../src/cartridges/dream-memory-fabric/schemas.ts";
-import {
-  dreamTranscriptReviewRequiredMachineIds,
-  dreamTranscriptReviewSourceProfile,
-} from "../src/cartridges/dream-memory-fabric/source-profile.ts";
+import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
 import {
   startTrustedLocalDreamMemoryRelayHttpServer,
   trustedLocalDreamMemoryRelayHttpConfigFromEnv,
@@ -62,13 +51,6 @@ const relaySecretRef = "secretref:dream-memory-relay-local-proof";
 const SourceRootsJsonSchema = z.array(
   z.object({
     authorityRoot: z.string().min(1),
-    derivedIndexes: z
-      .array(
-        z.object({
-          root: z.string().min(1).optional(),
-        })
-      )
-      .optional(),
   })
 );
 
@@ -83,44 +65,15 @@ const ReceiptSourceCountSchema = z.object({
   sourceId: z.string().min(1),
 });
 
-const RequiredMachineIdSchema = z.enum(dreamTranscriptReviewRequiredMachineIds);
-
-const requiredMachineIds = RequiredMachineIdSchema.options;
-
-const MachineCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
-  machineId: RequiredMachineIdSchema,
-  missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
-  sourceIds: z.array(z.string().min(1)).default([]),
-  status: z.enum(["captured", "missing"]),
-});
-
 const SourceFamilyCoverageSchema = z.object({
-  authorityCount: z.number().int().min(0),
   family: DreamSourceFamilySchema,
   missingReason: z.string().min(1).optional(),
-  sourceCount: z.number().int().min(0),
+  receiptCount: z.number().int().min(0),
   sourceIds: z.array(z.string().min(1)).default([]),
   status: z.enum(["captured", "missing"]),
 });
 
 const LocalRelayProofReceiptSchema = z.object({
-  backfill: z.object({
-    actionCount: z.number().int().min(0),
-    captureFixCount: z.number().int().min(0),
-    status: z.string().min(1),
-  }),
-  backfillRun: z.object({
-    blockedCount: z.number().int().min(0),
-    captureFixBlockedCount: z.number().int().min(0),
-    captureFixCompletedCount: z.number().int().min(0),
-    captureFixFailedCount: z.number().int().min(0),
-    captureFixSkippedCount: z.number().int().min(0),
-    completedCount: z.number().int().min(0),
-    failedCount: z.number().int().min(0),
-    skippedCount: z.number().int().min(0),
-  }),
   capture: z.object({
     artifactCaptureKind: z.literal("artifact"),
     artifactCapturedRef: ArtifactRefSchema,
@@ -131,31 +84,6 @@ const LocalRelayProofReceiptSchema = z.object({
   correlation: z.object({
     edgeCount: z.number().int().min(0),
     nodeCount: z.number().int().min(0),
-  }),
-  health: z.object({
-    blindSpotCount: z.number().int().min(0),
-    degradedSourceCount: z.number().int().min(0),
-    status: z.string().min(1),
-  }),
-  inventory: z.object({
-    machineCoverage: z.array(MachineCoverageSchema),
-    runtimeCoverage: z.array(
-      z.object({
-        count: z.number().int().min(0),
-        runtime: z.string().min(1),
-        status: z.string().min(1),
-      })
-    ),
-    sourceCount: z.number().int().min(0),
-    sourceFamilyCoverage: z.array(SourceFamilyCoverageSchema),
-    sources: z.array(
-      z.object({
-        authorityCount: z.number().int().min(0),
-        derivedIndexCount: z.number().int().min(0),
-        family: z.string().min(1),
-        sourceId: z.string().min(1),
-      })
-    ),
   }),
   query: z.string().min(1),
   rawCredentialsReturned: z.literal(false),
@@ -182,6 +110,7 @@ const LocalRelayProofReceiptSchema = z.object({
     signalCount: z.number().int().min(0),
     signalKinds: z.array(z.string().min(1)),
   }),
+  sourceFamilyCoverage: z.array(SourceFamilyCoverageSchema),
   sourceRootCount: z.number().int().min(1),
   workItemId: z.string().min(1),
 });
@@ -347,30 +276,10 @@ const healthz = async (input: {
 const artifactRef = (name: string) =>
   ArtifactRefSchema.parse(`artifact://local-dream-relay-proof/${name}.json`);
 
-const runtimeCoverageCount = (input: {
-  readonly coverage: DreamSourceInventoryDocument["runtimeCoverage"][number];
-  readonly inventory: DreamSourceInventoryDocument;
-}): number => {
-  const sourceId = input.coverage.nativeProof?.sourceId;
-  if (sourceId === undefined) {
-    return 0;
-  }
-
-  return (
-    input.inventory.sources.find((source) => source.sourceId === sourceId)
-      ?.authority.count ?? 0
-  );
-};
-
 const rawRootsFromConfig = (sourceRootsJson: string): readonly string[] => {
   const sourceRoots = SourceRootsJsonSchema.parse(JSON.parse(sourceRootsJson));
 
-  return sourceRoots.flatMap((sourceRoot) => [
-    sourceRoot.authorityRoot,
-    ...(sourceRoot.derivedIndexes ?? []).flatMap((derivedIndex) =>
-      derivedIndex.root === undefined ? [] : [derivedIndex.root]
-    ),
-  ]);
+  return sourceRoots.map((sourceRoot) => sourceRoot.authorityRoot);
 };
 
 const receiptCountsFor = (receipts: readonly DreamReceiptRef[]) => {
@@ -419,113 +328,38 @@ const receiptCountsFor = (receipts: readonly DreamReceiptRef[]) => {
   };
 };
 
-const machineIdForSource = (
-  source: DreamSourceInventoryDocument["sources"][number]
-): z.infer<typeof RequiredMachineIdSchema> | undefined => {
-  const scopedMachineId = source.scope.machineId;
-  const machineResult = RequiredMachineIdSchema.safeParse(scopedMachineId);
-  if (machineResult.success) {
-    return machineResult.data;
-  }
-
-  if (source.family === "cloudflare-runs") {
-    return "cloudflare";
-  }
-
-  return undefined;
-};
-
-const machineCoverageFor = (
-  inventory: DreamSourceInventoryDocument
-): z.infer<typeof MachineCoverageSchema>[] => {
-  const sourceIdsByMachine = new Map<string, Set<string>>();
-  const authorityCountsByMachine = new Map<string, number>();
-
-  for (const source of inventory.sources) {
-    const machineId = machineIdForSource(source);
-    if (machineId === undefined) {
-      continue;
-    }
-
-    const sourceIds = sourceIdsByMachine.get(machineId) ?? new Set<string>();
-    sourceIds.add(source.sourceId);
-    sourceIdsByMachine.set(machineId, sourceIds);
-    authorityCountsByMachine.set(
-      machineId,
-      (authorityCountsByMachine.get(machineId) ?? 0) + source.authority.count
-    );
-  }
-
-  return requiredMachineIds.map((machineId) => {
-    const sourceIds = [...(sourceIdsByMachine.get(machineId) ?? [])].toSorted();
-    const authorityCount = authorityCountsByMachine.get(machineId) ?? 0;
-    const captured = sourceIds.length > 0 && authorityCount > 0;
-
-    return MachineCoverageSchema.parse({
-      authorityCount,
-      machineId,
-      ...(captured
-        ? {}
-        : {
-            missingReason:
-              "No configured trusted Dream source root produced native evidence for this required machine.",
-          }),
-      sourceCount: sourceIds.length,
-      sourceIds,
-      status: captured ? "captured" : "missing",
-    });
-  });
-};
-
 const sourceFamilyCoverageFor = (input: {
   readonly evidenceReceipts: readonly DreamReceiptRef[];
   readonly expectedSourceFamilies: readonly DreamSourceFamily[];
-  readonly inventory: DreamSourceInventoryDocument;
 }): z.infer<typeof SourceFamilyCoverageSchema>[] => {
   const sourceIdsByFamily = new Map<DreamSourceFamily, Set<string>>();
-  const authorityCountsByFamily = new Map<DreamSourceFamily, number>();
-  const inventorySourceIds = new Set<string>();
-
-  for (const source of input.inventory.sources) {
-    inventorySourceIds.add(source.sourceId);
-    const sourceIds = sourceIdsByFamily.get(source.family) ?? new Set<string>();
-    sourceIds.add(source.sourceId);
-    sourceIdsByFamily.set(source.family, sourceIds);
-    authorityCountsByFamily.set(
-      source.family,
-      (authorityCountsByFamily.get(source.family) ?? 0) + source.authority.count
-    );
-  }
+  const receiptCountsByFamily = new Map<DreamSourceFamily, number>();
 
   for (const receipt of input.evidenceReceipts) {
     const sourceIds =
       sourceIdsByFamily.get(receipt.family) ?? new Set<string>();
     sourceIds.add(receipt.sourceId);
     sourceIdsByFamily.set(receipt.family, sourceIds);
-
-    if (!inventorySourceIds.has(receipt.sourceId)) {
-      authorityCountsByFamily.set(
-        receipt.family,
-        (authorityCountsByFamily.get(receipt.family) ?? 0) + 1
-      );
-    }
+    receiptCountsByFamily.set(
+      receipt.family,
+      (receiptCountsByFamily.get(receipt.family) ?? 0) + 1
+    );
   }
 
   return input.expectedSourceFamilies.map((family) => {
     const sourceIds = [...(sourceIdsByFamily.get(family) ?? [])].toSorted();
-    const authorityCount = authorityCountsByFamily.get(family) ?? 0;
-    const captured = sourceIds.length > 0 && authorityCount > 0;
+    const receiptCount = receiptCountsByFamily.get(family) ?? 0;
+    const captured = sourceIds.length > 0 && receiptCount > 0;
 
     return SourceFamilyCoverageSchema.parse({
-      authorityCount,
       family,
       ...(captured
         ? {}
         : {
             missingReason:
-              "No configured trusted Dream source root produced authority evidence for this source family.",
+              "No trusted relay retrieval receipt covered this source family; report this as a Dream coverage caveat.",
           }),
-      sourceCount: sourceIds.length,
+      receiptCount,
       sourceIds,
       status: captured ? "captured" : "missing",
     });
@@ -563,60 +397,6 @@ const run = async (): Promise<void> => {
 
   try {
     const readiness = await healthz({ baseUrl: relay.url, token });
-    const inventory = await postOperation<DreamSourceInventoryDocument>({
-      baseUrl: relay.url,
-      documentSchema: DreamSourceInventoryDocumentSchema,
-      operation: "inventory",
-      payload: {
-        actor,
-        requiredRuntimes: dreamTranscriptReviewSourceProfile.requiredRuntimes,
-        runId,
-        sourceFamiliesExpected: dreamTranscriptReviewSourceFamilies,
-        workItemId,
-      },
-      token,
-    });
-    const health = await postOperation<DreamSourceHealthDocument>({
-      baseUrl: relay.url,
-      documentSchema: DreamSourceHealthDocumentSchema,
-      operation: "source-health",
-      payload: {
-        actor,
-        inventory,
-        inventoryRef: artifactRef("source-inventory"),
-        runId,
-        workItemId,
-      },
-      token,
-    });
-    const backfill = await postOperation<DreamBackfillPlanDocument>({
-      baseUrl: relay.url,
-      documentSchema: DreamBackfillPlanDocumentSchema,
-      operation: "backfill-plan",
-      payload: {
-        actor,
-        health,
-        healthRef: artifactRef("source-health"),
-        inventory,
-        inventoryRef: artifactRef("source-inventory"),
-        runId,
-        workItemId,
-      },
-      token,
-    });
-    const backfillRun = await postOperation<DreamBackfillRunReceiptDocument>({
-      baseUrl: relay.url,
-      documentSchema: DreamBackfillRunReceiptDocumentSchema,
-      operation: "backfill-run",
-      payload: {
-        actor,
-        plan: backfill,
-        planRef: artifactRef("backfill-plan"),
-        runId,
-        workItemId,
-      },
-      token,
-    });
     const captureRun = await postOperation<DreamCaptureReceiptDocument>({
       baseUrl: relay.url,
       documentSchema: DreamCaptureReceiptDocumentSchema,
@@ -717,14 +497,10 @@ const run = async (): Promise<void> => {
       token,
     });
     const serialized = JSON.stringify({
-      backfill,
-      backfillRun,
       captureArtifact,
       captureRun,
       correlation,
-      health,
       hydration,
-      inventory,
       readiness,
       search,
       signals,
@@ -738,9 +514,6 @@ const run = async (): Promise<void> => {
       );
     }
 
-    const degradedSourceCount = health.indexHealth.filter(
-      (index) => index.status !== "fresh"
-    ).length;
     const searchReceiptCounts = receiptCountsFor(
       search.hits.flatMap((hit) => hit.receipts)
     );
@@ -751,37 +524,6 @@ const run = async (): Promise<void> => {
       signals.signals.flatMap((signal) => signal.receipts)
     );
     const receipt = LocalRelayProofReceiptSchema.parse({
-      backfill: {
-        actionCount: backfill.actions.length,
-        captureFixCount: backfill.captureFixes.length,
-        status: backfill.status,
-      },
-      backfillRun: {
-        blockedCount: backfillRun.actionResults.filter(
-          (action) => action.status === "blocked"
-        ).length,
-        captureFixBlockedCount: backfillRun.captureFixResults.filter(
-          (captureFix) => captureFix.status === "blocked"
-        ).length,
-        captureFixCompletedCount: backfillRun.captureFixResults.filter(
-          (captureFix) => captureFix.status === "completed"
-        ).length,
-        captureFixFailedCount: backfillRun.captureFixResults.filter(
-          (captureFix) => captureFix.status === "failed"
-        ).length,
-        captureFixSkippedCount: backfillRun.captureFixResults.filter(
-          (captureFix) => captureFix.status === "skipped"
-        ).length,
-        completedCount: backfillRun.actionResults.filter(
-          (action) => action.status === "completed"
-        ).length,
-        failedCount: backfillRun.actionResults.filter(
-          (action) => action.status === "failed"
-        ).length,
-        skippedCount: backfillRun.actionResults.filter(
-          (action) => action.status === "skipped"
-        ).length,
-      },
       capture: {
         artifactCaptureKind: captureArtifact.captureKind,
         artifactCapturedRef: captureArtifact.capturedRef.artifactRef,
@@ -792,36 +534,6 @@ const run = async (): Promise<void> => {
       correlation: {
         edgeCount: correlation.edges.length,
         nodeCount: correlation.nodes.length,
-      },
-      health: {
-        blindSpotCount:
-          inventory.blindSpots.length +
-          inventory.sources.reduce(
-            (count, source) => count + source.blindSpots.length,
-            0
-          ),
-        degradedSourceCount,
-        status: health.status,
-      },
-      inventory: {
-        machineCoverage: machineCoverageFor(inventory),
-        runtimeCoverage: inventory.runtimeCoverage.map((coverage) => ({
-          count: runtimeCoverageCount({ coverage, inventory }),
-          runtime: coverage.runtime,
-          status: coverage.status,
-        })),
-        sourceCount: inventory.sources.length,
-        sourceFamilyCoverage: sourceFamilyCoverageFor({
-          evidenceReceipts: hydration.hydrated.map((item) => item.receipt),
-          expectedSourceFamilies: dreamTranscriptReviewSourceFamilies,
-          inventory,
-        }),
-        sources: inventory.sources.map((source) => ({
-          authorityCount: source.authority.count,
-          derivedIndexCount: source.derivedIndexes.length,
-          family: source.family,
-          sourceId: source.sourceId,
-        })),
       },
       query,
       rawCredentialsReturned: readiness.rawCredentialsReturned,
@@ -850,6 +562,13 @@ const run = async (): Promise<void> => {
           ...new Set(signals.signals.map((signal) => signal.kind)),
         ].toSorted(),
       },
+      sourceFamilyCoverage: sourceFamilyCoverageFor({
+        evidenceReceipts: [
+          ...search.hits.flatMap((hit) => hit.receipts),
+          ...hydration.hydrated.map((item) => item.receipt),
+        ],
+        expectedSourceFamilies: dreamTranscriptReviewSourceFamilies,
+      }),
       sourceRootCount: readiness.adapter.sourceRoots.length,
       workItemId,
     });

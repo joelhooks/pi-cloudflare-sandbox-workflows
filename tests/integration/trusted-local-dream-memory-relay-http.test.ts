@@ -6,15 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
 import {
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamMemorySearchDocumentSchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
 } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
@@ -39,22 +35,6 @@ const relayToken = "trusted-local-relay-token-never-returned";
 const timestamp = "2026-06-09T20:30:00.000Z";
 
 const operationPath = (operation: DreamMemoryRelayOperation): string => {
-  if (operation === "inventory") {
-    return "/memory/inventory";
-  }
-
-  if (operation === "source-health") {
-    return "/memory/source-health";
-  }
-
-  if (operation === "backfill-plan") {
-    return "/memory/backfill/plan";
-  }
-
-  if (operation === "backfill-run") {
-    return "/memory/backfill/run";
-  }
-
   if (operation === "capture-run") {
     return "/memory/capture/run";
   }
@@ -158,43 +138,27 @@ describe("trusted local Dream memory relay HTTP server", () => {
 
     try {
       const brainRoot = join(root, "brain");
-      const cloudflareDerivedRoot = join(root, "cloudflare-derived");
       const cloudflareRoot = join(root, "cloudflare");
-      const codexDerivedRoot = join(root, "codex-derived");
       const codexRoot = join(root, "codex");
-      const piDerivedRoot = join(root, "pi-derived");
       const piRoot = join(root, "pi");
-      const repoOutputsDerivedRoot = join(root, "repo-outputs-derived");
       const repoOutputsRoot = join(root, "repo-outputs");
       const rawRoots = [
         brainRoot,
-        cloudflareDerivedRoot,
         cloudflareRoot,
-        codexDerivedRoot,
         codexRoot,
-        piDerivedRoot,
         piRoot,
-        repoOutputsDerivedRoot,
         repoOutputsRoot,
         root,
       ];
 
       await mkdir(brainRoot, { recursive: true });
-      await mkdir(cloudflareDerivedRoot, { recursive: true });
       await mkdir(cloudflareRoot, { recursive: true });
-      await mkdir(codexDerivedRoot, { recursive: true });
       await mkdir(codexRoot, { recursive: true });
-      await mkdir(piDerivedRoot, { recursive: true });
       await mkdir(piRoot, { recursive: true });
-      await mkdir(repoOutputsDerivedRoot, { recursive: true });
       await mkdir(repoOutputsRoot, { recursive: true });
       await writeTextFile({
         content: "codex session transcript",
         path: join(codexRoot, "codex-session.jsonl"),
-      });
-      await writeTextFile({
-        content: "cloudflare derived receipt",
-        path: join(cloudflareDerivedRoot, "cloudflare-run.json"),
       });
       await writeTextFile({
         content: "cloudflare run artifact",
@@ -203,14 +167,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
       await writeTextFile({
         content: "project brain update",
         path: join(brainRoot, "dream-memory.svx"),
-      });
-      await writeTextFile({
-        content: "pi derived row 1",
-        path: join(piDerivedRoot, "pi-session-1.json"),
-      });
-      await writeTextFile({
-        content: "pi derived row 2",
-        path: join(piDerivedRoot, "pi-session-2.json"),
       });
       await writeTextFile({
         content: "pi session transcript 1",
@@ -224,10 +180,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
         content: "dream workflow report canon",
         path: join(repoOutputsRoot, "dream-report-canon.md"),
       });
-      await writeTextFile({
-        content: "dream workflow report canon derived view",
-        path: join(repoOutputsDerivedRoot, "dream-report-canon.json"),
-      });
       const relay = await startTrustedLocalDreamMemoryRelayHttpServer({
         expectedBearerToken: relayToken,
         host: "127.0.0.1",
@@ -236,13 +188,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
           sourceRoots: [
             {
               authorityRoot: piRoot,
-              derivedIndexes: [
-                {
-                  indexId: "index:pi:qmd",
-                  indexKind: "qmd",
-                  root: piDerivedRoot,
-                },
-              ],
               family: "agent-transcripts",
               includeExtensions: [".jsonl"],
               label: "Pi transcripts",
@@ -253,13 +198,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
             },
             {
               authorityRoot: codexRoot,
-              derivedIndexes: [
-                {
-                  indexId: "index:codex:qmd",
-                  indexKind: "qmd",
-                  root: codexDerivedRoot,
-                },
-              ],
               family: "agent-transcripts",
               includeExtensions: [".jsonl"],
               label: "Codex transcripts",
@@ -279,13 +217,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
             },
             {
               authorityRoot: cloudflareRoot,
-              derivedIndexes: [
-                {
-                  indexId: "index:cloudflare:view",
-                  indexKind: "view",
-                  root: cloudflareDerivedRoot,
-                },
-              ],
               family: "cloudflare-runs",
               includeExtensions: [".json"],
               label: "Cloudflare run artifacts",
@@ -296,13 +227,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
             },
             {
               authorityRoot: repoOutputsRoot,
-              derivedIndexes: [
-                {
-                  indexId: "index:repo-outputs:view",
-                  indexKind: "view",
-                  root: repoOutputsDerivedRoot,
-                },
-              ],
               family: "repo-outputs",
               includeExtensions: [".md"],
               label: "Repo output artifacts",
@@ -328,97 +252,6 @@ describe("trusted local Dream memory relay HTTP server", () => {
           TrustedLocalDreamMemoryRelayReadinessReceiptSchema.parse(
             JSON.parse(healthText)
           );
-        const inventoryJson = await postRelay({
-          allowedSourceFamilies: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-            "repo-outputs",
-          ],
-          operation: "inventory",
-          payload: {
-            actor,
-            requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-            runId: "run:trusted-local-relay-http",
-            sourceFamiliesExpected: [
-              "agent-transcripts",
-              "brain",
-              "cloudflare-runs",
-              "repo-outputs",
-            ],
-            workItemId: "work:trusted-local-relay-http",
-          },
-          url: relay.url,
-        });
-        const inventoryEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamSourceInventoryDocumentSchema
-        ).parse(inventoryJson);
-        const inventoryRef =
-          "artifact://trusted-local-relay-http/source-inventory.json";
-        const healthJson = await postRelay({
-          allowedSourceFamilies: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-            "repo-outputs",
-          ],
-          operation: "source-health",
-          payload: {
-            actor,
-            inventory: inventoryEnvelope.document,
-            inventoryRef,
-            runId: "run:trusted-local-relay-http",
-            workItemId: "work:trusted-local-relay-http",
-          },
-          url: relay.url,
-        });
-        const healthEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamSourceHealthDocumentSchema
-        ).parse(healthJson);
-        const healthRef =
-          "artifact://trusted-local-relay-http/source-health.json";
-        const planJson = await postRelay({
-          allowedSourceFamilies: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-            "repo-outputs",
-          ],
-          operation: "backfill-plan",
-          payload: {
-            actor,
-            health: healthEnvelope.document,
-            healthRef,
-            inventory: inventoryEnvelope.document,
-            inventoryRef,
-            runId: "run:trusted-local-relay-http",
-            workItemId: "work:trusted-local-relay-http",
-          },
-          url: relay.url,
-        });
-        const planEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamBackfillPlanDocumentSchema
-        ).parse(planJson);
-        const runJson = await postRelay({
-          allowedSourceFamilies: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-            "repo-outputs",
-          ],
-          operation: "backfill-run",
-          payload: {
-            actor,
-            plan: planEnvelope.document,
-            planRef: "artifact://trusted-local-relay-http/backfill-plan.json",
-            runId: "run:trusted-local-relay-http",
-            workItemId: "work:trusted-local-relay-http",
-          },
-          url: relay.url,
-        });
-        const runEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamBackfillRunReceiptDocumentSchema
-        ).parse(runJson);
         const captureRunJson = await postRelay({
           allowedSourceFamilies: ["agent-transcripts", "cloudflare-runs"],
           operation: "capture-run",
@@ -514,12 +347,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           captureArtifact: captureArtifactJson,
           captureRun: captureRunJson,
           correlation: correlationJson,
-          health: healthJson,
           healthz: readiness,
           hydration: hydrationJson,
-          inventory: inventoryJson,
-          plan: planJson,
-          run: runJson,
           search: searchJson,
         });
 
@@ -533,27 +362,14 @@ describe("trusted local Dream memory relay HTTP server", () => {
           correlationEdgeCount: correlationEnvelope.document.edges.length,
           correlationSchema: correlationEnvelope.document.schemaVersion,
           deniedHealthStatus: deniedHealth.status,
-          healthStatus: healthEnvelope.document.status,
           hydratedFullTranscriptReturned:
             hydrationEnvelope.document.hydrated.at(0)?.fullTranscriptReturned,
           operationCatalogCount: readiness.endpointCatalog.endpoints.length,
-          planActions: planEnvelope.document.actions.map(
-            (action) => action.actionId
-          ),
           rawPathLeaked: rawRoots.some((rawRoot) =>
             serialized.includes(rawRoot)
           ),
           readinessSchema: readiness.schemaVersion,
           responseLeaksToken: serialized.includes(relayToken),
-          runCaptureFixStatuses: runEnvelope.document.captureFixResults.map(
-            (captureFix) => captureFix.status
-          ),
-          runStatuses: runEnvelope.document.actionResults.map(
-            (action) => action.status
-          ),
-          runtimeCoverage: inventoryEnvelope.document.runtimeCoverage.map(
-            (coverage) => `${coverage.runtime}:${coverage.status}`
-          ),
           searchHitCount: searchEnvelope.document.hits.length,
           searchReceiptSourceId: receipt.sourceId,
           sourceRootCount: readiness.adapter.sourceRoots.length,
@@ -565,32 +381,15 @@ describe("trusted local Dream memory relay HTTP server", () => {
           correlationEdgeCount: 4,
           correlationSchema: "dream.correlation-graph.v1",
           deniedHealthStatus: 401,
-          healthStatus: "degraded",
           hydratedFullTranscriptReturned: false,
-          operationCatalogCount: 10,
-          planActions: [
-            "backfill:source:codex-transcripts:index:codex:qmd",
-            "backfill:source:project-brain:source:project-brain:missing-derived-index",
-          ],
+          operationCatalogCount: 6,
           rawPathLeaked: false,
           readinessSchema: "trusted.dream-memory-relay.readiness.v1",
           responseLeaksToken: false,
-          runCaptureFixStatuses: ["blocked"],
-          runStatuses: ["skipped", "skipped"],
-          runtimeCoverage: [
-            "pi:captured",
-            "codex:captured",
-            "claude:missing",
-            "cloudflare:captured",
-          ],
           searchHitCount: 1,
           searchReceiptSourceId: "source:codex-transcripts",
           sourceRootCount: 5,
           supportedOperations: [
-            "inventory",
-            "source-health",
-            "backfill-plan",
-            "backfill-run",
             "capture-run",
             "capture-artifact",
             "signals",

@@ -83,38 +83,13 @@ export const integrationTestPackageMetadata = [
 
 export const integrationTestDreamWorkflowPackageMetadata = {
   description:
-    "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, run/artifact capture receipts, memory search, redacted hydration, HITL reports, HITL decision workflow seeds, and HITL follow-up run request drafts.",
+    "Dream memory fabric workflow nodes for run/artifact capture receipts, memory search, redacted hydration, correlation, refinement proposals, HITL reports, HITL decision workflow seeds, and HITL follow-up run request drafts.",
   exports: [
     {
       contractRef:
         "contract://workflow/dream-memory-fabric/source-profile/dream-transcript-review.v1",
       exportId: "dream-transcript-review-source-profile",
       kind: "source-profile",
-    },
-    {
-      contractRef:
-        "contract://workflow/dream-memory-fabric/source-inventory.v1",
-      exportId: "dream-source-inventory",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.source-inventory",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/source-health.v1",
-      exportId: "dream-source-health",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.source-health",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/backfill-plan.v1",
-      exportId: "dream-backfill-plan",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.backfill-plan",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/backfill-run.v1",
-      exportId: "dream-backfill-run",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.backfill-run",
     },
     {
       contractRef: "contract://workflow/dream-memory-fabric/capture-run.v1",
@@ -230,10 +205,9 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
       ],
       stochasticNotes: [
         ...request.planProposal.stochasticNotes,
-        `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
+        `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
         `Generated Dream retrieval steps must declare dreamCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        "Generated Dream source inventory or planning steps must declare dreamSourcePackDispositions for every advertised source pack, including requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs.",
-        `Generated Dream source-inventory steps must declare requiredMachineIds: ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}.`,
+        "Generated Dream planning steps must declare dreamSourcePackDispositions for every advertised source pack, including requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs.",
       ],
     },
     workItemId: "work-item:integration-test-dream",

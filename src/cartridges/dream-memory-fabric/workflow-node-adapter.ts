@@ -12,7 +12,6 @@ import {
   ArtifactRefSchema,
 } from "../../app/domain/schemas.ts";
 import type {
-  Actor,
   ArtifactPin,
   ArtifactRef,
   CapabilityBlocker,
@@ -21,8 +20,6 @@ import type {
 } from "../../app/domain/schemas.ts";
 import {
   DREAM_HITL_REPORT_SECTION_ORDER,
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionContractSchema,
@@ -34,7 +31,6 @@ import {
   DreamHitlReportProofLevelSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryFabricNodeTypeSchema,
-  DreamMemoryRelayBackfillRunPayloadSchema,
   DreamMemoryRelayCaptureArtifactPayloadSchema,
   DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemoryRelayCorrelationPayloadSchema,
@@ -44,16 +40,11 @@ import {
   DreamMemoryRelaySignalsPayloadSchema,
   DreamMemorySearchDocumentSchema,
   DreamRefinementProposalDocumentSchema,
-  DreamRuntimeSchema,
   DreamSignalDocumentSchema,
   DreamSignalKindSchema,
   DreamSourceFamilySchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
 } from "./schemas.ts";
 import type {
-  DreamBackfillPlanDocument,
-  DreamBackfillRunReceiptDocument,
   DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHitlDecisionContract,
@@ -66,7 +57,6 @@ import type {
   DreamHitlReportDocument,
   DreamHitlReportProofLevel,
   DreamHydrationDocument,
-  DreamMemoryRelayBackfillRunPayload,
   DreamMemoryRelayCaptureArtifactPayload,
   DreamMemoryRelayCaptureRunPayload,
   DreamMemoryRelayCorrelationPayload,
@@ -81,11 +71,8 @@ import type {
   DreamRefinementProposalDocument,
   DreamRefinementProposalRecommendation,
   DreamRefinementProposalTargetKind,
-  DreamRuntime,
   DreamSignalDocument,
   DreamSourceFamily,
-  DreamSourceHealthDocument,
-  DreamSourceInventoryDocument,
 } from "./schemas.ts";
 
 export type DreamMemoryFabricResult<TDocument> =
@@ -98,34 +85,6 @@ export type DreamMemoryFabricResult<TDocument> =
       readonly relayLeaseReceipt?: DreamMemoryRelayLeaseReceipt;
       readonly status: "ready";
     };
-
-export interface DreamMemoryFabricPort {
-  inventorySources(input: {
-    readonly actor: Actor;
-    readonly requiredRuntimes: readonly DreamRuntime[];
-    readonly runId: string;
-    readonly sourceFamiliesExpected: readonly DreamSourceFamily[];
-    readonly workItemId: string;
-  }): Promise<DreamMemoryFabricResult<DreamSourceInventoryDocument>>;
-
-  checkSourceHealth(input: {
-    readonly actor: Actor;
-    readonly inventory: DreamSourceInventoryDocument;
-    readonly inventoryRef: ArtifactRef;
-    readonly runId: string;
-    readonly workItemId: string;
-  }): Promise<DreamMemoryFabricResult<DreamSourceHealthDocument>>;
-
-  planBackfill(input: {
-    readonly actor: Actor;
-    readonly health: DreamSourceHealthDocument;
-    readonly healthRef: ArtifactRef;
-    readonly inventory: DreamSourceInventoryDocument;
-    readonly inventoryRef: ArtifactRef;
-    readonly runId: string;
-    readonly workItemId: string;
-  }): Promise<DreamMemoryFabricResult<DreamBackfillPlanDocument>>;
-}
 
 export interface DreamMemoryRetrievalPort {
   hydrateMemories(
@@ -149,12 +108,6 @@ export interface DreamMemoryCorrelationPort {
   ): Promise<DreamMemoryFabricResult<DreamCorrelationGraphDocument>>;
 }
 
-export interface DreamMemoryBackfillPort {
-  runBackfill(
-    input: DreamMemoryRelayBackfillRunPayload
-  ): Promise<DreamMemoryFabricResult<DreamBackfillRunReceiptDocument>>;
-}
-
 export interface DreamMemoryCapturePort {
   captureArtifact(
     input: DreamMemoryRelayCaptureArtifactPayload
@@ -167,10 +120,8 @@ export interface DreamMemoryCapturePort {
 
 export interface DreamMemoryFabricWorkflowNodeAdapterConfig {
   readonly artifacts: ArtifactStoreContract;
-  readonly dreamMemoryBackfill?: DreamMemoryBackfillPort;
   readonly dreamMemoryCapture?: DreamMemoryCapturePort;
   readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
-  readonly dreamMemoryFabric: DreamMemoryFabricPort;
   readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
   readonly dreamMemorySignals?: DreamMemorySignalPort;
 }
@@ -182,29 +133,6 @@ type BlockedWorkflowNodeExecutionResult = Extract<
 type DreamWorkflowNodeExecutionInput = Parameters<
   WorkflowNodeAdapterPort["execute"]
 >[0];
-
-const DreamSourceInventoryNodeConfigSchema = z.object({
-  requiredMachineIds: z.array(z.string().min(1)).min(1).optional(),
-  requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
-  sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
-});
-
-const DreamSourceHealthNodeConfigSchema = z.object({
-  inventoryRef: ArtifactRefSchema.optional(),
-  inventoryStepId: z.string().min(1).optional(),
-});
-
-const DreamBackfillPlanNodeConfigSchema = z.object({
-  healthRef: ArtifactRefSchema.optional(),
-  healthStepId: z.string().min(1).optional(),
-  inventoryRef: ArtifactRefSchema.optional(),
-  inventoryStepId: z.string().min(1).optional(),
-});
-
-const DreamBackfillRunNodeConfigSchema = z.object({
-  planRef: ArtifactRefSchema.optional(),
-  planStepId: z.string().min(1).optional(),
-});
 
 const CAPTURABLE_ARTIFACT_MEDIA_TYPES = [
   "application/json",
@@ -271,16 +199,10 @@ const DreamCorrelationNodeConfigSchema = z.object({
 });
 
 const DreamRefinementProposalNodeConfigSchema = z.object({
-  backfillRunRef: ArtifactRefSchema.optional(),
-  backfillRunStepId: z.string().min(1).optional(),
   correlationRef: ArtifactRefSchema.optional(),
   correlationStepId: z.string().min(1).optional(),
-  healthRef: ArtifactRefSchema.optional(),
-  healthStepId: z.string().min(1).optional(),
   hydrationRef: ArtifactRefSchema.optional(),
   hydrationStepId: z.string().min(1).optional(),
-  inventoryRef: ArtifactRefSchema.optional(),
-  inventoryStepId: z.string().min(1).optional(),
   maxProposals: z.number().int().min(1).max(20).default(8),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
@@ -289,22 +211,12 @@ const DreamRefinementProposalNodeConfigSchema = z.object({
 });
 
 const DreamHitlReportNodeConfigSchema = z.object({
-  backfillPlanRef: ArtifactRefSchema.optional(),
-  backfillPlanStepId: z.string().min(1).optional(),
-  backfillRef: ArtifactRefSchema.optional(),
-  backfillRunRef: ArtifactRefSchema.optional(),
-  backfillRunStepId: z.string().min(1).optional(),
-  backfillStepId: z.string().min(1).optional(),
   correlationRef: ArtifactRefSchema.optional(),
   correlationStepId: z.string().min(1).optional(),
   dynamicGenerationProofLevel:
     DreamHitlReportProofLevelSchema.default("plan-derived"),
-  healthRef: ArtifactRefSchema.optional(),
-  healthStepId: z.string().min(1).optional(),
   hydrationRef: ArtifactRefSchema.optional(),
   hydrationStepId: z.string().min(1).optional(),
-  inventoryRef: ArtifactRefSchema.optional(),
-  inventoryStepId: z.string().min(1).optional(),
   refinementProposalRef: ArtifactRefSchema.optional(),
   refinementProposalStepId: z.string().min(1).optional(),
   searchRef: ArtifactRefSchema.optional(),
@@ -360,8 +272,6 @@ const relayLeaseReceiptPathFor = (step: WorkflowNodeInvocationStep): string =>
 const writeDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly document:
-    | DreamBackfillPlanDocument
-    | DreamBackfillRunReceiptDocument
     | DreamCaptureReceiptDocument
     | DreamCorrelationGraphDocument
     | DreamHitlFollowUpRunRequestDocument
@@ -370,9 +280,7 @@ const writeDocument = async (input: {
     | DreamHydrationDocument
     | DreamMemorySearchDocument
     | DreamRefinementProposalDocument
-    | DreamSignalDocument
-    | DreamSourceHealthDocument
-    | DreamSourceInventoryDocument;
+    | DreamSignalDocument;
   readonly relayLeaseReceipt?: DreamMemoryRelayLeaseReceipt | undefined;
   readonly step: WorkflowNodeInvocationStep;
 }): Promise<WorkflowNodeExecutionResult> => {
@@ -436,106 +344,6 @@ const dependencyRefFor = (input: {
   }
 
   return input.dependencyArtifactRefs[input.stepId] ?? null;
-};
-
-const loadInventory = async (input: {
-  readonly artifacts: ArtifactStoreContract;
-  readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: DreamSourceInventoryDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: DreamSourceInventoryDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Dream source inventory artifact could not be loaded by the Dream node."
-    );
-  }
-};
-
-const loadHealth = async (input: {
-  readonly artifacts: ArtifactStoreContract;
-  readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: DreamSourceHealthDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: DreamSourceHealthDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Dream source health artifact could not be loaded by the Dream node."
-    );
-  }
-};
-
-const loadBackfill = async (input: {
-  readonly artifacts: ArtifactStoreContract;
-  readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: DreamBackfillPlanDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: DreamBackfillPlanDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Dream backfill plan artifact could not be loaded by the Dream node."
-    );
-  }
-};
-
-const loadBackfillRun = async (input: {
-  readonly artifacts: ArtifactStoreContract;
-  readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: DreamBackfillRunReceiptDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: DreamBackfillRunReceiptDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Dream backfill run receipt artifact could not be loaded by the Dream node."
-    );
-  }
 };
 
 const loadSearch = async (input: {
@@ -713,52 +521,6 @@ const loadHitlDecisionWorkflowSeed = async (input: {
   }
 };
 
-const inventoryRefFor = (input: {
-  readonly config: z.infer<typeof DreamSourceHealthNodeConfigSchema>;
-  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
-}): ArtifactRef | null =>
-  input.config.inventoryRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.inventoryStepId,
-  });
-
-const backfillRefsFor = (input: {
-  readonly config: z.infer<typeof DreamBackfillPlanNodeConfigSchema>;
-  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
-}): {
-  readonly healthRef: ArtifactRef | null;
-  readonly inventoryRef: ArtifactRef | null;
-} => {
-  const inventoryRef =
-    input.config.inventoryRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.inventoryStepId,
-    });
-  const healthRef =
-    input.config.healthRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.healthStepId,
-    });
-
-  return {
-    healthRef,
-    inventoryRef,
-  };
-};
-
-const backfillRunPlanRefFor = (input: {
-  readonly config: z.infer<typeof DreamBackfillRunNodeConfigSchema>;
-  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
-}): ArtifactRef | null =>
-  input.config.planRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.planStepId,
-  });
-
 const captureArtifactRefFor = (input: {
   readonly config: z.infer<typeof DreamCaptureArtifactNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
@@ -856,43 +618,22 @@ const refinementProposalRefsFor = (input: {
   readonly config: z.infer<typeof DreamRefinementProposalNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): {
-  readonly backfillRunRef: ArtifactRef | null;
   readonly correlationRef: ArtifactRef | null;
-  readonly healthRef: ArtifactRef | null;
   readonly hydrationRef: ArtifactRef | null;
-  readonly inventoryRef: ArtifactRef | null;
   readonly searchRef: ArtifactRef | null;
   readonly signalsRef: ArtifactRef | null;
 } => ({
-  backfillRunRef:
-    input.config.backfillRunRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.backfillRunStepId,
-    }),
   correlationRef:
     input.config.correlationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.correlationStepId,
     }),
-  healthRef:
-    input.config.healthRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.healthStepId,
-    }),
   hydrationRef:
     input.config.hydrationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.hydrationStepId,
-    }),
-  inventoryRef:
-    input.config.inventoryRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.inventoryStepId,
     }),
   searchRef:
     input.config.searchRef ??
@@ -912,51 +653,22 @@ const reportRefsFor = (input: {
   readonly config: z.infer<typeof DreamHitlReportNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): {
-  readonly backfillPlanRef: ArtifactRef | null;
-  readonly backfillRunRef: ArtifactRef | null;
   readonly correlationRef: ArtifactRef | null;
-  readonly healthRef: ArtifactRef | null;
   readonly hydrationRef: ArtifactRef | null;
-  readonly inventoryRef: ArtifactRef | null;
   readonly refinementProposalRef: ArtifactRef | null;
   readonly searchRef: ArtifactRef | null;
 } => ({
-  backfillPlanRef:
-    input.config.backfillPlanRef ??
-    input.config.backfillRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.backfillPlanStepId ?? input.config.backfillStepId,
-    }),
-  backfillRunRef:
-    input.config.backfillRunRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.backfillRunStepId,
-    }),
   correlationRef:
     input.config.correlationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.correlationStepId,
     }),
-  healthRef:
-    input.config.healthRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.healthStepId,
-    }),
   hydrationRef:
     input.config.hydrationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.hydrationStepId,
-    }),
-  inventoryRef:
-    input.config.inventoryRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.inventoryStepId,
     }),
   refinementProposalRef:
     input.config.refinementProposalRef ??
@@ -1001,22 +713,14 @@ const hitlDecisionWorkflowSeedRefFor = (input: {
   null;
 
 interface RequiredReportRefs {
-  readonly backfillPlanRef: ArtifactRef;
-  readonly backfillRunRef: ArtifactRef;
   readonly correlationRef: ArtifactRef;
-  readonly healthRef: ArtifactRef;
   readonly hydrationRef: ArtifactRef;
-  readonly inventoryRef: ArtifactRef;
   readonly searchRef: ArtifactRef;
 }
 
 interface LoadedReportInputs {
-  readonly backfill: DreamBackfillPlanDocument;
-  readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly correlation: DreamCorrelationGraphDocument;
-  readonly health: DreamSourceHealthDocument;
   readonly hydration: DreamHydrationDocument;
-  readonly inventory: DreamSourceInventoryDocument;
   readonly search: DreamMemorySearchDocument;
 }
 
@@ -1024,27 +728,19 @@ const requiredReportRefsFor = (
   refs: ReturnType<typeof reportRefsFor>
 ): RequiredReportRefs | BlockedWorkflowNodeExecutionResult => {
   if (
-    refs.backfillPlanRef === null ||
-    refs.backfillRunRef === null ||
     refs.correlationRef === null ||
-    refs.healthRef === null ||
     refs.hydrationRef === null ||
-    refs.inventoryRef === null ||
     refs.searchRef === null
   ) {
     return blocker(
       "stale_package",
-      "Dream HITL report node requires source inventory, source health, backfill plan, backfill run receipt, search, hydration, and correlation artifact refs."
+      "Dream HITL report node requires search, hydration, and correlation artifact refs."
     );
   }
 
   return {
-    backfillPlanRef: refs.backfillPlanRef,
-    backfillRunRef: refs.backfillRunRef,
     correlationRef: refs.correlationRef,
-    healthRef: refs.healthRef,
     hydrationRef: refs.hydrationRef,
-    inventoryRef: refs.inventoryRef,
     searchRef: refs.searchRef,
   };
 };
@@ -1053,38 +749,6 @@ const loadRequiredReportInputs = async (
   artifacts: ArtifactStoreContract,
   refs: RequiredReportRefs
 ): Promise<LoadedReportInputs | BlockedWorkflowNodeExecutionResult> => {
-  const inventory = await loadInventory({
-    artifactRef: refs.inventoryRef,
-    artifacts,
-  });
-  if (inventory.status === "blocked") {
-    return inventory;
-  }
-
-  const health = await loadHealth({
-    artifactRef: refs.healthRef,
-    artifacts,
-  });
-  if (health.status === "blocked") {
-    return health;
-  }
-
-  const backfill = await loadBackfill({
-    artifactRef: refs.backfillPlanRef,
-    artifacts,
-  });
-  if (backfill.status === "blocked") {
-    return backfill;
-  }
-
-  const backfillRun = await loadBackfillRun({
-    artifactRef: refs.backfillRunRef,
-    artifacts,
-  });
-  if (backfillRun.status === "blocked") {
-    return backfillRun;
-  }
-
   const search = await loadSearch({
     artifactRef: refs.searchRef,
     artifacts,
@@ -1110,12 +774,8 @@ const loadRequiredReportInputs = async (
   }
 
   return {
-    backfill: backfill.document,
-    backfillRun: backfillRun.document,
     correlation: correlation.document,
-    health: health.document,
     hydration: hydration.document,
-    inventory: inventory.document,
     search: search.document,
   };
 };
@@ -1386,7 +1046,7 @@ const proposedNextStepFor = (
   }
 
   if (targetKind === "capture-ingest-fix") {
-    return "Turn this into a capture or ingest repair task so backfill stays recovery-only.";
+    return "Turn this into a capture or ingest repair task for the separate memory-fabric repair workflow.";
   }
 
   if (targetKind === "dynamic-workflow-pattern") {
@@ -1466,85 +1126,6 @@ const proposalForHit = (input: {
   };
 };
 
-const coverageProposalFor = (input: {
-  readonly coverage: DreamSourceInventoryDocument["runtimeCoverage"][number];
-  readonly index: number;
-  readonly sourceRefs: readonly ArtifactRef[];
-}): DreamRefinementProposal => ({
-  proposalId: `proposal:capture-ingest-fix:runtime:${input.coverage.runtime}`,
-  proposedNextStep:
-    "Fix native runtime capture or explicitly narrow the next Dream scope before trusting recommendations that depend on this runtime.",
-  rating: input.coverage.status === "missing" ? 10 : 7,
-  reasoning:
-    "A Dream is invalid if runtime coverage is missing or false-positive without saying so. This turns the coverage gap into work instead of hiding it in the appendix.",
-  receipts: [],
-  recommendation: "turn-into-work",
-  sourceRefs: [...input.sourceRefs],
-  summary: `${input.coverage.runtime} coverage is ${input.coverage.status}. ${
-    input.coverage.missingReason ??
-    input.coverage.falsePositiveReason ??
-    "The next run needs explicit coverage proof."
-  }`,
-  targetKind: "capture-ingest-fix",
-  title: `Fix ${input.coverage.runtime} Dream coverage`,
-});
-
-const backfillProposalFor = (input: {
-  readonly action: DreamBackfillRunReceiptDocument["actionResults"][number];
-  readonly index: number;
-  readonly sourceRefs: readonly ArtifactRef[];
-}): DreamRefinementProposal => ({
-  proposalId: `proposal:capture-ingest-fix:backfill:${input.index + 1}:${proposalSlugFor(
-    input.action.actionId
-  )}`,
-  proposedNextStep:
-    "Convert this backfill result into an ingest/capture fix before treating future Dream backfills as normal operation.",
-  rating:
-    input.action.status === "blocked" || input.action.status === "failed"
-      ? 9
-      : 7,
-  reasoning:
-    "Backfill is recovery, not normal operation. A skipped, blocked, or failed backfill result is still a system improvement candidate.",
-  receipts: [],
-  recommendation: "turn-into-work",
-  sourceRefs: [...input.sourceRefs],
-  summary: `${input.action.actionId} ended ${input.action.status}. ${[
-    ...input.action.failures,
-    ...input.action.skippedReasons,
-  ].join(" ")}`,
-  targetKind: "capture-ingest-fix",
-  title: `Repair Dream backfill path: ${input.action.actionId}`,
-});
-
-const captureFixProposalFor = (input: {
-  readonly captureFix: DreamBackfillRunReceiptDocument["captureFixResults"][number];
-  readonly index: number;
-  readonly sourceRefs: readonly ArtifactRef[];
-}): DreamRefinementProposal => ({
-  proposalId: `proposal:capture-ingest-fix:capture:${input.index + 1}:${proposalSlugFor(
-    input.captureFix.fixId
-  )}`,
-  proposedNextStep:
-    "Turn this capture-fix result into source-adapter work so future dreams rely on normal ingest instead of recovery backfill.",
-  rating:
-    input.captureFix.status === "blocked" ||
-    input.captureFix.status === "failed"
-      ? 10
-      : 8,
-  reasoning:
-    "Dreaming is supposed to fix the memory fabric, not normalize backfills. A capture-fix result points at the ingest path that should be repaired.",
-  receipts: [],
-  recommendation: "turn-into-work",
-  sourceRefs: [...input.sourceRefs],
-  summary: `${input.captureFix.fixId} ended ${input.captureFix.status}. ${[
-    input.captureFix.repairAction,
-    ...input.captureFix.failures,
-    ...input.captureFix.skippedReasons,
-  ].join(" ")}`,
-  targetKind: "capture-ingest-fix",
-  title: `Repair Dream capture path: ${input.captureFix.fixId}`,
-});
-
 const targetKindForSignal = (
   signal: DreamSignalDocument["signals"][number]
 ): DreamRefinementProposalTargetKind => {
@@ -1590,16 +1171,10 @@ const signalProposalFor = (input: {
 };
 
 const refinementProposalDocumentFor = (input: {
-  readonly backfillRun: DreamBackfillRunReceiptDocument;
-  readonly backfillRunRef: ArtifactRef;
   readonly correlation: DreamCorrelationGraphDocument;
   readonly correlationRef: ArtifactRef;
-  readonly health: DreamSourceHealthDocument;
-  readonly healthRef: ArtifactRef;
   readonly hydration: DreamHydrationDocument;
   readonly hydrationRef: ArtifactRef;
-  readonly inventory: DreamSourceInventoryDocument;
-  readonly inventoryRef: ArtifactRef;
   readonly maxProposals: number;
   readonly search: DreamMemorySearchDocument;
   readonly searchRef: ArtifactRef;
@@ -1607,9 +1182,6 @@ const refinementProposalDocumentFor = (input: {
   readonly signalsRef: ArtifactRef;
 }): DreamRefinementProposalDocument => {
   const sourceRefs = [
-    input.inventoryRef,
-    input.healthRef,
-    input.backfillRunRef,
     input.signalsRef,
     input.searchRef,
     input.hydrationRef,
@@ -1618,33 +1190,6 @@ const refinementProposalDocumentFor = (input: {
   const hydratedReceiptKeys = new Set(
     input.hydration.hydrated.map((hydrated) => receiptKey(hydrated.receipt))
   );
-  const coverageProposals = input.inventory.runtimeCoverage
-    .filter((coverage) => coverage.status !== "captured")
-    .map((coverage, index) =>
-      coverageProposalFor({
-        coverage,
-        index,
-        sourceRefs: [input.inventoryRef, input.healthRef],
-      })
-    );
-  const backfillProposals = input.backfillRun.actionResults
-    .filter((action) => action.status !== "completed")
-    .map((action, index) =>
-      backfillProposalFor({
-        action,
-        index,
-        sourceRefs: [input.backfillRunRef],
-      })
-    );
-  const captureFixProposals = input.backfillRun.captureFixResults
-    .filter((captureFix) => captureFix.status !== "completed")
-    .map((captureFix, index) =>
-      captureFixProposalFor({
-        captureFix,
-        index,
-        sourceRefs: [input.backfillRunRef],
-      })
-    );
   const signalProposals = input.signals.signals.map((signal, index) =>
     signalProposalFor({
       index,
@@ -1660,13 +1205,7 @@ const refinementProposalDocumentFor = (input: {
       sourceRefs: [input.searchRef, input.hydrationRef, input.correlationRef],
     })
   );
-  const proposals = [
-    ...coverageProposals,
-    ...captureFixProposals,
-    ...backfillProposals,
-    ...signalProposals,
-    ...hitProposals,
-  ]
+  const proposals = [...signalProposals, ...hitProposals]
     .toSorted((left, right) => right.rating - left.rating)
     .slice(0, input.maxProposals);
 
@@ -1676,7 +1215,7 @@ const refinementProposalDocumentFor = (input: {
       plannerInstructions: [
         "Use accepted Dream refinement proposals as constraints for the next generated workflow.",
         "Do not treat proposal text as proof; follow sourceRefs and receipts before updating Brain or packages.",
-        "Keep backfill as recovery-only and turn recurring capture gaps into adapter work.",
+        "Route capture or ingest gaps to the separate memory-fabric repair workflow instead of folding them into the Dream.",
       ],
       proposalIds: proposals.map((proposal) => proposal.proposalId),
       requiredCapabilityKinds: [
@@ -1889,31 +1428,6 @@ const refinementProposalActionLineFor = (
 ): string =>
   `- **${proposal.title}** ${proposal.rating}/10. ${proposal.recommendation}: ${proposal.proposedNextStep}`;
 
-const runtimeCoverageLineFor = (
-  coverage: DreamSourceInventoryDocument["runtimeCoverage"][number]
-): string => {
-  const horizonSummary =
-    coverage.horizonCounts.length === 0
-      ? "no horizon counts"
-      : coverage.horizonCounts
-          .map(
-            (horizon) =>
-              `${horizon.horizon}: ${horizon.hitCount} hit(s), ${horizon.hydrationCount} hydrated`
-          )
-          .join("; ");
-  const proofSummary =
-    coverage.nativeProof?.sourceId ??
-    coverage.missingReason ??
-    coverage.falsePositiveReason ??
-    "no proof detail";
-
-  return `- **${coverage.runtime}**: ${coverage.status}; native source ${coverage.sourceNative ? "yes" : "no"}; ${horizonSummary}; ${proofSummary}.`;
-};
-
-const runtimeCoverageSectionFor = (
-  inventory: DreamSourceInventoryDocument
-): string => inventory.runtimeCoverage.map(runtimeCoverageLineFor).join("\n");
-
 const hitlDecisionContractFor = (
   sourceRefs: readonly ArtifactRef[]
 ): DreamHitlDecisionContract =>
@@ -1964,9 +1478,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
   readonly correlation: DreamCorrelationGraphDocument;
   readonly dreamCount: number;
   readonly generatedAt: string;
-  readonly health: DreamSourceHealthDocument;
   readonly hydration: DreamHydrationDocument;
-  readonly inventory: DreamSourceInventoryDocument;
   readonly plan: DynamicWorkflowPlanDocument;
   readonly proofLevel: DreamHitlReportProofLevel;
   readonly refinementProposalCount: number;
@@ -1981,31 +1493,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
     input.plan.harness.artifactRef,
     input.plan.verificationContract.artifactRef,
   ];
-  const requiredRuntimeCoverage = input.inventory.requiredRuntimes.map(
-    (runtime) => {
-      const coverage = input.inventory.runtimeCoverage.find(
-        (candidate) => candidate.runtime === runtime
-      );
-
-      return {
-        runtime,
-        sourceNative: coverage?.sourceNative ?? false,
-        status: coverage?.status ?? "missing",
-      };
-    }
-  );
-  const runtimeCoverageCaptured = requiredRuntimeCoverage.every(
-    (coverage) => coverage.status === "captured" && coverage.sourceNative
-  );
-  const sourceFamilies = new Set(
-    input.inventory.sources.map((source) => source.family)
-  );
-  const missingSourceFamilies = input.inventory.sourceFamiliesExpected.filter(
-    (family) => !sourceFamilies.has(family)
-  );
   const tShapedCoverageCaptured =
-    runtimeCoverageCaptured &&
-    missingSourceFamilies.length === 0 &&
     input.search.hits.length > 0 &&
     input.hydration.hydrated.length > 0 &&
     input.correlation.edges.length > 0;
@@ -2014,19 +1502,9 @@ const reportDefinitionOfDoneAuditFor = (input: {
   ).length;
   const dreamsAndRefinementsCaptured =
     input.dreamCount > 0 && input.refinementProposalCount > 0;
-  const tShapedGapSummary = [
-    ...requiredRuntimeCoverage
-      .filter(
-        (coverage) => coverage.status !== "captured" || !coverage.sourceNative
-      )
-      .map(
-        (coverage) =>
-          `${coverage.runtime}:${coverage.status}${
-            coverage.sourceNative ? "" : ":non-native"
-          }`
-      ),
-    ...missingSourceFamilies.map((family) => `${family}:missing-source`),
-  ];
+  const tShapedGapSummary = input.search.skippedSources.map(
+    (skippedSource) => `${skippedSource}:skipped-source`
+  );
 
   const items = [
     reportAuditItem({
@@ -2041,7 +1519,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "Cloudflare leases memory/search/hydration/backfill capabilities through the trusted relay.",
+        "Cloudflare leases memory search/hydration/correlation capabilities through the trusted relay.",
       requirementId: "worker-facing-relay-capability-lease",
       status: "not-proven",
       summary:
@@ -2075,20 +1553,12 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "Dream runs T-shaped across timeline, machines, runtimes, source families, hydration, and correlation.",
+        "Dream reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never hidden.",
       requirementId: "t-shaped-memory-coverage",
       status: tShapedCoverageCaptured ? "captured" : "not-proven",
       summary: tShapedCoverageCaptured
-        ? `Required runtimes and source families are covered with ${input.search.hits.length} search hit(s), ${input.hydration.hydrated.length} hydrated receipt(s), and ${input.correlation.edges.length} correlation edge(s).`
+        ? `Retrieval produced ${input.search.hits.length} search hit(s), ${input.hydration.hydrated.length} hydrated receipt(s), and ${input.correlation.edges.length} correlation edge(s).`
         : `Coverage gaps are explicit, not hidden: ${tShapedGapSummary.join(", ") || "missing search, hydration, or correlation evidence"}.`,
-    }),
-    reportAuditItem({
-      evidenceRefs: input.sourceRefs,
-      requirement:
-        "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
-      requirementId: "ingest-health-and-recovery-backfill",
-      status: "captured",
-      summary: `Health=${input.health.status}; report includes source health, backfill plan, and backfill run receipts for recovery-not-normal-operation.`,
     }),
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
@@ -2161,16 +1631,12 @@ const reportDefinitionOfDoneAuditMdsvxFor = (
   ].join("\n");
 
 const reportMdsvxFor = (input: {
-  readonly backfill: DreamBackfillPlanDocument;
-  readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly correlation: DreamCorrelationGraphDocument;
   readonly definitionOfDoneAudit: DreamHitlReportDefinitionOfDoneAudit;
   readonly hitlDecisionContract: DreamHitlDecisionContract;
   readonly dreamCount: number;
   readonly dreams: readonly DreamHitlDreamCard[];
-  readonly health: DreamSourceHealthDocument;
   readonly hydration: DreamHydrationDocument;
-  readonly inventory: DreamSourceInventoryDocument;
   readonly plan: DynamicWorkflowPlanDocument;
   readonly proofLevel: DreamHitlReportProofLevel;
   readonly receiptCount: number;
@@ -2191,19 +1657,10 @@ const reportMdsvxFor = (input: {
   } else if (input.dreams.length > 0) {
     actionSection = input.dreams.map(dreamActionLineFor).join("\n");
   }
-  const completedBackfillActions = input.backfillRun.actionResults.filter(
-    (action) => action.status === "completed"
-  ).length;
-  const blockedBackfillActions = input.backfillRun.actionResults.filter(
-    (action) => action.status === "blocked" || action.status === "failed"
-  ).length;
-  const completedCaptureFixes = input.backfillRun.captureFixResults.filter(
-    (captureFix) => captureFix.status === "completed"
-  ).length;
-  const blockedCaptureFixes = input.backfillRun.captureFixResults.filter(
-    (captureFix) =>
-      captureFix.status === "blocked" || captureFix.status === "failed"
-  ).length;
+  const skippedSourceSummary =
+    input.search.skippedSources.length === 0
+      ? "No sources were skipped by memory search."
+      : `Skipped sources reported as caveats: ${input.search.skippedSources.join(", ")}.`;
 
   return [
     "---",
@@ -2219,9 +1676,9 @@ const reportMdsvxFor = (input: {
     "",
     "## Run context",
     "",
-    `Run ${input.inventory.runId} searched ${input.search.hits.length} memory hits, hydrated ${input.hydration.hydrated.length} redacted receipts, and produced ${input.dreamCount} dreams for human review.`,
+    `Run ${input.search.runId} searched ${input.search.hits.length} memory hits, hydrated ${input.hydration.hydrated.length} redacted receipts, and produced ${input.dreamCount} dreams for human review.`,
     "",
-    `Dreams: ${input.dreamCount}. Unique receipts: ${input.receiptCount}. Status: ${input.health.status}. Expiry: 24h, noindex.`,
+    `Dreams: ${input.dreamCount}. Unique receipts: ${input.receiptCount}. Expiry: 24h, noindex.`,
     "",
     "## The actual dreams",
     "",
@@ -2285,9 +1742,7 @@ const reportMdsvxFor = (input: {
     "",
     "## Run coverage",
     "",
-    runtimeCoverageSectionFor(input.inventory),
-    "",
-    `Source health: ${input.health.status}. Recovery receipt: ${input.backfillRun.actionResults.length} index action result(s), ${completedBackfillActions} completed, ${blockedBackfillActions} blocked or failed. Capture fixes: ${input.backfillRun.captureFixResults.length} result(s), ${completedCaptureFixes} completed, ${blockedCaptureFixes} blocked or failed.`,
+    skippedSourceSummary,
     "",
     `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
     "",
@@ -2307,13 +1762,11 @@ const reportMdsvxFor = (input: {
     "",
     "## Technical appendix",
     "",
-    `Recovery receipt: ${input.backfillRun.actionResults.length} index action result(s), ${completedBackfillActions} completed. Capture fixes: ${input.backfillRun.captureFixResults.length} result(s), ${completedCaptureFixes} completed.`,
-    "",
     `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
     "",
     `Receipt count: ${input.receiptCount}. Raw transcripts returned: no.`,
     "",
-    `Source health: ${input.health.status}. Backfill plan status: ${input.backfill.status}. Backfill run schema: ${input.backfillRun.schemaVersion}. Correlation graph schema: ${input.correlation.schemaVersion}. Refinement proposal count: ${input.refinementProposals.length}. Template seed: joel/tufte-mdsvx@0.1.0. Publish policy: noindex and 24h expiry by default.`,
+    `Correlation graph schema: ${input.correlation.schemaVersion}. Refinement proposal count: ${input.refinementProposals.length}. Template seed: joel/tufte-mdsvx@0.1.0. Publish policy: noindex and 24h expiry by default.`,
   ].join("\n");
 };
 
@@ -2323,75 +1776,6 @@ const uniqueReceiptCountFor = (search: DreamMemorySearchDocument): number =>
       hit.receipts.map((receipt) => receiptKey(receipt))
     )
   ).size;
-
-const executeSourceInventoryNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
-): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamSourceInventoryNodeConfigSchema.parse(
-    input.step.config
-  );
-  const result = await config.dreamMemoryFabric.inventorySources({
-    actor: input.actor,
-    requiredRuntimes: nodeConfig.requiredRuntimes,
-    runId: input.plan.runId,
-    sourceFamiliesExpected: nodeConfig.sourceFamiliesExpected,
-    workItemId: input.plan.workItemId,
-  });
-  if (result.status === "blocked") {
-    return result;
-  }
-
-  return await writeDocument({
-    artifacts: config.artifacts,
-    document: DreamSourceInventoryDocumentSchema.parse(result.document),
-    relayLeaseReceipt: result.relayLeaseReceipt,
-    step: input.step,
-  });
-};
-
-const executeSourceHealthNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
-): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamSourceHealthNodeConfigSchema.parse(input.step.config);
-  const inventoryRef = inventoryRefFor({
-    config: nodeConfig,
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-  });
-  if (inventoryRef === null) {
-    return blocker(
-      "stale_package",
-      "Dream source health node requires a source inventory artifact ref."
-    );
-  }
-
-  const inventory = await loadInventory({
-    artifactRef: inventoryRef,
-    artifacts: config.artifacts,
-  });
-  if (inventory.status === "blocked") {
-    return inventory;
-  }
-
-  const result = await config.dreamMemoryFabric.checkSourceHealth({
-    actor: input.actor,
-    inventory: inventory.document,
-    inventoryRef,
-    runId: input.plan.runId,
-    workItemId: input.plan.workItemId,
-  });
-  if (result.status === "blocked") {
-    return result;
-  }
-
-  return await writeDocument({
-    artifacts: config.artifacts,
-    document: DreamSourceHealthDocumentSchema.parse(result.document),
-    relayLeaseReceipt: result.relayLeaseReceipt,
-    step: input.step,
-  });
-};
 
 const executeMemorySearchNode = async (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig,
@@ -2604,42 +1988,15 @@ const executeRefinementProposalsNode = async (
     dependencyArtifactRefs: input.dependencyArtifactRefs,
   });
   if (
-    refs.backfillRunRef === null ||
     refs.correlationRef === null ||
-    refs.healthRef === null ||
     refs.hydrationRef === null ||
-    refs.inventoryRef === null ||
     refs.searchRef === null ||
     refs.signalsRef === null
   ) {
     return blocker(
       "stale_package",
-      "Dream refinement proposal node requires inventory, source health, backfill run receipt, signals, search, hydration, and correlation artifact refs."
+      "Dream refinement proposal node requires signals, search, hydration, and correlation artifact refs."
     );
-  }
-
-  const inventory = await loadInventory({
-    artifactRef: refs.inventoryRef,
-    artifacts: config.artifacts,
-  });
-  if (inventory.status === "blocked") {
-    return inventory;
-  }
-
-  const health = await loadHealth({
-    artifactRef: refs.healthRef,
-    artifacts: config.artifacts,
-  });
-  if (health.status === "blocked") {
-    return health;
-  }
-
-  const backfillRun = await loadBackfillRun({
-    artifactRef: refs.backfillRunRef,
-    artifacts: config.artifacts,
-  });
-  if (backfillRun.status === "blocked") {
-    return backfillRun;
   }
 
   const search = await loadSearch({
@@ -2675,16 +2032,10 @@ const executeRefinementProposalsNode = async (
   }
 
   const document = refinementProposalDocumentFor({
-    backfillRun: backfillRun.document,
-    backfillRunRef: refs.backfillRunRef,
     correlation: correlation.document,
     correlationRef: refs.correlationRef,
-    health: health.document,
-    healthRef: refs.healthRef,
     hydration: hydration.document,
     hydrationRef: refs.hydrationRef,
-    inventory: inventory.document,
-    inventoryRef: refs.inventoryRef,
     maxProposals: nodeConfig.maxProposals,
     search: search.document,
     searchRef: refs.searchRef,
@@ -2739,10 +2090,6 @@ const executeHitlReportNode = async (
     machineArtifact: input.plan.machine,
   });
   const sourceRefs = [
-    requiredRefs.inventoryRef,
-    requiredRefs.healthRef,
-    requiredRefs.backfillPlanRef,
-    requiredRefs.backfillRunRef,
     requiredRefs.searchRef,
     requiredRefs.hydrationRef,
     requiredRefs.correlationRef,
@@ -2756,9 +2103,7 @@ const executeHitlReportNode = async (
     correlation: reportInputs.correlation,
     dreamCount: dreams.length,
     generatedAt,
-    health: reportInputs.health,
     hydration: reportInputs.hydration,
-    inventory: reportInputs.inventory,
     plan: input.plan,
     proofLevel: nodeConfig.dynamicGenerationProofLevel,
     refinementProposalCount: refinementProposals.document?.proposalCount ?? 0,
@@ -2768,16 +2113,12 @@ const executeHitlReportNode = async (
     stateMachineFigure,
   });
   const mdsvx = reportMdsvxFor({
-    backfill: reportInputs.backfill,
-    backfillRun: reportInputs.backfillRun,
     correlation: reportInputs.correlation,
     definitionOfDoneAudit,
     dreamCount: dreams.length,
     dreams,
-    health: reportInputs.health,
     hitlDecisionContract,
     hydration: reportInputs.hydration,
-    inventory: reportInputs.inventory,
     plan: input.plan,
     proofLevel: nodeConfig.dynamicGenerationProofLevel,
     receiptCount,
@@ -3014,111 +2355,6 @@ const executeCaptureArtifactNode = async (
   });
 };
 
-const executeBackfillRunNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
-): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryBackfill === undefined) {
-    return blocker(
-      "adapter_unavailable",
-      "Dream backfill run node requires a Dream memory backfill adapter."
-    );
-  }
-
-  const nodeConfig = DreamBackfillRunNodeConfigSchema.parse(input.step.config);
-  const planRef = backfillRunPlanRefFor({
-    config: nodeConfig,
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-  });
-  if (planRef === null) {
-    return blocker(
-      "stale_package",
-      "Dream backfill run node requires a recovery backfill plan artifact ref."
-    );
-  }
-
-  const plan = await loadBackfill({
-    artifactRef: planRef,
-    artifacts: config.artifacts,
-  });
-  if (plan.status === "blocked") {
-    return plan;
-  }
-
-  const result = await config.dreamMemoryBackfill.runBackfill(
-    DreamMemoryRelayBackfillRunPayloadSchema.parse({
-      actor: input.actor,
-      plan: plan.document,
-      planRef,
-      runId: input.plan.runId,
-      workItemId: input.plan.workItemId,
-    })
-  );
-  if (result.status === "blocked") {
-    return result;
-  }
-
-  return await writeDocument({
-    artifacts: config.artifacts,
-    document: DreamBackfillRunReceiptDocumentSchema.parse(result.document),
-    relayLeaseReceipt: result.relayLeaseReceipt,
-    step: input.step,
-  });
-};
-
-const executeBackfillPlanNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
-): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamBackfillPlanNodeConfigSchema.parse(input.step.config);
-  const refs = backfillRefsFor({
-    config: nodeConfig,
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-  });
-  if (refs.inventoryRef === null || refs.healthRef === null) {
-    return blocker(
-      "stale_package",
-      "Dream backfill node requires source inventory and source health artifact refs."
-    );
-  }
-
-  const inventory = await loadInventory({
-    artifactRef: refs.inventoryRef,
-    artifacts: config.artifacts,
-  });
-  if (inventory.status === "blocked") {
-    return inventory;
-  }
-
-  const health = await loadHealth({
-    artifactRef: refs.healthRef,
-    artifacts: config.artifacts,
-  });
-  if (health.status === "blocked") {
-    return health;
-  }
-
-  const result = await config.dreamMemoryFabric.planBackfill({
-    actor: input.actor,
-    health: health.document,
-    healthRef: refs.healthRef,
-    inventory: inventory.document,
-    inventoryRef: refs.inventoryRef,
-    runId: input.plan.runId,
-    workItemId: input.plan.workItemId,
-  });
-  if (result.status === "blocked") {
-    return result;
-  }
-
-  return await writeDocument({
-    artifacts: config.artifacts,
-    document: DreamBackfillPlanDocumentSchema.parse(result.document),
-    relayLeaseReceipt: result.relayLeaseReceipt,
-    step: input.step,
-  });
-};
-
 export const createDreamMemoryFabricWorkflowNodeAdapter = (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig
 ): WorkflowNodeAdapterPort => ({
@@ -3133,24 +2369,12 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
       );
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.source-inventory") {
-      return await executeSourceInventoryNode(config, input);
-    }
-
-    if (nodeTypeResult.data === "joelclaw.dream.source-health") {
-      return await executeSourceHealthNode(config, input);
-    }
-
     if (nodeTypeResult.data === "joelclaw.dream.memory-search") {
       return await executeMemorySearchNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.signals") {
       return await executeSignalsNode(config, input);
-    }
-
-    if (nodeTypeResult.data === "joelclaw.dream.backfill-run") {
-      return await executeBackfillRunNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.capture-run") {
@@ -3181,10 +2405,6 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
       return await executeHitlReportNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.hydrate") {
-      return await executeHydrationNode(config, input);
-    }
-
-    return await executeBackfillPlanNode(config, input);
+    return await executeHydrationNode(config, input);
   },
 });

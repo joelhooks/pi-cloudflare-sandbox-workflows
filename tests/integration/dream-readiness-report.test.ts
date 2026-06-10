@@ -35,109 +35,10 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 };
 
 const localProof = () => ({
-  backfill: {
-    actionCount: 3,
-    captureFixCount: 1,
-    status: "backfill-required",
-  },
-  backfillRun: {
-    blockedCount: 0,
-    completedCount: 0,
-    failedCount: 0,
-    skippedCount: 3,
-  },
   checkedAt: "2026-06-10T11:00:00.000Z",
   correlation: {
     edgeCount: 48,
     nodeCount: 35,
-  },
-  health: {
-    blindSpotCount: 2,
-    degradedSourceCount: 3,
-    status: "degraded",
-  },
-  inventory: {
-    machineCoverage: [
-      {
-        authorityCount: 5125,
-        machineId: "blaine",
-        sourceCount: 3,
-        status: "captured",
-      },
-      {
-        authorityCount: 211,
-        machineId: "cloudflare",
-        sourceCount: 1,
-        status: "captured",
-      },
-      {
-        authorityCount: 1,
-        machineId: "panda",
-        sourceCount: 1,
-        status: "captured",
-      },
-      {
-        authorityCount: 6,
-        machineId: "flagg",
-        sourceCount: 1,
-        status: "captured",
-      },
-    ],
-    runtimeCoverage: [
-      {
-        count: 4737,
-        runtime: "pi",
-        status: "captured",
-      },
-      {
-        count: 259,
-        runtime: "codex",
-        status: "captured",
-      },
-      {
-        count: 129,
-        runtime: "claude",
-        status: "captured",
-      },
-      {
-        count: 211,
-        runtime: "cloudflare",
-        status: "captured",
-      },
-    ],
-    sourceCount: 10,
-    sourceFamilyCoverage: [
-      {
-        authorityCount: 5132,
-        family: "agent-transcripts",
-        sourceCount: 5,
-        status: "captured",
-      },
-      {
-        authorityCount: 19,
-        family: "brain",
-        sourceCount: 2,
-        status: "captured",
-      },
-      {
-        authorityCount: 211,
-        family: "cloudflare-runs",
-        sourceCount: 1,
-        status: "captured",
-      },
-      {
-        authorityCount: 2,
-        family: "docs-pdf-brain",
-        sourceCount: 2,
-        status: "captured",
-      },
-      {
-        authorityCount: 13,
-        family: "repo-outputs",
-        sourceCount: 1,
-        status: "captured",
-      },
-    ],
   },
   rawCredentialsReturned: false,
   rawPathLeaked: false,
@@ -154,6 +55,33 @@ const localProof = () => ({
     signalCount: 8,
     signalKinds: ["agent-failure", "correction"],
   },
+  sourceFamilyCoverage: [
+    {
+      family: "agent-transcripts",
+      receiptCount: 5132,
+      status: "captured",
+    },
+    {
+      family: "brain",
+      receiptCount: 19,
+      status: "captured",
+    },
+    {
+      family: "cloudflare-runs",
+      receiptCount: 211,
+      status: "captured",
+    },
+    {
+      family: "docs-pdf-brain",
+      receiptCount: 2,
+      status: "captured",
+    },
+    {
+      family: "repo-outputs",
+      receiptCount: 13,
+      status: "captured",
+    },
+  ],
   sourceRootCount: 10,
 });
 
@@ -209,7 +137,7 @@ const preflight = () =>
     generatedAt: "2026-06-10T11:00:10.000Z",
     redacted: true,
     relayCapability: {
-      allowedOperations: ["inventory", "search", "hydrate", "correlate"],
+      allowedOperations: ["search", "hydrate", "correlate"],
       allowedSourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
       budget: {
         maxFiles: 500,
@@ -353,12 +281,12 @@ describe("Dream readiness report", () => {
       submitAttempted: receipt.summary.submitAttempted,
     }).toStrictEqual({
       auditBlockedCount: 5,
-      auditCapturedCount: 5,
+      auditCapturedCount: 4,
       auditMissingCount: 0,
       auditNotProvenCount: 0,
       auditSchemaVersion: "workflow.dream-definition-of-done-audit.v1",
       auditStatus: "blocked",
-      auditTotalCount: 10,
+      auditTotalCount: 9,
       blockerCount: 3,
       hasCanonicalTemplate: true,
       hasDefinitionOfDoneAudit: true,

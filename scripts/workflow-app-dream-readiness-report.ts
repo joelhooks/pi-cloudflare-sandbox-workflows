@@ -28,52 +28,10 @@ const defaultWzrrdBin = "wzrrd";
 
 const LocalRelayProofReceiptSchema = z
   .object({
-    backfill: z.object({
-      actionCount: z.number().int().min(0),
-      captureFixCount: z.number().int().min(0),
-      status: z.string().min(1),
-    }),
-    backfillRun: z.object({
-      blockedCount: z.number().int().min(0),
-      completedCount: z.number().int().min(0),
-      failedCount: z.number().int().min(0),
-      skippedCount: z.number().int().min(0),
-    }),
     checkedAt: z.string().min(1),
     correlation: z.object({
       edgeCount: z.number().int().min(0),
       nodeCount: z.number().int().min(0),
-    }),
-    health: z.object({
-      blindSpotCount: z.number().int().min(0),
-      degradedSourceCount: z.number().int().min(0),
-      status: z.string().min(1),
-    }),
-    inventory: z.object({
-      machineCoverage: z.array(
-        z.object({
-          authorityCount: z.number().int().min(0),
-          machineId: z.string().min(1),
-          sourceCount: z.number().int().min(0),
-          status: z.string().min(1),
-        })
-      ),
-      runtimeCoverage: z.array(
-        z.object({
-          count: z.number().int().min(0),
-          runtime: z.string().min(1),
-          status: z.string().min(1),
-        })
-      ),
-      sourceCount: z.number().int().min(0),
-      sourceFamilyCoverage: z.array(
-        z.object({
-          authorityCount: z.number().int().min(0),
-          family: z.string().min(1),
-          sourceCount: z.number().int().min(0),
-          status: z.string().min(1),
-        })
-      ),
     }),
     rawCredentialsReturned: z.literal(false),
     rawPathLeaked: z.literal(false),
@@ -90,6 +48,15 @@ const LocalRelayProofReceiptSchema = z
       signalCount: z.number().int().min(0),
       signalKinds: z.array(z.string().min(1)),
     }),
+    sourceFamilyCoverage: z
+      .array(
+        z.object({
+          family: z.string().min(1),
+          receiptCount: z.number().int().min(0),
+          status: z.string().min(1),
+        })
+      )
+      .default([]),
     sourceRootCount: z.number().int().min(0),
   })
   .passthrough();
@@ -428,34 +395,21 @@ const renderMarkdownSubset = (content: string): string => {
 const statusLineFor = (input: DreamReadinessReportInput): string =>
   [
     `source roots ${input.localProof.sourceRootCount}`,
-    `runtime sources ${input.localProof.inventory.runtimeCoverage.length}`,
+    `source families ${input.localProof.sourceFamilyCoverage.length}`,
     `hydrated receipts ${input.localProof.search.hydratedCount}`,
     `correlation edges ${input.localProof.correlation.edgeCount}`,
     `blockers ${input.runReceipt.blockedReasons.length}`,
   ].join(" / ");
 
-const runtimeCoverageLine = (proof: LocalRelayProofReceipt): string =>
-  proof.inventory.runtimeCoverage
-    .map(
-      (coverage) => `${coverage.runtime}=${coverage.count} (${coverage.status})`
-    )
-    .join(", ");
-
-const machineCoverageLine = (proof: LocalRelayProofReceipt): string =>
-  proof.inventory.machineCoverage
-    .map(
-      (coverage) =>
-        `${coverage.machineId}: ${coverage.authorityCount} authority record(s), ${coverage.status}`
-    )
-    .join("; ");
-
 const sourceFamilyLine = (proof: LocalRelayProofReceipt): string =>
-  proof.inventory.sourceFamilyCoverage
-    .map(
-      (coverage) =>
-        `${coverage.family}: ${coverage.authorityCount} authority record(s), ${coverage.status}`
-    )
-    .join("; ");
+  proof.sourceFamilyCoverage.length === 0
+    ? "no explicit source-family coverage reported"
+    : proof.sourceFamilyCoverage
+        .map(
+          (coverage) =>
+            `${coverage.family}: ${coverage.receiptCount} receipt(s), ${coverage.status}`
+        )
+        .join("; ");
 
 const bulletList = (items: readonly string[]): string =>
   items.length === 0 ? "- None." : items.map((item) => `- ${item}`).join("\n");
@@ -466,45 +420,8 @@ const auditEvidenceFor = (input: DreamReadinessReportInput): string[] => [
   `run-receipt:${input.runReceipt.runId}`,
 ];
 
-const runtimeCovered = (
-  proof: LocalRelayProofReceipt,
-  runtime: string
-): boolean =>
-  proof.inventory.runtimeCoverage.some(
-    (coverage) => coverage.runtime === runtime && coverage.status === "captured"
-  );
-
-const machineCovered = (
-  proof: LocalRelayProofReceipt,
-  machineId: string
-): boolean =>
-  proof.inventory.machineCoverage.some(
-    (coverage) =>
-      coverage.machineId === machineId && coverage.status === "captured"
-  );
-
-const sourceFamilyCovered = (
-  proof: LocalRelayProofReceipt,
-  family: string
-): boolean =>
-  proof.inventory.sourceFamilyCoverage.some(
-    (coverage) => coverage.family === family && coverage.status === "captured"
-  );
-
 const dreamCoverageCaptured = (proof: LocalRelayProofReceipt): boolean =>
-  ["pi", "codex", "claude", "cloudflare"].every((runtime) =>
-    runtimeCovered(proof, runtime)
-  ) &&
-  ["blaine", "panda", "flagg", "cloudflare"].every((machineId) =>
-    machineCovered(proof, machineId)
-  ) &&
-  [
-    "agent-transcripts",
-    "brain",
-    "cloudflare-runs",
-    "docs-pdf-brain",
-    "repo-outputs",
-  ].every((family) => sourceFamilyCovered(proof, family)) &&
+  proof.search.hitCount > 0 &&
   proof.search.hydratedCount > 0 &&
   proof.correlation.edgeCount > 0;
 
@@ -636,34 +553,23 @@ const tShapedCoverageAuditItem = (
 ): DreamDefinitionOfDoneAuditItem => {
   const coverageCaptured = dreamCoverageCaptured(input.localProof);
 
+  const missingFamilies = input.localProof.sourceFamilyCoverage
+    .filter((coverage) => coverage.status !== "captured")
+    .map((coverage) => coverage.family);
+  const familyCaveatSuffix =
+    missingFamilies.length === 0
+      ? ""
+      : ` Coverage caveat: missing source families ${missingFamilies.join(", ")}.`;
+
   return parseAuditItem({
     evidenceRefs: auditEvidenceFor(input),
     requirement:
-      "Dream runs T-shaped across timeline, machines, runtimes, source families, hydration, and correlation.",
+      "Dream reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never gates.",
     requirementId: "t-shaped-memory-coverage",
     status: coverageCaptured ? "captured" : "not-proven",
     summary: coverageCaptured
-      ? `Local proof captured runtime, machine, source-family, hydration, and correlation coverage: ${input.localProof.search.hydratedCount} hydrated receipts, ${input.localProof.correlation.edgeCount} edges.`
-      : "Local proof did not capture the required runtime/machine/source-family/hydration/correlation coverage.",
-  });
-};
-
-const ingestRecoveryAuditItem = (
-  input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
-  const repairEvidenceCaptured =
-    input.localProof.health.status.length > 0 &&
-    input.localProof.backfill.status.length > 0;
-
-  return parseAuditItem({
-    evidenceRefs: auditEvidenceFor(input),
-    requirement:
-      "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
-    requirementId: "ingest-health-and-recovery-backfill",
-    status: repairEvidenceCaptured ? "captured" : "not-proven",
-    summary: repairEvidenceCaptured
-      ? `Local proof reported health=${input.localProof.health.status}, backfill=${input.localProof.backfill.status}, actionCount=${String(input.localProof.backfill.actionCount)}, captureFixCount=${String(input.localProof.backfill.captureFixCount)}.`
-      : "Local proof did not include health/backfill evidence.",
+      ? `Local proof captured search, hydration, and correlation coverage: ${input.localProof.search.hydratedCount} hydrated receipts, ${input.localProof.correlation.edgeCount} edges.${familyCaveatSuffix}`
+      : `Local proof did not capture search/hydration/correlation evidence.${familyCaveatSuffix}`,
   });
 };
 
@@ -749,7 +655,6 @@ export const buildDreamDefinitionOfDoneAudit = (
     liveCloudflareExecutionAuditItem(input),
     generatedMachineAuditItem(input),
     tShapedCoverageAuditItem(input),
-    ingestRecoveryAuditItem(input),
     workflowOwnedWzrrdAuditItem(input),
     hitlRefinementLoopAuditItem(input),
     publicPrivateBoundaryAuditItem(input),
@@ -814,7 +719,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Reasoning",
     "",
-    `The local proof covered ${input.localProof.sourceRootCount} source roots across ${input.localProof.inventory.sourceCount} sources. Runtime coverage is ${runtimeCoverageLine(input.localProof)}. Machine coverage is ${machineCoverageLine(input.localProof)}.`,
+    `The local proof covered ${input.localProof.sourceRootCount} source roots. Source-family coverage is ${sourceFamilyLine(input.localProof)}.`,
     "",
     "Rating",
     "",
@@ -841,20 +746,6 @@ export const renderDreamReadinessReportMdsvx = (
     "Recommendation",
     "",
     "Approve the network boundary explicitly, provision `DREAM_MEMORY_RELAY_TOKEN`, deploy `DREAM_MEMORY_RELAY_BASE_URL` through the signoff-gated path, verify remote `/healthz`, then submit the existing Dream run request shape.",
-    "",
-    "### Treat backfill as a capture repair signal",
-    "",
-    "Reasoning",
-    "",
-    `The local proof reported health status ${input.localProof.health.status}, ${input.localProof.health.blindSpotCount} blind spot(s), ${input.localProof.health.degradedSourceCount} degraded source(s), and ${input.localProof.backfill.actionCount} recovery backfill action(s). If that keeps recurring, ingest is still broken.`,
-    "",
-    "Rating",
-    "",
-    "8/10.",
-    "",
-    "Recommendation",
-    "",
-    "After the live Dream run, promote recurring backfill actions into capture-path repair work instead of normalizing recovery as the workflow.",
     "",
     "### Keep the report honest",
     "",
@@ -883,10 +774,6 @@ export const renderDreamReadinessReportMdsvx = (
     "Required actions:",
     "",
     bulletList(input.preflight.requiredActions),
-    "",
-    "Runtime coverage:",
-    "",
-    `- ${runtimeCoverageLine(input.localProof)}`,
     "",
     "Source-family coverage:",
     "",
@@ -1036,12 +923,8 @@ const compactReceiptsFor = (
   definitionOfDoneAudit: audit,
   generatedAt: input.generatedAt,
   localProof: {
-    backfill: input.localProof.backfill,
-    backfillRun: input.localProof.backfillRun,
     checkedAt: input.localProof.checkedAt,
     correlation: input.localProof.correlation,
-    health: input.localProof.health,
-    inventory: input.localProof.inventory,
     rawCredentialsReturned: input.localProof.rawCredentialsReturned,
     rawPathLeaked: input.localProof.rawPathLeaked,
     rawPathsReturned: input.localProof.rawPathsReturned,
@@ -1049,6 +932,7 @@ const compactReceiptsFor = (
     runId: input.localProof.runId,
     search: input.localProof.search,
     signals: input.localProof.signals,
+    sourceFamilyCoverage: input.localProof.sourceFamilyCoverage,
     sourceRootCount: input.localProof.sourceRootCount,
   },
   preflight: {

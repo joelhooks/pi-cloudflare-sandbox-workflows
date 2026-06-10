@@ -435,16 +435,12 @@ export const WorkflowLivePreflightArtifactModelSchema = z.object({
 });
 
 export const WorkflowLivePreflightRelayOperationSchema = z.enum([
-  "backfill-plan",
-  "backfill-run",
   "capture-artifact",
   "capture-run",
   "correlate",
   "hydrate",
-  "inventory",
   "search",
   "signals",
-  "source-health",
 ]);
 
 export const WorkflowLivePreflightDreamSourceFamilySchema = z.enum([

@@ -22,10 +22,8 @@ const relayNetworkBoundarySignoff =
 
 const readyRelayCapability = {
   allowedOperations: [
-    "inventory",
-    "source-health",
-    "backfill-plan",
-    "backfill-run",
+    "capture-run",
+    "capture-artifact",
     "signals",
     "search",
     "hydrate",
@@ -146,10 +144,6 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
     expectedPackageManifestHashMatched: true,
     expectedPackageSeeded: true,
     expectedWorkflowNodeTypes: [
-      "joelclaw.dream.source-inventory",
-      "joelclaw.dream.source-health",
-      "joelclaw.dream.backfill-plan",
-      "joelclaw.dream.backfill-run",
       "joelclaw.dream.capture-run",
       "joelclaw.dream.capture-artifact",
       "joelclaw.dream.memory-search",

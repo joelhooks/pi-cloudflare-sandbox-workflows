@@ -8,15 +8,11 @@ import {
   createIntegrationTestDreamMemoryRetrievalAdapter,
 } from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import {
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
 } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
@@ -25,7 +21,7 @@ import type {
 } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import { handleTrustedDreamMemoryRelayRequest } from "../../src/cartridges/dream-memory-fabric/trusted-relay-server.ts";
 import type {
-  DreamMemoryFabricPort,
+  DreamMemoryCapturePort,
   DreamMemoryFabricResult,
 } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
@@ -34,22 +30,6 @@ const relayToken = "trusted-relay-token-never-in-response";
 const timestamp = "2026-06-09T18:00:00.000Z";
 
 const operationPath = (operation: DreamMemoryRelayOperation): string => {
-  if (operation === "inventory") {
-    return "/memory/inventory";
-  }
-
-  if (operation === "source-health") {
-    return "/memory/source-health";
-  }
-
-  if (operation === "backfill-plan") {
-    return "/memory/backfill/plan";
-  }
-
-  if (operation === "backfill-run") {
-    return "/memory/backfill/run";
-  }
-
   if (operation === "capture-run") {
     return "/memory/capture/run";
   }
@@ -67,10 +47,10 @@ const sourceFamiliesForPayload = (
   if (
     typeof payload === "object" &&
     payload !== null &&
-    "sourceFamiliesExpected" in payload &&
-    Array.isArray(payload.sourceFamiliesExpected)
+    "sourceFamilies" in payload &&
+    Array.isArray(payload.sourceFamilies)
   ) {
-    return payload.sourceFamiliesExpected.filter(
+    return payload.sourceFamilies.filter(
       (family): family is DreamSourceFamily => typeof family === "string"
     );
   }
@@ -155,27 +135,22 @@ const blocked = <TDocument>(): Promise<DreamMemoryFabricResult<TDocument>> =>
     status: "blocked",
   });
 
-const createCountingDreamMemoryFabric = (): {
+const createCountingDreamMemoryCapture = (): {
   readonly calls: string[];
-  readonly port: DreamMemoryFabricPort;
+  readonly port: DreamMemoryCapturePort;
 } => {
   const calls: string[] = [];
 
   return {
     calls,
     port: {
-      checkSourceHealth() {
-        calls.push("source-health");
+      captureArtifact() {
+        calls.push("capture-artifact");
 
         return blocked();
       },
-      inventorySources() {
-        calls.push("inventory");
-
-        return blocked();
-      },
-      planBackfill() {
-        calls.push("backfill-plan");
+      captureRun() {
+        calls.push("capture-run");
 
         return blocked();
       },
@@ -184,97 +159,13 @@ const createCountingDreamMemoryFabric = (): {
 };
 
 describe("trusted Dream memory relay server", () => {
-  it("serves inventory, source-health, and backfill-plan through typed relay envelopes without leaking the bearer token", async () => {
+  it("serves capture-run and capture-artifact through typed relay envelopes without leaking the bearer token", async () => {
     const run = buildIntegrationTestRunRequest();
-    const dreamMemoryFabric = createIntegrationTestDreamMemoryFabricAdapter();
     const config = {
-      dreamMemoryBackfill: dreamMemoryFabric,
-      dreamMemoryCapture: dreamMemoryFabric,
-      dreamMemoryFabric,
+      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
       expectedBearerToken: relayToken,
       now: () => timestamp,
     };
-
-    const inventoryResponse = await handleTrustedDreamMemoryRelayRequest({
-      config,
-      request: relayRequest({
-        operation: "inventory",
-        payload: {
-          actor: run.actor,
-          requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-          runId: run.runId,
-          sourceFamiliesExpected: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-          ],
-          workItemId: run.workItemId,
-        },
-        token: relayToken,
-      }),
-    });
-    const inventoryEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamSourceInventoryDocumentSchema
-    ).parse(await parseJson(inventoryResponse));
-
-    const inventoryRef = `artifact://relay-test/run/${run.runId}/dream/source-inventory.json`;
-    const healthResponse = await handleTrustedDreamMemoryRelayRequest({
-      config,
-      request: relayRequest({
-        operation: "source-health",
-        payload: {
-          actor: run.actor,
-          inventory: inventoryEnvelope.document,
-          inventoryRef,
-          runId: run.runId,
-          workItemId: run.workItemId,
-        },
-        token: relayToken,
-      }),
-    });
-    const healthEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamSourceHealthDocumentSchema
-    ).parse(await parseJson(healthResponse));
-
-    const healthRef = `artifact://relay-test/run/${run.runId}/dream/source-health.json`;
-    const backfillResponse = await handleTrustedDreamMemoryRelayRequest({
-      config,
-      request: relayRequest({
-        operation: "backfill-plan",
-        payload: {
-          actor: run.actor,
-          health: healthEnvelope.document,
-          healthRef,
-          inventory: inventoryEnvelope.document,
-          inventoryRef,
-          runId: run.runId,
-          workItemId: run.workItemId,
-        },
-        token: relayToken,
-      }),
-    });
-    const backfillEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamBackfillPlanDocumentSchema
-    ).parse(await parseJson(backfillResponse));
-
-    const planRef = `artifact://relay-test/run/${run.runId}/dream/backfill-plan.json`;
-    const backfillRunResponse = await handleTrustedDreamMemoryRelayRequest({
-      config,
-      request: relayRequest({
-        operation: "backfill-run",
-        payload: {
-          actor: run.actor,
-          plan: backfillEnvelope.document,
-          planRef,
-          runId: run.runId,
-          workItemId: run.workItemId,
-        },
-        token: relayToken,
-      }),
-    });
-    const backfillRunEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamBackfillRunReceiptDocumentSchema
-    ).parse(await parseJson(backfillRunResponse));
 
     const captureRunResponse = await handleTrustedDreamMemoryRelayRequest({
       config,
@@ -321,73 +212,34 @@ describe("trusted Dream memory relay server", () => {
     ).parse(await parseJson(captureArtifactResponse));
 
     expect({
-      backfillOperation: backfillEnvelope.operation,
-      backfillRunCaptureFixStatuses:
-        backfillRunEnvelope.document.captureFixResults.map(
-          (captureFix) => captureFix.status
-        ),
-      backfillRunOperation: backfillRunEnvelope.operation,
-      backfillRunSourceRefs: backfillRunEnvelope.sourceInventoryRefs,
-      backfillRunStatuses: backfillRunEnvelope.document.actionResults.map(
-        (action) => action.status
-      ),
-      backfillStatus: backfillEnvelope.document.status,
       captureArtifactKind: captureArtifactEnvelope.document.captureKind,
       captureArtifactOperation: captureArtifactEnvelope.operation,
-      captureArtifactSourceRefs: captureArtifactEnvelope.sourceInventoryRefs,
       captureRunCapturedRunId:
         captureRunEnvelope.document.captureKind === "run"
           ? captureRunEnvelope.document.capturedRunId
           : null,
       captureRunKind: captureRunEnvelope.document.captureKind,
       captureRunOperation: captureRunEnvelope.operation,
-      healthOperation: healthEnvelope.operation,
-      healthStatus: healthEnvelope.document.status,
-      inventoryOperation: inventoryEnvelope.operation,
-      inventorySchema: inventoryEnvelope.document.schemaVersion,
       leaseSecretRefs: [
-        inventoryEnvelope.leaseReceipt.secretRef,
-        healthEnvelope.leaseReceipt.secretRef,
-        backfillEnvelope.leaseReceipt.secretRef,
-        backfillRunEnvelope.leaseReceipt.secretRef,
+        captureRunEnvelope.leaseReceipt.secretRef,
+        captureArtifactEnvelope.leaseReceipt.secretRef,
       ],
       responseLeaksToken: JSON.stringify([
-        inventoryEnvelope,
-        healthEnvelope,
-        backfillEnvelope,
-        backfillRunEnvelope,
         captureRunEnvelope,
         captureArtifactEnvelope,
       ]).includes(relayToken),
-      sourceInventoryRefs: backfillEnvelope.sourceInventoryRefs,
-      usedAt: backfillEnvelope.leaseReceipt.usedAt,
+      usedAt: captureRunEnvelope.leaseReceipt.usedAt,
     }).toStrictEqual({
-      backfillOperation: "backfill-plan",
-      backfillRunCaptureFixStatuses: ["skipped"],
-      backfillRunOperation: "backfill-run",
-      backfillRunSourceRefs: [planRef],
-      backfillRunStatuses: ["skipped"],
-      backfillStatus: "backfill-required",
       captureArtifactKind: "artifact",
       captureArtifactOperation: "capture-artifact",
-      captureArtifactSourceRefs: [
-        `artifact://relay-test/run/${run.runId}/dream/hitl-report.json`,
-      ],
       captureRunCapturedRunId: run.runId,
       captureRunKind: "run",
       captureRunOperation: "capture-run",
-      healthOperation: "source-health",
-      healthStatus: "degraded",
-      inventoryOperation: "inventory",
-      inventorySchema: "dream.source-inventory.v1",
       leaseSecretRefs: [
-        "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
       ],
       responseLeaksToken: false,
-      sourceInventoryRefs: [inventoryRef, healthRef],
       usedAt: timestamp,
     });
   });
@@ -397,7 +249,6 @@ describe("trusted Dream memory relay server", () => {
     const config = {
       dreamMemoryCorrelation:
         createIntegrationTestDreamMemoryCorrelationAdapter(),
-      dreamMemoryFabric: createIntegrationTestDreamMemoryFabricAdapter(),
       dreamMemoryRetrieval: createIntegrationTestDreamMemoryRetrievalAdapter(),
       expectedBearerToken: relayToken,
       now: () => timestamp,
@@ -486,20 +337,21 @@ describe("trusted Dream memory relay server", () => {
   });
 
   it("rejects unauthenticated relay requests before invoking trusted memory ports", async () => {
-    const counting = createCountingDreamMemoryFabric();
+    const counting = createCountingDreamMemoryCapture();
     const run = buildIntegrationTestRunRequest();
     const response = await handleTrustedDreamMemoryRelayRequest({
       config: {
-        dreamMemoryFabric: counting.port,
+        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
       },
       request: relayRequest({
-        operation: "inventory",
+        operation: "capture-run",
         payload: {
           actor: run.actor,
-          requiredRuntimes: ["pi"],
+          readability: "actor-private",
           runId: run.runId,
-          sourceFamiliesExpected: ["agent-transcripts"],
+          sourceSystem: "cloudflare-workflow-run",
+          targetRunId: run.runId,
           workItemId: run.workItemId,
         },
       }),
@@ -515,10 +367,10 @@ describe("trusted Dream memory relay server", () => {
   });
 
   it("blocks retrieval and correlation operations when no trusted adapter is installed", async () => {
-    const counting = createCountingDreamMemoryFabric();
+    const counting = createCountingDreamMemoryCapture();
     const searchResponse = await handleTrustedDreamMemoryRelayRequest({
       config: {
-        dreamMemoryFabric: counting.port,
+        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
       },
       request: relayRequest({
@@ -533,7 +385,7 @@ describe("trusted Dream memory relay server", () => {
 
     const correlationResponse = await handleTrustedDreamMemoryRelayRequest({
       config: {
-        dreamMemoryFabric: counting.port,
+        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
       },
       request: relayRequest({

@@ -47,21 +47,6 @@ export const DreamPrivacyTierSchema = z.enum([
   "secret-adjacent",
 ]);
 
-export const DreamAdapterHealthStatusSchema = z.enum([
-  "healthy",
-  "missing",
-  "stale",
-  "unavailable",
-]);
-
-export const DreamRuntimeCoverageStatusSchema = z.enum([
-  "captured",
-  "false-positive",
-  "missing",
-  "skipped",
-  "stale",
-]);
-
 export const DreamSourceScopeSchema = z.object({
   machineId: z.string().min(1).optional(),
   organizationId: z.string().min(1),
@@ -70,16 +55,12 @@ export const DreamSourceScopeSchema = z.object({
 });
 
 export const DreamMemoryRelayOperationSchema = z.enum([
-  "backfill-plan",
-  "backfill-run",
   "capture-artifact",
   "capture-run",
   "correlate",
   "hydrate",
-  "inventory",
   "search",
   "signals",
-  "source-health",
 ]);
 
 export const DreamSourceSurfaceSchema = z.enum([
@@ -179,8 +160,6 @@ export const DreamSourcePackDispositionSchema = z
   });
 
 export const DreamWorkflowEffectSchema = z.enum([
-  "backfill-plan",
-  "backfill-run",
   "capture-artifact",
   "capture-run",
   "correlate",
@@ -188,16 +167,12 @@ export const DreamWorkflowEffectSchema = z.enum([
   "hitl-follow-up-run-request",
   "hitl-report",
   "hydrate",
-  "inventory",
   "refinement-proposals",
   "search",
   "signals",
-  "source-health",
 ]);
 
 export const DreamMemoryFabricNodeTypeSchema = z.enum([
-  "joelclaw.dream.backfill-plan",
-  "joelclaw.dream.backfill-run",
   "joelclaw.dream.correlate",
   "joelclaw.dream.capture-artifact",
   "joelclaw.dream.capture-run",
@@ -208,8 +183,6 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.memory-search",
   "joelclaw.dream.refinement-proposals",
   "joelclaw.dream.signals",
-  "joelclaw.dream.source-health",
-  "joelclaw.dream.source-inventory",
 ]);
 
 export const DreamSourceProfileSchema = z
@@ -225,7 +198,6 @@ export const DreamSourceProfileSchema = z
     packageId: z.string().min(1),
     profileId: z.string().min(1),
     purpose: z.string().min(1),
-    requiredMachineIds: z.array(z.string().min(1)).min(1),
     requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
     schemaVersion: z.literal("dream.source-profile.v1"),
     sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
@@ -250,29 +222,21 @@ export const DreamSourceProfileSchema = z
   });
 
 export const DreamMemoryRelayPathSchema = z.enum([
-  "/memory/backfill/plan",
-  "/memory/backfill/run",
   "/memory/capture/artifact",
   "/memory/capture/run",
   "/memory/correlate",
   "/memory/hydrate",
-  "/memory/inventory",
   "/memory/search",
   "/memory/signals",
-  "/memory/source-health",
 ]);
 
 const dreamMemoryRelayPathForOperation = {
-  "backfill-plan": "/memory/backfill/plan",
-  "backfill-run": "/memory/backfill/run",
   "capture-artifact": "/memory/capture/artifact",
   "capture-run": "/memory/capture/run",
   correlate: "/memory/correlate",
   hydrate: "/memory/hydrate",
-  inventory: "/memory/inventory",
   search: "/memory/search",
   signals: "/memory/signals",
-  "source-health": "/memory/source-health",
 } as const satisfies Record<
   z.infer<typeof DreamMemoryRelayOperationSchema>,
   z.infer<typeof DreamMemoryRelayPathSchema>
@@ -356,22 +320,6 @@ export const DreamMemoryRelayEndpointCatalogSchema = z.object({
   schemaVersion: z.literal("dream.memory-relay.endpoint-catalog.v1"),
 });
 
-export const DreamDerivedIndexStatusSchema = z.enum([
-  "fresh",
-  "missing",
-  "stale",
-  "unavailable",
-]);
-
-export const DreamDerivedIndexSchema = z.object({
-  authorityCount: z.number().int().min(0).optional(),
-  derivedCount: z.number().int().min(0).optional(),
-  freshnessCheckedAt: IsoDateTimeSchema,
-  indexId: z.string().min(1),
-  indexKind: z.enum(["qmd", "sqlite", "typesense", "vector", "view"]),
-  status: DreamDerivedIndexStatusSchema,
-});
-
 const DreamMemoryRelayResponseBaseSchema = z.object({
   followUpLinks: z.array(DreamMemoryRelayFollowUpLinkSchema).default([]),
   leaseReceipt: DreamMemoryRelayLeaseReceiptSchema,
@@ -380,8 +328,6 @@ const DreamMemoryRelayResponseBaseSchema = z.object({
   redacted: z.literal(true),
   runId: z.string().min(1),
   schemaVersion: z.literal("dream.memory-relay.response.v1"),
-  sourceFreshness: z.array(DreamDerivedIndexSchema).default([]),
-  sourceInventoryRefs: z.array(ArtifactRefSchema).default([]),
   workItemId: z.string().min(1),
 });
 
@@ -393,223 +339,6 @@ export const dreamMemoryRelayResponseEnvelopeSchema = <
   DreamMemoryRelayResponseBaseSchema.extend({
     document: documentSchema,
   });
-
-export const DreamSourceInventoryItemSchema = z.object({
-  adapter: z.object({
-    checkedAt: IsoDateTimeSchema,
-    health: DreamAdapterHealthStatusSchema,
-    port: z.string().min(1),
-  }),
-  authority: z.object({
-    count: z.number().int().min(0),
-    locatorHash: Sha256HexSchema.optional(),
-    redactedLocator: z.string().min(1).optional(),
-    sourceSystem: z.string().min(1),
-  }),
-  blindSpots: z.array(z.string().min(1)).default([]),
-  derivedIndexes: z.array(DreamDerivedIndexSchema).default([]),
-  family: DreamSourceFamilySchema,
-  freshness: z.object({
-    earliestAt: IsoDateTimeSchema.optional(),
-    indexedAt: IsoDateTimeSchema.optional(),
-    latestAt: IsoDateTimeSchema.optional(),
-  }),
-  label: z.string().min(1),
-  privacyTier: DreamPrivacyTierSchema,
-  scope: DreamSourceScopeSchema,
-  sourceId: z.string().min(1),
-});
-
-export const DreamCoverageHorizonCountSchema = z.object({
-  earliestAt: IsoDateTimeSchema.optional(),
-  hitCount: z.number().int().min(0),
-  horizon: DreamCoverageHorizonSchema,
-  hydrationCount: z.number().int().min(0),
-  latestAt: IsoDateTimeSchema.optional(),
-  queryCount: z.number().int().min(0),
-});
-
-export const DreamRuntimeCoverageSchema = z
-  .object({
-    falsePositiveReason: z.string().min(1).optional(),
-    horizonCounts: z.array(DreamCoverageHorizonCountSchema).default([]),
-    missingReason: z.string().min(1).optional(),
-    nativeProof: z
-      .object({
-        evidenceRefs: z.array(ArtifactRefSchema).default([]),
-        redactedLocator: z.string().min(1).optional(),
-        sourceId: z.string().min(1),
-      })
-      .optional(),
-    runtime: DreamRuntimeSchema,
-    sourceNative: z.boolean(),
-    status: DreamRuntimeCoverageStatusSchema,
-  })
-  .superRefine((coverage, context) => {
-    if (
-      coverage.status === "captured" &&
-      (!coverage.sourceNative || coverage.nativeProof === undefined)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Captured runtime coverage requires native source proof.",
-        path: ["nativeProof"],
-      });
-    }
-
-    if (coverage.status === "missing" && coverage.missingReason === undefined) {
-      context.addIssue({
-        code: "custom",
-        message: "Missing runtime coverage requires an explicit reason.",
-        path: ["missingReason"],
-      });
-    }
-
-    if (
-      coverage.status === "false-positive" &&
-      coverage.falsePositiveReason === undefined
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "False-positive runtime coverage requires an explicit reason.",
-        path: ["falsePositiveReason"],
-      });
-    }
-  });
-
-export const DreamSourceInventoryDocumentSchema = z
-  .object({
-    actor: ActorSchema,
-    blindSpots: z.array(z.string().min(1)).default([]),
-    generatedAt: IsoDateTimeSchema,
-    redacted: z.literal(true),
-    requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
-    runId: z.string().min(1),
-    runtimeCoverage: z.array(DreamRuntimeCoverageSchema).min(1),
-    schemaVersion: z.literal("dream.source-inventory.v1"),
-    scope: DreamSourceScopeSchema,
-    sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
-    sources: z.array(DreamSourceInventoryItemSchema).min(1),
-    summary: z.string().min(1),
-    workItemId: z.string().min(1),
-  })
-  .superRefine((document, context) => {
-    const sourceIds = new Set<string>();
-    for (const [index, source] of document.sources.entries()) {
-      if (sourceIds.has(source.sourceId)) {
-        context.addIssue({
-          code: "custom",
-          message: "Dream source inventory sourceId values must be unique.",
-          path: ["sources", index, "sourceId"],
-        });
-      }
-      sourceIds.add(source.sourceId);
-    }
-
-    const coveredRuntimes = new Set(
-      document.runtimeCoverage.map((coverage) => coverage.runtime)
-    );
-    for (const runtime of document.requiredRuntimes) {
-      if (!coveredRuntimes.has(runtime)) {
-        context.addIssue({
-          code: "custom",
-          message:
-            "Dream source inventory must explicitly report every required runtime.",
-          path: ["runtimeCoverage"],
-        });
-      }
-    }
-  });
-
-export const DreamSourceHealthStatusSchema = z.enum([
-  "blocked",
-  "degraded",
-  "healthy",
-]);
-
-export const DreamSourceHealthDocumentSchema = z.object({
-  checkedAt: IsoDateTimeSchema,
-  freshnessFailures: z.array(z.string().min(1)).default([]),
-  indexHealth: z.array(DreamDerivedIndexSchema).default([]),
-  inventoryRef: ArtifactPinSchema,
-  redacted: z.literal(true),
-  runId: z.string().min(1),
-  schemaVersion: z.literal("dream.source-health.v1"),
-  status: DreamSourceHealthStatusSchema,
-  summary: z.string().min(1),
-  workItemId: z.string().min(1),
-});
-
-export const DreamBackfillPlanActionSchema = z.object({
-  actionId: z.string().min(1),
-  authoritySourceId: z.string().min(1),
-  controlledScriptRef: z.string().min(1).optional(),
-  derivedIndexId: z.string().min(1),
-  expectedAuthorityCount: z.number().int().min(0).optional(),
-  priority: z.enum(["high", "low", "medium"]),
-  reason: z.string().min(1),
-  sourceFamily: DreamSourceFamilySchema,
-  timeWindow: z.object({
-    from: IsoDateTimeSchema.optional(),
-    to: IsoDateTimeSchema.optional(),
-  }),
-});
-
-export const DreamCaptureFixSchema = z.object({
-  fixId: z.string().min(1),
-  ownerRef: z.string().min(1),
-  reasonBackfillWasNeeded: z.string().min(1),
-  targetSourceId: z.string().min(1),
-});
-
-export const DreamBackfillPlanDocumentSchema = z.object({
-  actions: z.array(DreamBackfillPlanActionSchema).default([]),
-  captureFixes: z.array(DreamCaptureFixSchema).default([]),
-  generatedAt: IsoDateTimeSchema,
-  healthRef: ArtifactPinSchema,
-  inventoryRef: ArtifactPinSchema,
-  mode: z.literal("recovery-not-normal-operation"),
-  redacted: z.literal(true),
-  runId: z.string().min(1),
-  schemaVersion: z.literal("dream.backfill-plan.v1"),
-  status: z.enum(["backfill-required", "blocked", "no-backfill-needed"]),
-  summary: z.string().min(1),
-  workItemId: z.string().min(1),
-});
-
-export const DreamMemoryRelayInventoryPayloadSchema = z.object({
-  actor: ActorSchema,
-  requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
-  runId: z.string().min(1),
-  sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
-  workItemId: z.string().min(1),
-});
-
-export const DreamMemoryRelaySourceHealthPayloadSchema = z.object({
-  actor: ActorSchema,
-  inventory: DreamSourceInventoryDocumentSchema,
-  inventoryRef: ArtifactRefSchema,
-  runId: z.string().min(1),
-  workItemId: z.string().min(1),
-});
-
-export const DreamMemoryRelayBackfillPlanPayloadSchema = z.object({
-  actor: ActorSchema,
-  health: DreamSourceHealthDocumentSchema,
-  healthRef: ArtifactRefSchema,
-  inventory: DreamSourceInventoryDocumentSchema,
-  inventoryRef: ArtifactRefSchema,
-  runId: z.string().min(1),
-  workItemId: z.string().min(1),
-});
-
-export const DreamMemoryRelayBackfillRunPayloadSchema = z.object({
-  actor: ActorSchema,
-  plan: DreamBackfillPlanDocumentSchema,
-  planRef: ArtifactRefSchema,
-  runId: z.string().min(1),
-  workItemId: z.string().min(1),
-});
 
 export const DreamReceiptRefSchema = z.object({
   artifactRef: ArtifactRefSchema.optional(),
@@ -1300,15 +1029,6 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
   redacted: z.literal(true),
   relayLeaseReceiptRefs: z.array(ArtifactRefSchema).default([]),
   runId: z.string().min(1),
-  runtimeSourceCoverage: z.object({
-    declaredMachineIds: z.array(z.string().min(1)).default([]),
-    declaredRuntimes: z.array(DreamRuntimeSchema).default([]),
-    declaredSourceFamilies: z.array(DreamSourceFamilySchema).default([]),
-    inventoryStepIds: z.array(z.string().min(1)).default([]),
-    requiredMachineIds: z.array(z.string().min(1)).min(1),
-    requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
-    requiredSourceFamilies: z.array(DreamSourceFamilySchema).min(1),
-  }),
   schemaVersion: z.literal("dream.generated-workflow-proof.v1"),
   sourcePackDisposition: z.object({
     dispositionCount: z.number().int().min(0),
@@ -1323,7 +1043,6 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
     packageExportId: z.string().min(1),
     packageId: z.string().min(1),
     profileId: z.string().min(1),
-    requiredMachineIds: z.array(z.string().min(1)).min(1),
     requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
     sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
     sourcePacks: z.array(DreamSourcePackSchema).default([]),
@@ -1385,39 +1104,6 @@ export const DreamCorrelationGraphDocumentSchema = z.object({
   workItemId: z.string().min(1),
 });
 
-export const DreamBackfillRunReceiptDocumentSchema = z.object({
-  actionResults: z
-    .array(
-      z.object({
-        actionId: z.string().min(1),
-        failures: z.array(z.string().min(1)).default([]),
-        indexedCount: z.number().int().min(0),
-        skippedReasons: z.array(z.string().min(1)).default([]),
-        status: z.enum(["blocked", "completed", "failed", "skipped"]),
-      })
-    )
-    .default([]),
-  captureFixResults: z
-    .array(
-      z.object({
-        failures: z.array(z.string().min(1)).default([]),
-        fixId: z.string().min(1),
-        ownerRef: z.string().min(1),
-        repairAction: z.string().min(1),
-        skippedReasons: z.array(z.string().min(1)).default([]),
-        status: z.enum(["blocked", "completed", "failed", "skipped"]),
-        targetSourceId: z.string().min(1),
-      })
-    )
-    .default([]),
-  completedAt: IsoDateTimeSchema,
-  planRef: ArtifactPinSchema,
-  redacted: z.literal(true),
-  runId: z.string().min(1),
-  schemaVersion: z.literal("dream.backfill-run-receipt.v1"),
-  workItemId: z.string().min(1),
-});
-
 const DreamCaptureReceiptBaseDocumentSchema = z.object({
   captureKind: z.enum(["artifact", "run"]),
   capturedAt: IsoDateTimeSchema,
@@ -1443,33 +1129,13 @@ export const DreamCaptureReceiptDocumentSchema = z.discriminatedUnion(
   ]
 );
 
-export type DreamAdapterHealthStatus = z.infer<
-  typeof DreamAdapterHealthStatusSchema
->;
-export type DreamBackfillRunReceiptDocument = z.infer<
-  typeof DreamBackfillRunReceiptDocumentSchema
->;
-export type DreamBackfillPlanAction = z.infer<
-  typeof DreamBackfillPlanActionSchema
->;
-export type DreamBackfillPlanDocument = z.infer<
-  typeof DreamBackfillPlanDocumentSchema
->;
 export type DreamCaptureReceiptDocument = z.infer<
   typeof DreamCaptureReceiptDocumentSchema
 >;
-export type DreamCaptureFix = z.infer<typeof DreamCaptureFixSchema>;
 export type DreamCorrelationGraphDocument = z.infer<
   typeof DreamCorrelationGraphDocumentSchema
 >;
 export type DreamCoverageHorizon = z.infer<typeof DreamCoverageHorizonSchema>;
-export type DreamCoverageHorizonCount = z.infer<
-  typeof DreamCoverageHorizonCountSchema
->;
-export type DreamDerivedIndex = z.infer<typeof DreamDerivedIndexSchema>;
-export type DreamDerivedIndexStatus = z.infer<
-  typeof DreamDerivedIndexStatusSchema
->;
 export type DreamHydrationDocument = z.infer<
   typeof DreamHydrationDocumentSchema
 >;
@@ -1532,12 +1198,6 @@ export type DreamMemoryRelayOperation = z.infer<
   typeof DreamMemoryRelayOperationSchema
 >;
 export type DreamWorkflowEffect = z.infer<typeof DreamWorkflowEffectSchema>;
-export type DreamMemoryRelayBackfillPlanPayload = z.infer<
-  typeof DreamMemoryRelayBackfillPlanPayloadSchema
->;
-export type DreamMemoryRelayBackfillRunPayload = z.infer<
-  typeof DreamMemoryRelayBackfillRunPayloadSchema
->;
 export type DreamMemoryRelayCaptureArtifactPayload = z.infer<
   typeof DreamMemoryRelayCaptureArtifactPayloadSchema
 >;
@@ -1546,9 +1206,6 @@ export type DreamMemoryRelayCaptureRunPayload = z.infer<
 >;
 export type DreamMemoryRelayHydrationPayload = z.infer<
   typeof DreamMemoryRelayHydrationPayloadSchema
->;
-export type DreamMemoryRelayInventoryPayload = z.infer<
-  typeof DreamMemoryRelayInventoryPayloadSchema
 >;
 export type DreamMemoryRelayPath = z.infer<typeof DreamMemoryRelayPathSchema>;
 export type DreamMemoryRelayRedactionPolicy = z.infer<
@@ -1562,9 +1219,6 @@ export type DreamMemoryRelaySearchPayload = z.infer<
 >;
 export type DreamMemoryRelaySignalsPayload = z.infer<
   typeof DreamMemoryRelaySignalsPayloadSchema
->;
-export type DreamMemoryRelaySourceHealthPayload = z.infer<
-  typeof DreamMemoryRelaySourceHealthPayloadSchema
 >;
 export type DreamMemoryRelayTimeWindow = z.infer<
   typeof DreamMemoryRelayTimeWindowSchema
@@ -1616,10 +1270,6 @@ export type DreamRefinementProposalTargetKind = z.infer<
   typeof DreamRefinementProposalTargetKindSchema
 >;
 export type DreamRuntime = z.infer<typeof DreamRuntimeSchema>;
-export type DreamRuntimeCoverage = z.infer<typeof DreamRuntimeCoverageSchema>;
-export type DreamRuntimeCoverageStatus = z.infer<
-  typeof DreamRuntimeCoverageStatusSchema
->;
 export type DreamSignalDocument = z.infer<typeof DreamSignalDocumentSchema>;
 export type DreamSignalKind = z.infer<typeof DreamSignalKindSchema>;
 export type DreamSourceFamily = z.infer<typeof DreamSourceFamilySchema>;
@@ -1634,17 +1284,5 @@ export type DreamSourcePackSelectionPolicy = z.infer<
   typeof DreamSourcePackSelectionPolicySchema
 >;
 export type DreamSourceSurface = z.infer<typeof DreamSourceSurfaceSchema>;
-export type DreamSourceHealthDocument = z.infer<
-  typeof DreamSourceHealthDocumentSchema
->;
-export type DreamSourceHealthStatus = z.infer<
-  typeof DreamSourceHealthStatusSchema
->;
 export type DreamSourceProfile = z.infer<typeof DreamSourceProfileSchema>;
-export type DreamSourceInventoryDocument = z.infer<
-  typeof DreamSourceInventoryDocumentSchema
->;
-export type DreamSourceInventoryItem = z.infer<
-  typeof DreamSourceInventoryItemSchema
->;
 export type DreamSourceScope = z.infer<typeof DreamSourceScopeSchema>;

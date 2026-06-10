@@ -6,8 +6,6 @@ import {
   dreamMemoryFabricPackageMetadata,
 } from "../../src/cartridges/dream-memory-fabric/package-seed.ts";
 import {
-  DreamBackfillRunReceiptDocumentSchema,
-  DreamBackfillPlanDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionDocumentSchema,
@@ -19,12 +17,9 @@ import {
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamMemorySearchDocumentSchema,
   DreamRefinementProposalDocumentSchema,
-  DreamRuntimeCoverageSchema,
   DreamSourceProfileSchema,
   DreamSignalDocumentSchema,
   DreamSourcePackDispositionSchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
 } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
 
@@ -61,158 +56,6 @@ const receiptRef = {
   sourceId: "source:pi-transcripts",
   timestamp,
 } as const;
-
-const source = (input: {
-  readonly family:
-    | "agent-transcripts"
-    | "brain"
-    | "cloudflare-runs"
-    | "docs-pdf-brain";
-  readonly label: string;
-  readonly sourceId: string;
-}) => ({
-  adapter: {
-    checkedAt: timestamp,
-    health: "healthy",
-    port: `MemoryInventoryPort:${input.sourceId}`,
-  },
-  authority: {
-    count: 12,
-    locatorHash: hash,
-    redactedLocator: `redacted://${input.sourceId}`,
-    sourceSystem: input.sourceId,
-  },
-  blindSpots: [],
-  derivedIndexes: [
-    {
-      authorityCount: 12,
-      derivedCount: 12,
-      freshnessCheckedAt: timestamp,
-      indexId: `${input.sourceId}:typesense`,
-      indexKind: "typesense",
-      status: "fresh",
-    },
-  ],
-  family: input.family,
-  freshness: {
-    earliestAt: "2025-09-03T00:00:00.000Z",
-    indexedAt: timestamp,
-    latestAt: timestamp,
-  },
-  label: input.label,
-  privacyTier: "private",
-  scope,
-  sourceId: input.sourceId,
-});
-
-const validInventory = () => ({
-  actor,
-  blindSpots: [
-    "Claude local capture is missing and must not be hidden by Pi proxy hits.",
-  ],
-  generatedAt: timestamp,
-  redacted: true,
-  requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-  runId: "run-dream-preflight",
-  runtimeCoverage: [
-    {
-      horizonCounts: [
-        {
-          earliestAt: "2025-09-03T00:00:00.000Z",
-          hitCount: 42,
-          horizon: "all-time",
-          hydrationCount: 4,
-          latestAt: timestamp,
-          queryCount: 8,
-        },
-      ],
-      nativeProof: {
-        evidenceRefs: ["artifact://dream-preflight/run/pi/native-proof.json"],
-        redactedLocator: "redacted://pi-native-jsonl",
-        sourceId: "source:pi-transcripts",
-      },
-      runtime: "pi",
-      sourceNative: true,
-      status: "captured",
-    },
-    {
-      falsePositiveReason:
-        "Search hits came from Pi paths that mentioned Codex, not native ~/.codex/sessions paths.",
-      horizonCounts: [],
-      runtime: "codex",
-      sourceNative: false,
-      status: "false-positive",
-    },
-    {
-      horizonCounts: [],
-      missingReason:
-        "No Claude capture state or native Claude transcript index was available to the relay.",
-      runtime: "claude",
-      sourceNative: false,
-      status: "missing",
-    },
-    {
-      horizonCounts: [
-        {
-          hitCount: 6,
-          horizon: "7d",
-          hydrationCount: 2,
-          latestAt: timestamp,
-          queryCount: 3,
-        },
-      ],
-      nativeProof: {
-        evidenceRefs: [
-          "artifact://dream-preflight/run/cloudflare/event-stream.json",
-        ],
-        redactedLocator: "redacted://cloudflare-workflow-events",
-        sourceId: "source:cloudflare-runs",
-      },
-      runtime: "cloudflare",
-      sourceNative: true,
-      status: "captured",
-    },
-  ],
-  schemaVersion: "dream.source-inventory.v1",
-  scope,
-  sourceFamiliesExpected: [
-    "agent-transcripts",
-    "brain",
-    "cloudflare-runs",
-    "docs-pdf-brain",
-    "repo-outputs",
-  ],
-  sources: [
-    source({
-      family: "agent-transcripts",
-      label: "Native Pi transcripts",
-      sourceId: "source:pi-transcripts",
-    }),
-    source({
-      family: "agent-transcripts",
-      label: "Native Codex transcripts",
-      sourceId: "source:codex-transcripts",
-    }),
-    source({
-      family: "brain",
-      label: "Project Brain roots",
-      sourceId: "source:brain-roots",
-    }),
-    source({
-      family: "cloudflare-runs",
-      label: "Cloudflare workflow outputs",
-      sourceId: "source:cloudflare-runs",
-    }),
-    source({
-      family: "docs-pdf-brain",
-      label: "JoelClaw docs API",
-      sourceId: "source:joelclaw-docs",
-    }),
-  ],
-  summary:
-    "Dream source inventory reports native coverage, false positives, and missing runtimes before retrieval.",
-  workItemId: "work-item:dream-preflight",
-});
 
 describe("Dream memory fabric domain contracts", () => {
   it("treats the Dream source profile as package data, not the generated runtime machine", () => {
@@ -252,7 +95,6 @@ describe("Dream memory fabric domain contracts", () => {
       packageMetadataHasProfile: dreamMemoryFabricPackageMetadata.exports.some(
         (exportRecord) => exportRecord.kind === "source-profile"
       ),
-      requiredMachines: profile.requiredMachineIds,
       sourceFamilies: profile.sourceFamiliesExpected,
       sourcePackIds: profile.sourcePacks.map((pack) => pack.packId),
       sourcePackPolicies: profile.sourcePacks.map(
@@ -266,7 +108,6 @@ describe("Dream memory fabric domain contracts", () => {
       packageMetadataHasHitlDecisionWorkflowSeedNode: true,
       packageMetadataHasHitlFollowUpRunRequestNode: true,
       packageMetadataHasProfile: true,
-      requiredMachines: ["blaine", "panda", "flagg", "cloudflare"],
       sourceFamilies: [
         "agent-transcripts",
         "brain",
@@ -390,137 +231,7 @@ describe("Dream memory fabric domain contracts", () => {
     });
   });
 
-  it("captures source inventory without pretending false or missing runtime coverage is real", () => {
-    const parsed = DreamSourceInventoryDocumentSchema.parse(validInventory());
-
-    expect({
-      codexStatus: parsed.runtimeCoverage.find(
-        (coverage) => coverage.runtime === "codex"
-      )?.status,
-      requiredRuntimes: parsed.requiredRuntimes,
-      schemaVersion: parsed.schemaVersion,
-      sourceCount: parsed.sources.length,
-    }).toStrictEqual({
-      codexStatus: "false-positive",
-      requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-      schemaVersion: "dream.source-inventory.v1",
-      sourceCount: 5,
-    });
-  });
-
-  it("rejects captured runtime coverage without native source proof", () => {
-    const result = DreamRuntimeCoverageSchema.safeParse({
-      horizonCounts: [],
-      runtime: "codex",
-      sourceNative: false,
-      status: "captured",
-    });
-
-    expect({
-      issueMessage: result.success ? null : result.error.issues.at(0)?.message,
-      success: result.success,
-    }).toStrictEqual({
-      issueMessage: "Captured runtime coverage requires native source proof.",
-      success: false,
-    });
-  });
-
-  it("rejects inventory that omits a required runtime coverage finding", () => {
-    const inventory = validInventory();
-    const result = DreamSourceInventoryDocumentSchema.safeParse({
-      ...inventory,
-      runtimeCoverage: inventory.runtimeCoverage.filter(
-        (coverage) => coverage.runtime !== "cloudflare"
-      ),
-    });
-
-    expect({
-      issueMessage: result.success ? null : result.error.issues.at(0)?.message,
-      success: result.success,
-    }).toStrictEqual({
-      issueMessage:
-        "Dream source inventory must explicitly report every required runtime.",
-      success: false,
-    });
-  });
-
-  it("captures source health and scoped backfill as recovery, not normal operation", () => {
-    const health = DreamSourceHealthDocumentSchema.parse({
-      checkedAt: timestamp,
-      freshnessFailures: ["source:codex-transcripts index is stale."],
-      indexHealth: [
-        {
-          authorityCount: 250,
-          derivedCount: 0,
-          freshnessCheckedAt: timestamp,
-          indexId: "source:codex-transcripts:typesense",
-          indexKind: "typesense",
-          status: "stale",
-        },
-      ],
-      inventoryRef: artifactPin("dream/source-inventory.json"),
-      redacted: true,
-      runId: "run-dream-preflight",
-      schemaVersion: "dream.source-health.v1",
-      status: "degraded",
-      summary:
-        "Health check found stale Codex derived index while authority still exists.",
-      workItemId: "work-item:dream-preflight",
-    });
-    const backfillPlan = DreamBackfillPlanDocumentSchema.parse({
-      actions: [
-        {
-          actionId: "backfill:codex-native-transcripts",
-          authoritySourceId: "source:codex-transcripts",
-          controlledScriptRef: "joelclaw:sessions/backfill-codex",
-          derivedIndexId: "source:codex-transcripts:typesense",
-          expectedAuthorityCount: 250,
-          priority: "high",
-          reason:
-            "Native Codex files exist but derived index has no usable native coverage.",
-          sourceFamily: "agent-transcripts",
-          timeWindow: {
-            from: "2025-09-03T00:00:00.000Z",
-            to: timestamp,
-          },
-        },
-      ],
-      captureFixes: [
-        {
-          fixId: "capture:codex-to-joelclaw-runs",
-          ownerRef: "system:joelclaw",
-          reasonBackfillWasNeeded:
-            "Codex sessions were present locally but not reliably captured as native run chunks.",
-          targetSourceId: "source:codex-transcripts",
-        },
-      ],
-      generatedAt: timestamp,
-      healthRef: artifactPin("dream/source-health.json"),
-      inventoryRef: artifactPin("dream/source-inventory.json"),
-      mode: "recovery-not-normal-operation",
-      redacted: true,
-      runId: "run-dream-preflight",
-      schemaVersion: "dream.backfill-plan.v1",
-      status: "backfill-required",
-      summary:
-        "Backfill stale Codex derived index once, then fix capture so this is not normal workflow behavior.",
-      workItemId: "work-item:dream-preflight",
-    });
-
-    expect({
-      backfillMode: backfillPlan.mode,
-      backfillStatus: backfillPlan.status,
-      captureFixCount: backfillPlan.captureFixes.length,
-      healthStatus: health.status,
-    }).toStrictEqual({
-      backfillMode: "recovery-not-normal-operation",
-      backfillStatus: "backfill-required",
-      captureFixCount: 1,
-      healthStatus: "degraded",
-    });
-  });
-
-  it("captures the full trusted relay contract for retrieval, correlation, backfill execution, and capture", () => {
+  it("captures the full trusted relay contract for retrieval, correlation, and capture", () => {
     const relayRequest = DreamMemoryRelayRequestEnvelopeSchema.parse({
       actor,
       allowedSourceFamilies: ["agent-transcripts", "brain"],
@@ -646,22 +357,6 @@ describe("Dream memory fabric domain contracts", () => {
       schemaVersion: "dream.correlation-graph.v1",
       workItemId: "work-item:dream-preflight",
     });
-    const backfillReceipt = DreamBackfillRunReceiptDocumentSchema.parse({
-      actionResults: [
-        {
-          actionId: "backfill:codex-native",
-          indexedCount: 0,
-          skippedReasons: ["Native Codex source not leased in this test."],
-          status: "skipped",
-        },
-      ],
-      completedAt: timestamp,
-      planRef: artifactPin("dream/backfill-plan.json"),
-      redacted: true,
-      runId: "run-dream-preflight",
-      schemaVersion: "dream.backfill-run-receipt.v1",
-      workItemId: "work-item:dream-preflight",
-    });
     const captureReceipt = DreamCaptureReceiptDocumentSchema.parse({
       captureKind: "artifact",
       capturedAt: timestamp,
@@ -701,10 +396,6 @@ describe("Dream memory fabric domain contracts", () => {
     const endpointCatalog = DreamMemoryRelayEndpointCatalogSchema.parse({
       endpoints: [
         {
-          operation: "inventory",
-          path: "/memory/inventory",
-        },
-        {
           operation: "search",
           path: "/memory/search",
         },
@@ -717,7 +408,6 @@ describe("Dream memory fabric domain contracts", () => {
     });
 
     expect({
-      backfillReceiptSchema: backfillReceipt.schemaVersion,
       captureReceiptReadability: captureReceipt.readability,
       capturedRunId:
         runCaptureReceipt.captureKind === "run"
@@ -731,10 +421,9 @@ describe("Dream memory fabric domain contracts", () => {
       searchSchema: search.schemaVersion,
       signalKind: signals.signals.at(0)?.kind,
     }).toStrictEqual({
-      backfillReceiptSchema: "dream.backfill-run-receipt.v1",
       captureReceiptReadability: "actor-private",
       capturedRunId: "run-dream-preflight",
-      endpointCount: 3,
+      endpointCount: 2,
       graphEdgeRelationship: "supports_dream",
       hydrationReturnedFullTranscript: false,
       relayRequestSchema: "dream.memory-relay.request.v1",
@@ -1136,14 +825,6 @@ describe("Dream memory fabric domain contracts", () => {
         },
         {
           requirement:
-            "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
-          requirementId: "ingest-health-and-recovery-backfill",
-          status: "captured",
-          summary:
-            "The report contract requires source health, backfill plan, and backfill run source refs.",
-        },
-        {
-          requirement:
             "Dream emits actionable dreams and refinement proposals for kernel/package/workflow/schema/access/report changes.",
           requirementId: "dreams-and-refinement-proposals",
           status: "not-proven",
@@ -1180,10 +861,10 @@ describe("Dream memory fabric domain contracts", () => {
       status: "not-proven",
       summary: {
         blockedCount: 0,
-        capturedCount: 4,
+        capturedCount: 3,
         missingCount: 0,
         notProvenCount: 6,
-        totalCount: 10,
+        totalCount: 9,
       },
     } as const;
     const report = DreamHitlReportDocumentSchema.parse({
@@ -1211,10 +892,6 @@ describe("Dream memory fabric domain contracts", () => {
         exportId: "dream-hitl-decision-schema",
         nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
         sourceRefs: [
-          "artifact://dream-preflight/run/dream/source-inventory.json",
-          "artifact://dream-preflight/run/dream/source-health.json",
-          "artifact://dream-preflight/run/dream/backfill-plan.json",
-          "artifact://dream-preflight/run/dream/backfill-run-receipt.json",
           "artifact://dream-preflight/run/dream/memory-search.json",
           "artifact://dream-preflight/run/dream/hydration.json",
           "artifact://dream-preflight/run/dream/correlation-graph.json",
@@ -1296,10 +973,6 @@ describe("Dream memory fabric domain contracts", () => {
         "technical-appendix",
       ],
       sourceRefs: [
-        "artifact://dream-preflight/run/dream/source-inventory.json",
-        "artifact://dream-preflight/run/dream/source-health.json",
-        "artifact://dream-preflight/run/dream/backfill-plan.json",
-        "artifact://dream-preflight/run/dream/backfill-run-receipt.json",
         "artifact://dream-preflight/run/dream/memory-search.json",
         "artifact://dream-preflight/run/dream/hydration.json",
         "artifact://dream-preflight/run/dream/correlation-graph.json",
@@ -1338,7 +1011,6 @@ describe("Dream memory fabric domain contracts", () => {
         "live-cloudflare-execution",
         "generated-machine-and-harness",
         "t-shaped-memory-coverage",
-        "ingest-health-and-recovery-backfill",
         "dreams-and-refinement-proposals",
         "hitl-refinement-loop",
         "workflow-owned-wzrrd-output",
@@ -1347,10 +1019,10 @@ describe("Dream memory fabric domain contracts", () => {
       auditStatus: "not-proven",
       auditSummary: {
         blockedCount: 0,
-        capturedCount: 4,
+        capturedCount: 3,
         missingCount: 0,
         notProvenCount: 6,
-        totalCount: 10,
+        totalCount: 9,
       },
       decisionContract: {
         artifactPath: "dream/hitl-decision.json",
@@ -1359,10 +1031,6 @@ describe("Dream memory fabric domain contracts", () => {
         exportId: "dream-hitl-decision-schema",
         nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
         sourceRefs: [
-          "artifact://dream-preflight/run/dream/source-inventory.json",
-          "artifact://dream-preflight/run/dream/source-health.json",
-          "artifact://dream-preflight/run/dream/backfill-plan.json",
-          "artifact://dream-preflight/run/dream/backfill-run-receipt.json",
           "artifact://dream-preflight/run/dream/memory-search.json",
           "artifact://dream-preflight/run/dream/hydration.json",
           "artifact://dream-preflight/run/dream/correlation-graph.json",
@@ -1389,66 +1057,46 @@ describe("Dream memory fabric domain contracts", () => {
     });
   });
 
-  it("allows generated workflows to include Dream preflight states before retrieval", () => {
+  it("allows generated workflows to include Dream retrieval states", () => {
     const steps = [
       DynamicWorkflowStepSchema.parse({
         config: {
-          requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-          sourceFamiliesExpected: [
-            "agent-transcripts",
-            "brain",
-            "cloudflare-runs",
-            "docs-pdf-brain",
-          ],
+          maxHits: 10,
+          query: "dream workflow",
+          sourceFamilies: ["agent-transcripts", "brain"],
         },
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.source-inventory",
-        outputPath: "dream/source-inventory.json",
-        stepId: "inventory-memory-fabric",
-        summary:
-          "Inventory memory fabric sources before any retrieval lane runs.",
+        nodeType: "joelclaw.dream.memory-search",
+        outputPath: "dream/memory-search.json",
+        stepId: "search-memory-fabric",
+        summary: "Search redacted Dream memory evidence across horizons.",
       }),
       DynamicWorkflowStepSchema.parse({
         config: {
-          inventoryStepId: "inventory-memory-fabric",
+          searchStepId: "search-memory-fabric",
         },
-        dependsOn: ["inventory-memory-fabric"],
+        dependsOn: ["search-memory-fabric"],
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.source-health",
-        outputPath: "dream/source-health.json",
-        stepId: "check-source-health",
-        summary:
-          "Check source freshness and derived index health before retrieval.",
+        nodeType: "joelclaw.dream.hydrate",
+        outputPath: "dream/hydration.json",
+        stepId: "hydrate-receipts",
+        summary: "Hydrate redacted receipts without raw transcripts.",
       }),
       DynamicWorkflowStepSchema.parse({
         config: {
-          healthStepId: "check-source-health",
-          inventoryStepId: "inventory-memory-fabric",
+          hydrationStepId: "hydrate-receipts",
+          searchStepId: "search-memory-fabric",
         },
-        dependsOn: ["check-source-health"],
+        dependsOn: ["hydrate-receipts"],
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.backfill-plan",
-        outputPath: "dream/backfill-plan.json",
-        stepId: "plan-recovery-backfills",
-        summary:
-          "Plan scoped recovery backfills and capture fixes for stale sources.",
-      }),
-      DynamicWorkflowStepSchema.parse({
-        config: {
-          planStepId: "plan-recovery-backfills",
-        },
-        dependsOn: ["plan-recovery-backfills"],
-        kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.backfill-run",
-        outputPath: "dream/backfill-run-receipt.json",
-        stepId: "run-recovery-backfills",
-        summary:
-          "Execute recovery backfill through a leased relay and emit a receipt.",
+        nodeType: "joelclaw.dream.correlate",
+        outputPath: "dream/correlation-graph.json",
+        stepId: "correlate-evidence",
+        summary: "Correlate hydrated evidence into a source-backed graph.",
       }),
     ];
 
     expect(steps.map((step) => step.kind)).toStrictEqual([
-      "workflow.node.invoke",
       "workflow.node.invoke",
       "workflow.node.invoke",
       "workflow.node.invoke",
@@ -1458,10 +1106,9 @@ describe("Dream memory fabric domain contracts", () => {
         step.kind === "workflow.node.invoke" ? step.nodeType : null
       )
     ).toStrictEqual([
-      "joelclaw.dream.source-inventory",
-      "joelclaw.dream.source-health",
-      "joelclaw.dream.backfill-plan",
-      "joelclaw.dream.backfill-run",
+      "joelclaw.dream.memory-search",
+      "joelclaw.dream.hydrate",
+      "joelclaw.dream.correlate",
     ]);
   });
 });

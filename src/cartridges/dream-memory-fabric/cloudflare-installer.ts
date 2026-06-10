@@ -65,9 +65,8 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
             artifacts,
             delegate: createDreamMemoryFabricWorkflowNodeAdapter({
               artifacts,
-              dreamMemoryBackfill: dreamMemoryRelay,
+              dreamMemoryCapture: dreamMemoryRelay,
               dreamMemoryCorrelation: dreamMemoryRelay,
-              dreamMemoryFabric: dreamMemoryRelay,
               dreamMemoryRetrieval: dreamMemoryRelay,
               dreamMemorySignals: dreamMemoryRelay,
             }),

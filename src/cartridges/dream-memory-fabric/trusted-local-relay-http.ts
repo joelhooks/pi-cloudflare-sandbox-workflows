@@ -7,7 +7,6 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "../../app/domain/schemas.ts";
 import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import {
-  DreamDerivedIndexStatusSchema,
   DreamMemoryRelayEndpointCatalogSchema,
   DreamPrivacyTierSchema,
   DreamRuntimeSchema,
@@ -16,7 +15,6 @@ import {
 } from "./schemas.ts";
 import { createTrustedLocalDreamMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
 import type {
-  TrustedLocalDreamDerivedIndexConfig,
   TrustedLocalDreamMemoryFabricConfig,
   TrustedLocalDreamSourceRoot,
 } from "./trusted-local-memory-fabric.ts";
@@ -51,29 +49,16 @@ const DEFAULT_RELAY_PORT = 8789;
 const TRUSTED_LOCAL_PORT = "TrustedLocalDreamMemoryFabricPort";
 
 const SupportedRelayOperationSchema = z.enum([
-  "backfill-plan",
-  "backfill-run",
   "capture-artifact",
   "capture-run",
   "correlate",
   "hydrate",
-  "inventory",
   "search",
   "signals",
-  "source-health",
 ]);
-
-const TrustedLocalDreamDerivedIndexConfigSchema = z.object({
-  derivedCount: z.number().int().min(0).optional(),
-  indexId: z.string().min(1),
-  indexKind: z.enum(["qmd", "sqlite", "typesense", "vector", "view"]),
-  root: z.string().min(1).optional(),
-  status: DreamDerivedIndexStatusSchema.optional(),
-});
 
 const TrustedLocalDreamSourceRootConfigSchema = z.object({
   authorityRoot: z.string().min(1),
-  derivedIndexes: z.array(TrustedLocalDreamDerivedIndexConfigSchema).optional(),
   family: DreamSourceFamilySchema,
   includeExtensions: z.array(z.string().min(1)).optional(),
   label: z.string().min(1),
@@ -94,7 +79,6 @@ export const TrustedLocalDreamMemoryRelayReadinessReceiptSchema = z.object({
     sourceRoots: z
       .array(
         z.object({
-          derivedIndexCount: z.number().int().min(0),
           family: DreamSourceFamilySchema,
           includeExtensionCount: z.number().int().min(0),
           privacyTier: DreamPrivacyTierSchema,
@@ -122,25 +106,10 @@ export type TrustedLocalDreamMemoryRelayReadinessReceipt = z.infer<
   typeof TrustedLocalDreamMemoryRelayReadinessReceiptSchema
 >;
 
-const normalizeDerivedIndex = (
-  input: z.infer<typeof TrustedLocalDreamDerivedIndexConfigSchema>
-): TrustedLocalDreamDerivedIndexConfig => ({
-  ...(input.derivedCount === undefined
-    ? {}
-    : { derivedCount: input.derivedCount }),
-  indexId: input.indexId,
-  indexKind: input.indexKind,
-  ...(input.root === undefined ? {} : { root: input.root }),
-  ...(input.status === undefined ? {} : { status: input.status }),
-});
-
 const normalizeSourceRoot = (
   input: z.infer<typeof TrustedLocalDreamSourceRootConfigSchema>
 ): TrustedLocalDreamSourceRoot => ({
   authorityRoot: input.authorityRoot,
-  ...(input.derivedIndexes === undefined
-    ? {}
-    : { derivedIndexes: input.derivedIndexes.map(normalizeDerivedIndex) }),
   family: input.family,
   ...(input.includeExtensions === undefined
     ? {}
@@ -273,7 +242,6 @@ const jsonError = (status: number, code: string, message: string): Response =>
   );
 
 const sourceRootSummary = (sourceRoot: TrustedLocalDreamSourceRoot) => ({
-  derivedIndexCount: sourceRoot.derivedIndexes?.length ?? 0,
   family: sourceRoot.family,
   includeExtensionCount: sourceRoot.includeExtensions?.length ?? 0,
   privacyTier: sourceRoot.privacyTier,
@@ -304,10 +272,6 @@ export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
     redacted: true,
     schemaVersion: "trusted.dream-memory-relay.readiness.v1",
     supportedOperations: [
-      "inventory",
-      "source-health",
-      "backfill-plan",
-      "backfill-run",
       "capture-run",
       "capture-artifact",
       "signals",
@@ -349,15 +313,13 @@ export const createTrustedLocalDreamMemoryRelayFetchHandler = (
     ...(adapterNow === undefined ? {} : { now: adapterNow }),
     sourceRoots: config.memoryFabric.sourceRoots,
   });
-  const dreamMemoryFabric = createTrustedLocalDreamMemoryFabricAdapter({
+  const dreamMemoryCapture = createTrustedLocalDreamMemoryFabricAdapter({
     ...config.memoryFabric,
     ...(adapterNow === undefined ? {} : { now: adapterNow }),
   });
   const relayConfig = {
-    dreamMemoryBackfill: dreamMemoryFabric,
-    dreamMemoryCapture: dreamMemoryFabric,
+    dreamMemoryCapture,
     dreamMemoryCorrelation: dreamMemoryRetrieval,
-    dreamMemoryFabric,
     dreamMemoryRetrieval,
     dreamMemorySignals: dreamMemoryRetrieval,
     expectedBearerToken: config.expectedBearerToken,

@@ -264,7 +264,7 @@ describe("Dream HITL decision workflow-seed node", () => {
     });
     const adapter = createDreamMemoryFabricWorkflowNodeAdapter({
       artifacts,
-      dreamMemoryFabric: createIntegrationTestDreamMemoryFabricAdapter(),
+      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
     });
     const executeInput = {
       actor: integrationTestActor,
@@ -351,7 +351,7 @@ describe("Dream HITL decision workflow-seed node", () => {
     });
     const adapter = createDreamMemoryFabricWorkflowNodeAdapter({
       artifacts,
-      dreamMemoryFabric: createIntegrationTestDreamMemoryFabricAdapter(),
+      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
     });
     const executeInput = {
       actor: integrationTestActor,

@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
 import type { TrustedJoelClawSessionBridgeCommand } from "../../src/cartridges/dream-memory-fabric/trusted-joelclaw-session-source.ts";
-import { createTrustedLocalDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts";
 import { createTrustedLocalDreamMemoryRetrievalAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts";
-import type { DreamMemoryFabricResult } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 
 const timestamp = "2026-06-09T20:00:00.000Z";
 
@@ -28,16 +26,6 @@ const remoteSourceRoot = {
   },
   sourceId: "source:agent-transcripts:joelclaw-ssh:flagg",
   sourceSystem: "joelclaw:sessions:ssh",
-};
-
-const readyDocument = <TDocument>(
-  result: DreamMemoryFabricResult<TDocument>
-): TDocument => {
-  if (result.status === "blocked") {
-    throw new Error(result.blocker.message);
-  }
-
-  return result.document;
 };
 
 const commandWithSearchHits =
@@ -78,66 +66,6 @@ const commandWithSearchHits =
   };
 
 describe("trusted JoelClaw session Dream memory source", () => {
-  it("inventories joelclaw+ssh authority roots as redacted machine evidence", async () => {
-    const commands: string[][] = [];
-    const adapter = createTrustedLocalDreamMemoryFabricAdapter({
-      now: () => timestamp,
-      sessionBridgeCommand: commandWithSearchHits(commands),
-      sourceRoots: [remoteSourceRoot],
-    });
-    const inventory = readyDocument(
-      await adapter.inventorySources({
-        actor,
-        requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-        runId: "run:joelclaw-session-source-test",
-        sourceFamiliesExpected: ["agent-transcripts"],
-        workItemId: "work:joelclaw-session-source-test",
-      })
-    );
-    const source = inventory.sources.find(
-      (item) => item.sourceId === remoteSourceRoot.sourceId
-    );
-    const serialized = JSON.stringify(inventory);
-
-    expect({
-      authorityCount: source?.authority.count,
-      commandArgs: commands[0],
-      health: source?.adapter.health,
-      rawAuthorityRootLeaked: serialized.includes(
-        remoteSourceRoot.authorityRoot
-      ),
-      redactedLocator: source?.authority.redactedLocator,
-      scope: source?.scope,
-    }).toStrictEqual({
-      authorityCount: 37,
-      commandArgs: [
-        "sessions",
-        "search",
-        "agent memory workflow transcript",
-        "--source",
-        "ssh",
-        "--machine",
-        "flagg",
-        "--ssh-target",
-        "flagg",
-        "--runtime",
-        "all",
-        "--limit",
-        "1",
-        "--max-files",
-        "37",
-      ],
-      health: "healthy",
-      rawAuthorityRootLeaked: false,
-      redactedLocator:
-        "redacted://dream-source/source%3Aagent-transcripts%3Ajoelclaw-ssh%3Aflagg",
-      scope: {
-        machineId: "flagg",
-        organizationId: "org:joelhooks",
-      },
-    });
-  });
-
   it("searches joelclaw+ssh authority roots and hydrates cached redacted receipts", async () => {
     const commands: string[][] = [];
     const adapter = createTrustedLocalDreamMemoryRetrievalAdapter({

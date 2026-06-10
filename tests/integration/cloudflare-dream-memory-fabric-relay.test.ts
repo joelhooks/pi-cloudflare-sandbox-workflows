@@ -10,7 +10,6 @@ import {
 } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 import {
   createIntegrationTestDreamMemoryCorrelationAdapter,
-  createIntegrationTestDreamMemoryFabricAdapter,
   createIntegrationTestDreamMemoryRetrievalAdapter,
 } from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import { DreamMemoryRelayRequestEnvelopeSchema } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
@@ -53,8 +52,6 @@ const relayResponseFrom = (input: {
     redacted: true,
     runId: input.runId,
     schemaVersion: "dream.memory-relay.response.v1",
-    sourceFreshness: [],
-    sourceInventoryRefs: [],
     workItemId: input.workItemId,
   });
 
@@ -99,57 +96,11 @@ const createQueuedFetch = (responses: readonly Response[]) => {
 const parseJson = (value: string): unknown => JSON.parse(value);
 
 describe("Cloudflare Dream memory fabric relay adapter", () => {
-  it("posts Dream preflight requests to the trusted relay without leaking the relay token into documents", async () => {
+  it("posts Dream retrieval and capture requests to the trusted relay without leaking the relay token into documents", async () => {
     const request = buildIntegrationTestRunRequest();
-    const fixture = createIntegrationTestDreamMemoryFabricAdapter();
     const correlationFixture =
       createIntegrationTestDreamMemoryCorrelationAdapter();
     const retrievalFixture = createIntegrationTestDreamMemoryRetrievalAdapter();
-    const inventory = await fixture.inventorySources({
-      actor: request.actor,
-      requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-      runId: request.runId,
-      sourceFamiliesExpected: ["agent-transcripts", "brain", "cloudflare-runs"],
-      workItemId: request.workItemId,
-    });
-    if (inventory.status === "blocked") {
-      throw new Error(inventory.blocker.message);
-    }
-
-    const health = await fixture.checkSourceHealth({
-      actor: request.actor,
-      inventory: inventory.document,
-      inventoryRef: `artifact://relay-test/runs/${request.runId}/dream/source-inventory.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (health.status === "blocked") {
-      throw new Error(health.blocker.message);
-    }
-
-    const backfill = await fixture.planBackfill({
-      actor: request.actor,
-      health: health.document,
-      healthRef: `artifact://relay-test/runs/${request.runId}/dream/source-health.json`,
-      inventory: inventory.document,
-      inventoryRef: `artifact://relay-test/runs/${request.runId}/dream/source-inventory.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (backfill.status === "blocked") {
-      throw new Error(backfill.blocker.message);
-    }
-
-    const backfillRun = await fixture.runBackfill({
-      actor: request.actor,
-      plan: backfill.document,
-      planRef: `artifact://relay-test/runs/${request.runId}/dream/backfill-plan.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (backfillRun.status === "blocked") {
-      throw new Error(backfillRun.blocker.message);
-    }
     const captureRunDocument = {
       captureKind: "run" as const,
       capturedAt: "2026-06-09T18:00:00.000Z",
@@ -220,30 +171,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
 
     const fakeFetch = createQueuedFetch([
       relayResponseFrom({
-        document: inventory.document,
-        operation: "inventory",
-        runId: request.runId,
-        workItemId: request.workItemId,
-      }),
-      relayResponseFrom({
-        document: health.document,
-        operation: "source-health",
-        runId: request.runId,
-        workItemId: request.workItemId,
-      }),
-      relayResponseFrom({
-        document: backfill.document,
-        operation: "backfill-plan",
-        runId: request.runId,
-        workItemId: request.workItemId,
-      }),
-      relayResponseFrom({
-        document: backfillRun.document,
-        operation: "backfill-run",
-        runId: request.runId,
-        workItemId: request.workItemId,
-      }),
-      relayResponseFrom({
         document: captureRunDocument,
         operation: "capture-run",
         runId: request.runId,
@@ -285,50 +212,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       userAgent: "pi-cloudflare-sandbox-workflows-test/0.0.0",
     });
 
-    const inventoryResult = await adapter.inventorySources({
-      actor: request.actor,
-      requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
-      runId: request.runId,
-      sourceFamiliesExpected: ["agent-transcripts", "brain", "cloudflare-runs"],
-      workItemId: request.workItemId,
-    });
-    if (inventoryResult.status === "blocked") {
-      throw new Error(inventoryResult.blocker.message);
-    }
-
-    const healthResult = await adapter.checkSourceHealth({
-      actor: request.actor,
-      inventory: inventoryResult.document,
-      inventoryRef: `artifact://relay-test/runs/${request.runId}/dream/source-inventory.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (healthResult.status === "blocked") {
-      throw new Error(healthResult.blocker.message);
-    }
-
-    const backfillResult = await adapter.planBackfill({
-      actor: request.actor,
-      health: healthResult.document,
-      healthRef: `artifact://relay-test/runs/${request.runId}/dream/source-health.json`,
-      inventory: inventoryResult.document,
-      inventoryRef: `artifact://relay-test/runs/${request.runId}/dream/source-inventory.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (backfillResult.status === "blocked") {
-      throw new Error(backfillResult.blocker.message);
-    }
-    const backfillRunResult = await adapter.runBackfill({
-      actor: request.actor,
-      plan: backfillResult.document,
-      planRef: `artifact://relay-test/runs/${request.runId}/dream/backfill-plan.json`,
-      runId: request.runId,
-      workItemId: request.workItemId,
-    });
-    if (backfillRunResult.status === "blocked") {
-      throw new Error(backfillRunResult.blocker.message);
-    }
     const captureRunResult = await adapter.captureRun({
       actor: request.actor,
       readability: "actor-private",
@@ -393,14 +276,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       authorizationHeaders: fakeFetch.calls.map(
         (call) => call.headers["authorization"]
       ),
-      backfillRunCaptureFixStatuses:
-        backfillRunResult.document.captureFixResults.map(
-          (captureFix) => captureFix.status
-        ),
-      backfillRunStatuses: backfillRunResult.document.actionResults.map(
-        (action) => action.status
-      ),
-      backfillStatus: backfillResult.document.status,
       captureArtifactKind: captureArtifactResult.document.captureKind,
       captureRunCapturedRunId:
         captureRunResult.document.captureKind === "run"
@@ -409,17 +284,11 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       captureRunKind: captureRunResult.document.captureKind,
       correlationEdgeCount: correlationResult.document.edges.length,
       correlationNodeCount: correlationResult.document.nodes.length,
-      healthStatus: healthResult.document.status,
       hydrationCount: hydrationResult.document.hydrated.length,
       idempotencyKeys: parsedRequestBodies.map((body) => body.idempotencyKey),
-      inventorySchemaVersion: inventoryResult.document.schemaVersion,
       methods: fakeFetch.calls.map((call) => call.method),
       operations: parsedRequestBodies.map((body) => body.operation),
       relayLeaseIds: [
-        inventoryResult.relayLeaseReceipt,
-        healthResult.relayLeaseReceipt,
-        backfillResult.relayLeaseReceipt,
-        backfillRunResult.relayLeaseReceipt,
         captureRunResult.relayLeaseReceipt,
         captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
@@ -427,10 +296,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         correlationResult.relayLeaseReceipt,
       ].map((receipt) => receipt?.leaseId),
       relayLeaseSecretRefs: [
-        inventoryResult.relayLeaseReceipt,
-        healthResult.relayLeaseReceipt,
-        backfillResult.relayLeaseReceipt,
-        backfillRunResult.relayLeaseReceipt,
         captureRunResult.relayLeaseReceipt,
         captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
@@ -438,10 +303,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         correlationResult.relayLeaseReceipt,
       ].map((receipt) => receipt?.secretRef),
       relayLeaseStatuses: [
-        inventoryResult.relayLeaseReceipt,
-        healthResult.relayLeaseReceipt,
-        backfillResult.relayLeaseReceipt,
-        backfillRunResult.relayLeaseReceipt,
         captureRunResult.relayLeaseReceipt,
         captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
@@ -453,10 +314,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       ),
       requestSchemas: parsedRequestBodies.map((body) => body.schemaVersion),
       responseDocumentsLeakToken: JSON.stringify([
-        inventoryResult.document,
-        healthResult.document,
-        backfillResult.document,
-        backfillRunResult.document,
         captureRunResult.document,
         captureArtifactResult.document,
         searchResult.document,
@@ -473,49 +330,22 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `Bearer ${relayToken}`,
         `Bearer ${relayToken}`,
         `Bearer ${relayToken}`,
-        `Bearer ${relayToken}`,
-        `Bearer ${relayToken}`,
-        `Bearer ${relayToken}`,
-        `Bearer ${relayToken}`,
       ],
-      backfillRunCaptureFixStatuses: ["skipped"],
-      backfillRunStatuses: ["skipped"],
-      backfillStatus: "backfill-required",
       captureArtifactKind: "artifact",
       captureRunCapturedRunId: request.runId,
       captureRunKind: "run",
       correlationEdgeCount: 4,
       correlationNodeCount: 5,
-      healthStatus: "degraded",
       hydrationCount: 2,
       idempotencyKeys: [
-        `dream-memory-relay:${request.runId}:${request.workItemId}:inventory`,
-        `dream-memory-relay:${request.runId}:${request.workItemId}:source-health`,
-        `dream-memory-relay:${request.runId}:${request.workItemId}:backfill-plan`,
-        `dream-memory-relay:${request.runId}:${request.workItemId}:backfill-run`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:capture-run`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:capture-artifact`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:search`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:hydrate`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:correlate`,
       ],
-      inventorySchemaVersion: "dream.source-inventory.v1",
-      methods: [
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-        "POST",
-      ],
+      methods: ["POST", "POST", "POST", "POST", "POST"],
       operations: [
-        "inventory",
-        "source-health",
-        "backfill-plan",
-        "backfill-run",
         "capture-run",
         "capture-artifact",
         "search",
@@ -523,10 +353,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         "correlate",
       ],
       relayLeaseIds: [
-        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:inventory`,
-        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:source-health`,
-        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:backfill-plan`,
-        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:backfill-run`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:capture-run`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:capture-artifact`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:search`,
@@ -539,28 +365,10 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
-        "secretref:dream-memory-relay",
       ],
-      relayLeaseStatuses: [
-        "used",
-        "used",
-        "used",
-        "used",
-        "used",
-        "used",
-        "used",
-        "used",
-        "used",
-      ],
+      relayLeaseStatuses: ["used", "used", "used", "used", "used"],
       requestBodiesLeakToken: false,
       requestSchemas: [
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
@@ -575,16 +383,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `trace:${request.runId}`,
         `trace:${request.runId}`,
         `trace:${request.runId}`,
-        `trace:${request.runId}`,
-        `trace:${request.runId}`,
-        `trace:${request.runId}`,
-        `trace:${request.runId}`,
       ],
       urls: [
-        "https://memory-relay.joelclaw.local/memory/inventory",
-        "https://memory-relay.joelclaw.local/memory/source-health",
-        "https://memory-relay.joelclaw.local/memory/backfill/plan",
-        "https://memory-relay.joelclaw.local/memory/backfill/run",
         "https://memory-relay.joelclaw.local/memory/capture/run",
         "https://memory-relay.joelclaw.local/memory/capture/artifact",
         "https://memory-relay.joelclaw.local/memory/search",
@@ -597,14 +397,6 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
   it("publishes the full Dream memory relay endpoint catalog without direct private substrate paths", () => {
     expect(dreamMemoryRelayEndpointCatalog).toStrictEqual({
       endpoints: [
-        {
-          operation: "backfill-plan",
-          path: "/memory/backfill/plan",
-        },
-        {
-          operation: "backfill-run",
-          path: "/memory/backfill/run",
-        },
         {
           operation: "capture-artifact",
           path: "/memory/capture/artifact",
@@ -622,20 +414,12 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
           path: "/memory/hydrate",
         },
         {
-          operation: "inventory",
-          path: "/memory/inventory",
-        },
-        {
           operation: "search",
           path: "/memory/search",
         },
         {
           operation: "signals",
           path: "/memory/signals",
-        },
-        {
-          operation: "source-health",
-          path: "/memory/source-health",
         },
       ],
       schemaVersion: "dream.memory-relay.endpoint-catalog.v1",
@@ -656,11 +440,12 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       userAgent: "pi-cloudflare-sandbox-workflows-test/0.0.0",
     });
 
-    const result = await adapter.inventorySources({
+    const result = await adapter.searchMemories({
       actor: request.actor,
-      requiredRuntimes: ["pi"],
+      maxHits: 1,
+      query: "dynamic workflow proof",
       runId: request.runId,
-      sourceFamiliesExpected: ["agent-transcripts"],
+      sourceFamilies: ["agent-transcripts"],
       workItemId: request.workItemId,
     });
 
