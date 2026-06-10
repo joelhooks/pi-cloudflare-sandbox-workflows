@@ -21,6 +21,50 @@ const exactSignoffAction =
 const invalidSignoffAction =
   "Recorded relay exposure sign-off did not match the required phrase; provide the exact sign-off phrase before provisioning.";
 
+const DreamRelayProvisioningPlanStepSchema = z.object({
+  blockedBy: z.array(z.string().min(1)).default([]),
+  commandTemplate: z.string().min(1).optional(),
+  description: z.string().min(1),
+  executed: z.literal(false),
+  expectedReceipt: z.string().min(1).optional(),
+  redacted: z.literal(true),
+  requiresSignoff: z.boolean(),
+  sideEffectClass: z.enum([
+    "none",
+    "local-process",
+    "secret-write",
+    "network-boundary",
+    "worker-config",
+    "remote-verification",
+    "live-workflow-submit",
+  ]),
+  status: z.enum(["blocked", "ready", "ready-after-signoff"]),
+  stepId: z.string().min(1),
+});
+
+export const DreamRelayProvisioningPlanSchema = z.object({
+  approvalStatus: z.enum(["approved", "invalid", "required"]),
+  noSideEffectsPerformed: z.literal(true),
+  redacted: z.literal(true),
+  requiredSecretBindings: z.array(z.literal("DREAM_MEMORY_RELAY_TOKEN")),
+  requiredSignoffPhrase: z.literal(signoffPhrase),
+  requiredWorkerVars: z.array(z.literal("DREAM_MEMORY_RELAY_BASE_URL")),
+  schemaVersion: z.literal("trusted.dream-memory-relay.provisioning-plan.v1"),
+  selectedTransportCandidates: z.array(
+    z.object({
+      available: z.boolean(),
+      command: z.string().min(1),
+      preferred: z.boolean(),
+      reason: z.string().min(1),
+    })
+  ),
+  steps: z.array(DreamRelayProvisioningPlanStepSchema),
+});
+
+export type DreamRelayProvisioningPlan = z.infer<
+  typeof DreamRelayProvisioningPlanSchema
+>;
+
 const RelayReceiptFamilyCountSchema = z.object({
   family: z.string().min(1),
   receiptCount: z.number().int().min(0),
@@ -136,6 +180,7 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
       path: z.string().min(1).optional(),
     })
   ),
+  provisioningPlan: DreamRelayProvisioningPlanSchema,
   recommendedNextActions: z.array(z.string().min(1)),
   redacted: z.literal(true),
   schemaVersion: z.literal(
@@ -501,6 +546,232 @@ const recommendedNextActions = (input: {
   return [...new Set(actions)];
 };
 
+const preferredTransportCommands = ["cloudflared", "ngrok", "tailscale"];
+
+const transportCandidatesFor = (
+  networkTools: readonly CommandProbe[]
+): DreamRelayProvisioningPlan["selectedTransportCandidates"] => {
+  const toolsByCommand = new Map(
+    networkTools.map((tool) => [tool.command, tool])
+  );
+
+  return preferredTransportCommands.map((command, index) => {
+    const tool = toolsByCommand.get(command);
+    const available = tool?.available === true;
+
+    return {
+      available,
+      command,
+      preferred: index === 0,
+      reason: available
+        ? `${command} is installed locally.`
+        : `${command} is not available on PATH.`,
+    };
+  });
+};
+
+const provisioningPlanBlockedBy = (input: {
+  readonly approvalStatus: "approved" | "invalid" | "required";
+  readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
+  readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly networkTools: readonly CommandProbe[];
+  readonly visionHasSignoffRule: boolean;
+}): readonly string[] => {
+  const blockers: string[] = [];
+
+  if (!input.visionHasSignoffRule) {
+    blockers.push("missing-vision-signoff-rule");
+  }
+
+  if (input.approvalStatus !== "approved") {
+    blockers.push("missing-exact-owner-signoff");
+  }
+
+  if (input.localRelayProof.status !== "passed") {
+    blockers.push("local-relay-proof-not-passed");
+  }
+
+  if (!input.networkTools.some((tool) => tool.available)) {
+    blockers.push("no-approved-transport-tool");
+  }
+
+  if (
+    input.livePreflight.status !== "ready" &&
+    input.livePreflight.status !== "blocked"
+  ) {
+    blockers.push("live-preflight-unavailable");
+  }
+
+  return [...new Set(blockers)];
+};
+
+const buildProvisioningStep = (input: {
+  readonly blockedBy?: readonly string[];
+  readonly commandTemplate?: string;
+  readonly description: string;
+  readonly expectedReceipt?: string;
+  readonly requiresSignoff: boolean;
+  readonly sideEffectClass: z.infer<
+    typeof DreamRelayProvisioningPlanStepSchema
+  >["sideEffectClass"];
+  readonly stepId: string;
+}): z.infer<typeof DreamRelayProvisioningPlanStepSchema> => {
+  const blockedBy = [...(input.blockedBy ?? [])];
+  const status = (() => {
+    if (blockedBy.length > 0) {
+      return "blocked";
+    }
+
+    if (input.requiresSignoff) {
+      return "ready-after-signoff";
+    }
+
+    return "ready";
+  })();
+
+  return DreamRelayProvisioningPlanStepSchema.parse({
+    blockedBy,
+    ...(input.commandTemplate === undefined
+      ? {}
+      : { commandTemplate: input.commandTemplate }),
+    description: input.description,
+    executed: false,
+    ...(input.expectedReceipt === undefined
+      ? {}
+      : { expectedReceipt: input.expectedReceipt }),
+    redacted: true,
+    requiresSignoff: input.requiresSignoff,
+    sideEffectClass: input.sideEffectClass,
+    status,
+    stepId: input.stepId,
+  });
+};
+
+const buildProvisioningPlan = (input: {
+  readonly approvalStatus: "approved" | "invalid" | "required";
+  readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
+  readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly networkTools: readonly CommandProbe[];
+  readonly visionHasSignoffRule: boolean;
+}): DreamRelayProvisioningPlan => {
+  const baseBlockers = provisioningPlanBlockedBy(input);
+  const relayConfigBlockers = [
+    ...baseBlockers,
+    ...(input.livePreflight.missingCheckIds.includes(
+      "env:DREAM_MEMORY_RELAY_BASE_URL"
+    )
+      ? ["missing-dream-memory-relay-base-url"]
+      : []),
+    ...(input.livePreflight.missingCheckIds.includes(
+      "env:DREAM_MEMORY_RELAY_TOKEN"
+    )
+      ? ["missing-dream-memory-relay-token"]
+      : []),
+    ...(input.livePreflight.missingCheckIds.includes(
+      "wrangler:DREAM_MEMORY_RELAY_BASE_URL"
+    )
+      ? ["missing-worker-relay-url-config"]
+      : []),
+    ...(input.livePreflight.relayHealthzStatus === "passed"
+      ? []
+      : ["relay-healthz-not-verified"]),
+  ];
+
+  return DreamRelayProvisioningPlanSchema.parse({
+    approvalStatus: input.approvalStatus,
+    noSideEffectsPerformed: true,
+    redacted: true,
+    requiredSecretBindings: ["DREAM_MEMORY_RELAY_TOKEN"],
+    requiredSignoffPhrase: signoffPhrase,
+    requiredWorkerVars: ["DREAM_MEMORY_RELAY_BASE_URL"],
+    schemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
+    selectedTransportCandidates: transportCandidatesFor(input.networkTools),
+    steps: [
+      buildProvisioningStep({
+        blockedBy:
+          input.localRelayProof.status === "passed"
+            ? []
+            : ["local-relay-proof-not-passed"],
+        commandTemplate: "pnpm app:dream:relay:proof",
+        description:
+          "Refresh the redacted local relay proof before any network exposure.",
+        expectedReceipt:
+          ".wrangler/workflow-app/dream-relay/latest-local-proof.json",
+        requiresSignoff: false,
+        sideEffectClass: "none",
+        stepId: "refresh-local-relay-proof",
+      }),
+      buildProvisioningStep({
+        blockedBy: baseBlockers,
+        commandTemplate: "pnpm app:dream:relay",
+        description:
+          "Start the trusted Dream relay bound to localhost with approved source roots and a non-printed token.",
+        expectedReceipt: "trusted.dream-memory-relay.readiness.v1",
+        requiresSignoff: true,
+        sideEffectClass: "local-process",
+        stepId: "start-local-trusted-relay",
+      }),
+      buildProvisioningStep({
+        blockedBy: baseBlockers,
+        commandTemplate:
+          "<approved-transport> expose http://127.0.0.1:<relay-port> as HTTPS",
+        description:
+          "Expose the localhost trusted relay through the approved HTTPS transport.",
+        expectedReceipt: "approved HTTPS relay URL",
+        requiresSignoff: true,
+        sideEffectClass: "network-boundary",
+        stepId: "expose-approved-https-relay",
+      }),
+      buildProvisioningStep({
+        blockedBy: baseBlockers,
+        commandTemplate:
+          "printf '%s' \"$DREAM_MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put DREAM_MEMORY_RELAY_TOKEN --config wrangler.jsonc",
+        description:
+          "Provision the relay token as a remote Worker secret without printing token material.",
+        expectedReceipt:
+          "wrangler secret list includes DREAM_MEMORY_RELAY_TOKEN",
+        requiresSignoff: true,
+        sideEffectClass: "secret-write",
+        stepId: "provision-worker-relay-token",
+      }),
+      buildProvisioningStep({
+        blockedBy: baseBlockers,
+        commandTemplate:
+          "deploy Worker with DREAM_MEMORY_RELAY_BASE_URL set to the approved HTTPS relay URL",
+        description:
+          "Deploy or configure the Worker with the approved relay base URL.",
+        expectedReceipt:
+          ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
+        requiresSignoff: true,
+        sideEffectClass: "worker-config",
+        stepId: "configure-worker-relay-url",
+      }),
+      buildProvisioningStep({
+        blockedBy: relayConfigBlockers,
+        commandTemplate: "pnpm app:dream:preflight",
+        description:
+          "Verify authenticated /healthz and live Dream readiness after relay config is present.",
+        expectedReceipt:
+          ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
+        requiresSignoff: true,
+        sideEffectClass: "remote-verification",
+        stepId: "verify-relay-healthz",
+      }),
+      buildProvisioningStep({
+        blockedBy: relayConfigBlockers,
+        commandTemplate: "pnpm app:dream:run --submit",
+        description:
+          "Submit the generated Cloudflare Dream workflow only after preflight is ready.",
+        expectedReceipt:
+          ".wrangler/workflow-app/dream-runs/<run-id>-receipt.json",
+        requiresSignoff: true,
+        sideEffectClass: "live-workflow-submit",
+        stepId: "submit-live-dream",
+      }),
+    ],
+  });
+};
+
 export const buildDreamRelayProvisioningPreflightReceipt = (
   input: BuildDreamRelayProvisioningPreflightInput
 ): DreamRelayProvisioningPreflightReceipt => {
@@ -517,6 +788,13 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
   });
   const approvalStatus = approvalStatusFor(input.approvalSignoff);
   const actions = recommendedNextActions({
+    approvalStatus,
+    livePreflight,
+    localRelayProof,
+    networkTools: input.networkTools,
+    visionHasSignoffRule,
+  });
+  const provisioningPlan = buildProvisioningPlan({
     approvalStatus,
     livePreflight,
     localRelayProof,
@@ -547,6 +825,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
       command: tool.command,
       ...(tool.path === undefined ? {} : { path: tool.path }),
     })),
+    provisioningPlan,
     recommendedNextActions: actions,
     redacted: true,
     schemaVersion: "trusted.dream-memory-relay.provisioning-preflight.v1",

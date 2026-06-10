@@ -801,39 +801,44 @@ Decision:
 - `VISION.md` requires owner sign-off before exposing JoelClaw/Typesense/private transcript access over a new network boundary.
 - The provisioning preflight is intentionally non-mutating: it does not start tunnels, create funnels, rotate secrets, edit Worker config, or expose the relay.
 - The preflight reads the latest local relay proof and live Dream preflight, probes available exposure tools, checks the Vision sign-off rule, and writes a redacted operational receipt.
+- The preflight now emits a nested `trusted.dream-memory-relay.provisioning-plan.v1` plan with `noSideEffectsPerformed=true`. Each planned step records its side-effect class, sign-off requirement, blockers, expected receipt, and `executed=false`.
 - A provided `--approval-ref` is provenance only. The receipt is approved only when `--approval-signoff` exactly matches `exposing JoelClaw/Typesense over a new network boundary`.
 - Exact sign-off still does not perform exposure. Actual provisioning remains a separate deliberate step.
 
 Changed surfaces:
 
 - `scripts/workflow-app-dream-relay-provisioning-preflight.ts` adds `trusted.dream-memory-relay.provisioning-preflight.v1`.
+- The same script now includes `trusted.dream-memory-relay.provisioning-plan.v1` inside the preflight receipt.
 - `package.json` exposes `pnpm app:dream:relay:provisioning-preflight`.
-- `tests/integration/dream-relay-provisioning-preflight.test.ts` proves the gate blocks without sign-off, rejects `--approval-ref` alone, rejects non-matching sign-off text, can become ready-for-approved-provisioning with the exact sign-off plus local proof/tooling, and blocks if the local relay proof is missing.
+- `tests/integration/dream-relay-provisioning-preflight.test.ts` proves the gate blocks without sign-off, rejects `--approval-ref` alone, rejects non-matching sign-off text, can become ready-for-approved-provisioning with the exact sign-off plus local proof/tooling, blocks if the local relay proof is missing, and proves the provisioning plan is non-executed.
 
 Latest receipt:
 
 - Command: `pnpm app:dream:relay:provisioning-preflight`
 - Receipt path: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`
-- Receipt time: `2026-06-09T21:39:36.765Z`
+- Receipt time: `2026-06-10T03:49:48.768Z`
 - Status: `blocked`
 - Approval status: `required`
 - Sign-off phrase: `exposing JoelClaw/Typesense over a new network boundary`
 - Local relay proof status: `passed`
-- Local relay proof source roots: `8`
-- Local relay search/hydration/correlation: `12` hits, `12` hydrated redacted receipts, `48` correlation edges, `33` correlation nodes
-- Local relay hydrated family mix: `agent-transcripts:3`, `brain:3`, `cloudflare-runs:3`, `docs-pdf-brain:3`
+- Local relay proof source roots: `10`
+- Local relay search/hydration/correlation: `12` hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes
+- Local relay hydrated family mix: `agent-transcripts:3`, `brain:3`, `cloudflare-runs:2`, `docs-pdf-brain:2`, `repo-outputs:2`
 - Live preflight status: `blocked`
 - Missing live checks: `env:DREAM_MEMORY_RELAY_BASE_URL`, `env:DREAM_MEMORY_RELAY_TOKEN`, `wrangler:DREAM_MEMORY_RELAY_BASE_URL`, and `relay:healthz`
 - Tool probes: `ngrok` available, `tailscale` available, `cloudflared` unavailable
+- Provisioning plan steps: `refresh-local-relay-proof` is `ready` and has `sideEffectClass=none`; `start-local-trusted-relay`, `expose-approved-https-relay`, `provision-worker-relay-token`, `configure-worker-relay-url`, `verify-relay-healthz`, and `submit-live-dream` are `blocked`, require sign-off, and have `executed=false`.
 - Recommended next actions: get explicit owner sign-off, provision approved HTTPS relay endpoint, provision `DREAM_MEMORY_RELAY_TOKEN` without printing it, then add `DREAM_MEMORY_RELAY_BASE_URL` to Worker config after approval.
 
 Validation receipts:
 
 - `pnpm app:dream:relay:provisioning-preflight` passed and wrote the redacted blocked receipt.
-- `pnpm vitest run tests/integration/dream-relay-provisioning-preflight.test.ts tests/integration/dream-live-preflight.test.ts` passed: `2` files, `12` tests.
-- `pnpm typecheck` passed.
-- `pnpm typecheck:tsc` passed.
+- `pnpm exec vitest run tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `1` file, `9` tests.
+- `pnpm exec vitest run tests/integration/dream-relay-provisioning-preflight.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts` passed: `3` files, `23` tests.
 - `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pi-notes brain check` passed.
+- `git diff --check` passed.
 
 This still does not prove a live Dream run in Cloudflare. It makes the next risky step explicit: the system can now show that local relay capability is real, network tools exist, and live Worker gates remain, while refusing to imply that a private transcript relay should be exposed without a recorded owner approval.
 

@@ -138,6 +138,14 @@ const livePreflightBlocked = JSON.stringify({
       status: "missing",
     },
     {
+      checkId: "env:DREAM_MEMORY_RELAY_BASE_URL",
+      message: "DREAM_MEMORY_RELAY_BASE_URL is not configured.",
+      redacted: true,
+      required: true,
+      requiredFor: ["dream-memory-relay-binding"],
+      status: "missing",
+    },
+    {
       checkId: "env:DREAM_MEMORY_RELAY_TOKEN",
       message: "DREAM_MEMORY_RELAY_TOKEN is not configured.",
       redacted: true,
@@ -185,6 +193,8 @@ describe("Dream relay provisioning preflight", () => {
       backfillRunSkippedCount: receipt.localRelayProof.backfillRunSkippedCount,
       correlationEdgeCount: receipt.localRelayProof.correlationEdgeCount,
       localProofStatus: receipt.localRelayProof.status,
+      noSideEffectsPerformed: receipt.provisioningPlan.noSideEffectsPerformed,
+      planSchemaVersion: receipt.provisioningPlan.schemaVersion,
       recommendedSignoff: receipt.recommendedNextActions.includes(
         "Get explicit owner sign-off for exposing the trusted Dream relay over a new network boundary."
       ),
@@ -195,6 +205,8 @@ describe("Dream relay provisioning preflight", () => {
       backfillRunSkippedCount: 9,
       correlationEdgeCount: 48,
       localProofStatus: "passed",
+      noSideEffectsPerformed: true,
+      planSchemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
       recommendedSignoff: true,
       signoffProvided: false,
       status: "blocked",
@@ -415,6 +427,83 @@ describe("Dream relay provisioning preflight", () => {
       healthzAction: true,
       signoffProvided: true,
       status: "ready-for-approved-provisioning",
+    });
+  });
+
+  it("emits a non-executed provisioning plan with blocked live submit steps", () => {
+    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+      approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
+      approvalSignoff,
+      checkedAt: "2026-06-09T10:00:00.000Z",
+      livePreflightPath: "dream-preflight.json",
+      livePreflightText: livePreflightBlocked,
+      localRelayProofPath: "local-proof.json",
+      localRelayProofText: localRelayProof,
+      networkTools: [
+        {
+          available: false,
+          command: "cloudflared",
+        },
+        {
+          available: true,
+          command: "ngrok",
+          path: "/opt/homebrew/bin/ngrok",
+        },
+      ],
+      visionText: visionWithSignoffRule,
+    });
+
+    const stepsById = new Map(
+      receipt.provisioningPlan.steps.map((step) => [step.stepId, step])
+    );
+
+    expect({
+      allStepsNonExecuted: receipt.provisioningPlan.steps.every(
+        (step) => !step.executed
+      ),
+      refreshStatus: stepsById.get("refresh-local-relay-proof")?.status,
+      relayTokenStep: {
+        executed: stepsById.get("provision-worker-relay-token")?.executed,
+        sideEffectClass: stepsById.get("provision-worker-relay-token")
+          ?.sideEffectClass,
+        status: stepsById.get("provision-worker-relay-token")?.status,
+      },
+      submitBlockers: stepsById.get("submit-live-dream")?.blockedBy,
+      transportCandidates: receipt.provisioningPlan.selectedTransportCandidates,
+    }).toStrictEqual({
+      allStepsNonExecuted: true,
+      refreshStatus: "ready",
+      relayTokenStep: {
+        executed: false,
+        sideEffectClass: "secret-write",
+        status: "ready-after-signoff",
+      },
+      submitBlockers: [
+        "missing-dream-memory-relay-base-url",
+        "missing-dream-memory-relay-token",
+        "missing-worker-relay-url-config",
+        "relay-healthz-not-verified",
+      ],
+      transportCandidates: [
+        {
+          available: false,
+          command: "cloudflared",
+          preferred: true,
+          reason: "cloudflared is not available on PATH.",
+        },
+        {
+          available: true,
+          command: "ngrok",
+          preferred: false,
+          reason: "ngrok is installed locally.",
+        },
+        {
+          available: false,
+          command: "tailscale",
+          preferred: false,
+          reason: "tailscale is not available on PATH.",
+        },
+      ],
     });
   });
 
