@@ -109,10 +109,10 @@ const buildLease = (input: {
   return CapabilityLeaseSchema.parse({
     actor: request.actor,
     capability: "github.pull-request.create",
-    capabilityRef: `capability:github.pull-request.create:${request.runId}`,
+    capabilityRef: `capability:github.pull-request.create:${request.runId}:test:github-pr`,
     dryRun: input.dryRun ?? false,
     expiresAt: "2026-06-08T23:59:00.000Z",
-    leaseId: `lease:github.pull-request.create:${request.runId}`,
+    leaseId: `lease:github.pull-request.create:${request.runId}:test:github-pr`,
     payloadHash: hashJson(input.payload),
     payloadRef: `artifact://github-pr-adapter/runs/${request.runId}/payloads/github-pr.json`,
     policyId: "github-pr-policy",
@@ -132,6 +132,7 @@ const buildLease = (input: {
     },
     runId: request.runId,
     secretRef: input.secretRef ?? "secretref:github-pr",
+    stepId: "test:github-pr",
     traceContext: workflowTraceContextForCapability({
       capability: "github.pull-request.create",
       runId: request.runId,

@@ -59,10 +59,10 @@ const buildLease = (input: {
   return CapabilityLeaseSchema.parse({
     actor: request.actor,
     capability: "discord.message.send",
-    capabilityRef: `capability:discord.message.send:${request.runId}`,
+    capabilityRef: `capability:discord.message.send:${request.runId}:test:discord-message`,
     dryRun: input.dryRun ?? false,
     expiresAt: "2026-06-08T23:59:00.000Z",
-    leaseId: `lease:discord.message.send:${request.runId}`,
+    leaseId: `lease:discord.message.send:${request.runId}:test:discord-message`,
     payloadHash: input.payload.bodyHash,
     payloadRef: `artifact://discord-adapter/runs/${request.runId}/payloads/discord-message.json`,
     policyId: "discord-message-policy",
@@ -82,6 +82,7 @@ const buildLease = (input: {
       } satisfies CapabilityLease["reviewGate"]),
     runId: request.runId,
     secretRef: input.secretRef ?? "secretref:discord-bot",
+    stepId: "test:discord-message",
     traceContext: workflowTraceContextForCapability({
       capability: "discord.message.send",
       runId: request.runId,

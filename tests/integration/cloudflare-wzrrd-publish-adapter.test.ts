@@ -231,10 +231,10 @@ const buildLease = (input: {
   CapabilityLeaseSchema.parse({
     actor: input.request.actor,
     capability: "wzrrd.site.publish",
-    capabilityRef: `capability:wzrrd.site.publish:${input.request.runId}`,
+    capabilityRef: `capability:wzrrd.site.publish:${input.request.runId}:test:wzrrd-publish`,
     dryRun: input.dryRun ?? false,
     expiresAt: "2026-06-08T23:59:00.000Z",
-    leaseId: `lease:wzrrd.site.publish:${input.request.runId}`,
+    leaseId: `lease:wzrrd.site.publish:${input.request.runId}:test:wzrrd-publish`,
     payloadHash: hashJson(input.payload),
     payloadRef: `artifact://wzrrd-adapter/runs/${input.request.runId}/payloads/wzrrd-publish.json`,
     policyId: "wzrrd-adapter-policy",
@@ -255,6 +255,7 @@ const buildLease = (input: {
       } satisfies CapabilityLease["reviewGate"]),
     runId: input.request.runId,
     secretRef: input.secretRef ?? "secretref:wzrrd-api",
+    stepId: "test:wzrrd-publish",
     traceContext: workflowTraceContextForCapability({
       capability: "wzrrd.site.publish",
       runId: input.request.runId,

@@ -75,7 +75,7 @@ const buildCapabilityReceipt = (): CapabilityLeaseReceipt =>
       status: "dry-run",
     },
     dryRun: true,
-    leaseId: `lease:discord.message.send:${runId}`,
+    leaseId: `lease:discord.message.send:${runId}:step-discord-1`,
     payloadHash: sha256Hex("review gate message"),
     payloadRef: capabilityPayloadRef,
     policyId: "discord-message-policy",

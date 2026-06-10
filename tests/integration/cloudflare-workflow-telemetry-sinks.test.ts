@@ -35,7 +35,7 @@ const structuredLog = (
       laneId: "lane:planner",
       laneKind: "planner",
       laneRuntime: "pi-agent-cli",
-      leaseId: "lease:discord.message.send:run",
+      leaseId: "lease:discord.message.send:run:research-review",
       payloadHash: "0".repeat(64),
       rawSecret: "must-not-be-exported",
       resourceRef: "discord:channel:operator-status",

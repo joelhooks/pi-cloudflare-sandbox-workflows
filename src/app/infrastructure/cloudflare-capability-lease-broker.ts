@@ -123,7 +123,11 @@ const writeReceiptRow = async (input: {
     input.d1
       .prepare(
         `insert into receipts (receipt_id, run_id, receipt_kind, artifact_ref, receipt_hash, redacted)
-         values (?, ?, ?, ?, ?, ?)`
+         values (?, ?, ?, ?, ?, ?)
+         on conflict(receipt_id) do update set
+           artifact_ref = excluded.artifact_ref,
+           receipt_hash = excluded.receipt_hash,
+           redacted = excluded.redacted`
       )
       .bind(
         row.receipt_id,
@@ -163,7 +167,14 @@ const persistIssuedLease = async (input: {
     input.d1
       .prepare(
         `insert into capability_leases (lease_id, run_id, capability, resource_ref, payload_hash, policy_id, status, expires_at, redacted)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         on conflict(lease_id) do update set
+           resource_ref = excluded.resource_ref,
+           payload_hash = excluded.payload_hash,
+           policy_id = excluded.policy_id,
+           status = excluded.status,
+           expires_at = excluded.expires_at,
+           redacted = excluded.redacted`
       )
       .bind(
         leaseRow.lease_id,
@@ -431,10 +442,10 @@ const decideLease = async (input: {
   const lease = CapabilityLeaseSchema.parse({
     actor: input.request.actor,
     capability: input.request.capability,
-    capabilityRef: `capability:${input.request.capability}:${input.request.runId}`,
+    capabilityRef: `capability:${input.request.capability}:${input.request.runId}:${input.request.stepId}`,
     dryRun: input.request.dryRun,
     expiresAt: input.request.expiresAt,
-    leaseId: `lease:${input.request.capability}:${input.request.runId}`,
+    leaseId: `lease:${input.request.capability}:${input.request.runId}:${input.request.stepId}`,
     payloadHash: input.request.payloadHash,
     payloadRef: input.request.payloadRef,
     policyId: policyIdForCapability({
@@ -448,6 +459,7 @@ const decideLease = async (input: {
     rollbackRef: input.request.rollbackRef,
     runId: input.request.runId,
     secretRef: input.request.secretRef,
+    stepId: input.request.stepId,
     traceContext: input.request.traceContext,
     workItemId: input.request.workItemId,
   });

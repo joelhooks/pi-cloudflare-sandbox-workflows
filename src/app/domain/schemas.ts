@@ -1174,6 +1174,7 @@ export const CapabilityLeaseRequestSchema = z.object({
   rollbackRef: ArtifactRefSchema.optional(),
   runId: z.string().min(1),
   secretRef: z.string().min(1),
+  stepId: z.string().min(1),
   traceContext: WorkflowTraceContextSchema,
   workItemId: z.string().min(1),
 });
@@ -1195,6 +1196,7 @@ export const CapabilityLeaseSchema = z.object({
   rollbackRef: ArtifactRefSchema.optional(),
   runId: z.string().min(1),
   secretRef: z.string().min(1),
+  stepId: z.string().min(1),
   traceContext: WorkflowTraceContextSchema,
   workItemId: z.string().min(1),
 });

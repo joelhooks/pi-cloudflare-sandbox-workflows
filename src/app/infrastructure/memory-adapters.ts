@@ -1035,10 +1035,10 @@ export const createPolicyCapabilityLeaseBroker = (
     const lease = CapabilityLeaseSchema.parse({
       actor: input.actor,
       capability: input.capability,
-      capabilityRef: `capability:${input.capability}:${input.runId}`,
+      capabilityRef: `capability:${input.capability}:${input.runId}:${input.stepId}`,
       dryRun: input.dryRun,
       expiresAt: input.expiresAt,
-      leaseId: `lease:${input.capability}:${input.runId}`,
+      leaseId: `lease:${input.capability}:${input.runId}:${input.stepId}`,
       payloadHash: input.payloadHash,
       payloadRef: input.payloadRef,
       policyId: policyIdForCapability({
@@ -1052,6 +1052,7 @@ export const createPolicyCapabilityLeaseBroker = (
       rollbackRef: input.rollbackRef,
       runId: input.runId,
       secretRef: input.secretRef,
+      stepId: input.stepId,
       traceContext: input.traceContext,
       workItemId: input.workItemId,
     });

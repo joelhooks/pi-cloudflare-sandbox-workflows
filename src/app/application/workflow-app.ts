@@ -2166,6 +2166,7 @@ export class WorkflowApp implements WorkflowAppContract {
         reviewGate,
         runId: input.request.runId,
         secretRef,
+        stepId: "review-surface:linear-comment",
         traceContext: workflowTraceContextForCapability({
           capability: "linear.comment.create",
           runId: input.request.runId,
@@ -2405,6 +2406,7 @@ export class WorkflowApp implements WorkflowAppContract {
         reviewGate,
         runId: input.request.runId,
         secretRef,
+        stepId: "review-surface:wzrrd",
         traceContext: workflowTraceContextForCapability({
           capability: "wzrrd.site.publish",
           runId: input.request.runId,
@@ -2635,6 +2637,7 @@ export class WorkflowApp implements WorkflowAppContract {
         reviewGate,
         runId: input.request.runId,
         secretRef,
+        stepId: "review-surface:github-branch",
         traceContext: workflowTraceContextForCapability({
           capability: "github.branch.commit",
           runId: input.request.runId,
@@ -2875,6 +2878,7 @@ export class WorkflowApp implements WorkflowAppContract {
         reviewGate,
         runId: input.request.runId,
         secretRef,
+        stepId: "review-surface:github-pr",
         traceContext: workflowTraceContextForCapability({
           capability: "github.pull-request.create",
           runId: input.request.runId,
@@ -4281,6 +4285,7 @@ export class WorkflowApp implements WorkflowAppContract {
       reviewGate: input.step.reviewGate,
       runId: input.request.runId,
       secretRef: input.step.secretRef,
+      stepId: input.step.stepId,
       traceContext: workflowTraceContextForCapability({
         capability: "discord.message.send",
         runId: input.request.runId,

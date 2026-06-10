@@ -112,10 +112,10 @@ const buildLease = (input: {
   return CapabilityLeaseSchema.parse({
     actor: request.actor,
     capability: "linear.comment.create",
-    capabilityRef: `capability:linear.comment.create:${request.runId}`,
+    capabilityRef: `capability:linear.comment.create:${request.runId}:test:linear-comment`,
     dryRun,
     expiresAt: "2026-06-08T23:59:00.000Z",
-    leaseId: `lease:linear.comment.create:${request.runId}`,
+    leaseId: `lease:linear.comment.create:${request.runId}:test:linear-comment`,
     payloadHash: hashJson(input.payload),
     payloadRef: `artifact://linear-adapter/runs/${request.runId}/payloads/linear-comment.json`,
     policyId: "linear-comment-policy",
@@ -138,6 +138,7 @@ const buildLease = (input: {
         },
     runId: request.runId,
     secretRef: input.secretRef ?? "secretref:linear-api",
+    stepId: "test:linear-comment",
     traceContext: workflowTraceContextForCapability({
       capability: "linear.comment.create",
       runId: request.runId,

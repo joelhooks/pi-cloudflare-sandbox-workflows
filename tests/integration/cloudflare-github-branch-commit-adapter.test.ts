@@ -141,10 +141,10 @@ const buildLease = (payload: GitHubBranchCommitPayload): CapabilityLease => {
   return CapabilityLeaseSchema.parse({
     actor: request.actor,
     capability: "github.branch.commit",
-    capabilityRef: `capability:github.branch.commit:${request.runId}`,
+    capabilityRef: `capability:github.branch.commit:${request.runId}:test:github-branch`,
     dryRun: false,
     expiresAt: "2026-06-08T23:59:00.000Z",
-    leaseId: `lease:github.branch.commit:${request.runId}`,
+    leaseId: `lease:github.branch.commit:${request.runId}:test:github-branch`,
     payloadHash: hashJson(payload),
     payloadRef: `artifact://github-branch-adapter/runs/${request.runId}/payloads/github-branch-commit.json`,
     policyId: "github-branch-policy",
@@ -164,6 +164,7 @@ const buildLease = (payload: GitHubBranchCommitPayload): CapabilityLease => {
     },
     runId: request.runId,
     secretRef: "secretref:github-branch-commit",
+    stepId: "test:github-branch",
     traceContext: workflowTraceContextForCapability({
       capability: "github.branch.commit",
       runId: request.runId,

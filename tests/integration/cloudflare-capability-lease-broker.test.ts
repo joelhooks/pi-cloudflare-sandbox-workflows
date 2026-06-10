@@ -30,11 +30,24 @@ interface D1Operation {
 
 interface FakeD1Statement {
   bind(...boundValues: D1QueryValue[]): FakeD1Statement;
-  run(): Promise<{ readonly success: true }>;
+  run(): Promise<{ readonly success: boolean }>;
 }
 
 const createFakeD1 = () => {
   const operations: D1Operation[] = [];
+  const tables = new Map<string, Map<D1QueryValue, readonly D1QueryValue[]>>();
+  const tableFor = (
+    name: string
+  ): Map<D1QueryValue, readonly D1QueryValue[]> => {
+    const existing = tables.get(name);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created = new Map<D1QueryValue, readonly D1QueryValue[]>();
+    tables.set(name, created);
+
+    return created;
+  };
 
   return {
     d1: {
@@ -47,6 +60,16 @@ const createFakeD1 = () => {
           },
           run() {
             operations.push({ query, values });
+            const insertedTable = /insert into (\w+)/u.exec(query)?.[1];
+            if (insertedTable === undefined) {
+              return Promise.resolve({ success: true });
+            }
+            const rows = tableFor(insertedTable);
+            const primaryKey = values[0] ?? null;
+            if (rows.has(primaryKey) && !query.includes("on conflict")) {
+              return Promise.resolve({ success: false });
+            }
+            rows.set(primaryKey, values);
 
             return Promise.resolve({ success: true });
           },
@@ -56,8 +79,13 @@ const createFakeD1 = () => {
       },
     },
     operations,
+    tables,
   };
 };
+
+const capabilityStepId = (
+  capability: CapabilityLeaseRequest["capability"]
+): string => `test:${capability}`;
 
 const capabilityTraceContext = (input: {
   readonly capability: CapabilityLeaseRequest["capability"];
@@ -66,7 +94,7 @@ const capabilityTraceContext = (input: {
   workflowTraceContextForCapability({
     capability: input.capability,
     runId: input.runId,
-    stepId: `test:${input.capability}`,
+    stepId: capabilityStepId(input.capability),
   });
 
 const buildLeaseFixture = async () => {
@@ -111,6 +139,7 @@ const buildLeaseFixture = async () => {
     },
     runId: request.runId,
     secretRef: "secretref:discord-dry-run",
+    stepId: capabilityStepId("discord.message.send"),
     traceContext: capabilityTraceContext({
       capability: "discord.message.send",
       runId: request.runId,
@@ -178,6 +207,7 @@ const buildWzrrdLeaseFixture = async () => {
     },
     runId: request.runId,
     secretRef: "secretref:wzrrd-dry-run",
+    stepId: capabilityStepId("wzrrd.site.publish"),
     traceContext: capabilityTraceContext({
       capability: "wzrrd.site.publish",
       runId: request.runId,
@@ -256,6 +286,7 @@ const buildGitHubPullRequestLeaseFixture = async () => {
     },
     runId: request.runId,
     secretRef: "secretref:github-dry-run",
+    stepId: capabilityStepId("github.pull-request.create"),
     traceContext: capabilityTraceContext({
       capability: "github.pull-request.create",
       runId: request.runId,
@@ -342,6 +373,7 @@ const buildGitHubBranchCommitLeaseFixture = async () => {
     },
     runId: request.runId,
     secretRef: "secretref:github-dry-run",
+    stepId: capabilityStepId("github.branch.commit"),
     traceContext: capabilityTraceContext({
       capability: "github.branch.commit",
       runId: request.runId,
@@ -417,6 +449,7 @@ const buildLinearCommentLeaseFixture = async () => {
     },
     runId: request.runId,
     secretRef: "secretref:linear-dry-run",
+    stepId: capabilityStepId("linear.comment.create"),
     traceContext: capabilityTraceContext({
       capability: "linear.comment.create",
       runId: request.runId,
@@ -448,6 +481,7 @@ describe("Cloudflare capability lease broker", () => {
       throw new Error(decision.blocker.message);
     }
 
+    const expectedLeaseId = `lease:discord.message.send:${fixture.leaseRequest.runId}:${fixture.leaseRequest.stepId}`;
     expect({
       artifactReceiptCount: [...fixture.artifacts.records.keys()].filter(
         (key) => key.includes("/receipts/capability-leases/")
@@ -460,20 +494,12 @@ describe("Cloudflare capability lease broker", () => {
       ),
     }).toStrictEqual({
       artifactReceiptCount: 1,
-      leaseId: `lease:discord.message.send:${fixture.leaseRequest.runId}`,
+      leaseId: expectedLeaseId,
       leaseTraceContext: fixture.leaseRequest.traceContext,
       operationCount: 2,
       operationValues: [
-        [
-          `lease:discord.message.send:${fixture.leaseRequest.runId}`,
-          fixture.leaseRequest.runId,
-          "discord.message.send",
-        ],
-        [
-          `lease:discord.message.send:${fixture.leaseRequest.runId}:lease`,
-          fixture.leaseRequest.runId,
-          "lease",
-        ],
+        [expectedLeaseId, fixture.leaseRequest.runId, "discord.message.send"],
+        [`${expectedLeaseId}:lease`, fixture.leaseRequest.runId, "lease"],
       ],
     });
   });
@@ -662,7 +688,7 @@ describe("Cloudflare capability lease broker", () => {
       receiptStatus: receipt.delivery.status,
       receiptTraceContext: receipt.traceContext,
     }).toStrictEqual({
-      leaseId: `lease:github.pull-request.create:${fixture.leaseRequest.runId}`,
+      leaseId: `lease:github.pull-request.create:${fixture.leaseRequest.runId}:${fixture.leaseRequest.stepId}`,
       operationKinds: [
         "github.pull-request.create",
         "lease",
@@ -714,7 +740,7 @@ describe("Cloudflare capability lease broker", () => {
       receiptStatus: receipt.delivery.status,
       receiptTraceContext: receipt.traceContext,
     }).toStrictEqual({
-      leaseId: `lease:github.branch.commit:${fixture.leaseRequest.runId}`,
+      leaseId: `lease:github.branch.commit:${fixture.leaseRequest.runId}:${fixture.leaseRequest.stepId}`,
       operationKinds: [
         "github.branch.commit",
         "lease",
@@ -762,7 +788,7 @@ describe("Cloudflare capability lease broker", () => {
       receiptStatus: receipt.delivery.status,
       receiptTraceContext: receipt.traceContext,
     }).toStrictEqual({
-      leaseId: `lease:linear.comment.create:${fixture.leaseRequest.runId}`,
+      leaseId: `lease:linear.comment.create:${fixture.leaseRequest.runId}:${fixture.leaseRequest.stepId}`,
       operationKinds: [
         "linear.comment.create",
         "lease",
@@ -775,6 +801,74 @@ describe("Cloudflare capability lease broker", () => {
       },
       receiptStatus: "dry-run",
       receiptTraceContext: fixture.leaseRequest.traceContext,
+    });
+  });
+
+  it("issues distinct leases for two same-capability steps in one run", async () => {
+    const fixture = await buildLeaseFixture();
+
+    const first = await fixture.broker.requestLease(fixture.leaseRequest);
+    const second = await fixture.broker.requestLease({
+      ...fixture.leaseRequest,
+      stepId: "step-discord-2",
+    });
+    if (first.status !== "issued" || second.status !== "issued") {
+      throw new Error("Expected both same-capability step leases to issue.");
+    }
+
+    expect({
+      firstLeaseId: first.lease.leaseId,
+      leaseRowCount: fixture.d1.tables.get("capability_leases")?.size,
+      receiptRowCount: fixture.d1.tables.get("receipts")?.size,
+      secondLeaseId: second.lease.leaseId,
+    }).toStrictEqual({
+      firstLeaseId: `lease:discord.message.send:${fixture.leaseRequest.runId}:${fixture.leaseRequest.stepId}`,
+      leaseRowCount: 2,
+      receiptRowCount: 2,
+      secondLeaseId: `lease:discord.message.send:${fixture.leaseRequest.runId}:step-discord-2`,
+    });
+  });
+
+  it("re-issues and re-records the same (runId, stepId) lease idempotently", async () => {
+    const fixture = await buildLeaseFixture();
+
+    const first = await fixture.broker.requestLease(fixture.leaseRequest);
+    const retry = await fixture.broker.requestLease(fixture.leaseRequest);
+    if (first.status !== "issued" || retry.status !== "issued") {
+      throw new Error("Expected the repeated lease request to issue.");
+    }
+    const { resource } = fixture.leaseRequest;
+    if (resource.kind !== "discord.channel") {
+      throw new Error("Expected Discord lease fixture resource.");
+    }
+
+    const delivery: DiscordDeliveryResult = {
+      channelRef: resource.channelRef,
+      dryRun: true,
+      payloadHash: fixture.leaseRequest.payloadHash,
+      redacted: true,
+      serverRef: resource.serverRef,
+      status: "dry-run",
+    };
+    const receipt = await fixture.broker.recordDiscordExecution({
+      delivery,
+      lease: first.lease,
+    });
+    const retryReceipt = await fixture.broker.recordDiscordExecution({
+      delivery,
+      lease: retry.lease,
+    });
+
+    expect({
+      leaseId: retry.lease.leaseId,
+      leaseRowCount: fixture.d1.tables.get("capability_leases")?.size,
+      receiptRef: retryReceipt.receiptRef,
+      receiptRowCount: fixture.d1.tables.get("receipts")?.size,
+    }).toStrictEqual({
+      leaseId: first.lease.leaseId,
+      leaseRowCount: 1,
+      receiptRef: receipt.receiptRef,
+      receiptRowCount: 2,
     });
   });
 });
