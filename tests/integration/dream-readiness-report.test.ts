@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { runDreamReadinessReportCli } from "../../scripts/workflow-app-dream-readiness-report.ts";
 import { buildDreamLiveRunRequest } from "../../scripts/workflow-app-dream-run.ts";
@@ -15,6 +16,18 @@ const rawPrivatePath = "/private/tmp/do-not-publish-dream-path";
 const rawRelayToken = "do-not-publish-dream-relay-token";
 const rawRelayUrl = "https://private-relay.example.test";
 const runId = "run-live-dream-memory-fabric-report-test";
+
+const DreamDefinitionOfDoneAuditSummarySchema = z.object({
+  schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
+  status: z.string().min(1),
+  summary: z.object({
+    blockedCount: z.number().int().min(0),
+    capturedCount: z.number().int().min(0),
+    missingCount: z.number().int().min(0),
+    notProvenCount: z.number().int().min(0),
+    totalCount: z.number().int().min(1),
+  }),
+});
 
 const writeJson = async (path: string, value: unknown): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
@@ -54,6 +67,18 @@ const localProof = () => ({
       {
         authorityCount: 211,
         machineId: "cloudflare",
+        sourceCount: 1,
+        status: "captured",
+      },
+      {
+        authorityCount: 1,
+        machineId: "panda",
+        sourceCount: 1,
+        status: "captured",
+      },
+      {
+        authorityCount: 6,
+        machineId: "flagg",
         sourceCount: 1,
         status: "captured",
       },
@@ -97,6 +122,18 @@ const localProof = () => ({
       {
         authorityCount: 211,
         family: "cloudflare-runs",
+        sourceCount: 1,
+        status: "captured",
+      },
+      {
+        authorityCount: 2,
+        family: "docs-pdf-brain",
+        sourceCount: 2,
+        status: "captured",
+      },
+      {
+        authorityCount: 13,
+        family: "repo-outputs",
         sourceCount: 1,
         status: "captured",
       },
@@ -286,28 +323,49 @@ describe("Dream readiness report", () => {
     const mdsvx = await readFile(receipt.reportPath, "utf-8");
     const html = await readFile(receipt.indexPath, "utf-8");
     const receipts = await readFile(receipt.receiptsPath, "utf-8");
-    const combined = `${mdsvx}\n${html}\n${receipts}`;
+    const audit = DreamDefinitionOfDoneAuditSummarySchema.parse(
+      JSON.parse(await readFile(receipt.definitionOfDoneAuditPath, "utf-8"))
+    );
+    const combined = `${mdsvx}\n${html}\n${receipts}\n${JSON.stringify(audit)}`;
 
     expect({
+      auditBlockedCount: audit.summary.blockedCount,
+      auditCapturedCount: audit.summary.capturedCount,
+      auditMissingCount: audit.summary.missingCount,
+      auditNotProvenCount: audit.summary.notProvenCount,
+      auditSchemaVersion: audit.schemaVersion,
+      auditStatus: audit.status,
+      auditTotalCount: audit.summary.totalCount,
       blockerCount: receipt.summary.blockerCount,
       hasCanonicalTemplate: mdsvx.includes(
         'template: "joel/tufte-mdsvx@0.1.0"'
       ),
+      hasDefinitionOfDoneAudit: mdsvx.includes("## Definition of done audit"),
       hasHumanFindingBeforeProof:
         mdsvx.indexOf("## The actual finding") < mdsvx.indexOf("## Proof"),
       hasNoCandidateReview: !mdsvx.includes("Candidate review"),
       hasNoRawPrivateValues: [rawPrivatePath, rawRelayToken, rawRelayUrl].every(
         (privateValue) => !combined.includes(privateValue)
       ),
+      htmlLinksAudit: html.includes("definition-of-done-audit.json"),
       htmlLinksSource: html.includes("report.mdsvx"),
       localProofStatus: receipt.summary.localProofStatus,
       submitAttempted: receipt.summary.submitAttempted,
     }).toStrictEqual({
+      auditBlockedCount: 5,
+      auditCapturedCount: 5,
+      auditMissingCount: 0,
+      auditNotProvenCount: 0,
+      auditSchemaVersion: "workflow.dream-definition-of-done-audit.v1",
+      auditStatus: "blocked",
+      auditTotalCount: 10,
       blockerCount: 3,
       hasCanonicalTemplate: true,
+      hasDefinitionOfDoneAudit: true,
       hasHumanFindingBeforeProof: true,
       hasNoCandidateReview: true,
       hasNoRawPrivateValues: true,
+      htmlLinksAudit: true,
       htmlLinksSource: true,
       localProofStatus: "passed",
       submitAttempted: false,

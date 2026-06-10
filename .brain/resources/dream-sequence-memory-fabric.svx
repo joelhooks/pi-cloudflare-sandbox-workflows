@@ -26,6 +26,20 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T11:18Z implementation progress: Dream readiness reports now publish a machine-readable definition-of-done audit beside the Tufte/MDSvX page.
+
+Receipts:
+
+- New artifact: `definition-of-done-audit.json` with schema `workflow.dream-definition-of-done-audit.v1`.
+- `workflow.dream-readiness-report.v1` render receipts now include `definitionOfDoneAuditPath`; `receipts.json` also embeds the audit.
+- The static preview links `definition-of-done-audit.json` alongside `report.mdsvx` and `receipts.json`.
+- The audit maps the Dream objective into 10 requirements: Dream cartridge package, trusted local relay, Worker-facing relay capability lease, live Cloudflare execution, generated machine/harness, T-shaped memory coverage, ingest health/recovery backfill, workflow-owned Wzrrd output, HITL refinement loop, and public/private redaction boundary.
+- Focused test coverage asserts the current honest status split for a fully covered local proof: 5 captured, 5 blocked, 0 missing, 0 not-proven.
+- Dogfood Wzrrd: `https://dream-definition-audit-20260610-1118.wzrrd.sh/`, noindex, expires `2026-06-11T11:17:45.826Z`, `fileCount=6`, `report.mdsvx` hash `ae003f8b735885d86a9c20fd30d84cd719bd743dbca54203a00fc60855ef3d34`, `index.html` hash `074498fb6fb3b7108489937b65b4da6178fb3e704c222bd53ed216ef207ee214`.
+- Published audit summary: `status=blocked`, `capturedCount=5`, `blockedCount=5`, `missingCount=0`, `notProvenCount=0`, `totalCount=10`.
+
+This tightens the completion boundary. The report no longer merely says "not done"; it carries a structured audit proving which parts of the Dream objective are currently evidenced and which are blocked by the Worker-facing relay/live Cloudflare/generated-machine/HITL-output gates.
+
 2026-06-10T11:02Z implementation progress: the Dream readiness report command now has an explicit receipt-backed Wzrrd publish path.
 
 Receipts:

@@ -99,6 +99,7 @@ export type LocalRelayProofReceipt = z.infer<
 >;
 
 const DreamReadinessReportReceiptSchema = z.object({
+  definitionOfDoneAuditPath: z.string().min(1),
   generatedAt: z.string().min(1),
   htmlHash: z.string().length(64),
   indexPath: z.string().min(1),
@@ -124,6 +125,41 @@ const DreamReadinessReportReceiptSchema = z.object({
 
 export type DreamReadinessReportReceipt = z.infer<
   typeof DreamReadinessReportReceiptSchema
+>;
+
+const DreamDefinitionOfDoneAuditItemSchema = z.object({
+  blockerRefs: z.array(z.string().min(1)).default([]),
+  evidenceRefs: z.array(z.string().min(1)).default([]),
+  requirement: z.string().min(1),
+  requirementId: z.string().min(1),
+  status: z.enum(["blocked", "captured", "missing", "not-proven"]),
+  summary: z.string().min(1),
+});
+
+const DreamDefinitionOfDoneAuditSchema = z.object({
+  generatedAt: z.string().min(1),
+  items: z.array(DreamDefinitionOfDoneAuditItemSchema).min(1),
+  redacted: z.literal(true),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
+  status: z.enum(["blocked", "captured", "not-proven"]),
+  summary: z.object({
+    blockedCount: z.number().int().min(0),
+    capturedCount: z.number().int().min(0),
+    missingCount: z.number().int().min(0),
+    notProvenCount: z.number().int().min(0),
+    totalCount: z.number().int().min(1),
+  }),
+});
+
+export type DreamDefinitionOfDoneAudit = z.infer<
+  typeof DreamDefinitionOfDoneAuditSchema
+>;
+type DreamDefinitionOfDoneAuditItem = z.infer<
+  typeof DreamDefinitionOfDoneAuditItemSchema
+>;
+type DreamDefinitionOfDoneAuditItemInput = z.input<
+  typeof DreamDefinitionOfDoneAuditItemSchema
 >;
 
 const WzrrdCliPublishResultSchema = z
@@ -424,10 +460,339 @@ const sourceFamilyLine = (proof: LocalRelayProofReceipt): string =>
 const bulletList = (items: readonly string[]): string =>
   items.length === 0 ? "- None." : items.map((item) => `- ${item}`).join("\n");
 
+const auditEvidenceFor = (input: DreamReadinessReportInput): string[] => [
+  `local-proof:${input.localProof.runId}`,
+  `preflight:${input.preflight.generatedAt}`,
+  `run-receipt:${input.runReceipt.runId}`,
+];
+
+const runtimeCovered = (
+  proof: LocalRelayProofReceipt,
+  runtime: string
+): boolean =>
+  proof.inventory.runtimeCoverage.some(
+    (coverage) => coverage.runtime === runtime && coverage.status === "captured"
+  );
+
+const machineCovered = (
+  proof: LocalRelayProofReceipt,
+  machineId: string
+): boolean =>
+  proof.inventory.machineCoverage.some(
+    (coverage) =>
+      coverage.machineId === machineId && coverage.status === "captured"
+  );
+
+const sourceFamilyCovered = (
+  proof: LocalRelayProofReceipt,
+  family: string
+): boolean =>
+  proof.inventory.sourceFamilyCoverage.some(
+    (coverage) => coverage.family === family && coverage.status === "captured"
+  );
+
+const dreamCoverageCaptured = (proof: LocalRelayProofReceipt): boolean =>
+  ["pi", "codex", "claude", "cloudflare"].every((runtime) =>
+    runtimeCovered(proof, runtime)
+  ) &&
+  ["blaine", "panda", "flagg", "cloudflare"].every((machineId) =>
+    machineCovered(proof, machineId)
+  ) &&
+  [
+    "agent-transcripts",
+    "brain",
+    "cloudflare-runs",
+    "docs-pdf-brain",
+    "repo-outputs",
+  ].every((family) => sourceFamilyCovered(proof, family)) &&
+  proof.search.hydratedCount > 0 &&
+  proof.correlation.edgeCount > 0;
+
+const preflightCheckStatus = (
+  input: DreamReadinessReportInput,
+  checkId: string
+): string =>
+  input.preflight.checks.find((check) => check.checkId === checkId)?.status ??
+  "missing";
+
+const parseAuditItem = (
+  item: DreamDefinitionOfDoneAuditItemInput
+): DreamDefinitionOfDoneAuditItem =>
+  DreamDefinitionOfDoneAuditItemSchema.parse(item);
+
+const liveSubmittedFor = (input: DreamReadinessReportInput): boolean =>
+  input.runReceipt.submit.attempted && input.runReceipt.status === "submitted";
+
+const dreamCartridgePackageAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const packageCaptured =
+    input.preflight.remoteRegistry.status === "queried" &&
+    input.preflight.remoteRegistry.expectedPackageSeeded === true;
+
+  return parseAuditItem({
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Dream is an installed artifact-backed workflow cartridge/package.",
+    requirementId: "dream-cartridge-package",
+    status: packageCaptured ? "captured" : "missing",
+    summary: packageCaptured
+      ? "Remote registry has workflow/dream-memory-fabric seeded for invocation."
+      : "Remote registry did not prove workflow/dream-memory-fabric is seeded.",
+  });
+};
+
+const trustedLocalRelayAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const localRelayCaptured =
+    input.localProof.rawCredentialsReturned === false &&
+    input.localProof.rawPathsReturned === false &&
+    input.localProof.rawPathLeaked === false &&
+    input.localProof.sourceRootCount > 0;
+
+  return parseAuditItem({
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Trusted relay can inspect the memory fabric without returning raw credentials, paths, or transcripts.",
+    requirementId: "trusted-local-memory-relay",
+    status: localRelayCaptured ? "captured" : "not-proven",
+    summary: localRelayCaptured
+      ? `Local relay proof covered ${input.localProof.sourceRootCount} source roots with redaction flags held.`
+      : "Local relay proof did not satisfy the redaction/source-root evidence requirements.",
+  });
+};
+
+const workerFacingRelayAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const relayReady =
+    input.preflight.relayCapability.readiness.endpointConfigured &&
+    input.preflight.relayCapability.readiness.tokenConfigured &&
+    input.preflight.relayCapability.readiness.workerBaseUrlConfigured &&
+    input.preflight.relayCapability.readiness.healthzStatus === "passed";
+
+  return parseAuditItem({
+    blockerRefs: input.runReceipt.blockedReasons,
+    evidenceRefs: [
+      ...auditEvidenceFor(input),
+      `preflight-check:env:DREAM_MEMORY_RELAY_BASE_URL:${preflightCheckStatus(input, "env:DREAM_MEMORY_RELAY_BASE_URL")}`,
+      `preflight-check:env:DREAM_MEMORY_RELAY_TOKEN:${preflightCheckStatus(input, "env:DREAM_MEMORY_RELAY_TOKEN")}`,
+      `preflight-check:relay:healthz:${preflightCheckStatus(input, "relay:healthz")}`,
+    ],
+    requirement:
+      "Cloudflare leases memory/search/hydration/backfill capabilities through a Worker-facing trusted relay.",
+    requirementId: "worker-facing-relay-capability-lease",
+    status: relayReady ? "captured" : "blocked",
+    summary: relayReady
+      ? "Worker-facing relay endpoint, token, config, and authenticated healthz are ready."
+      : "Worker-facing relay URL/token/config/remote healthz are not all ready.",
+  });
+};
+
+const liveCloudflareExecutionAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const liveSubmitted = liveSubmittedFor(input);
+
+  return parseAuditItem({
+    blockerRefs: input.runReceipt.blockedReasons,
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Dream is submitted to and executed by the deployed Cloudflare workflow app.",
+    requirementId: "live-cloudflare-execution",
+    status: liveSubmitted ? "captured" : "blocked",
+    summary: liveSubmitted
+      ? "The live run request was submitted to Cloudflare."
+      : `Live submit did not happen; submit.attempted=${String(input.runReceipt.submit.attempted)}.`,
+  });
+};
+
+const generatedMachineAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const liveSubmitted = liveSubmittedFor(input);
+
+  return parseAuditItem({
+    blockerRefs: input.runReceipt.blockedReasons,
+    evidenceRefs: [
+      ...auditEvidenceFor(input),
+      ...input.preflight.artifactModel.generatedArtifactsRequired.map(
+        (artifact) => `required-generated-artifact:${artifact}`
+      ),
+    ],
+    requirement:
+      "A real planner generates and pins workflow.xstate-machine.v1 plus generated harness/source/hash artifacts.",
+    requirementId: "generated-machine-and-harness",
+    status: liveSubmitted ? "not-proven" : "blocked",
+    summary: liveSubmitted
+      ? "Live submit happened, but this readiness report has not inspected generated machine/harness artifacts."
+      : "Planner execution never started, so generated machine/harness artifacts do not exist for this run.",
+  });
+};
+
+const tShapedCoverageAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const coverageCaptured = dreamCoverageCaptured(input.localProof);
+
+  return parseAuditItem({
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Dream runs T-shaped across timeline, machines, runtimes, source families, hydration, and correlation.",
+    requirementId: "t-shaped-memory-coverage",
+    status: coverageCaptured ? "captured" : "not-proven",
+    summary: coverageCaptured
+      ? `Local proof captured runtime, machine, source-family, hydration, and correlation coverage: ${input.localProof.search.hydratedCount} hydrated receipts, ${input.localProof.correlation.edgeCount} edges.`
+      : "Local proof did not capture the required runtime/machine/source-family/hydration/correlation coverage.",
+  });
+};
+
+const ingestRecoveryAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const repairEvidenceCaptured =
+    input.localProof.health.status.length > 0 &&
+    input.localProof.backfill.status.length > 0;
+
+  return parseAuditItem({
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
+    requirementId: "ingest-health-and-recovery-backfill",
+    status: repairEvidenceCaptured ? "captured" : "not-proven",
+    summary: repairEvidenceCaptured
+      ? `Local proof reported health=${input.localProof.health.status}, backfill=${input.localProof.backfill.status}, actionCount=${String(input.localProof.backfill.actionCount)}, captureFixCount=${String(input.localProof.backfill.captureFixCount)}.`
+      : "Local proof did not include health/backfill evidence.",
+  });
+};
+
+const workflowOwnedWzrrdAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const liveSubmitted = liveSubmittedFor(input);
+
+  return parseAuditItem({
+    blockerRefs: input.runReceipt.blockedReasons,
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "The Cloudflare Dream workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
+    requirementId: "workflow-owned-wzrrd-output",
+    status: liveSubmitted ? "not-proven" : "blocked",
+    summary: liveSubmitted
+      ? "Live submit happened, but this readiness report has not inspected workflow-owned Wzrrd lease receipts."
+      : "Only the operator readiness report exists; no workflow-owned Wzrrd publish capability receipt exists for this Dream run.",
+  });
+};
+
+const hitlRefinementLoopAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const liveSubmitted = liveSubmittedFor(input);
+
+  return parseAuditItem({
+    blockerRefs: input.runReceipt.blockedReasons,
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Accepted dreams produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
+    requirementId: "hitl-refinement-loop",
+    status: liveSubmitted ? "not-proven" : "blocked",
+    summary: liveSubmitted
+      ? "Live submit happened, but this readiness report has not inspected HITL decision/seed/follow-up artifacts."
+      : "The live Dream blocked before report, HITL decision seed, or follow-up run request artifacts could be generated.",
+  });
+};
+
+const publicPrivateBoundaryAuditItem = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAuditItem => {
+  const redactionCaptured =
+    input.localProof.rawCredentialsReturned === false &&
+    input.localProof.rawPathsReturned === false &&
+    input.localProof.rawPathLeaked === false;
+
+  return parseAuditItem({
+    evidenceRefs: auditEvidenceFor(input),
+    requirement:
+      "Public artifacts remain redacted: no raw credentials, raw private paths, or raw transcripts.",
+    requirementId: "public-private-redaction-boundary",
+    status: redactionCaptured ? "captured" : "not-proven",
+    summary: redactionCaptured
+      ? "Local relay proof redaction flags all remained false."
+      : "Redaction flags did not prove the public/private boundary.",
+  });
+};
+
+const auditStatusFor = (input: {
+  readonly blockedCount: number;
+  readonly missingCount: number;
+  readonly notProvenCount: number;
+}): DreamDefinitionOfDoneAudit["status"] => {
+  if (input.blockedCount > 0 || input.missingCount > 0) {
+    return "blocked";
+  }
+
+  if (input.notProvenCount > 0) {
+    return "not-proven";
+  }
+
+  return "captured";
+};
+
+export const buildDreamDefinitionOfDoneAudit = (
+  input: DreamReadinessReportInput
+): DreamDefinitionOfDoneAudit => {
+  const parsedItems = [
+    dreamCartridgePackageAuditItem(input),
+    trustedLocalRelayAuditItem(input),
+    workerFacingRelayAuditItem(input),
+    liveCloudflareExecutionAuditItem(input),
+    generatedMachineAuditItem(input),
+    tShapedCoverageAuditItem(input),
+    ingestRecoveryAuditItem(input),
+    workflowOwnedWzrrdAuditItem(input),
+    hitlRefinementLoopAuditItem(input),
+    publicPrivateBoundaryAuditItem(input),
+  ];
+  const capturedCount = parsedItems.filter(
+    (item) => item.status === "captured"
+  ).length;
+  const blockedCount = parsedItems.filter(
+    (item) => item.status === "blocked"
+  ).length;
+  const missingCount = parsedItems.filter(
+    (item) => item.status === "missing"
+  ).length;
+  const notProvenCount = parsedItems.filter(
+    (item) => item.status === "not-proven"
+  ).length;
+
+  return DreamDefinitionOfDoneAuditSchema.parse({
+    generatedAt: input.generatedAt,
+    items: parsedItems,
+    redacted: true,
+    runId: input.runReceipt.runId,
+    schemaVersion: "workflow.dream-definition-of-done-audit.v1",
+    status: auditStatusFor({ blockedCount, missingCount, notProvenCount }),
+    summary: {
+      blockedCount,
+      capturedCount,
+      missingCount,
+      notProvenCount,
+      totalCount: parsedItems.length,
+    },
+  });
+};
+
+const auditLineFor = (item: DreamDefinitionOfDoneAudit["items"][number]) =>
+  `- ${item.requirementId}: ${item.status} — ${item.summary}`;
+
 export const renderDreamReadinessReportMdsvx = (
   input: DreamReadinessReportInput
-): string =>
-  [
+): string => {
+  const audit = buildDreamDefinitionOfDoneAudit(input);
+
+  return [
     "---",
     'expiresIn: "24h"',
     "noindex: true",
@@ -533,6 +898,12 @@ export const renderDreamReadinessReportMdsvx = (
     `- ${input.localProof.signals.signalCount} signal(s): ${input.localProof.signals.signalKinds.join(", ")}.`,
     `- ${input.localProof.correlation.nodeCount} correlation node(s), ${input.localProof.correlation.edgeCount} correlation edge(s).`,
     "",
+    "## Definition of done audit",
+    "",
+    `Audit status: ${audit.status}. Captured ${audit.summary.capturedCount}/${audit.summary.totalCount}; blocked ${audit.summary.blockedCount}; missing ${audit.summary.missingCount}; not proven ${audit.summary.notProvenCount}.`,
+    "",
+    ...audit.items.map(auditLineFor),
+    "",
     "## What did not happen",
     "",
     "- No live Cloudflare Dream was submitted.",
@@ -545,6 +916,7 @@ export const renderDreamReadinessReportMdsvx = (
     "",
     "Template: `joel/tufte-mdsvx@0.1.0`. Publish policy: noindex, 24h expiry. The canonical source is `report.mdsvx`; `index.html` is a static preview for Wzrrd.",
   ].join("\n");
+};
 
 export const renderDreamReadinessReportHtml = (input: {
   readonly generatedAt: string;
@@ -645,6 +1017,7 @@ export const renderDreamReadinessReportHtml = (input: {
           <div>Template <code>joel/tufte-mdsvx@0.1.0</code></div>
           <div>Source <a href="report.mdsvx">report.mdsvx</a></div>
           <div>Receipts <a href="receipts.json">receipts.json</a></div>
+          <div>Audit <a href="definition-of-done-audit.json">definition-of-done-audit.json</a></div>
         </div>
       </header>
       ${renderMarkdownSubset(input.mdsvx)}
@@ -656,7 +1029,11 @@ export const renderDreamReadinessReportHtml = (input: {
 </body>
 </html>`;
 
-const compactReceiptsFor = (input: DreamReadinessReportInput) => ({
+const compactReceiptsFor = (
+  input: DreamReadinessReportInput,
+  audit: DreamDefinitionOfDoneAudit
+) => ({
+  definitionOfDoneAudit: audit,
   generatedAt: input.generatedAt,
   localProof: {
     backfill: input.localProof.backfill,
@@ -815,18 +1192,27 @@ export const renderDreamReadinessReport = async (input: {
   readonly report: DreamReadinessReportInput;
 }): Promise<DreamReadinessReportReceipt> => {
   const siteDir = resolve(input.outRoot, input.report.runReceipt.runId);
+  const definitionOfDoneAuditPath = join(
+    siteDir,
+    "definition-of-done-audit.json"
+  );
   const reportPath = join(siteDir, "report.mdsvx");
   const indexPath = join(siteDir, "index.html");
   const receiptsPath = join(siteDir, "receipts.json");
   const receiptPath = join(siteDir, "render-receipt.json");
+  const audit = buildDreamDefinitionOfDoneAudit(input.report);
   const mdsvx = renderDreamReadinessReportMdsvx(input.report);
   const html = renderDreamReadinessReportHtml({
     generatedAt: input.report.generatedAt,
     mdsvx,
     runId: input.report.runReceipt.runId,
   });
-  const compactReceipts = compactReceiptsFor(input.report);
+  const compactReceipts = compactReceiptsFor(input.report, audit);
 
+  await writeText(
+    definitionOfDoneAuditPath,
+    `${JSON.stringify(audit, null, 2)}\n`
+  );
   await writeText(reportPath, `${mdsvx}\n`);
   await writeText(indexPath, `${html}\n`);
   await writeText(
@@ -835,6 +1221,7 @@ export const renderDreamReadinessReport = async (input: {
   );
 
   const receipt = DreamReadinessReportReceiptSchema.parse({
+    definitionOfDoneAuditPath,
     generatedAt: input.report.generatedAt,
     htmlHash: sha256Hex(html),
     indexPath,
