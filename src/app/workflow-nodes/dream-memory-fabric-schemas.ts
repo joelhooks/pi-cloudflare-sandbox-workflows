@@ -114,6 +114,24 @@ export const DreamSourcePackSchema = z.object({
   title: z.string().min(1),
 });
 
+export const DreamSourcePackDispositionStatusSchema = z.enum([
+  "selected-by-default",
+  "selected-with-lease",
+  "separate-workflow-candidate",
+  "skipped-missing-lease",
+]);
+
+export const DreamSourcePackDispositionSchema = z.object({
+  capabilityKinds: z.array(z.string().min(1)).default([]),
+  packId: z.string().min(1),
+  packageId: z.string().min(1),
+  reason: z.string().min(1),
+  selectionPolicy: DreamSourcePackSelectionPolicySchema,
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1),
+  status: DreamSourcePackDispositionStatusSchema,
+  surfaces: z.array(DreamSourceSurfaceSchema).min(1),
+});
+
 export const DreamWorkflowEffectSchema = z.enum([
   "backfill-plan",
   "backfill-run",
@@ -878,6 +896,13 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
   relayLeaseReceiptRefs: z.array(ArtifactRefSchema).default([]),
   runId: z.string().min(1),
   schemaVersion: z.literal("dream.generated-workflow-proof.v1"),
+  sourcePackDisposition: z.object({
+    dispositionCount: z.number().int().min(0),
+    dispositions: z.array(DreamSourcePackDispositionSchema).default([]),
+    expectedPackIds: z.array(z.string().min(1)).default([]),
+    missingPackIds: z.array(z.string().min(1)).default([]),
+    unexpectedPackIds: z.array(z.string().min(1)).default([]),
+  }),
   sourceProfile: z.object({
     allowedRelayOperations: z.array(DreamMemoryRelayOperationSchema).min(1),
     hash: Sha256HexSchema,
@@ -1148,6 +1173,12 @@ export type DreamSignalDocument = z.infer<typeof DreamSignalDocumentSchema>;
 export type DreamSignalKind = z.infer<typeof DreamSignalKindSchema>;
 export type DreamSourceFamily = z.infer<typeof DreamSourceFamilySchema>;
 export type DreamSourcePack = z.infer<typeof DreamSourcePackSchema>;
+export type DreamSourcePackDisposition = z.infer<
+  typeof DreamSourcePackDispositionSchema
+>;
+export type DreamSourcePackDispositionStatus = z.infer<
+  typeof DreamSourcePackDispositionStatusSchema
+>;
 export type DreamSourcePackSelectionPolicy = z.infer<
   typeof DreamSourcePackSelectionPolicySchema
 >;

@@ -218,6 +218,7 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
         ...request.planProposal.stochasticNotes,
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
         `Generated Dream retrieval steps must declare dreamCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
+        "Generated Dream source inventory or planning steps must declare dreamSourcePackDispositions for every advertised source pack.",
       ],
     },
     workItemId: "work-item:integration-test-dream",

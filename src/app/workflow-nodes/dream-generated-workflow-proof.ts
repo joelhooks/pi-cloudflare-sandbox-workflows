@@ -17,12 +17,15 @@ import {
   DreamCoverageHorizonSchema,
   DreamGeneratedWorkflowProofDocumentSchema,
   DreamMemoryFabricNodeTypeSchema,
+  DreamSourcePackDispositionSchema,
   DreamWorkflowEffectSchema,
 } from "./dream-memory-fabric-schemas.ts";
 import type {
   DreamCoverageHorizon,
   DreamGeneratedWorkflowProofDocument,
   DreamMemoryFabricNodeType,
+  DreamSourcePack,
+  DreamSourcePackDisposition,
   DreamSourceProfile,
   DreamWorkflowEffect,
 } from "./dream-memory-fabric-schemas.ts";
@@ -220,6 +223,129 @@ const dreamCoverageHorizonsFor = (
   );
 };
 
+const dreamSourcePackDispositionsFor = (
+  step: DynamicWorkflowStep
+): DreamSourcePackDisposition[] => {
+  if (step.kind !== "workflow.node.invoke") {
+    return [];
+  }
+
+  const declaredDispositions = step.config["dreamSourcePackDispositions"];
+  if (!Array.isArray(declaredDispositions)) {
+    return [];
+  }
+
+  return declaredDispositions.flatMap((declaredDisposition) => {
+    const parsed =
+      DreamSourcePackDispositionSchema.safeParse(declaredDisposition);
+
+    return parsed.success ? [parsed.data] : [];
+  });
+};
+
+const sourcePackDispositionsFor = (
+  plan: DynamicWorkflowPlanDocument
+): DreamSourcePackDisposition[] => {
+  const dispositionByPackId = new Map<string, DreamSourcePackDisposition>();
+  for (const disposition of plan.steps.flatMap(
+    dreamSourcePackDispositionsFor
+  )) {
+    if (!dispositionByPackId.has(disposition.packId)) {
+      dispositionByPackId.set(disposition.packId, disposition);
+    }
+  }
+
+  return [...dispositionByPackId.values()];
+};
+
+const capabilityKindsCoverPack = (input: {
+  readonly disposition: DreamSourcePackDisposition;
+  readonly pack: DreamSourcePack;
+}): boolean =>
+  input.pack.requiredCapabilityKinds.every((capabilityKind) =>
+    input.disposition.capabilityKinds.includes(capabilityKind)
+  );
+
+const dispositionMatchesPack = (input: {
+  readonly disposition: DreamSourcePackDisposition;
+  readonly pack: DreamSourcePack;
+}): boolean =>
+  input.disposition.packageId === input.pack.packageId &&
+  input.disposition.selectionPolicy === input.pack.selectionPolicy &&
+  sameItemsInOrder(
+    input.disposition.sourceFamilies,
+    input.pack.sourceFamilies
+  ) &&
+  sameItemsInOrder(input.disposition.surfaces, input.pack.surfaces);
+
+const dispositionStatusMatchesPolicy = (input: {
+  readonly disposition: DreamSourcePackDisposition;
+  readonly pack: DreamSourcePack;
+}): boolean => {
+  if (!dispositionMatchesPack(input)) {
+    return false;
+  }
+
+  if (input.pack.selectionPolicy === "default") {
+    return input.disposition.status === "selected-by-default";
+  }
+
+  if (input.pack.selectionPolicy === "optional-lease") {
+    return (
+      input.disposition.status === "skipped-missing-lease" ||
+      (input.disposition.status === "selected-with-lease" &&
+        capabilityKindsCoverPack(input))
+    );
+  }
+
+  return input.disposition.status === "separate-workflow-candidate";
+};
+
+const sourcePackDispositionSummaryFor = (input: {
+  readonly dispositions: readonly DreamSourcePackDisposition[];
+  readonly sourcePacks: readonly DreamSourcePack[];
+}) => {
+  const expectedPackIds = input.sourcePacks.map((pack) => pack.packId);
+  const declaredPackIds = input.dispositions.map(
+    (disposition) => disposition.packId
+  );
+
+  return {
+    dispositionCount: input.dispositions.length,
+    dispositions: input.dispositions,
+    expectedPackIds,
+    missingPackIds: expectedPackIds.filter(
+      (packId) => !declaredPackIds.includes(packId)
+    ),
+    unexpectedPackIds: declaredPackIds.filter(
+      (packId) => !expectedPackIds.includes(packId)
+    ),
+  };
+};
+
+const generatedPlanDisposesSourcePacks = (input: {
+  readonly dispositions: readonly DreamSourcePackDisposition[];
+  readonly sourcePacks: readonly DreamSourcePack[];
+}): boolean => {
+  const dispositionByPackId = new Map(
+    input.dispositions.map((disposition) => [disposition.packId, disposition])
+  );
+
+  return (
+    input.dispositions.every((disposition) =>
+      input.sourcePacks.some((pack) => pack.packId === disposition.packId)
+    ) &&
+    input.sourcePacks.every((pack) => {
+      const disposition = dispositionByPackId.get(pack.packId);
+
+      return (
+        disposition !== undefined &&
+        dispositionStatusMatchesPolicy({ disposition, pack })
+      );
+    })
+  );
+};
+
 const dreamEffectsFor = (step: DynamicWorkflowStep): DreamWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
@@ -306,6 +432,10 @@ export const verifyDreamGeneratedWorkflow = (
     input.plan.steps.flatMap(dreamCoverageHorizonsFor)
   );
   const requiredHorizons = input.expectedSourceProfile.timeHorizons;
+  const sourcePackDisposition = sourcePackDispositionSummaryFor({
+    dispositions: sourcePackDispositionsFor(input.plan),
+    sourcePacks: input.expectedSourceProfile.sourcePacks,
+  });
   const nodeTypes = input.plan.steps.flatMap((step) => {
     if (step.kind !== "workflow.node.invoke") {
       return [];
@@ -406,6 +536,16 @@ export const verifyDreamGeneratedWorkflow = (
         "Dream generated plan is bound to the installed transcript-review source profile instead of generic Dream lore.",
     },
     {
+      checkId: "plan:source-pack-disposition",
+      evidenceRefs: [input.planArtifact.artifactRef],
+      passed: generatedPlanDisposesSourcePacks({
+        dispositions: sourcePackDisposition.dispositions,
+        sourcePacks: input.expectedSourceProfile.sourcePacks,
+      }),
+      summary:
+        "Dream generated plan explicitly declares whether each advertised source pack was selected under leases, skipped for missing leases, or saved as a separate workflow candidate.",
+    },
+    {
       checkId: "machine:step-order-bound",
       evidenceRefs: [
         input.planArtifact.artifactRef,
@@ -481,6 +621,7 @@ export const verifyDreamGeneratedWorkflow = (
     relayLeaseReceiptRefs,
     runId: input.plan.runId,
     schemaVersion: "dream.generated-workflow-proof.v1",
+    sourcePackDisposition,
     sourceProfile: sourceProfileFingerprint({
       exportId: input.expectedSourceProfileExportId,
       profile: input.expectedSourceProfile,

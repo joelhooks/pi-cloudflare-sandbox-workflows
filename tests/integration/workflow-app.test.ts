@@ -285,8 +285,34 @@ const addDreamPreflightToBlueprint = (
   const dreamCoverageHorizons = [
     ...dreamTranscriptReviewSourceProfile.timeHorizons,
   ];
+  const dreamSourcePackDispositions =
+    dreamTranscriptReviewSourceProfile.sourcePacks.map((pack) => {
+      let status = "skipped-missing-lease";
+      let reason =
+        "Skipped until scoped source-pack leases are available for this generated run.";
+      if (pack.selectionPolicy === "default") {
+        status = "selected-by-default";
+        reason = "Selected by the installed Dream source profile.";
+      } else if (pack.selectionPolicy === "separate-workflow") {
+        status = "separate-workflow-candidate";
+        reason =
+          "Saved as a separate workflow candidate so support/comms surfaces do not alter transcript-review Dream readiness.";
+      }
+
+      return {
+        capabilityKinds: [],
+        packId: pack.packId,
+        packageId: pack.packageId,
+        reason,
+        selectionPolicy: pack.selectionPolicy,
+        sourceFamilies: [...pack.sourceFamilies],
+        status,
+        surfaces: [...pack.surfaces],
+      };
+    });
   const inventoryStep = DynamicWorkflowStepSchema.parse({
     config: {
+      dreamSourcePackDispositions,
       requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
       sourceFamiliesExpected: [
         "agent-transcripts",
@@ -709,6 +735,7 @@ describe("workflow app integration contract", () => {
         "plan:profile-effect-coverage",
         "plan:horizon-coverage",
         "plan:source-profile-bound",
+        "plan:source-pack-disposition",
       ],
       status: "failed",
       stepKinds: [
@@ -3178,6 +3205,46 @@ describe("workflow app integration contract", () => {
         hash: hashJson(planWithoutHorizonCoverage),
       },
     });
+    const planWithoutSourcePackDispositions =
+      DynamicWorkflowPlanDocumentSchema.parse({
+        ...plan,
+        steps: plan.steps.map((step) => {
+          if (step.kind !== "workflow.node.invoke") {
+            return step;
+          }
+
+          return {
+            ...step,
+            config: Object.fromEntries(
+              Object.entries(step.config).filter(
+                ([key]) => key !== "dreamSourcePackDispositions"
+              )
+            ),
+          };
+        }),
+      });
+    const proofWithoutSourcePackDispositions = verifyDreamGeneratedWorkflow({
+      executionProof,
+      executionProofRef: result.executionProofArtifact.artifactRef,
+      expectedPackageRef: dreamWorkflowPackageRef,
+      expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+      expectedSourceProfileExportId: "dream-transcript-review-source-profile",
+      generatedAt: "2026-06-09T21:46:45.000Z",
+      harnessArtifact: result.harnessArtifact,
+      harnessSource: await artifacts.readText({
+        artifactRef: result.harnessArtifact.artifactRef,
+      }),
+      machine,
+      machineArtifact: result.machineArtifact,
+      machineSource: await artifacts.readText({
+        artifactRef: result.machineArtifact.sourceArtifactRef,
+      }),
+      plan: planWithoutSourcePackDispositions,
+      planArtifact: {
+        ...result.planArtifact,
+        hash: hashJson(planWithoutSourcePackDispositions),
+      },
+    });
     const combinedBackfillPlan = DynamicWorkflowPlanDocumentSchema.parse({
       ...plan,
       steps: plan.steps.flatMap((step) => {
@@ -3340,6 +3407,8 @@ describe("workflow app integration contract", () => {
         generatedWorkflowProof.rawTranscriptsReturned,
       dreamGeneratedProofRelayLeaseRefs:
         generatedWorkflowProof.relayLeaseReceiptRefs,
+      dreamGeneratedProofSourcePackDisposition:
+        generatedWorkflowProof.sourcePackDisposition,
       dreamGeneratedProofSourceProfile: generatedWorkflowProof.sourceProfile,
       dreamGeneratedProofStatus: generatedWorkflowProof.status,
       dreamGeneratedProofStepCount: generatedWorkflowProof.stepCount,
@@ -3365,6 +3434,12 @@ describe("workflow app integration contract", () => {
           .filter((check) => check.status === "failed")
           .map((check) => check.checkId),
       proofWithoutHorizonCoverageStatus: proofWithoutHorizonCoverage.status,
+      proofWithoutSourcePackDispositionsFailedChecks:
+        proofWithoutSourcePackDispositions.checks
+          .filter((check) => check.status === "failed")
+          .map((check) => check.checkId),
+      proofWithoutSourcePackDispositionsStatus:
+        proofWithoutSourcePackDispositions.status,
       proofWithoutSourceProfileFailedChecks: proofWithoutSourceProfile.checks
         .filter((check) => check.status === "failed")
         .map((check) => check.checkId),
@@ -3646,6 +3721,7 @@ describe("workflow app integration contract", () => {
         "plan:profile-effect-coverage",
         "plan:horizon-coverage",
         "plan:source-profile-bound",
+        "plan:source-pack-disposition",
         "machine:step-order-bound",
         "execution:generated-machine-sequence",
         "execution:relay-lease-sidecars",
@@ -3702,6 +3778,44 @@ describe("workflow app integration contract", () => {
       ],
       dreamGeneratedProofRawTranscriptsReturned: false,
       dreamGeneratedProofRelayLeaseRefs: [],
+      dreamGeneratedProofSourcePackDisposition: {
+        dispositionCount: 2,
+        dispositions: [
+          {
+            capabilityKinds: [],
+            packId: "source-pack:joelhooks:work-graph",
+            packageId: "source-pack/joelhooks-work-graph",
+            reason:
+              "Skipped until scoped source-pack leases are available for this generated run.",
+            selectionPolicy: "optional-lease",
+            sourceFamilies: [
+              "comms",
+              "people-org-memory",
+              "repo-outputs",
+              "support",
+            ],
+            status: "skipped-missing-lease",
+            surfaces: ["github", "linear", "slack", "org-project-graph"],
+          },
+          {
+            capabilityKinds: [],
+            packId: "source-pack:badass-courses:aihero-support-sweep",
+            packageId: "workflow/aihero-support-sweep",
+            reason:
+              "Saved as a separate workflow candidate so support/comms surfaces do not alter transcript-review Dream readiness.",
+            selectionPolicy: "separate-workflow",
+            sourceFamilies: ["brain", "comms", "people-org-memory", "support"],
+            status: "separate-workflow-candidate",
+            surfaces: ["brain", "front", "slack", "org-project-graph"],
+          },
+        ],
+        expectedPackIds: [
+          "source-pack:joelhooks:work-graph",
+          "source-pack:badass-courses:aihero-support-sweep",
+        ],
+        missingPackIds: [],
+        unexpectedPackIds: [],
+      },
       dreamGeneratedProofSourceProfile: {
         allowedRelayOperations: [
           "inventory",
@@ -3752,6 +3866,10 @@ describe("workflow app integration contract", () => {
       plannedBackfillActions: ["backfill:claude:native-capture"],
       proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
       proofWithoutHorizonCoverageStatus: "failed",
+      proofWithoutSourcePackDispositionsFailedChecks: [
+        "plan:source-pack-disposition",
+      ],
+      proofWithoutSourcePackDispositionsStatus: "failed",
       proofWithoutSourceProfileFailedChecks: ["plan:source-profile-bound"],
       proofWithoutSourceProfileStatus: "failed",
       refinementNextWorkflowProposalIds: [
