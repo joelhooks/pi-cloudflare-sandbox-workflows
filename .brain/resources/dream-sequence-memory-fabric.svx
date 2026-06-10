@@ -26,16 +26,16 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T08:06Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
+2026-06-10T08:33Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
 
 Receipts:
 
 - Local trusted relay proof: `run:dream-relay-local-proof:20260610T073025130Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
 - Local proof coverage: 10 source roots; required machine coverage for `blaine`, `panda`, `flagg`, and Cloudflare; required source families `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; runtime coverage for Pi, Codex, Claude, and Cloudflare; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T08:27:14.209Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T082712962Z-8cf2be1d-receipt.json`, `submit.attempted=false`.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T08:33:37.575Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T083336219Z-2d19e1b8`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T083336219Z-2d19e1b8-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T083336219Z-2d19e1b8-receipt.json`, `submit.attempted=false`.
 - Package state: Worker deploy receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` deployed current code to Worker version `d1143029-8ed7-4081-b6bc-ec09f6f108f7` without Dream relay vars and without reseeding packages. Remote `workflow/dream-memory-fabric` still matches current manifest hash `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`; latest seed commit remains `c5d8f4ac39726846b448977e4c605e0a52abe672` from the 2026-06-10T08:06Z seed.
-- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T08:27:06.500Z`, status `blocked`, no side effects performed. Local proof refresh is ready; local relay start, HTTPS exposure, Worker token provisioning, Worker URL config, relay healthz verification, and live Dream submit remain blocked by missing exact owner sign-off and relay config.
+- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T08:33:27.851Z`, status `blocked`, no side effects performed. Local proof refresh is ready; local relay start, HTTPS exposure, Worker token provisioning, Worker URL config, relay healthz verification, and live Dream submit remain blocked by missing exact owner sign-off and relay config.
 
 Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
 
@@ -52,6 +52,18 @@ Receipts:
 - Current Dream package manifest hash after this change: `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`.
 
 This is still not a live Dream execution. It closes the artifact loop from human decision to next generated workflow request, but submission still goes through the front door, generated-machine proof, capability leases, review gates, and Cloudflare receipts.
+
+2026-06-10T08:33Z implementation progress: Dream readiness and run-request prompts now require the whole HITL refinement loop, not just a report.
+
+Receipts:
+
+- `workflow.live-preflight.v1.artifactModel.generatedArtifactsRequired` now includes `dream.hitl-decision.v1`, `dream.hitl-decision-workflow-seed.v1`, and `dream.hitl-follow-up-run-request.v1` in addition to planner/machine/harness/proof/report/publish artifacts.
+- `scripts/workflow-app-dream-run.ts` now tells the stochastic planner that verifier proof must show HITL report, HITL decision seed, and HITL follow-up run request effects through generated `workflow.node.invoke` states.
+- The same prompt states that `dream.hitl-follow-up-run-request.v1` must be written with `submitted:false`; it is planner input for the next run, not a hidden mutation or live submission.
+- Latest live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T08:33:37.575Z`, status `blocked`, remote Dream package hash still matches `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`.
+- Latest live run request: `run-live-dream-memory-fabric-20260610T083336219Z-2d19e1b8`, `submit.attempted=false`, blocked only by relay URL/token/config/healthz plus exact owner sign-off.
+
+This change still does not execute Dreaming. It prevents the future generated Dream workflow from satisfying the prompt with "report published" while skipping the decision-to-next-workflow handoff.
 
 2026-06-10T07:42Z implementation progress: accepted Dream HITL decisions can now feed the next generated workflow as package data instead of report prose.
 

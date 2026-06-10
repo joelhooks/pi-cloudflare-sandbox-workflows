@@ -311,6 +311,8 @@ Wrangler 4.97.0
         traceCapability: receipt.relayCapability.traceCapability,
       },
       requiredActions: receipt.requiredActions,
+      requiredGeneratedArtifacts:
+        receipt.artifactModel.generatedArtifactsRequired,
       status: receipt.status,
     }).toStrictEqual({
       leakedAdminSecret: false,
@@ -344,6 +346,20 @@ Wrangler 4.97.0
         traceCapability: "dream.memory.relay",
       },
       requiredActions: [],
+      requiredGeneratedArtifacts: [
+        "planner prompt/transcript",
+        "workflow.xstate-machine.v1 config artifact",
+        "generated TypeScript harness source",
+        "machine/harness hashes",
+        "dream.refinement-proposals.v1 proposal artifact",
+        "dream.hitl-report.v1 MDSvX report artifact",
+        "dream.hitl-decision.v1 decision contract artifact",
+        "dream.hitl-decision-workflow-seed.v1 seed artifact",
+        "dream.hitl-follow-up-run-request.v1 draft artifact",
+        "workflow.execution-proof.v1 Cloudflare execution proof",
+        "workflow.cartridge-invocation-proof.v1 per-node proofs",
+        "wzrrd.site.publish capability receipt for the Dream report",
+      ],
       status: "ready",
     });
   });

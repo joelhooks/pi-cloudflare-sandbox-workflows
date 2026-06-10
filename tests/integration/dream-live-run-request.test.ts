@@ -80,6 +80,9 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "machine/harness hashes",
       "dream.refinement-proposals.v1 proposal artifact",
       "dream.hitl-report.v1 MDSvX report artifact",
+      "dream.hitl-decision.v1 decision contract artifact",
+      "dream.hitl-decision-workflow-seed.v1 seed artifact",
+      "dream.hitl-follow-up-run-request.v1 draft artifact",
       "workflow.execution-proof.v1 Cloudflare execution proof",
       "workflow.cartridge-invocation-proof.v1 per-node proofs",
       "wzrrd.site.publish capability receipt for the Dream report",
@@ -252,6 +255,18 @@ describe("Dream live run request harness", () => {
         request.planProposal.stochasticNotes.some((note) =>
           note.includes("dream/hitl-report.mdsvx")
         ),
+      stochasticNotesRequireFullHitlRefinementLoop:
+        request.planProposal.stochasticNotes.some(
+          (note) =>
+            note.includes("HITL decision seed") &&
+            note.includes("HITL follow-up run request")
+        ) &&
+        request.planProposal.stochasticNotes.some(
+          (note) =>
+            note.includes("dream.hitl-decision-workflow-seed.v1") &&
+            note.includes("dream.hitl-follow-up-run-request.v1") &&
+            note.includes("submitted:false")
+        ),
       stochasticNotesRequireSignalMining:
         request.planProposal.stochasticNotes.some((note) =>
           note.includes("signal mining")
@@ -270,6 +285,7 @@ describe("Dream live run request harness", () => {
       stochasticNotesAllowGeneratedRuntimeShape: true,
       stochasticNotesDoNotHardcodeNodeOrder: true,
       stochasticNotesMentionWzrrdPrimaryDocument: true,
+      stochasticNotesRequireFullHitlRefinementLoop: true,
       stochasticNotesRequireSignalMining: true,
       workItemId: "work-item:dream-memory-fabric",
     });
