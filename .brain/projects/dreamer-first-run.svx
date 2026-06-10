@@ -49,7 +49,7 @@ Five-stage agent pipeline, each stage gate-green (oxfmt/oxlint, tsgo, tsc, 179/1
 
 **Litmus verdict: FAIL (expected residue, now scoped).** Three hardcodings still force TypeScript for a second workflow:
 
-1. Profile registry is compile-time (`installedWorkflowCartridgeSourceProfiles` / seed-template arrays in `src/cartridges/cloudflare-workflow-cartridges.ts`) — needs a data loader seam.
+1. Profile registry is compile-time (`installedWorkflowCartridgeSourceProfiles` / seed-template arrays in `src/cartridges/cloudflare-workflow-cartridges.ts`) — replace with the installed-packages directory seam (decided 2026-06-10, see `decisions/kernel-package-overlays.svx` "Local install contract"): local dir of package data per packageId, same shapes the Worker reads from D1/Artifacts, hand-maintained until the `kernel` CLI owns it.
 2. The proof recorder is pinned to the Dream profile and runs unconditionally on every run (`memory-fabric/cloudflare-installer.ts`, `plan:source-profile-bound` requires the dream profile id) — recorders must bind per-profile.
 3. Effect coverage uses closed dream-shaped enums (`requiredMemoryOutputEffects`, `MemoryWorkflowEffectSchema`) instead of profile-declared effects.
 

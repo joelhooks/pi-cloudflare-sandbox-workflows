@@ -28,6 +28,10 @@ Kernel package **content lives in Cloudflare Artifacts git repos** in the regist
 - Artifacts-git as sole source of truth means no GitHub PR review flow for kernel edits; review happens through the workflow app's review gates (dream proposals, forward/rollback diffs) instead. Accepted: the review-gate machinery is the project's own trust boundary, and a second source of truth (GitHub repo + registry) is how content drifts.
 - Overlay semantics (what wins when layers conflict) must be defined in the package schema before the install CLI ships; until then overlays are convention.
 
+## Local install contract — first instance (added 2026-06-10)
+
+The seam that replaces the compile-time profile registry IS the install contract: a local installed-packages directory holding package data (source-profile.json, manifest with hashes) per packageId. Local scripts resolve `--profile <id>` against that directory; the Worker resolves the same shapes from D1/Artifacts. Hand-maintained until the `kernel` CLI owns it in M4 — designed once, not twice. Rejected alternatives: resolving via the deployed registry API (network+token for every local preflight) and a `--profile-file` escape hatch (two resolution paths to reconcile later).
+
 ## Consequences
 
 - The registry spike (`prototypes/cloudflare-registry-workflow-os-spike`) shape graduates into `src/app` as the package registry; per the rewrite boundary, interfaces and state shapes move, not spike code.
