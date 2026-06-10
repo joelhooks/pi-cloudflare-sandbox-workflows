@@ -138,6 +138,7 @@ export const DreamWorkflowEffectSchema = z.enum([
   "capture-artifact",
   "capture-run",
   "correlate",
+  "hitl-decision-seed",
   "hitl-report",
   "hydrate",
   "inventory",
@@ -153,6 +154,7 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.correlate",
   "joelclaw.dream.capture-artifact",
   "joelclaw.dream.capture-run",
+  "joelclaw.dream.hitl-decision-seed",
   "joelclaw.dream.hitl-report",
   "joelclaw.dream.hydrate",
   "joelclaw.dream.memory-search",
@@ -880,6 +882,90 @@ export const DreamHitlDecisionDocumentSchema = z
     }
   });
 
+export const DreamHitlDecisionWorkflowSeedStatusSchema = z.enum([
+  "no-actionable-decisions",
+  "ready",
+]);
+
+export const DreamHitlDecisionWorkflowSeedDocumentSchema = z
+  .object({
+    acceptedDecisionIds: z.array(z.string().min(1)).default([]),
+    actionableDecisionCount: z.number().int().min(0),
+    actionableDecisions: z.array(DreamHitlDecisionSchema).default([]),
+    decisionRef: ArtifactRefSchema,
+    generatedAt: IsoDateTimeSchema,
+    heldDecisionIds: z.array(z.string().min(1)).default([]),
+    nextWorkflowSeed: DreamHitlDecisionNextWorkflowSeedSchema,
+    redacted: z.literal(true),
+    refinementProposalRef: ArtifactRefSchema.optional(),
+    rejectedDecisionIds: z.array(z.string().min(1)).default([]),
+    reportRef: ArtifactRefSchema,
+    runId: z.string().min(1),
+    schemaVersion: z.literal("dream.hitl-decision-workflow-seed.v1"),
+    sourceRefs: z.array(ArtifactRefSchema).min(1),
+    status: DreamHitlDecisionWorkflowSeedStatusSchema,
+    summary: z.string().min(1),
+    workItemDecisionIds: z.array(z.string().min(1)).default([]),
+    workItemId: z.string().min(1),
+  })
+  .superRefine((document, context) => {
+    if (
+      document.actionableDecisionCount !== document.actionableDecisions.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "actionableDecisionCount must match actionableDecisions.length.",
+        path: ["actionableDecisionCount"],
+      });
+    }
+
+    if (document.status === "ready" && document.actionableDecisionCount === 0) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Ready HITL decision workflow seeds require at least one actionable decision.",
+        path: ["status"],
+      });
+    }
+
+    if (
+      document.status === "no-actionable-decisions" &&
+      document.actionableDecisionCount > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "No-actionable-decisions HITL workflow seeds cannot include actionable decisions.",
+        path: ["status"],
+      });
+    }
+
+    if (
+      document.status === "ready" &&
+      document.nextWorkflowSeed.plannerInstructions.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Ready HITL decision workflow seeds require planner instructions.",
+        path: ["nextWorkflowSeed", "plannerInstructions"],
+      });
+    }
+
+    if (
+      document.status === "ready" &&
+      document.nextWorkflowSeed.artifactUpdateTargets.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Ready HITL decision workflow seeds require artifact update targets.",
+        path: ["nextWorkflowSeed", "artifactUpdateTargets"],
+      });
+    }
+  });
+
 export const DREAM_HITL_REPORT_SECTION_ORDER = [
   "run-context",
   "actual-dreams",
@@ -1326,6 +1412,12 @@ export type DreamHitlDecisionArtifactUpdateTargetKind = z.infer<
 >;
 export type DreamHitlDecisionDocument = z.infer<
   typeof DreamHitlDecisionDocumentSchema
+>;
+export type DreamHitlDecisionWorkflowSeedDocument = z.infer<
+  typeof DreamHitlDecisionWorkflowSeedDocumentSchema
+>;
+export type DreamHitlDecisionWorkflowSeedStatus = z.infer<
+  typeof DreamHitlDecisionWorkflowSeedStatusSchema
 >;
 export type DreamHitlDecisionNextWorkflowSeed = z.infer<
   typeof DreamHitlDecisionNextWorkflowSeedSchema

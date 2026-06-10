@@ -23,6 +23,8 @@ import {
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionContractSchema,
+  DreamHitlDecisionDocumentSchema,
+  DreamHitlDecisionWorkflowSeedDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHitlReportProofLevelSchema,
   DreamHydrationDocumentSchema,
@@ -50,6 +52,8 @@ import type {
   DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHitlDecisionContract,
+  DreamHitlDecisionDocument,
+  DreamHitlDecisionWorkflowSeedDocument,
   DreamHitlDreamCard,
   DreamHitlReportDocument,
   DreamHitlReportProofLevel,
@@ -300,6 +304,11 @@ const DreamHitlReportNodeConfigSchema = z.object({
   title: z.string().min(1).default("Dream review"),
 });
 
+const DreamHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
+  decisionRef: ArtifactRefSchema.optional(),
+  decisionStepId: z.string().min(1).optional(),
+});
+
 const blocker = (
   code: CapabilityBlocker["code"],
   message: string
@@ -333,6 +342,7 @@ const writeDocument = async (input: {
     | DreamBackfillRunReceiptDocument
     | DreamCaptureReceiptDocument
     | DreamCorrelationGraphDocument
+    | DreamHitlDecisionWorkflowSeedDocument
     | DreamHitlReportDocument
     | DreamHydrationDocument
     | DreamMemorySearchDocument
@@ -630,6 +640,31 @@ const loadRefinementProposals = async (input: {
   }
 };
 
+const loadHitlDecision = async (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly artifactRef: ArtifactRef;
+}): Promise<
+  | {
+      readonly document: DreamHitlDecisionDocument;
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  try {
+    return {
+      document: DreamHitlDecisionDocumentSchema.parse(
+        await input.artifacts.readJson({ artifactRef: input.artifactRef })
+      ),
+      status: "loaded",
+    };
+  } catch {
+    return blocker(
+      "stale_package",
+      "Dream HITL decision artifact could not be loaded by the Dream node."
+    );
+  }
+};
+
 const inventoryRefFor = (input: {
   readonly config: z.infer<typeof DreamSourceHealthNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
@@ -888,6 +923,21 @@ const reportRefsFor = (input: {
       stepId: input.config.searchStepId,
     }),
 });
+
+const hitlDecisionRefFor = (input: {
+  readonly config: z.infer<
+    typeof DreamHitlDecisionWorkflowSeedNodeConfigSchema
+  >;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly inputRefs: readonly ArtifactRef[];
+}): ArtifactRef | null =>
+  input.config.decisionRef ??
+  dependencyRefFor({
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    stepId: input.config.decisionStepId,
+  }) ??
+  input.inputRefs.at(0) ??
+  null;
 
 interface RequiredReportRefs {
   readonly backfillPlanRef: ArtifactRef;
@@ -1566,6 +1616,81 @@ const refinementProposalDocumentFor = (input: {
     schemaVersion: "dream.refinement-proposals.v1",
     sourceRefs,
     workItemId: input.search.workItemId,
+  });
+};
+
+const actionableHitlDecisionsFor = (
+  document: DreamHitlDecisionDocument
+): DreamHitlDecisionDocument["decisions"] =>
+  document.decisions.filter(
+    (decision) =>
+      decision.decision === "accept" || decision.decision === "turn-into-work"
+  );
+
+const uniqueArtifactRefs = (refs: readonly ArtifactRef[]): ArtifactRef[] => [
+  ...new Set(refs),
+];
+
+const hitlDecisionWorkflowSeedDocumentFor = (input: {
+  readonly decision: DreamHitlDecisionDocument;
+  readonly decisionRef: ArtifactRef;
+}): DreamHitlDecisionWorkflowSeedDocument => {
+  const actionableDecisions = actionableHitlDecisionsFor(input.decision);
+  const acceptedDecisionIds = input.decision.decisions
+    .filter((decision) => decision.decision === "accept")
+    .map((decision) => decision.decisionId);
+  const workItemDecisionIds = input.decision.decisions
+    .filter((decision) => decision.decision === "turn-into-work")
+    .map((decision) => decision.decisionId);
+  const heldDecisionIds = input.decision.decisions
+    .filter((decision) => decision.decision === "hold")
+    .map((decision) => decision.decisionId);
+  const rejectedDecisionIds = input.decision.decisions
+    .filter((decision) => decision.decision === "reject")
+    .map((decision) => decision.decisionId);
+  const sourceRefs = uniqueArtifactRefs([
+    input.decisionRef,
+    input.decision.reportRef,
+    ...(input.decision.refinementProposalRef === undefined
+      ? []
+      : [input.decision.refinementProposalRef]),
+    ...input.decision.sourceRefs,
+    ...input.decision.nextWorkflowSeed.sourceRefs,
+    ...input.decision.decisions.flatMap((decision) => decision.sourceRefs),
+    ...input.decision.nextWorkflowSeed.artifactUpdateTargets.flatMap(
+      (target) => target.sourceRefs
+    ),
+  ]);
+  const status =
+    actionableDecisions.length === 0
+      ? "no-actionable-decisions"
+      : ("ready" as const);
+  const summary =
+    status === "ready"
+      ? `HITL accepted ${acceptedDecisionIds.length} decision(s) and turned ${workItemDecisionIds.length} decision(s) into work; the next generated workflow must consume ${input.decision.nextWorkflowSeed.plannerInstructions.length} planner instruction(s).`
+      : "HITL review did not accept or turn any Dream decision into work; the next generated workflow seed is intentionally empty.";
+
+  return DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+    acceptedDecisionIds,
+    actionableDecisionCount: actionableDecisions.length,
+    actionableDecisions,
+    decisionRef: input.decisionRef,
+    generatedAt: new Date().toISOString(),
+    heldDecisionIds,
+    nextWorkflowSeed: input.decision.nextWorkflowSeed,
+    redacted: true,
+    ...(input.decision.refinementProposalRef === undefined
+      ? {}
+      : { refinementProposalRef: input.decision.refinementProposalRef }),
+    rejectedDecisionIds,
+    reportRef: input.decision.reportRef,
+    runId: input.decision.runId,
+    schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+    sourceRefs,
+    status,
+    summary,
+    workItemDecisionIds,
+    workItemId: input.decision.workItemId,
   });
 };
 
@@ -2273,6 +2398,43 @@ const executeHitlReportNode = async (
   });
 };
 
+const executeHitlDecisionWorkflowSeedNode = async (
+  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
+  input: DreamWorkflowNodeExecutionInput
+): Promise<WorkflowNodeExecutionResult> => {
+  const nodeConfig = DreamHitlDecisionWorkflowSeedNodeConfigSchema.parse(
+    input.step.config
+  );
+  const decisionRef = hitlDecisionRefFor({
+    config: nodeConfig,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    inputRefs: input.step.inputRefs,
+  });
+  if (decisionRef === null) {
+    return blocker(
+      "stale_package",
+      "Dream HITL decision seed node requires a dream.hitl-decision.v1 artifact ref."
+    );
+  }
+
+  const decision = await loadHitlDecision({
+    artifactRef: decisionRef,
+    artifacts: config.artifacts,
+  });
+  if (decision.status === "blocked") {
+    return decision;
+  }
+
+  return await writeDocument({
+    artifacts: config.artifacts,
+    document: hitlDecisionWorkflowSeedDocumentFor({
+      decision: decision.document,
+      decisionRef,
+    }),
+    step: input.step,
+  });
+};
+
 const executeCaptureRunNode = async (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig,
   input: DreamWorkflowNodeExecutionInput
@@ -2525,6 +2687,10 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
 
     if (nodeTypeResult.data === "joelclaw.dream.refinement-proposals") {
       return await executeRefinementProposalsNode(config, input);
+    }
+
+    if (nodeTypeResult.data === "joelclaw.dream.hitl-decision-seed") {
+      return await executeHitlDecisionWorkflowSeedNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.hitl-report") {

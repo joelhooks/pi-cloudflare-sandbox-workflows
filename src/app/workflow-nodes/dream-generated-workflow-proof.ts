@@ -68,6 +68,7 @@ export interface DreamGeneratedWorkflowProofRecorderConfig {
 const isRelayBackedDreamNodeType = (
   nodeType: DreamMemoryFabricNodeType
 ): boolean =>
+  nodeType !== "joelclaw.dream.hitl-decision-seed" &&
   nodeType !== "joelclaw.dream.hitl-report" &&
   nodeType !== "joelclaw.dream.refinement-proposals";
 
@@ -77,6 +78,7 @@ const dreamNodeTypeEffects = {
   "joelclaw.dream.capture-artifact": ["capture-artifact"],
   "joelclaw.dream.capture-run": ["capture-run"],
   "joelclaw.dream.correlate": ["correlate"],
+  "joelclaw.dream.hitl-decision-seed": ["hitl-decision-seed"],
   "joelclaw.dream.hitl-report": ["hitl-report"],
   "joelclaw.dream.hydrate": ["hydrate"],
   "joelclaw.dream.memory-search": ["search"],

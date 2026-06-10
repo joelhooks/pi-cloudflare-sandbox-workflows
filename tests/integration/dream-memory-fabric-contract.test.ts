@@ -7,6 +7,7 @@ import {
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlDecisionDocumentSchema,
+  DreamHitlDecisionWorkflowSeedDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayEndpointCatalogSchema,
@@ -231,6 +232,13 @@ describe("Dream memory fabric domain contracts", () => {
             exportRecord.exportId === "dream-hitl-decision-schema" &&
             exportRecord.kind === "schema"
         ),
+      packageMetadataHasHitlDecisionWorkflowSeedNode:
+        dreamMemoryFabricPackageMetadata.exports.some(
+          (exportRecord) =>
+            exportRecord.exportId === "dream-hitl-decision-workflow-seed" &&
+            exportRecord.kind === "workflow-node" &&
+            exportRecord.nodeType === "joelclaw.dream.hitl-decision-seed"
+        ),
       packageMetadataHasProfile: dreamMemoryFabricPackageMetadata.exports.some(
         (exportRecord) => exportRecord.kind === "source-profile"
       ),
@@ -245,6 +253,7 @@ describe("Dream memory fabric domain contracts", () => {
       exportedKind: "source-profile",
       packageId: "workflow/dream-memory-fabric",
       packageMetadataHasHitlDecisionSchema: true,
+      packageMetadataHasHitlDecisionWorkflowSeedNode: true,
       packageMetadataHasProfile: true,
       requiredMachines: ["blaine", "panda", "flagg", "cloudflare"],
       sourceFamilies: [
@@ -835,6 +844,37 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       workItemId: "work-item:dream-preflight",
     });
+    const acceptedDecision = decisions.decisions.at(0);
+    if (acceptedDecision === undefined) {
+      throw new Error("Expected accepted decision.");
+    }
+
+    const workflowSeed = DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+      acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
+      actionableDecisionCount: 1,
+      actionableDecisions: [acceptedDecision],
+      decisionRef: "artifact://dream-preflight/run/dream/hitl-decision.json",
+      generatedAt: timestamp,
+      heldDecisionIds: ["decision:dream:optional-slack-pack"],
+      nextWorkflowSeed: decisions.nextWorkflowSeed,
+      redacted: true,
+      refinementProposalRef:
+        "artifact://dream-preflight/run/dream/refinement-proposals.json",
+      rejectedDecisionIds: [],
+      reportRef: decisions.reportRef,
+      runId: decisions.runId,
+      schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      sourceRefs: [
+        "artifact://dream-preflight/run/dream/hitl-decision.json",
+        "artifact://dream-preflight/run/dream/hitl-report.json",
+        "artifact://dream-preflight/run/dream/refinement-proposals.json",
+      ],
+      status: "ready",
+      summary:
+        "HITL accepted one Dream decision and turned it into next workflow input.",
+      workItemDecisionIds: [],
+      workItemId: decisions.workItemId,
+    });
 
     expect({
       actionableSeedIds: decisions.nextWorkflowSeed.decisionIds,
@@ -846,6 +886,9 @@ describe("Dream memory fabric domain contracts", () => {
       updateTargets: decisions.nextWorkflowSeed.artifactUpdateTargets.map(
         (target) => target.targetKind
       ),
+      workflowSeedActionableDecisionCount: workflowSeed.actionableDecisionCount,
+      workflowSeedSchemaVersion: workflowSeed.schemaVersion,
+      workflowSeedStatus: workflowSeed.status,
     }).toStrictEqual({
       actionableSeedIds: ["decision:dream:generated-machine-proof"],
       decisionCount: 2,
@@ -853,6 +896,9 @@ describe("Dream memory fabric domain contracts", () => {
       reviewerType: "human",
       schemaVersion: "dream.hitl-decision.v1",
       updateTargets: ["brain", "workflow"],
+      workflowSeedActionableDecisionCount: 1,
+      workflowSeedSchemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      workflowSeedStatus: "ready",
     });
   });
 
