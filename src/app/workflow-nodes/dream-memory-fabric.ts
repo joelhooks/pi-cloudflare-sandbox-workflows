@@ -13,6 +13,8 @@ import type {
   ArtifactPin,
   ArtifactRef,
   CapabilityBlocker,
+  DynamicWorkflowMachineDocument,
+  DynamicWorkflowPlanDocument,
 } from "../domain/schemas.ts";
 import {
   DREAM_HITL_REPORT_SECTION_ORDER,
@@ -1074,26 +1076,72 @@ const dreamFamilyLabels: Record<DreamSourceFamily, string> = {
   support: "support signals",
 };
 
-const dreamReportStateMachineD2 = [
-  "direction: down",
-  'inventory: "Source inventory"',
-  'health: "Source health"',
-  'backfillPlan: "Recovery backfill plan"',
-  'backfillRun: "Backfill run receipt"',
-  'search: "Memory search"',
-  'hydrate: "Redacted hydration"',
-  'correlate: "Correlation graph"',
-  'refine: "Refinement proposals"',
-  'report: "HITL report artifact"',
-  "inventory -> health",
-  "health -> backfillPlan",
-  "backfillPlan -> backfillRun",
-  "backfillRun -> search",
-  "search -> hydrate",
-  "hydrate -> correlate",
-  "correlate -> refine",
-  "refine -> report",
-].join("\n");
+const d2Label = (value: string): string => JSON.stringify(value);
+
+const dreamReportStateMachineFigureFor = (
+  machine: DynamicWorkflowMachineDocument
+): DreamHitlReportDocument["proof"]["stateMachineFigure"] => {
+  const stateEntries = Object.entries(machine.xstate.states);
+  const stateIds = new Map(
+    stateEntries.map(([stateName], index) => [stateName, `s${index}`])
+  );
+  const transitions = stateEntries.flatMap(([stateName, state]) =>
+    Object.entries(state.on).map(([eventName, transition]) => ({
+      eventName,
+      from: stateName,
+      to: transition.target,
+    }))
+  );
+  const maxFanOut = Math.max(
+    0,
+    ...stateEntries.map(([, state]) => Object.keys(state.on).length)
+  );
+  let aspectRatio = "4:5";
+  if (stateEntries.length >= 10 && maxFanOut <= 2) {
+    aspectRatio = "3:5";
+  } else if (maxFanOut >= 3) {
+    aspectRatio = "16:9";
+  }
+  const nodeLines = stateEntries.map(([stateName, state]) => {
+    const stateId = stateIds.get(stateName);
+    if (stateId === undefined) {
+      throw new Error(`Generated machine state id missing for ${stateName}.`);
+    }
+
+    const stepSummary =
+      state.meta.stepId === undefined ? "" : `\n${state.meta.stepId}`;
+    const finalSummary = state.type === "final" ? "\nfinal" : "";
+
+    return `${stateId}: ${d2Label(`${stateName}${stepSummary}${finalSummary}`)}`;
+  });
+  const edgeLines = transitions.map((transition) => {
+    const fromId = stateIds.get(transition.from);
+    const toId = stateIds.get(transition.to);
+    if (fromId === undefined || toId === undefined) {
+      throw new Error(
+        `Generated machine transition references an unknown state: ${transition.from} -> ${transition.to}.`
+      );
+    }
+
+    return `${fromId} -> ${toId}: ${d2Label(transition.eventName)}`;
+  });
+
+  return {
+    aspectRatio,
+    component: "D2",
+    machineId: machine.machineId,
+    source: [
+      "direction: down",
+      ...nodeLines,
+      ...edgeLines,
+      `initial: ${d2Label(machine.xstate.initial)}`,
+      `machine: ${d2Label(machine.machineId)}`,
+    ].join("\n"),
+    sourceKind: "generated-xstate-machine",
+    stateCount: stateEntries.length,
+    transitionCount: transitions.length,
+  };
+};
 
 const frontMatterString = (value: string): string => JSON.stringify(value);
 
@@ -1571,10 +1619,12 @@ const reportMdsvxFor = (input: {
   readonly health: DreamSourceHealthDocument;
   readonly hydration: DreamHydrationDocument;
   readonly inventory: DreamSourceInventoryDocument;
+  readonly plan: DynamicWorkflowPlanDocument;
   readonly proofLevel: DreamHitlReportProofLevel;
   readonly receiptCount: number;
   readonly refinementProposals: readonly DreamRefinementProposal[];
   readonly search: DreamMemorySearchDocument;
+  readonly stateMachineFigure: DreamHitlReportDocument["proof"]["stateMachineFigure"];
   readonly title: string;
 }): string => {
   const dreamSection =
@@ -1641,17 +1691,27 @@ const reportMdsvxFor = (input: {
     "",
     "## Workflow state machine",
     "",
-    "The D2 source below is the report figure for the Dream node chain. It belongs below the dreams so proof does not bury the human decision.",
+    "The D2 source below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static Dream node list. It belongs below the dreams so proof does not bury the human decision.",
     "",
     "```d2",
-    dreamReportStateMachineD2,
+    input.stateMachineFigure.source,
     "```",
     "",
     "## Dynamic generation proof",
     "",
     `Dynamic generation proof level: ${input.proofLevel}.`,
     "",
-    "The report records the proof level supplied by the generated workflow. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, generated machine hashes, cartridge invocation proofs, and verifier result.",
+    `Generated machine: ${input.plan.machine.artifactRef} hash ${input.plan.machine.hash}.`,
+    "",
+    `Generated machine source: ${input.plan.machine.sourceArtifactRef} hash ${input.plan.machine.sourceHash}.`,
+    "",
+    `Generated harness: ${input.plan.harness.artifactRef} hash ${input.plan.harness.hash}.`,
+    "",
+    `Verification contract: ${input.plan.verificationContract.artifactRef} hash ${input.plan.verificationContract.hash}.`,
+    "",
+    `Planner lane: ${input.plan.planner.source}, nonce ${input.plan.planner.nonce}. Plan ${input.plan.planId} has ${input.plan.steps.length} step(s).`,
+    "",
+    "The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `dream.generated-workflow-proof.v1`, and verifier result.",
     "",
     "## Run coverage",
     "",
@@ -2104,6 +2164,7 @@ const executeHitlReportNode = async (
     search: reportInputs.search,
   });
   const receiptCount = uniqueReceiptCountFor(reportInputs.search);
+  const stateMachineFigure = dreamReportStateMachineFigureFor(input.machine);
   const mdsvx = reportMdsvxFor({
     backfill: reportInputs.backfill,
     backfillRun: reportInputs.backfillRun,
@@ -2113,10 +2174,12 @@ const executeHitlReportNode = async (
     health: reportInputs.health,
     hydration: reportInputs.hydration,
     inventory: reportInputs.inventory,
+    plan: input.plan,
     proofLevel: nodeConfig.dynamicGenerationProofLevel,
     receiptCount,
     refinementProposals: refinementProposals.document?.proposals ?? [],
     search: reportInputs.search,
+    stateMachineFigure,
     title: nodeConfig.title,
   });
   const document = DreamHitlReportDocumentSchema.parse({
@@ -2128,12 +2191,18 @@ const executeHitlReportNode = async (
     noindex: true,
     proof: {
       dynamicGenerationProofLevel: nodeConfig.dynamicGenerationProofLevel,
-      rawTranscriptsReturned: false,
-      stateMachineFigure: {
-        aspectRatio: "4:5",
-        component: "D2",
-        source: dreamReportStateMachineD2,
+      generatedArtifacts: {
+        harness: input.plan.harness,
+        machine: input.plan.machine,
+        plan: {
+          planId: input.plan.planId,
+          planner: input.plan.planner,
+          stepCount: input.plan.steps.length,
+        },
+        verificationContract: input.plan.verificationContract,
       },
+      rawTranscriptsReturned: false,
+      stateMachineFigure,
     },
     receiptCount,
     redacted: true,

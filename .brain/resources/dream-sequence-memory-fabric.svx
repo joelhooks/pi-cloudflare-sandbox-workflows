@@ -78,6 +78,7 @@ Cartridge boundary:
 - Each Dream run still needs a planner-generated runtime: `workflow.dynamic-plan.v1`, `workflow.xstate-machine.v1`, generated TypeScript source, generated harness source, artifact hashes, and execution proof.
 - The generated-workflow proof should bind the generated plan to the installed source profile and pinned package export, then prove the generated XState/harness artifacts were executed. Binding to a profile is not the same thing as a fixed deterministic phase list.
 - Generated retrieval and signal-mining steps must declare `dreamCoverageHorizons` for the source profile's required horizons. `dream.generated-workflow-proof.v1` records `horizonCoverage.requiredHorizons` and `horizonCoverage.coveredHorizons`, and fails `plan:horizon-coverage` when a generated plan collapses into recent-only retrieval.
+- The Dream HITL report must render its D2 state-machine figure from the pinned generated `workflow.xstate-machine.v1` config. `dream.hitl-report.v1.proof` now carries generated machine, machine source, harness, verification-contract, planner, plan, hash, state-count, transition-count, and `sourceKind=generated-xstate-machine` metadata so a Wzrrd report cannot quietly fall back to a static Dream node diagram.
 
 0. **Generate and prove the workflow**
    - Ask a real planner lane to generate the task-specific workflow from the source inventory, goal, scopes, and available capability leases.

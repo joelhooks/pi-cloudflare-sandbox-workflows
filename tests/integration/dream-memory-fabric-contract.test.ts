@@ -754,11 +754,50 @@ describe("Dream memory fabric domain contracts", () => {
       noindex: true,
       proof: {
         dynamicGenerationProofLevel: "generated-machine",
+        generatedArtifacts: {
+          harness: {
+            artifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/harness.json",
+            entrypoint: "workflows/harness.ts",
+            harnessId: "harness:run-dream-preflight",
+            hash: "b".repeat(64),
+            language: "typescript",
+          },
+          machine: {
+            artifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",
+            hash: "a".repeat(64),
+            machineId: "machine:run-dream-preflight",
+            sourceArtifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.ts",
+            sourceHash: "c".repeat(64),
+          },
+          plan: {
+            planId: "plan:run-dream-preflight",
+            planner: {
+              kind: "stochastic",
+              nonce: "nonce:dream-preflight",
+              source: "pi-agent-cli",
+            },
+            stepCount: 8,
+          },
+          verificationContract: {
+            artifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/verification-contract.json",
+            contractId: "verification:run-dream-preflight",
+            hash: "d".repeat(64),
+            mediaType: "application/json",
+          },
+        },
         rawTranscriptsReturned: false,
         stateMachineFigure: {
-          aspectRatio: "4:5",
+          aspectRatio: "3:5",
           component: "D2",
-          source: "source -> report",
+          machineId: "machine:run-dream-preflight",
+          source: "s0 -> s1: NEXT",
+          sourceKind: "generated-xstate-machine",
+          stateCount: 8,
+          transitionCount: 9,
         },
       },
       receiptCount: 1,
@@ -795,13 +834,17 @@ describe("Dream memory fabric domain contracts", () => {
 
     expect({
       dreamCount: report.dreamCount,
+      machineRef: report.proof.generatedArtifacts.machine.artifactRef,
       mdsvxHasD2: report.mdsvx.includes("```d2"),
       proofLevel: report.proof.dynamicGenerationProofLevel,
       rawTranscriptsReturned: report.proof.rawTranscriptsReturned,
       sectionOrder: report.sectionOrder,
+      stateMachineSourceKind: report.proof.stateMachineFigure.sourceKind,
       template: `${report.template.templateId}@${report.template.version}`,
     }).toStrictEqual({
       dreamCount: 1,
+      machineRef:
+        "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",
       mdsvxHasD2: true,
       proofLevel: "generated-machine",
       rawTranscriptsReturned: false,
@@ -813,6 +856,7 @@ describe("Dream memory fabric domain contracts", () => {
         "proof",
         "technical-appendix",
       ],
+      stateMachineSourceKind: "generated-xstate-machine",
       template: "joel/tufte-mdsvx@0.1.0",
     });
   });

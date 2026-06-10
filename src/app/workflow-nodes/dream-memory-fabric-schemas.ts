@@ -4,8 +4,11 @@ import {
   ActorSchema,
   ArtifactPinSchema,
   ArtifactRefSchema,
+  DynamicWorkflowMachineArtifactSchema,
+  GeneratedHarnessArtifactSchema,
   IsoDateTimeSchema,
   Sha256HexSchema,
+  VerificationContractArtifactSchema,
   WorkflowTraceContextSchema,
 } from "../domain/schemas.ts";
 
@@ -764,7 +767,26 @@ export const DreamHitlReportTemplateSchema = z.object({
 export const DreamHitlReportStateMachineFigureSchema = z.object({
   aspectRatio: z.string().min(1),
   component: z.literal("D2"),
+  machineId: z.string().min(1),
   source: z.string().min(1),
+  sourceKind: z.literal("generated-xstate-machine"),
+  stateCount: z.number().int().min(1),
+  transitionCount: z.number().int().min(0),
+});
+
+export const DreamHitlReportGeneratedArtifactsSchema = z.object({
+  harness: GeneratedHarnessArtifactSchema,
+  machine: DynamicWorkflowMachineArtifactSchema,
+  plan: z.object({
+    planId: z.string().min(1),
+    planner: z.object({
+      kind: z.literal("stochastic"),
+      nonce: z.string().min(1),
+      source: z.string().min(1),
+    }),
+    stepCount: z.number().int().min(1),
+  }),
+  verificationContract: VerificationContractArtifactSchema,
 });
 
 export const DreamHitlDreamCardSchema = z.object({
@@ -785,6 +807,7 @@ export const DreamHitlReportDocumentSchema = z.object({
   noindex: z.literal(true),
   proof: z.object({
     dynamicGenerationProofLevel: DreamHitlReportProofLevelSchema,
+    generatedArtifacts: DreamHitlReportGeneratedArtifactsSchema,
     rawTranscriptsReturned: z.literal(false),
     stateMachineFigure: DreamHitlReportStateMachineFigureSchema,
   }),
@@ -1014,6 +1037,9 @@ export type DreamHydrationDocument = z.infer<
 export type DreamHitlDreamCard = z.infer<typeof DreamHitlDreamCardSchema>;
 export type DreamHitlReportDocument = z.infer<
   typeof DreamHitlReportDocumentSchema
+>;
+export type DreamHitlReportGeneratedArtifacts = z.infer<
+  typeof DreamHitlReportGeneratedArtifactsSchema
 >;
 export type DreamHitlReportProofLevel = z.infer<
   typeof DreamHitlReportProofLevelSchema

@@ -3387,6 +3387,15 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesDynamicProof: report.mdsvx.includes(
         "## Dynamic generation proof"
       ),
+      reportMdsvxIncludesGeneratedHarnessRef: report.mdsvx.includes(
+        result.harnessArtifact.artifactRef
+      ),
+      reportMdsvxIncludesGeneratedMachineRef: report.mdsvx.includes(
+        result.machineArtifact.artifactRef
+      ),
+      reportMdsvxIncludesGeneratedMachineSourceRef: report.mdsvx.includes(
+        result.machineArtifact.sourceArtifactRef
+      ),
       reportMdsvxIncludesRefinement: report.mdsvx.includes(
         "Refinement proposals emitted: 7."
       ),
@@ -3403,12 +3412,26 @@ describe("workflow app integration contract", () => {
         report.mdsvx.indexOf("## Dynamic generation proof"),
       reportMdsvxRefPublished: wzrrdPayload.primaryDocument?.artifactRef,
       reportMdsvxSourceMatchesJson: reportMdsvx === report.mdsvx,
+      reportProofGeneratedArtifacts: report.proof.generatedArtifacts,
       reportProofLevel: report.proof.dynamicGenerationProofLevel,
       reportRawTranscriptsReturned: report.proof.rawTranscriptsReturned,
       reportRefinementProposalCount: report.refinementProposalCount,
       reportRefinementProposalRef: report.refinementProposalRef,
       reportSectionOrder: report.sectionOrder,
       reportSourceRefs: report.sourceRefs,
+      reportStateMachineFigure: {
+        aspectRatio: report.proof.stateMachineFigure.aspectRatio,
+        machineId: report.proof.stateMachineFigure.machineId,
+        sourceHasFirstDreamStep:
+          report.proof.stateMachineFigure.source.includes(
+            "inventory-memory-fabric"
+          ),
+        sourceHasStaticDreamLabel:
+          report.proof.stateMachineFigure.source.includes("Source inventory"),
+        sourceKind: report.proof.stateMachineFigure.sourceKind,
+        stateCount: report.proof.stateMachineFigure.stateCount,
+        transitionCount: report.proof.stateMachineFigure.transitionCount,
+      },
       reportTemplate: `${report.template.templateId}@${report.template.version}`,
       searchHitCount: search.hits.length,
       searchReceiptFamilies: search.hits.flatMap((hit) =>
@@ -3764,6 +3787,9 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesD2: true,
       reportMdsvxIncludesDreamsFirst: true,
       reportMdsvxIncludesDynamicProof: true,
+      reportMdsvxIncludesGeneratedHarnessRef: true,
+      reportMdsvxIncludesGeneratedMachineRef: true,
+      reportMdsvxIncludesGeneratedMachineSourceRef: true,
       reportMdsvxIncludesRefinement: true,
       reportMdsvxIncludesReportNode: true,
       reportMdsvxIncludesReportStandard: true,
@@ -3773,6 +3799,16 @@ describe("workflow app integration contract", () => {
       reportMdsvxPutsDreamsBeforeProof: true,
       reportMdsvxRefPublished: dreamRefs.reportMdsvxRef,
       reportMdsvxSourceMatchesJson: true,
+      reportProofGeneratedArtifacts: {
+        harness: result.harnessArtifact,
+        machine: result.machineArtifact,
+        plan: {
+          planId: plan.planId,
+          planner: plan.planner,
+          stepCount: 12,
+        },
+        verificationContract: result.verificationContractArtifact,
+      },
       reportProofLevel: "generated-machine",
       reportRawTranscriptsReturned: false,
       reportRefinementProposalCount: 7,
@@ -3795,6 +3831,15 @@ describe("workflow app integration contract", () => {
         dreamRefs.correlationRef,
         dreamRefs.refinementRef,
       ],
+      reportStateMachineFigure: {
+        aspectRatio: "3:5",
+        machineId: machine.machineId,
+        sourceHasFirstDreamStep: true,
+        sourceHasStaticDreamLabel: false,
+        sourceKind: "generated-xstate-machine",
+        stateCount: 15,
+        transitionCount: 25,
+      },
       reportTemplate: "joel/tufte-mdsvx@0.1.0",
       searchHitCount: 3,
       searchReceiptFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
