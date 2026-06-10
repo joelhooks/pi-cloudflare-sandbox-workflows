@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T11:39Z implementation progress: the actual Dream HITL report contract now carries its own definition-of-done audit.
+
+Receipts:
+
+- `dream.hitl-report.v1` now requires nested `definitionOfDoneAudit` with schema `dream.hitl-report.definition-of-done-audit.v1`.
+- `joelclaw.dream.hitl-report` computes the audit from generated machine/harness/verification refs, report source refs, runtime/source-family/hydration/correlation coverage, ingest/backfill documents, dream/refinement counts, and redaction facts.
+- The report MDSvX now renders `## Definition of done audit` below `## Dynamic generation proof` and above `## Run coverage`.
+- The audit explicitly keeps post-report proof gates as `not-proven`: relay lease sidecars, live Cloudflare execution receipt, workflow-owned Wzrrd publication, HITL decision seed/follow-up artifacts, and verifier acceptance.
+- Focused verification passed: `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/workflow-app.test.ts` and `pnpm typecheck`.
+
+This makes the eventual Cloudflare-generated Dream report harder to bullshit. The report can prove its generated-machine/report/redaction facts, but it must still point at external receipts for live execution, leases, Wzrrd delivery, and the follow-up HITL loop.
+
 2026-06-10T11:32Z run attempt: Dreaming was run again through the trusted local memory relay proof, live preflight, live request builder, and public readiness handoff. Local proof passed; live Cloudflare submit correctly did not happen.
 
 Receipts:

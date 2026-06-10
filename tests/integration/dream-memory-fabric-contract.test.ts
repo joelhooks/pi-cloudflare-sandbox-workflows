@@ -1085,7 +1085,109 @@ describe("Dream memory fabric domain contracts", () => {
   });
 
   it("captures the Dream HITL report as a redacted MDSvX artifact contract", () => {
+    const reportDefinitionOfDoneAudit = {
+      generatedAt: timestamp,
+      items: [
+        {
+          evidenceRefs: ["node:joelclaw.dream.hitl-report"],
+          requirement:
+            "Dream report is emitted by the installed Dream workflow cartridge/package.",
+          requirementId: "dream-cartridge-package",
+          status: "captured",
+          summary:
+            "`joelclaw.dream.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
+        },
+        {
+          requirement:
+            "Cloudflare leases memory/search/hydration/backfill capabilities through the trusted relay.",
+          requirementId: "worker-facing-relay-capability-lease",
+          status: "not-proven",
+          summary:
+            "Relay lease sidecars are verified by dream.generated-workflow-proof.v1, not the report schema fixture.",
+        },
+        {
+          requirement:
+            "Dream is submitted to and executed by the deployed Cloudflare workflow app.",
+          requirementId: "live-cloudflare-execution",
+          status: "not-proven",
+          summary:
+            "The report schema fixture is not a Cloudflare execution receipt.",
+        },
+        {
+          evidenceRefs: [
+            "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",
+            "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.ts",
+            "artifact://dream-preflight/runs/run-dream-preflight/workflows/harness.json",
+          ],
+          requirement:
+            "A real planner generates and pins workflow.xstate-machine.v1 plus generated harness/source/hash artifacts.",
+          requirementId: "generated-machine-and-harness",
+          status: "captured",
+          summary:
+            "Generated machine, source, and harness refs are hash-pinned.",
+        },
+        {
+          requirement:
+            "Dream runs T-shaped across timeline, machines, runtimes, source families, hydration, and correlation.",
+          requirementId: "t-shaped-memory-coverage",
+          status: "not-proven",
+          summary:
+            "The schema fixture does not include source inventory, hydration, or correlation coverage.",
+        },
+        {
+          requirement:
+            "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
+          requirementId: "ingest-health-and-recovery-backfill",
+          status: "captured",
+          summary:
+            "The report contract requires source health, backfill plan, and backfill run source refs.",
+        },
+        {
+          requirement:
+            "Dream emits actionable dreams and refinement proposals for kernel/package/workflow/schema/access/report changes.",
+          requirementId: "dreams-and-refinement-proposals",
+          status: "not-proven",
+          summary:
+            "The schema fixture has a dream card but no refinement proposal artifact.",
+        },
+        {
+          requirement:
+            "Accepted dreams produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
+          requirementId: "hitl-refinement-loop",
+          status: "not-proven",
+          summary:
+            "The report contract emits the HITL decision contract; seed/follow-up artifacts are separate workflow nodes.",
+        },
+        {
+          requirement:
+            "The Cloudflare Dream workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
+          requirementId: "workflow-owned-wzrrd-output",
+          status: "not-proven",
+          summary:
+            "The report schema fixture does not prove leased Wzrrd publication.",
+        },
+        {
+          requirement:
+            "Public artifacts remain redacted: no raw credentials, raw private paths, or raw transcripts.",
+          requirementId: "public-private-redaction-boundary",
+          status: "captured",
+          summary: "The report contract requires rawTranscriptsReturned=false.",
+        },
+      ],
+      redacted: true,
+      runId: "run-dream-preflight",
+      schemaVersion: "dream.hitl-report.definition-of-done-audit.v1",
+      status: "not-proven",
+      summary: {
+        blockedCount: 0,
+        capturedCount: 4,
+        missingCount: 0,
+        notProvenCount: 6,
+        totalCount: 10,
+      },
+    } as const;
     const report = DreamHitlReportDocumentSchema.parse({
+      definitionOfDoneAudit: reportDefinitionOfDoneAudit,
       dreamCount: 1,
       dreams: [
         {
@@ -1214,6 +1316,11 @@ describe("Dream memory fabric domain contracts", () => {
     });
 
     expect({
+      auditRequirementIds: report.definitionOfDoneAudit.items.map(
+        (item) => item.requirementId
+      ),
+      auditStatus: report.definitionOfDoneAudit.status,
+      auditSummary: report.definitionOfDoneAudit.summary,
       decisionContract: report.hitlDecisionContract,
       dreamCount: report.dreamCount,
       machineRef: report.proof.generatedArtifacts.machine.artifactRef,
@@ -1225,6 +1332,26 @@ describe("Dream memory fabric domain contracts", () => {
       stateMachineSourceKind: report.proof.stateMachineFigure.sourceKind,
       template: `${report.template.templateId}@${report.template.version}`,
     }).toStrictEqual({
+      auditRequirementIds: [
+        "dream-cartridge-package",
+        "worker-facing-relay-capability-lease",
+        "live-cloudflare-execution",
+        "generated-machine-and-harness",
+        "t-shaped-memory-coverage",
+        "ingest-health-and-recovery-backfill",
+        "dreams-and-refinement-proposals",
+        "hitl-refinement-loop",
+        "workflow-owned-wzrrd-output",
+        "public-private-redaction-boundary",
+      ],
+      auditStatus: "not-proven",
+      auditSummary: {
+        blockedCount: 0,
+        capturedCount: 4,
+        missingCount: 0,
+        notProvenCount: 6,
+        totalCount: 10,
+      },
       decisionContract: {
         artifactPath: "dream/hitl-decision.json",
         contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",

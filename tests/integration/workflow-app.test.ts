@@ -3806,6 +3806,11 @@ describe("workflow app integration contract", () => {
         (proposal) => `${proposal.targetKind}:${proposal.recommendation}`
       ),
       refinementSourceRefs: refinement.sourceRefs,
+      reportDefinitionOfDoneAuditItems: report.definitionOfDoneAudit.items.map(
+        (item) => `${item.requirementId}:${item.status}`
+      ),
+      reportDefinitionOfDoneAuditStatus: report.definitionOfDoneAudit.status,
+      reportDefinitionOfDoneAuditSummary: report.definitionOfDoneAudit.summary,
       reportDreamCount: report.dreamCount,
       reportHitlDecisionContract: report.hitlDecisionContract,
       reportMdsvxIncludesAccessAdapter: report.mdsvx.includes(
@@ -3815,6 +3820,9 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesD2Fig: report.mdsvx.includes("<D2Fig"),
       reportMdsvxIncludesD2FigAspectRatio: report.mdsvx.includes(
         `aspectRatio="${report.proof.stateMachineFigure.aspectRatio}"`
+      ),
+      reportMdsvxIncludesDefinitionAudit: report.mdsvx.includes(
+        "## Definition of done audit"
       ),
       reportMdsvxIncludesDreamsFirst: report.mdsvx.includes(
         "## The actual dreams"
@@ -4382,6 +4390,26 @@ describe("workflow app integration contract", () => {
         dreamRefs.hydrationRef,
         dreamRefs.correlationRef,
       ],
+      reportDefinitionOfDoneAuditItems: [
+        "dream-cartridge-package:captured",
+        "worker-facing-relay-capability-lease:not-proven",
+        "live-cloudflare-execution:not-proven",
+        "generated-machine-and-harness:captured",
+        "t-shaped-memory-coverage:not-proven",
+        "ingest-health-and-recovery-backfill:captured",
+        "dreams-and-refinement-proposals:captured",
+        "hitl-refinement-loop:not-proven",
+        "workflow-owned-wzrrd-output:not-proven",
+        "public-private-redaction-boundary:captured",
+      ],
+      reportDefinitionOfDoneAuditStatus: "not-proven",
+      reportDefinitionOfDoneAuditSummary: {
+        blockedCount: 0,
+        capturedCount: 5,
+        missingCount: 0,
+        notProvenCount: 5,
+        totalCount: 10,
+      },
       reportDreamCount: 3,
       reportHitlDecisionContract: {
         artifactPath: "dream/hitl-decision.json",
@@ -4405,6 +4433,7 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesD2: true,
       reportMdsvxIncludesD2Fig: true,
       reportMdsvxIncludesD2FigAspectRatio: true,
+      reportMdsvxIncludesDefinitionAudit: true,
       reportMdsvxIncludesDreamsFirst: true,
       reportMdsvxIncludesDynamicProof: true,
       reportMdsvxIncludesGeneratedHarnessRef: true,

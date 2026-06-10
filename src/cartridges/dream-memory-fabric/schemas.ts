@@ -1167,6 +1167,31 @@ export const DreamHitlReportGeneratedArtifactsSchema = z.object({
   verificationContract: VerificationContractArtifactSchema,
 });
 
+export const DreamHitlReportDefinitionOfDoneAuditItemSchema = z.object({
+  blockerRefs: z.array(z.string().min(1)).default([]),
+  evidenceRefs: z.array(z.string().min(1)).default([]),
+  requirement: z.string().min(1),
+  requirementId: z.string().min(1),
+  status: z.enum(["blocked", "captured", "missing", "not-proven"]),
+  summary: z.string().min(1),
+});
+
+export const DreamHitlReportDefinitionOfDoneAuditSchema = z.object({
+  generatedAt: IsoDateTimeSchema,
+  items: z.array(DreamHitlReportDefinitionOfDoneAuditItemSchema).min(1),
+  redacted: z.literal(true),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("dream.hitl-report.definition-of-done-audit.v1"),
+  status: z.enum(["blocked", "captured", "not-proven"]),
+  summary: z.object({
+    blockedCount: z.number().int().min(0),
+    capturedCount: z.number().int().min(0),
+    missingCount: z.number().int().min(0),
+    notProvenCount: z.number().int().min(0),
+    totalCount: z.number().int().min(1),
+  }),
+});
+
 export const DreamHitlDreamCardSchema = z.object({
   rating: z.number().int().min(1).max(10),
   reasoning: z.string().min(1),
@@ -1195,6 +1220,7 @@ export const DreamHitlDecisionContractSchema = z.object({
 });
 
 export const DreamHitlReportDocumentSchema = z.object({
+  definitionOfDoneAudit: DreamHitlReportDefinitionOfDoneAuditSchema,
   dreamCount: z.number().int().min(0),
   dreams: z.array(DreamHitlDreamCardSchema).default([]),
   expiresIn: z.literal("24h"),
@@ -1453,6 +1479,12 @@ export type DreamHitlDecisionContract = z.infer<
 >;
 export type DreamHitlReportDocument = z.infer<
   typeof DreamHitlReportDocumentSchema
+>;
+export type DreamHitlReportDefinitionOfDoneAudit = z.infer<
+  typeof DreamHitlReportDefinitionOfDoneAuditSchema
+>;
+export type DreamHitlReportDefinitionOfDoneAuditItem = z.infer<
+  typeof DreamHitlReportDefinitionOfDoneAuditItemSchema
 >;
 export type DreamHitlReportGeneratedArtifacts = z.infer<
   typeof DreamHitlReportGeneratedArtifactsSchema

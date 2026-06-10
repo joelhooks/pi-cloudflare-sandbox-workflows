@@ -29,6 +29,7 @@ import {
   DreamHitlDecisionDocumentSchema,
   DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlDecisionWorkflowSeedDocumentSchema,
+  DreamHitlReportDefinitionOfDoneAuditSchema,
   DreamHitlReportDocumentSchema,
   DreamHitlReportProofLevelSchema,
   DreamHydrationDocumentSchema,
@@ -60,6 +61,8 @@ import type {
   DreamHitlFollowUpRunRequestDocument,
   DreamHitlDecisionWorkflowSeedDocument,
   DreamHitlDreamCard,
+  DreamHitlReportDefinitionOfDoneAudit,
+  DreamHitlReportDefinitionOfDoneAuditItem,
   DreamHitlReportDocument,
   DreamHitlReportProofLevel,
   DreamHydrationDocument,
@@ -1924,10 +1927,244 @@ const hitlDecisionContractFor = (
     targetKinds: ["dream-card", "refinement-proposal"],
   });
 
+type DreamHitlReportDefinitionOfDoneAuditItemInput = Omit<
+  DreamHitlReportDefinitionOfDoneAuditItem,
+  "blockerRefs" | "evidenceRefs"
+> & {
+  readonly blockerRefs?: readonly string[];
+  readonly evidenceRefs?: readonly string[];
+};
+
+const reportAuditItem = (
+  item: DreamHitlReportDefinitionOfDoneAuditItemInput
+): DreamHitlReportDefinitionOfDoneAuditItem => ({
+  blockerRefs: [...(item.blockerRefs ?? [])],
+  evidenceRefs: [...(item.evidenceRefs ?? [])],
+  requirement: item.requirement,
+  requirementId: item.requirementId,
+  status: item.status,
+  summary: item.summary,
+});
+
+const reportAuditStatusFor = (
+  items: readonly DreamHitlReportDefinitionOfDoneAuditItem[]
+): DreamHitlReportDefinitionOfDoneAudit["status"] => {
+  if (
+    items.some((item) => item.status === "blocked" || item.status === "missing")
+  ) {
+    return "blocked";
+  }
+
+  return items.some((item) => item.status === "not-proven")
+    ? "not-proven"
+    : "captured";
+};
+
+const reportDefinitionOfDoneAuditFor = (input: {
+  readonly correlation: DreamCorrelationGraphDocument;
+  readonly dreamCount: number;
+  readonly generatedAt: string;
+  readonly health: DreamSourceHealthDocument;
+  readonly hydration: DreamHydrationDocument;
+  readonly inventory: DreamSourceInventoryDocument;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly proofLevel: DreamHitlReportProofLevel;
+  readonly refinementProposalCount: number;
+  readonly runId: string;
+  readonly search: DreamMemorySearchDocument;
+  readonly sourceRefs: readonly ArtifactRef[];
+  readonly stateMachineFigure: DreamHitlReportDocument["proof"]["stateMachineFigure"];
+}): DreamHitlReportDefinitionOfDoneAudit => {
+  const generatedArtifactRefs = [
+    input.plan.machine.artifactRef,
+    input.plan.machine.sourceArtifactRef,
+    input.plan.harness.artifactRef,
+    input.plan.verificationContract.artifactRef,
+  ];
+  const requiredRuntimeCoverage = input.inventory.requiredRuntimes.map(
+    (runtime) => {
+      const coverage = input.inventory.runtimeCoverage.find(
+        (candidate) => candidate.runtime === runtime
+      );
+
+      return {
+        runtime,
+        sourceNative: coverage?.sourceNative ?? false,
+        status: coverage?.status ?? "missing",
+      };
+    }
+  );
+  const runtimeCoverageCaptured = requiredRuntimeCoverage.every(
+    (coverage) => coverage.status === "captured" && coverage.sourceNative
+  );
+  const sourceFamilies = new Set(
+    input.inventory.sources.map((source) => source.family)
+  );
+  const missingSourceFamilies = input.inventory.sourceFamiliesExpected.filter(
+    (family) => !sourceFamilies.has(family)
+  );
+  const tShapedCoverageCaptured =
+    runtimeCoverageCaptured &&
+    missingSourceFamilies.length === 0 &&
+    input.search.hits.length > 0 &&
+    input.hydration.hydrated.length > 0 &&
+    input.correlation.edges.length > 0;
+  const unsafeHydrationCount = input.hydration.hydrated.filter(
+    (hydrated) => hydrated.fullTranscriptReturned
+  ).length;
+  const dreamsAndRefinementsCaptured =
+    input.dreamCount > 0 && input.refinementProposalCount > 0;
+  const tShapedGapSummary = [
+    ...requiredRuntimeCoverage
+      .filter(
+        (coverage) => coverage.status !== "captured" || !coverage.sourceNative
+      )
+      .map(
+        (coverage) =>
+          `${coverage.runtime}:${coverage.status}${
+            coverage.sourceNative ? "" : ":non-native"
+          }`
+      ),
+    ...missingSourceFamilies.map((family) => `${family}:missing-source`),
+  ];
+
+  const items = [
+    reportAuditItem({
+      evidenceRefs: ["node:joelclaw.dream.hitl-report", ...input.sourceRefs],
+      requirement:
+        "Dream report is emitted by the installed Dream workflow cartridge/package.",
+      requirementId: "dream-cartridge-package",
+      status: "captured",
+      summary:
+        "`joelclaw.dream.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Cloudflare leases memory/search/hydration/backfill capabilities through the trusted relay.",
+      requirementId: "worker-facing-relay-capability-lease",
+      status: "not-proven",
+      summary:
+        "This report consumes Dream artifacts but does not prove relay lease sidecars; `dream.generated-workflow-proof.v1` must verify them.",
+    }),
+    reportAuditItem({
+      evidenceRefs: generatedArtifactRefs,
+      requirement:
+        "Dream is submitted to and executed by the deployed Cloudflare workflow app.",
+      requirementId: "live-cloudflare-execution",
+      status: "not-proven",
+      summary:
+        "The report is not the Cloudflare execution receipt; require `workflow.execution-proof.v1` and verifier acceptance for the surrounding run.",
+    }),
+    reportAuditItem({
+      evidenceRefs: generatedArtifactRefs,
+      requirement:
+        "A real planner generates and pins workflow.xstate-machine.v1 plus generated harness/source/hash artifacts.",
+      requirementId: "generated-machine-and-harness",
+      status:
+        input.proofLevel === "generated-machine" &&
+        input.stateMachineFigure.machineBinding.status ===
+          "bound-to-generated-machine"
+          ? "captured"
+          : "not-proven",
+      summary:
+        input.proofLevel === "generated-machine"
+          ? `Generated machine, source, harness, and verifier contract are hash-pinned; D2 source hash ${input.stateMachineFigure.sourceHash}.`
+          : `Report proof level is ${input.proofLevel}, so generated machine execution is not proven by this report.`,
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Dream runs T-shaped across timeline, machines, runtimes, source families, hydration, and correlation.",
+      requirementId: "t-shaped-memory-coverage",
+      status: tShapedCoverageCaptured ? "captured" : "not-proven",
+      summary: tShapedCoverageCaptured
+        ? `Required runtimes and source families are covered with ${input.search.hits.length} search hit(s), ${input.hydration.hydrated.length} hydrated receipt(s), and ${input.correlation.edges.length} correlation edge(s).`
+        : `Coverage gaps are explicit, not hidden: ${tShapedGapSummary.join(", ") || "missing search, hydration, or correlation evidence"}.`,
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Dream checks ingest health, plans recovery backfills, and treats recurring backfill as capture repair work.",
+      requirementId: "ingest-health-and-recovery-backfill",
+      status: "captured",
+      summary: `Health=${input.health.status}; report includes source health, backfill plan, and backfill run receipts for recovery-not-normal-operation.`,
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Dream emits actionable dreams and refinement proposals for kernel/package/workflow/schema/access/report changes.",
+      requirementId: "dreams-and-refinement-proposals",
+      status: dreamsAndRefinementsCaptured ? "captured" : "not-proven",
+      summary: dreamsAndRefinementsCaptured
+        ? `Report contains ${input.dreamCount} dream card(s) and ${input.refinementProposalCount} refinement proposal(s).`
+        : `Report contains ${input.dreamCount} dream card(s) and ${input.refinementProposalCount} refinement proposal(s); this is diagnostic, not a complete refinement loop.`,
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Accepted dreams produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
+      requirementId: "hitl-refinement-loop",
+      status: "not-proven",
+      summary:
+        "The report emits the HITL decision contract; decision seed and follow-up run request artifacts are post-report workflow nodes.",
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "The Cloudflare Dream workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
+      requirementId: "workflow-owned-wzrrd-output",
+      status: "not-proven",
+      summary:
+        "The report node renders MDSvX only; leased `wzrrd.site.publish` delivery is a separate post-verifier side effect.",
+    }),
+    reportAuditItem({
+      evidenceRefs: input.sourceRefs,
+      requirement:
+        "Public artifacts remain redacted: no raw credentials, raw private paths, or raw transcripts.",
+      requirementId: "public-private-redaction-boundary",
+      status: unsafeHydrationCount === 0 ? "captured" : "blocked",
+      summary:
+        unsafeHydrationCount === 0
+          ? "Report and hydration artifacts assert redacted evidence only; raw transcripts were not returned."
+          : `${unsafeHydrationCount} hydration item(s) returned full transcripts and must not be published.`,
+    }),
+  ];
+  const summary = {
+    blockedCount: items.filter((item) => item.status === "blocked").length,
+    capturedCount: items.filter((item) => item.status === "captured").length,
+    missingCount: items.filter((item) => item.status === "missing").length,
+    notProvenCount: items.filter((item) => item.status === "not-proven").length,
+    totalCount: items.length,
+  };
+
+  return DreamHitlReportDefinitionOfDoneAuditSchema.parse({
+    generatedAt: input.generatedAt,
+    items,
+    redacted: true,
+    runId: input.runId,
+    schemaVersion: "dream.hitl-report.definition-of-done-audit.v1",
+    status: reportAuditStatusFor(items),
+    summary,
+  });
+};
+
+const reportDefinitionOfDoneAuditMdsvxFor = (
+  audit: DreamHitlReportDefinitionOfDoneAudit
+): string =>
+  [
+    `Audit status: ${audit.status}. Captured ${audit.summary.capturedCount}/${audit.summary.totalCount}; blocked ${audit.summary.blockedCount}; missing ${audit.summary.missingCount}; not proven ${audit.summary.notProvenCount}.`,
+    "",
+    ...audit.items.map(
+      (item) => `- ${item.requirementId}: ${item.status} -- ${item.summary}`
+    ),
+  ].join("\n");
+
 const reportMdsvxFor = (input: {
   readonly backfill: DreamBackfillPlanDocument;
   readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly correlation: DreamCorrelationGraphDocument;
+  readonly definitionOfDoneAudit: DreamHitlReportDefinitionOfDoneAudit;
   readonly hitlDecisionContract: DreamHitlDecisionContract;
   readonly dreamCount: number;
   readonly dreams: readonly DreamHitlDreamCard[];
@@ -2041,6 +2278,10 @@ const reportMdsvxFor = (input: {
     `Planner lane: ${input.plan.planner.source}, nonce ${input.plan.planner.nonce}. Plan ${input.plan.planId} has ${input.plan.steps.length} step(s).`,
     "",
     "The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `dream.generated-workflow-proof.v1`, and verifier result.",
+    "",
+    "## Definition of done audit",
+    "",
+    reportDefinitionOfDoneAuditMdsvxFor(input.definitionOfDoneAudit),
     "",
     "## Run coverage",
     "",
@@ -2510,10 +2751,27 @@ const executeHitlReportNode = async (
       : [refs.refinementProposalRef]),
   ];
   const hitlDecisionContract = hitlDecisionContractFor(sourceRefs);
+  const generatedAt = new Date().toISOString();
+  const definitionOfDoneAudit = reportDefinitionOfDoneAuditFor({
+    correlation: reportInputs.correlation,
+    dreamCount: dreams.length,
+    generatedAt,
+    health: reportInputs.health,
+    hydration: reportInputs.hydration,
+    inventory: reportInputs.inventory,
+    plan: input.plan,
+    proofLevel: nodeConfig.dynamicGenerationProofLevel,
+    refinementProposalCount: refinementProposals.document?.proposalCount ?? 0,
+    runId: input.plan.runId,
+    search: reportInputs.search,
+    sourceRefs,
+    stateMachineFigure,
+  });
   const mdsvx = reportMdsvxFor({
     backfill: reportInputs.backfill,
     backfillRun: reportInputs.backfillRun,
     correlation: reportInputs.correlation,
+    definitionOfDoneAudit,
     dreamCount: dreams.length,
     dreams,
     health: reportInputs.health,
@@ -2529,10 +2787,11 @@ const executeHitlReportNode = async (
     title: nodeConfig.title,
   });
   const document = DreamHitlReportDocumentSchema.parse({
+    definitionOfDoneAudit,
     dreamCount: dreams.length,
     dreams,
     expiresIn: "24h",
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     hitlDecisionContract,
     mdsvx,
     noindex: true,
