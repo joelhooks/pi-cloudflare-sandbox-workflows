@@ -17,6 +17,9 @@ import {
 } from "../../src/app/domain/schemas.ts";
 import type { WorkflowLivePreflightReceipt } from "../../src/app/domain/schemas.ts";
 
+const relayNetworkBoundarySignoff =
+  "exposing JoelClaw/Typesense over a new network boundary";
+
 const readyRelayCapability = {
   allowedOperations: [
     "inventory",
@@ -354,7 +357,57 @@ describe("Dream live run request harness", () => {
     }
   });
 
-  it("submits the typed request only after preflight is ready", async () => {
+  it("refuses live submit when preflight is ready but relay boundary sign-off is missing", async () => {
+    const repoRoot = await mkdtemp(
+      resolve(tmpdir(), "dream-live-run-missing-signoff-")
+    );
+
+    try {
+      await writePreflight(repoRoot, readyPreflight);
+      let fetchCalled = false;
+
+      const receipt = await runDreamLiveRunCli({
+        argv: [
+          "--submit",
+          "--run-id",
+          "run-live-dream-memory-fabric-ready-no-signoff",
+          "--preflight-path",
+          "preflight.json",
+          "--request-path",
+          "request.json",
+          "--receipt-path",
+          "receipt.json",
+          "--skip-preflight-refresh",
+        ],
+        fetch() {
+          fetchCalled = true;
+
+          return Promise.resolve(Response.json({ ok: true }));
+        },
+        log() {},
+        processEnv: {},
+        repoRoot,
+      });
+
+      expect({
+        blockedReasons: receipt.blockedReasons,
+        fetchCalled,
+        status: receipt.status,
+        submitAttempted: receipt.submit.attempted,
+      }).toStrictEqual({
+        blockedReasons: [
+          "Provide the exact owner sign-off phrase before submitting a live Dream run that uses the trusted memory relay network boundary.",
+        ],
+        fetchCalled: false,
+        status: "blocked",
+        submitAttempted: false,
+      });
+    } finally {
+      await rm(repoRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("submits the typed request only after preflight is ready and relay boundary sign-off is present", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-live-run-ready-"));
 
     try {
@@ -374,6 +427,8 @@ describe("Dream live run request harness", () => {
           "receipt.json",
           "--response-path",
           "response.json",
+          "--approval-signoff",
+          relayNetworkBoundarySignoff,
           "--skip-preflight-refresh",
         ],
         fetch(_url, init) {
@@ -440,6 +495,8 @@ describe("Dream live run request harness", () => {
           "request.json",
           "--receipt-path",
           "receipt.json",
+          "--approval-signoff",
+          relayNetworkBoundarySignoff,
         ],
         fetch() {
           fetchCalled = true;

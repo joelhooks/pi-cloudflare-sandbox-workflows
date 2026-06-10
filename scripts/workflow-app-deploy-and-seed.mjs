@@ -23,6 +23,10 @@ const configPath = "wrangler.jsonc";
 const defaultReceiptPath =
   ".wrangler/workflow-app/latest-deploy-seed-receipt.json";
 const packageSeedAdminAuthRetryDelaysMs = [2000, 5000, 10_000];
+const dreamRelaySignoffPhrase =
+  "exposing JoelClaw/Typesense over a new network boundary";
+const dreamRelayGeneratedConfigPath =
+  ".wrangler/workflow-app/wrangler.dream-relay.jsonc";
 const deploySecretNames = [
   "PI_AUTH_JSON_B64",
   "WORKFLOW_APP_MODEL",
@@ -32,6 +36,11 @@ const deploySecretNames = [
   "GITHUB_TOKEN",
   "LINEAR_API_TOKEN",
   "WORKFLOW_APP_ADMIN_TOKEN",
+];
+const redactedMaterialNames = [
+  ...deploySecretNames,
+  "DREAM_MEMORY_RELAY_BASE_URL",
+  "DREAM_MEMORY_RELAY_SECRET_REF",
 ];
 
 const cliArgs = new Set(process.argv.slice(2));
@@ -114,13 +123,110 @@ const runCommand = async (command, commandArgs, options = {}) => {
 
 const redact = (value) => {
   let redacted = value;
-  for (const secret of deploySecretNames) {
+  for (const secret of redactedMaterialNames) {
     const material = env[secret];
     if (material) {
       redacted = redacted.replaceAll(material, `[redacted:${secret}]`);
     }
   }
   return redacted;
+};
+
+const dreamRelayApprovalSignoff = () =>
+  getArgValue("--dream-relay-approval-signoff") ??
+  env.DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF ??
+  env.DREAM_MEMORY_RELAY_PROVISIONING_SIGNOFF;
+
+const parseDreamRelayBaseUrl = () => {
+  const raw = env.DREAM_MEMORY_RELAY_BASE_URL?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("DREAM_MEMORY_RELAY_BASE_URL must be a valid HTTPS URL.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error("DREAM_MEMORY_RELAY_BASE_URL must use HTTPS.");
+  }
+
+  return url.toString().replace(/\/$/u, "");
+};
+
+const dreamRelayWorkerVars = () => {
+  const relayBaseUrl = parseDreamRelayBaseUrl();
+  if (relayBaseUrl === null) {
+    return null;
+  }
+
+  if (dreamRelayApprovalSignoff() !== dreamRelaySignoffPhrase) {
+    throw new Error(
+      `Refusing to deploy DREAM_MEMORY_RELAY_BASE_URL without exact sign-off phrase: ${dreamRelaySignoffPhrase}`
+    );
+  }
+
+  return {
+    DREAM_MEMORY_RELAY_BASE_URL: relayBaseUrl,
+    DREAM_MEMORY_RELAY_SECRET_REF:
+      env.DREAM_MEMORY_RELAY_SECRET_REF ?? "secretref:dream-memory-relay",
+    DREAM_MEMORY_RELAY_USER_AGENT:
+      env.DREAM_MEMORY_RELAY_USER_AGENT ??
+      "pi-cloudflare-sandbox-workflows-dream-relay/0.0.0",
+  };
+};
+
+const injectDreamRelayWorkerVars = (configText, vars) => {
+  const varsMarker = /("vars"\s*:\s*\{\n)/u;
+  if (!varsMarker.test(configText)) {
+    throw new Error(
+      "wrangler.jsonc must contain a top-level vars object before injecting Dream relay Worker vars."
+    );
+  }
+
+  const injected = Object.entries(vars)
+    .map(([key, value]) => `    "${key}": ${JSON.stringify(value)},`)
+    .join("\n");
+
+  return configText.replace(varsMarker, `$1${injected}\n`);
+};
+
+const writeDreamRelayWranglerConfig = async () => {
+  const workerVars = dreamRelayWorkerVars();
+  if (workerVars === null) {
+    return null;
+  }
+
+  const sourceConfigText = await readFile(
+    resolve(repoRoot, configPath),
+    "utf-8"
+  );
+  const generatedConfigPath = resolve(repoRoot, dreamRelayGeneratedConfigPath);
+  await mkdir(dirname(generatedConfigPath), { recursive: true });
+  await writeFile(
+    generatedConfigPath,
+    injectDreamRelayWorkerVars(sourceConfigText, workerVars),
+    {
+      encoding: "utf-8",
+      mode: 0o600,
+    }
+  );
+
+  return {
+    configPath: dreamRelayGeneratedConfigPath,
+    summary: {
+      generatedConfigPath: dreamRelayGeneratedConfigPath,
+      redacted: true,
+      signoffStatus: "approved",
+      vars: Object.keys(workerVars).map((name) => ({
+        name,
+        status: "injected",
+      })),
+    },
+  };
 };
 
 const putSecret = async (name) => {
@@ -414,6 +520,7 @@ const addStep = (name, result) => {
 
 let workerUrl = getArgValue("--worker-url") ?? env.WORKFLOW_APP_URL ?? null;
 let deployedWithSecretsFile = false;
+let generatedDreamRelayConfig = null;
 let status = "completed";
 try {
   if (!hasArg("--skip-migrations")) {
@@ -434,6 +541,10 @@ try {
   }
 
   if (!hasArg("--skip-deploy")) {
+    generatedDreamRelayConfig = await writeDreamRelayWranglerConfig();
+    if (generatedDreamRelayConfig !== null) {
+      addStep("dream-relay-worker-config", generatedDreamRelayConfig.summary);
+    }
     const deploySecretsPath = await writeDeploySecretsFile();
     deployedWithSecretsFile = deploySecretsPath !== null;
     const deployArgs = [
@@ -441,7 +552,7 @@ try {
       "wrangler",
       "deploy",
       "--config",
-      configPath,
+      generatedDreamRelayConfig?.configPath ?? configPath,
       "--message",
       "deploy workflow app spine",
     ];
@@ -458,6 +569,11 @@ try {
     } finally {
       if (deploySecretsPath !== null) {
         await rm(deploySecretsPath, { force: true });
+      }
+      if (generatedDreamRelayConfig !== null) {
+        await rm(resolve(repoRoot, generatedDreamRelayConfig.configPath), {
+          force: true,
+        });
       }
     }
     workerUrl = parseWorkerUrl(

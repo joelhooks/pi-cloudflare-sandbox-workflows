@@ -1026,8 +1026,39 @@ const checkStatusFor = (
 ): WorkflowLivePreflightCheck["status"] =>
   checks.find((check) => check.checkId === checkId)?.status ?? "missing";
 
+const deployScriptSupportsDreamRelayWorkerVar = (
+  deployScriptText: string
+): boolean =>
+  deployScriptText.includes("DREAM_MEMORY_RELAY_BASE_URL") &&
+  deployScriptText.includes("dreamRelaySignoffPhrase");
+
+const workerRelayBaseUrlConfigured = (input: {
+  readonly deployScriptText: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly wranglerConfigText: string;
+}): boolean =>
+  input.wranglerConfigText.includes("DREAM_MEMORY_RELAY_BASE_URL") ||
+  (isPresent(input.env["DREAM_MEMORY_RELAY_BASE_URL"]) &&
+    deployScriptSupportsDreamRelayWorkerVar(input.deployScriptText));
+
+const checkDreamRelayWorkerBaseUrlConfig = (input: {
+  readonly deployScriptText: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly wranglerConfigText: string;
+}): WorkflowLivePreflightCheck => ({
+  checkId: "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
+  message: workerRelayBaseUrlConfigured(input)
+    ? "Worker deploy config or signoff-gated deploy-time injection defines DREAM_MEMORY_RELAY_BASE_URL."
+    : "Worker deploy config does not define DREAM_MEMORY_RELAY_BASE_URL.",
+  redacted: true,
+  required: true,
+  requiredFor: ["dream-memory-relay-binding"],
+  status: workerRelayBaseUrlConfigured(input) ? "passed" : "missing",
+});
+
 const dreamRelayCapabilityFor = (input: {
   readonly checks: readonly WorkflowLivePreflightCheck[];
+  readonly deployScriptText: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly remoteSecretNames: ReadonlySet<string>;
   readonly wranglerConfigText: string;
@@ -1038,9 +1069,7 @@ const dreamRelayCapabilityFor = (input: {
   const tokenConfigured =
     isPresent(input.env["DREAM_MEMORY_RELAY_TOKEN"]) ||
     input.remoteSecretNames.has("DREAM_MEMORY_RELAY_TOKEN");
-  const workerBaseUrlConfigured = input.wranglerConfigText.includes(
-    "DREAM_MEMORY_RELAY_BASE_URL"
-  );
+  const workerBaseUrlConfiguredForDeploy = workerRelayBaseUrlConfigured(input);
   const secretRef =
     input.env["DREAM_MEMORY_RELAY_SECRET_REF"]?.trim() ||
     "secretref:dream-memory-relay";
@@ -1065,7 +1094,7 @@ const dreamRelayCapabilityFor = (input: {
       healthzStatus: checkStatusFor(input.checks, "relay:healthz"),
       localProofStatus: checkStatusFor(input.checks, "relay:local-proof"),
       tokenConfigured,
-      workerBaseUrlConfigured,
+      workerBaseUrlConfigured: workerBaseUrlConfiguredForDeploy,
     },
     redacted: true,
     redactionPolicy: {
@@ -1088,15 +1117,10 @@ export const buildDreamLivePreflightReceipt = (
     ...envRequirements.map((requirement) =>
       checkEnvRequirement(input.env, requirement, remoteSecretNames)
     ),
-    checkSourceText({
-      checkId: "wrangler:DREAM_MEMORY_RELAY_BASE_URL",
-      missingMessage:
-        "Worker deploy config does not define DREAM_MEMORY_RELAY_BASE_URL.",
-      presentMessage:
-        "Worker deploy config defines DREAM_MEMORY_RELAY_BASE_URL.",
-      requiredFor: ["dream-memory-relay-binding"],
-      sourceText: input.wranglerConfigText,
-      token: "DREAM_MEMORY_RELAY_BASE_URL",
+    checkDreamRelayWorkerBaseUrlConfig({
+      deployScriptText: input.deployScriptText,
+      env: input.env,
+      wranglerConfigText: input.wranglerConfigText,
     }),
     checkSourceText({
       checkId: "deploy-secret:DREAM_MEMORY_RELAY_TOKEN",
@@ -1148,6 +1172,7 @@ export const buildDreamLivePreflightReceipt = (
     redacted: true,
     relayCapability: dreamRelayCapabilityFor({
       checks,
+      deployScriptText: input.deployScriptText,
       env: input.env,
       remoteSecretNames,
       wranglerConfigText: input.wranglerConfigText,

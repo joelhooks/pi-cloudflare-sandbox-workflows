@@ -26,6 +26,10 @@ const defaultPreflightPath =
 const defaultRunDir = ".wrangler/workflow-app/dream-runs";
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
+const dreamRelaySignoffPhrase =
+  "exposing JoelClaw/Typesense over a new network boundary";
+const missingSubmitSignoffAction =
+  "Provide the exact owner sign-off phrase before submitting a live Dream run that uses the trusted memory relay network boundary.";
 
 const requiredPackageIds = [
   "badass-courses/claw-kernel",
@@ -46,6 +50,7 @@ const dreamWorkflowNodePalette = dreamMemoryFabricPackageMetadata.exports
   .filter((nodeType): nodeType is string => nodeType !== undefined);
 
 interface DreamRunArgs {
+  readonly approvalSignoff?: string;
   readonly localRelayProofPath?: string;
   readonly preflightPath: string;
   readonly refreshPreflight: boolean;
@@ -76,6 +81,7 @@ export interface BuildDreamLiveRunRequestReceiptInput {
   readonly preflightRefreshed: boolean;
   readonly request: WorkflowRunRequest;
   readonly requestPath: string;
+  readonly submitBlockers?: readonly string[];
   readonly responsePath?: string;
   readonly submitAttempted: boolean;
   readonly submitStatusCode?: number;
@@ -128,6 +134,9 @@ const argValue = (
 };
 
 const parseArgs = (argv: readonly string[]): DreamRunArgs => {
+  const approvalSignoff =
+    argValue(argv, "--approval-signoff") ??
+    argValue(argv, "--dream-relay-approval-signoff");
   const runId = argValue(argv, "--run-id");
   const requestPath = argValue(argv, "--request-path");
   const receiptPath = argValue(argv, "--receipt-path");
@@ -140,6 +149,7 @@ const parseArgs = (argv: readonly string[]): DreamRunArgs => {
     (submit && !argv.includes("--skip-preflight-refresh"));
 
   return {
+    ...(approvalSignoff === undefined ? {} : { approvalSignoff }),
     ...(localRelayProofPath === undefined ? {} : { localRelayProofPath }),
     preflightPath: argValue(argv, "--preflight-path") ?? defaultPreflightPath,
     refreshPreflight,
@@ -272,10 +282,34 @@ const missingReadyReasons = (
   return failedRequiredRelayChecks;
 };
 
+const submitSignoffFor = (input: {
+  readonly args: DreamRunArgs;
+  readonly processEnv: Readonly<Record<string, string | undefined>>;
+}): string | undefined =>
+  input.args.approvalSignoff ??
+  input.processEnv["DREAM_MEMORY_RELAY_APPROVAL_SIGNOFF"] ??
+  input.processEnv["DREAM_MEMORY_RELAY_PROVISIONING_SIGNOFF"];
+
+const missingSubmitApprovalReasons = (input: {
+  readonly args: DreamRunArgs;
+  readonly processEnv: Readonly<Record<string, string | undefined>>;
+}): readonly string[] => {
+  if (!input.args.submit) {
+    return [];
+  }
+
+  return submitSignoffFor(input) === dreamRelaySignoffPhrase
+    ? []
+    : [missingSubmitSignoffAction];
+};
+
 export const buildDreamLiveRunRequestReceipt = (
   input: BuildDreamLiveRunRequestReceiptInput
 ): DreamLiveRunRequestReceipt => {
-  const blockedReasons = missingReadyReasons(input.preflight);
+  const blockedReasons = [
+    ...missingReadyReasons(input.preflight),
+    ...(input.submitBlockers ?? []),
+  ];
   let status: DreamLiveRunRequestReceipt["status"] = "prepared";
   if (blockedReasons.length > 0) {
     status = "blocked";
@@ -348,6 +382,50 @@ const responseBody = async (response: Response): Promise<unknown> => {
   }
 };
 
+const submitLiveDreamRunIfAllowed = async (input: {
+  readonly args: DreamRunArgs;
+  readonly fetch?: typeof fetch;
+  readonly preflight: PreflightLoadResult;
+  readonly processEnv: Readonly<Record<string, string | undefined>>;
+  readonly request: WorkflowRunRequest;
+  readonly responsePath: string;
+  readonly workerUrl: string;
+}): Promise<{
+  readonly attempted: boolean;
+  readonly submitBlockers: readonly string[];
+  readonly submitStatusCode?: number;
+}> => {
+  const submitBlockers = missingSubmitApprovalReasons({
+    args: input.args,
+    processEnv: input.processEnv,
+  });
+  const canSubmit =
+    input.args.submit &&
+    input.preflight.status === "ready" &&
+    submitBlockers.length === 0;
+  if (!canSubmit) {
+    return {
+      attempted: false,
+      submitBlockers,
+    };
+  }
+
+  const response = await (input.fetch ?? fetch)(`${input.workerUrl}/runs`, {
+    body: JSON.stringify(input.request),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+  await writeJson(input.responsePath, await responseBody(response));
+
+  return {
+    attempted: true,
+    submitBlockers,
+    submitStatusCode: response.status,
+  };
+};
+
 export const runDreamLiveRunCli = async (
   input: RunDreamLiveRunCliInput
 ): Promise<DreamLiveRunRequestReceipt> => {
@@ -394,19 +472,15 @@ export const runDreamLiveRunCli = async (
 
   await writeJson(requestPath, request);
 
-  let submitStatusCode: number | undefined;
-  const canSubmit = args.submit && preflight.status === "ready";
-  if (canSubmit) {
-    const response = await (input.fetch ?? fetch)(`${workerUrl}/runs`, {
-      body: JSON.stringify(request),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
-    submitStatusCode = response.status;
-    await writeJson(responsePath, await responseBody(response));
-  }
+  const submitResult = await submitLiveDreamRunIfAllowed({
+    args,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    preflight,
+    processEnv: input.processEnv,
+    request,
+    responsePath,
+    workerUrl,
+  });
 
   const receipt = buildDreamLiveRunRequestReceipt({
     checkedAt: now.toISOString(),
@@ -415,9 +489,12 @@ export const runDreamLiveRunCli = async (
     preflightRefreshed: args.refreshPreflight,
     request,
     requestPath: relativeRequestPath,
-    ...(canSubmit ? { responsePath: relativeResponsePath } : {}),
-    submitAttempted: canSubmit,
-    ...(submitStatusCode === undefined ? {} : { submitStatusCode }),
+    ...(submitResult.attempted ? { responsePath: relativeResponsePath } : {}),
+    submitAttempted: submitResult.attempted,
+    submitBlockers: submitResult.submitBlockers,
+    ...(submitResult.submitStatusCode === undefined
+      ? {}
+      : { submitStatusCode: submitResult.submitStatusCode }),
     workerUrl,
   });
   await writeJson(receiptPath, receipt);

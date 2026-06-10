@@ -83,6 +83,11 @@ const completeEnv = {
 const wranglerWithDreamRelay =
   '"DREAM_MEMORY_RELAY_BASE_URL": "https://dream-relay.example.test"';
 const deployScriptWithDreamRelayToken = '"DREAM_MEMORY_RELAY_TOKEN"';
+const deployScriptWithSignoffGatedDreamRelayConfig = [
+  '"DREAM_MEMORY_RELAY_TOKEN"',
+  '"DREAM_MEMORY_RELAY_BASE_URL"',
+  "dreamRelaySignoffPhrase",
+].join("\n");
 
 const relayReadinessPassed: WorkflowLivePreflightCheck = {
   checkId: "relay:healthz",
@@ -331,6 +336,40 @@ Wrangler 4.97.0
       },
       requiredActions: [],
       status: "ready",
+    });
+  });
+
+  it("accepts signoff-gated deploy-time relay URL injection without hardcoding the URL into wrangler", () => {
+    const receipt = buildDreamLivePreflightReceipt({
+      deployScriptText: deployScriptWithSignoffGatedDreamRelayConfig,
+      env: completeEnv,
+      generatedAt: "2026-06-09T10:00:00.000Z",
+      localRelayProofCheck: localRelayProofPassed,
+      relayReadinessCheck: relayReadinessPassed,
+      remoteRegistry: seededRemoteRegistry,
+      remoteSecrets: completeRemoteSecrets,
+      workerUrl:
+        "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev",
+      wranglerConfigText: "",
+    });
+    const relayConfigCheck = receipt.checks.find(
+      (check) => check.checkId === "wrangler:DREAM_MEMORY_RELAY_BASE_URL"
+    );
+
+    expect({
+      leakedRelaySecret: JSON.stringify(receipt).includes("relay-secret"),
+      relayConfigMessage: relayConfigCheck?.message,
+      relayConfigStatus: relayConfigCheck?.status,
+      status: receipt.status,
+      workerBaseUrlConfigured:
+        receipt.relayCapability.readiness.workerBaseUrlConfigured,
+    }).toStrictEqual({
+      leakedRelaySecret: false,
+      relayConfigMessage:
+        "Worker deploy config or signoff-gated deploy-time injection defines DREAM_MEMORY_RELAY_BASE_URL.",
+      relayConfigStatus: "passed",
+      status: "ready",
+      workerBaseUrlConfigured: true,
     });
   });
 
