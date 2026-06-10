@@ -41,6 +41,18 @@ export const dreamTranscriptReviewTimeHorizons = [
   "all-time",
 ] as const satisfies readonly MemoryCoverageHorizon[];
 
+/**
+ * Output effects this profile requires beyond its allowed relay operations.
+ * Effect coverage is profile data: the platform reads the required set from
+ * the installed profile instead of memory-fabric constants.
+ */
+export const dreamTranscriptReviewRequiredOutputEffects = [
+  "refinement-proposals",
+  "hitl-decision-seed",
+  "hitl-follow-up-run-request",
+  "hitl-report",
+] as const;
+
 export const dreamTranscriptReviewSourcePacks = [
   {
     description:
@@ -121,6 +133,7 @@ export const dreamTranscriptReviewSourceProfile =
     profileId: "joelhooks/dream-transcript-review",
     purpose:
       "Review agent transcripts and adjacent agent-run artifacts across the JoelClaw network, then surface source-backed kernel/package/workflow refinements.",
+    requiredOutputEffects: [...dreamTranscriptReviewRequiredOutputEffects],
     requiredRuntimes: [...dreamTranscriptReviewRequiredRuntimes],
     schemaVersion: "memory.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],

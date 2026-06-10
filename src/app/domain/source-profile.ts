@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { ArtifactRefSchema } from "./schemas.ts";
+import {
+  ArtifactRefSchema,
+  WorkflowEffectSchema,
+  WorkflowNodeTypeSchema,
+} from "./schemas.ts";
 
 export const MemorySourceFamilySchema = z.enum([
   "agent-transcripts",
@@ -148,31 +152,15 @@ export const MemorySourcePackDispositionSchema = z
     }
   });
 
-export const MemoryWorkflowEffectSchema = z.enum([
-  "capture-artifact",
-  "capture-run",
-  "correlate",
-  "hitl-decision-seed",
-  "hitl-follow-up-run-request",
-  "hitl-report",
-  "hydrate",
-  "refinement-proposals",
-  "search",
-  "signals",
-]);
+/**
+ * Effects and node types are open, schema-validated vocabularies. The
+ * platform never enumerates them: node-type-to-effect mappings come from
+ * package/cartridge data, and required effects come from the installed
+ * source profile.
+ */
+export const MemoryWorkflowEffectSchema = WorkflowEffectSchema;
 
-export const MemoryFabricNodeTypeSchema = z.enum([
-  "joelclaw.memory.correlate",
-  "joelclaw.memory.capture-artifact",
-  "joelclaw.memory.capture-run",
-  "joelclaw.memory.hitl-decision-seed",
-  "joelclaw.memory.hitl-follow-up-run-request",
-  "joelclaw.memory.hitl-report",
-  "joelclaw.memory.hydrate",
-  "joelclaw.memory.search",
-  "joelclaw.memory.refinement-proposals",
-  "joelclaw.memory.signals",
-]);
+export const MemoryFabricNodeTypeSchema = WorkflowNodeTypeSchema;
 
 export const MemorySourceProfilePlannerGuidanceSchema = z.object({
   intent: z.string().min(1),
@@ -195,6 +183,7 @@ export const MemorySourceProfileSchema = z
     plannerGuidance: MemorySourceProfilePlannerGuidanceSchema.optional(),
     profileId: z.string().min(1),
     purpose: z.string().min(1),
+    requiredOutputEffects: z.array(MemoryWorkflowEffectSchema),
     requiredRuntimes: z.array(MemoryRuntimeSchema).min(1),
     schemaVersion: z.literal("memory.source-profile.v1"),
     sourceFamiliesExpected: z.array(MemorySourceFamilySchema).min(1),

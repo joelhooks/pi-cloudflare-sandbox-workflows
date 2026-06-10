@@ -34,7 +34,10 @@ import type {
   DynamicWorkflowBlueprint,
   DynamicWorkflowStep,
 } from "../../src/app/domain/schemas.ts";
-import { MemorySourcePackDispositionSchema } from "../../src/app/domain/source-profile.ts";
+import {
+  MemorySourcePackDispositionSchema,
+  MemorySourceProfileSchema,
+} from "../../src/app/domain/source-profile.ts";
 import { createCloudflareArtifactsObservabilityRecorder } from "../../src/app/infrastructure/cloudflare-artifacts-observability-recorder.ts";
 import { createCloudflareArtifactsReviewSurfacePublisher } from "../../src/app/infrastructure/cloudflare-artifacts-review-surface.ts";
 import { createArtifactEvidenceDeterministicVerifier } from "../../src/app/infrastructure/deterministic-verifier.ts";
@@ -633,6 +636,12 @@ const integrationTestMemoryHitlDecisionDocument = (input: {
     ],
     workItemId: input.workItemId,
   });
+
+const effectCoverageStatusFor = (
+  proof: ReturnType<typeof verifyMemoryGeneratedWorkflow>
+): string | undefined =>
+  proof.checks.find((check) => check.checkId === "plan:profile-effect-coverage")
+    ?.status;
 
 const addWorkflowNodeToBlueprint = (
   blueprint: DynamicWorkflowBlueprint
@@ -4042,6 +4051,12 @@ describe("workflow app integration contract", () => {
         packageExportId: "dream-transcript-review-source-profile",
         packageId: "workflow/memory-fabric",
         profileId: "joelhooks/dream-transcript-review",
+        requiredOutputEffects: [
+          "refinement-proposals",
+          "hitl-decision-seed",
+          "hitl-follow-up-run-request",
+          "hitl-report",
+        ],
         requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
         sourceFamiliesExpected: [
           "agent-transcripts",
@@ -4209,6 +4224,197 @@ describe("workflow app integration contract", () => {
         },
         title: "This dream found work to do.",
       },
+    });
+  });
+
+  it("checks effect coverage against the run profile's declared effects, not memory-fabric constants", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-profile-declared-effects"
+    );
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const request = buildIntegrationTestDreamRunRequest();
+    const hitlDecisionInputRef = artifacts.artifactRef({
+      path: "dream/hitl-decision.json",
+      runId: request.runId,
+    });
+    await artifacts.writeJson({
+      path: "dream/hitl-decision.json",
+      redacted: true,
+      runId: request.runId,
+      value: integrationTestMemoryHitlDecisionDocument({
+        captureRunRef: artifacts.artifactRef({
+          path: "dream/capture-run.json",
+          runId: request.runId,
+        }),
+        refinementProposalRef: artifacts.artifactRef({
+          path: "dream/refinement-proposals.json",
+          runId: request.runId,
+        }),
+        reportRef: artifacts.artifactRef({
+          path: "dream/hitl-report.json",
+          runId: request.runId,
+        }),
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+    });
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        async proposePlan(input) {
+          return addDreamPreflightToBlueprint(
+            await planner.proposePlan(input),
+            {
+              hitlDecisionInputRef,
+            }
+          );
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        dreamIntegrationPackages
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection: createMemoryWorkflowStatusProjectionStore(),
+      workflowNodeAdapter: createArtifactBackedWorkflowCartridgeAdapter({
+        artifacts,
+        delegate: createMemoryFabricWorkflowNodeAdapter({
+          artifacts,
+          memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+          memoryCorrelation: createIntegrationTestMemoryCorrelationAdapter(),
+          memoryRetrieval: createIntegrationTestMemoryRetrievalAdapter(),
+          memorySignals: createIntegrationTestMemoryRetrievalAdapter(),
+        }),
+        now: () => "2026-06-10T09:00:00.000Z",
+      }),
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    const result = await workflow.run(request);
+    if (result.status !== "captured") {
+      throw new Error(result.blocker.message);
+    }
+
+    const plan = DynamicWorkflowPlanDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: result.planArtifact.artifactRef })
+    );
+    const machine = DynamicWorkflowMachineDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: result.machineArtifact.artifactRef,
+      })
+    );
+    const executionProof = WorkflowExecutionProofDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: result.executionProofArtifact.artifactRef,
+      })
+    );
+    const machineSource = await artifacts.readText({
+      artifactRef: result.machineArtifact.sourceArtifactRef,
+    });
+    const harnessSource = await artifacts.readText({
+      artifactRef: result.harnessArtifact.artifactRef,
+    });
+    const supportSweepSourceProfile = MemorySourceProfileSchema.parse({
+      allowedRelayOperations: ["search", "hydrate"],
+      defaultQuery: "aihero support sweep",
+      outputBoundary: {
+        noCustomerDataInPublicArtifacts: true,
+        noRawCredentials: true,
+        noRawPrivatePaths: true,
+        noRawTranscripts: true,
+      },
+      packageId: "workflow/memory-fabric",
+      profileId: "badass-courses/aihero-support-sweep",
+      purpose:
+        "Sweep support threads across surfaces and digest them for review.",
+      requiredOutputEffects: ["support-digest"],
+      requiredRuntimes: ["cloudflare"],
+      schemaVersion: "memory.source-profile.v1",
+      sourceFamiliesExpected: ["support"],
+      sourcePacks: [],
+      timeHorizons: ["7d"],
+      title: "AIHero Support Sweep",
+      workflowId: "aihero.support-sweep",
+    });
+    const planWithSupportDigest = DynamicWorkflowPlanDocumentSchema.parse({
+      ...plan,
+      steps: plan.steps.map((step) =>
+        step.kind === "workflow.node.invoke" &&
+        step.stepId === "render-memory-hitl-report"
+          ? {
+              ...step,
+              config: {
+                ...step.config,
+                memoryEffects: ["support-digest"],
+              },
+            }
+          : step
+      ),
+    });
+    const verifyAgainstSupportProfile = (
+      planForProof: typeof plan
+    ): ReturnType<typeof verifyMemoryGeneratedWorkflow> =>
+      verifyMemoryGeneratedWorkflow({
+        executionProof,
+        executionProofRef: result.executionProofArtifact.artifactRef,
+        expectedPackageRef: memoryWorkflowPackageRef,
+        expectedSourceProfile: supportSweepSourceProfile,
+        expectedSourceProfileExportId: "dream-transcript-review-source-profile",
+        generatedAt: "2026-06-10T09:30:00.000Z",
+        harnessArtifact: result.harnessArtifact,
+        harnessSource,
+        machine,
+        machineArtifact: result.machineArtifact,
+        machineSource,
+        plan: planForProof,
+        planArtifact: {
+          ...result.planArtifact,
+          hash: hashJson(planForProof),
+        },
+      });
+    const proofCoveringItsEffects = verifyAgainstSupportProfile(
+      planWithSupportDigest
+    );
+    const proofMissingItsEffects = verifyAgainstSupportProfile(plan);
+
+    expect({
+      coverageWithDeclaredEffect: effectCoverageStatusFor(
+        proofCoveringItsEffects
+      ),
+      coverageWithoutDeclaredEffect: effectCoverageStatusFor(
+        proofMissingItsEffects
+      ),
+      malformedEffectIdAccepted: MemorySourceProfileSchema.safeParse({
+        ...supportSweepSourceProfile,
+        requiredOutputEffects: ["Support_Digest"],
+      }).success,
+      requiredEffects: proofCoveringItsEffects.effectCoverage.requiredEffects,
+    }).toStrictEqual({
+      coverageWithDeclaredEffect: "passed",
+      coverageWithoutDeclaredEffect: "failed",
+      malformedEffectIdAccepted: false,
+      requiredEffects: ["hydrate", "search", "support-digest"],
     });
   });
 

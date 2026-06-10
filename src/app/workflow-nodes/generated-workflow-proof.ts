@@ -32,7 +32,6 @@ import {
 } from "../domain/source-profile.ts";
 import type {
   MemoryCoverageHorizon,
-  MemoryFabricNodeType,
   MemorySourcePack,
   MemorySourcePackDisposition,
   MemorySourceProfile,
@@ -105,6 +104,7 @@ export const MemoryGeneratedWorkflowProofDocumentSchema = z.object({
     packageExportId: z.string().min(1),
     packageId: z.string().min(1),
     profileId: z.string().min(1),
+    requiredOutputEffects: z.array(MemoryWorkflowEffectSchema),
     requiredRuntimes: z.array(MemoryRuntimeSchema).min(1),
     sourceFamiliesExpected: z.array(MemorySourceFamilySchema).min(1),
     sourcePacks: z.array(MemorySourcePackSchema).default([]),
@@ -159,36 +159,34 @@ export interface MemoryGeneratedWorkflowProofRecorderConfig {
   readonly now?: () => string;
 }
 
-const isRelayBackedMemoryNodeType = (nodeType: MemoryFabricNodeType): boolean =>
-  nodeType !== "joelclaw.memory.hitl-follow-up-run-request" &&
-  nodeType !== "joelclaw.memory.hitl-decision-seed" &&
-  nodeType !== "joelclaw.memory.hitl-report" &&
-  nodeType !== "joelclaw.memory.refinement-proposals";
+type DynamicWorkflowStep = DynamicWorkflowPlanDocument["steps"][number];
 
-const memoryNodeTypeEffects = {
-  "joelclaw.memory.capture-artifact": ["capture-artifact"],
-  "joelclaw.memory.capture-run": ["capture-run"],
-  "joelclaw.memory.correlate": ["correlate"],
-  "joelclaw.memory.hitl-decision-seed": ["hitl-decision-seed"],
-  "joelclaw.memory.hitl-follow-up-run-request": ["hitl-follow-up-run-request"],
-  "joelclaw.memory.hitl-report": ["hitl-report"],
-  "joelclaw.memory.hydrate": ["hydrate"],
-  "joelclaw.memory.refinement-proposals": ["refinement-proposals"],
-  "joelclaw.memory.search": ["search"],
-  "joelclaw.memory.signals": ["signals"],
-} as const satisfies Record<
-  MemoryFabricNodeType,
+/**
+ * Node-type-to-effect declarations come from the pinned package data (the
+ * cartridge exports its node palette with effect declarations), never from
+ * platform constants.
+ */
+type WorkflowNodeEffectsByNodeType = ReadonlyMap<
+  string,
   readonly MemoryWorkflowEffect[]
 >;
 
-const requiredMemoryOutputEffects = [
-  "refinement-proposals",
-  "hitl-decision-seed",
-  "hitl-follow-up-run-request",
-  "hitl-report",
-] as const satisfies readonly MemoryWorkflowEffect[];
-
-type DynamicWorkflowStep = DynamicWorkflowPlanDocument["steps"][number];
+const workflowNodeEffectsForPinnedPackage = (input: {
+  readonly expectedPackageRef: ArtifactRef;
+  readonly plan: DynamicWorkflowPlanDocument;
+}): WorkflowNodeEffectsByNodeType =>
+  new Map(
+    (
+      input.plan.pinnedPackages.find(
+        (candidate) => candidate.artifactRef === input.expectedPackageRef
+      )?.metadata.exports ?? []
+    ).flatMap((exportRecord) =>
+      exportRecord.kind === "workflow-node" &&
+      exportRecord.nodeType !== undefined
+        ? [[exportRecord.nodeType, exportRecord.effects ?? []] as const]
+        : []
+    )
+  );
 
 const sameItemsInOrder = (
   left: readonly string[],
@@ -224,6 +222,7 @@ const sourceProfileFingerprint = (input: {
   packageExportId: input.exportId,
   packageId: input.profile.packageId,
   profileId: input.profile.profileId,
+  requiredOutputEffects: input.profile.requiredOutputEffects,
   requiredRuntimes: input.profile.requiredRuntimes,
   sourceFamiliesExpected: input.profile.sourceFamiliesExpected,
   sourcePacks: input.profile.sourcePacks,
@@ -254,15 +253,9 @@ const planMentionsSourceProfile = (input: {
   );
 };
 
-const memoryEffectOrder = (effect: MemoryWorkflowEffect): number =>
-  MemoryWorkflowEffectSchema.options.indexOf(effect);
-
 const uniqueMemoryEffects = (
   effects: readonly MemoryWorkflowEffect[]
-): MemoryWorkflowEffect[] =>
-  [...new Set(effects)].toSorted(
-    (left, right) => memoryEffectOrder(left) - memoryEffectOrder(right)
-  );
+): MemoryWorkflowEffect[] => [...new Set(effects)].toSorted();
 
 const declaredMemoryEffectsFor = (
   step: DynamicWorkflowStep
@@ -464,19 +457,16 @@ const generatedPlanDisposesSourcePacks = (input: {
 };
 
 const memoryEffectsFor = (
-  step: DynamicWorkflowStep
+  step: DynamicWorkflowStep,
+  nodeEffects: WorkflowNodeEffectsByNodeType
 ): MemoryWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
   }
 
-  const parsedNodeType = MemoryFabricNodeTypeSchema.safeParse(step.nodeType);
-
   return uniqueMemoryEffects([
     ...declaredMemoryEffectsFor(step),
-    ...(parsedNodeType.success
-      ? memoryNodeTypeEffects[parsedNodeType.data]
-      : []),
+    ...(nodeEffects.get(step.nodeType) ?? []),
   ]);
 };
 
@@ -484,17 +474,37 @@ const requiredMemoryEffectsFor = (
   profile: MemorySourceProfile
 ): MemoryWorkflowEffect[] =>
   uniqueMemoryEffects([
-    ...profile.allowedRelayOperations,
-    ...requiredMemoryOutputEffects,
+    ...MemoryWorkflowEffectSchema.array().parse(profile.allowedRelayOperations),
+    ...profile.requiredOutputEffects,
   ]);
+
+const relayBackedStepIdsFor = (input: {
+  readonly nodeEffects: WorkflowNodeEffectsByNodeType;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly profile: MemorySourceProfile;
+}): string[] => {
+  const relayOperations = new Set<string>(input.profile.allowedRelayOperations);
+
+  return input.plan.steps.flatMap((step) =>
+    step.kind === "workflow.node.invoke" &&
+    memoryEffectsFor(step, input.nodeEffects).some((effect) =>
+      relayOperations.has(effect)
+    )
+      ? [step.stepId]
+      : []
+  );
+};
 
 const generatedPlanCoversMemoryEffects = (input: {
   readonly expectedPackageRef: ArtifactRef;
+  readonly nodeEffects: WorkflowNodeEffectsByNodeType;
   readonly plan: DynamicWorkflowPlanDocument;
   readonly requiredEffects: readonly MemoryWorkflowEffect[];
 }): boolean => {
   const coveredEffects = uniqueMemoryEffects(
-    input.plan.steps.flatMap(memoryEffectsFor)
+    input.plan.steps.flatMap((step) =>
+      memoryEffectsFor(step, input.nodeEffects)
+    )
   );
 
   return (
@@ -502,7 +512,7 @@ const generatedPlanCoversMemoryEffects = (input: {
       (step) =>
         step.kind === "workflow.node.invoke" &&
         step.packageRefs.includes(input.expectedPackageRef) &&
-        memoryEffectsFor(step).length > 0
+        memoryEffectsFor(step, input.nodeEffects).length > 0
     ) &&
     input.requiredEffects.every((effect) => coveredEffects.includes(effect))
   );
@@ -541,8 +551,12 @@ export const verifyMemoryGeneratedWorkflow = (
   input: VerifyMemoryGeneratedWorkflowInput
 ): MemoryGeneratedWorkflowProofDocument => {
   const stepIds = input.plan.steps.map((step) => step.stepId);
+  const nodeEffects = workflowNodeEffectsForPinnedPackage({
+    expectedPackageRef: input.expectedPackageRef,
+    plan: input.plan,
+  });
   const coveredEffects = uniqueMemoryEffects(
-    input.plan.steps.flatMap(memoryEffectsFor)
+    input.plan.steps.flatMap((step) => memoryEffectsFor(step, nodeEffects))
   );
   const requiredEffects = requiredMemoryEffectsFor(input.expectedSourceProfile);
   const coveredHorizons = uniqueMemoryCoverageHorizons(
@@ -562,16 +576,10 @@ export const verifyMemoryGeneratedWorkflow = (
 
     return parsed.success ? [parsed.data] : [];
   });
-  const relayBackedStepIds = input.plan.steps.flatMap((step) => {
-    if (step.kind !== "workflow.node.invoke") {
-      return [];
-    }
-
-    const parsed = MemoryFabricNodeTypeSchema.safeParse(step.nodeType);
-
-    return parsed.success && isRelayBackedMemoryNodeType(parsed.data)
-      ? [step.stepId]
-      : [];
+  const relayBackedStepIds = relayBackedStepIdsFor({
+    nodeEffects,
+    plan: input.plan,
+    profile: input.expectedSourceProfile,
   });
   const relayLeaseReceiptRefs =
     input.executionProof.workflowNodeOutputRefs.filter((artifactRef) =>
@@ -616,6 +624,7 @@ export const verifyMemoryGeneratedWorkflow = (
       evidenceRefs: [input.planArtifact.artifactRef],
       passed: generatedPlanCoversMemoryEffects({
         expectedPackageRef: input.expectedPackageRef,
+        nodeEffects,
         plan: input.plan,
         requiredEffects,
       }),

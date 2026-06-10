@@ -18,10 +18,7 @@ import type {
   DynamicWorkflowMachineDocument,
   DynamicWorkflowPlanDocument,
 } from "../../app/domain/schemas.ts";
-import {
-  MemoryFabricNodeTypeSchema,
-  MemorySourceFamilySchema,
-} from "../../app/domain/source-profile.ts";
+import { MemorySourceFamilySchema } from "../../app/domain/source-profile.ts";
 import type { MemorySourceFamily } from "../../app/domain/source-profile.ts";
 import {
   WORKFLOW_HITL_REPORT_SECTION_ORDER,
@@ -2366,52 +2363,51 @@ export const createMemoryFabricWorkflowNodeAdapter = (
   config: MemoryFabricWorkflowNodeAdapterConfig
 ): WorkflowNodeAdapterPort => ({
   async execute(input) {
-    const nodeTypeResult = MemoryFabricNodeTypeSchema.safeParse(
-      input.step.nodeType
-    );
-    if (!nodeTypeResult.success) {
-      return blocker(
-        "adapter_unavailable",
-        `Memory fabric workflow node adapter does not support nodeType ${input.step.nodeType}.`
-      );
-    }
+    const { nodeType } = input.step;
 
-    if (nodeTypeResult.data === "joelclaw.memory.search") {
+    if (nodeType === "joelclaw.memory.search") {
       return await executeMemorySearchNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.signals") {
+    if (nodeType === "joelclaw.memory.signals") {
       return await executeSignalsNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.capture-run") {
+    if (nodeType === "joelclaw.memory.capture-run") {
       return await executeCaptureRunNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.capture-artifact") {
+    if (nodeType === "joelclaw.memory.capture-artifact") {
       return await executeCaptureArtifactNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.correlate") {
+    if (nodeType === "joelclaw.memory.correlate") {
       return await executeCorrelationNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.refinement-proposals") {
+    if (nodeType === "joelclaw.memory.refinement-proposals") {
       return await executeRefinementProposalsNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.hitl-decision-seed") {
+    if (nodeType === "joelclaw.memory.hitl-decision-seed") {
       return await executeHitlDecisionWorkflowSeedNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.hitl-follow-up-run-request") {
+    if (nodeType === "joelclaw.memory.hitl-follow-up-run-request") {
       return await executeHitlFollowUpRunRequestNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.memory.hitl-report") {
+    if (nodeType === "joelclaw.memory.hitl-report") {
       return await executeHitlReportNode(config, input);
     }
 
-    return await executeHydrationNode(config, input);
+    if (nodeType === "joelclaw.memory.hydrate") {
+      return await executeHydrationNode(config, input);
+    }
+
+    return blocker(
+      "adapter_unavailable",
+      `Memory fabric workflow node adapter does not support nodeType ${input.step.nodeType}.`
+    );
   },
 });

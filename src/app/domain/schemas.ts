@@ -272,9 +272,31 @@ export const PackageKindSchema = z.enum([
   "adapter-pack",
 ]);
 
+/**
+ * Effect and node-type identifiers are open, schema-validated vocabularies:
+ * packages declare them as data, the platform never enumerates them. Effect
+ * ids are kebab-case; node types are dot-separated kebab-case segments.
+ */
+export const WorkflowEffectSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/u,
+    "Workflow effect ids must be kebab-case."
+  )
+  .brand<"WorkflowEffect">();
+
+export const WorkflowNodeTypeSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/u,
+    "Workflow node types must be dot-separated kebab-case segments."
+  )
+  .brand<"WorkflowNodeType">();
+
 export const PackageExportSchema = z
   .object({
     contractRef: z.string().min(1),
+    effects: z.array(WorkflowEffectSchema).optional(),
     exportId: z.string().min(1),
     kind: z.enum([
       "app",
@@ -301,6 +323,17 @@ export const PackageExportSchema = z
         code: "custom",
         message: "Workflow-node package exports require nodeType.",
         path: ["nodeType"],
+      });
+    }
+
+    if (
+      exportRecord.kind !== "workflow-node" &&
+      exportRecord.effects !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Only workflow-node package exports declare effects.",
+        path: ["effects"],
       });
     }
   });
@@ -2182,9 +2215,11 @@ export type VerificationResultDocument = z.infer<
 export type WorkflowExecutionProofArtifact = z.infer<
   typeof WorkflowExecutionProofArtifactSchema
 >;
+export type WorkflowEffect = z.infer<typeof WorkflowEffectSchema>;
 export type WorkflowExecutionProofDocument = z.infer<
   typeof WorkflowExecutionProofDocumentSchema
 >;
+export type WorkflowNodeType = z.infer<typeof WorkflowNodeTypeSchema>;
 export type WorkflowSideEffectDeclaration = z.infer<
   typeof WorkflowSideEffectDeclarationSchema
 >;
