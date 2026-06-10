@@ -26,6 +26,26 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T08:50Z run attempt: Dreaming was run as far as the current safety gates permit. Local relay proof completed; live Cloudflare submit correctly did not happen.
+
+Receipts:
+
+- Local relay proof: `run:dream-relay-local-proof:20260610T084929361Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`, status `completed`.
+- Local proof coverage: 10 source roots; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; missing machine ids `[]`; missing source families `[]`; `rawCredentialsReturned=false`; `rawPathLeaked=false`.
+- Live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T08:49:51.323Z`, status `blocked`. Remote Dream package manifest hash matched and the remote node palette includes `joelclaw.dream.hitl-decision-seed` and `joelclaw.dream.hitl-follow-up-run-request`.
+- Live run request: `run-live-dream-memory-fabric-20260610T084950034Z-e1f1ef2e`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T084950034Z-e1f1ef2e-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T084950034Z-e1f1ef2e-receipt.json`, status `blocked`, `submit.attempted=false`.
+- Provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T08:50:01.589Z`, status `blocked`, no side effects performed, sign-off not provided.
+
+Blocked reasons:
+
+- `DREAM_MEMORY_RELAY_BASE_URL` is not configured.
+- `DREAM_MEMORY_RELAY_TOKEN` is not provisioned as a Worker secret.
+- Worker deploy config does not define `DREAM_MEMORY_RELAY_BASE_URL`.
+- Authenticated relay `/healthz` is not verified.
+- Exact owner sign-off for the trusted relay network boundary was not provided.
+
+This is the correct failure mode. The system produced a run request and receipts, but it did not claim a live Cloudflare Dream execution or fake Wzrrd report output.
+
 2026-06-10T08:44Z implementation progress: Dream generated-workflow proof now requires the HITL handoff, not just proposal/report output.
 
 Receipts:
