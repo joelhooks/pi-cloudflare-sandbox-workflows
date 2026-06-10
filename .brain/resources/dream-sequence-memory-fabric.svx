@@ -26,15 +26,15 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T05:57Z status: the Dream relay proof ran locally and passed, but the live Cloudflare Dream did not submit.
+2026-06-10T06:17Z status: the Dream relay proof ran locally and passed, but the live Cloudflare Dream did not submit.
 
 Receipts:
 
-- Local trusted relay proof: `run:dream-relay-local-proof:20260610T055652906Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
-- Local proof coverage: 10 source roots, Pi/Codex/Claude/Cloudflare runtime coverage, `blaine`/`panda`/`flagg`/Cloudflare machine coverage, 8 mined signals, 12 search hits, 12 hydrated redacted receipts, 48 correlation edges, and no raw path/credential leakage.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T05:57:16.446Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T055715035Z-85bc1536`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T055715035Z-85bc1536-receipt.json`, `submit.attempted=false`.
-- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T05:57:21.109Z`, status `blocked`, no side effects performed.
+- Local trusted relay proof: `run:dream-relay-local-proof:20260610T061634863Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Local proof coverage: 10 source roots, Pi `4737`, Codex `259`, Claude `129`, and Cloudflare `175` runtime coverage; `blaine`/`panda`/`flagg`/Cloudflare machine coverage; all required Dreamer source families captured; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T06:17:08.942Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T061707360Z-c143439a`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T061707360Z-c143439a-receipt.json`, `submit.attempted=false`.
+- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T06:17:23.191Z`, status `blocked`, no side effects performed.
 
 Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
 
@@ -1904,14 +1904,14 @@ Implementation receipt:
 
 Latest corrected receipts:
 
-- Local proof: `run:dream-relay-local-proof:20260610T054444751Z`, `10` source roots, supported operations `inventory/source-health/backfill-plan/backfill-run/capture-run/capture-artifact/signals/search/hydrate/correlate`, `10` backfill action receipts, `8` mined signal receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes, run/artifact capture receipts, and `missingSourceFamilies=[]`.
+- Local proof: `run:dream-relay-local-proof:20260610T061634863Z`, `10` source roots, supported operations `inventory/source-health/backfill-plan/backfill-run/capture-run/capture-artifact/signals/search/hydrate/correlate`, `10` backfill action receipts, `8` mined signal receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes, run/artifact capture receipts, and `missingSourceFamilies=[]`.
 - Captured Dreamer source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`.
-- Capture proof: artifact capture returned `artifact://local-dream-relay-proof/hitl-report.json`; run capture returned `artifact://trusted-dream-memory-relay/captures/cloudflare-workflow-run/runs/run%3Adream-relay-local-proof%3A20260610T054444751Z.json`. Both are redacted receipt refs, not raw transcript/body return channels.
+- Capture proof: artifact capture returned `artifact://local-dream-relay-proof/hitl-report.json`; run capture returned `artifact://trusted-dream-memory-relay/captures/cloudflare-workflow-run/runs/run%3Adream-relay-local-proof%3A20260610T061634863Z.json`. Both are redacted receipt refs, not raw transcript/body return channels.
 - Package reseed receipt: `.wrangler/workflow-app/latest-dream-package-reseed-receipt.json`, completed `2026-06-10T05:50:25.488Z`, deployed Worker version `ce3a3eec-a6c1-429c-8f4d-8c97e88928b9`, seeded `workflow/dream-memory-fabric` with manifest hash `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`, and wrote package seed commit `b1b5a8a7a0fc5b67c4d70fe31892f1e242f53039`.
 - Dream cartridge hash after adding capture exports: expected `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`; remote D1 now reports the same hash.
-- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T05:50:46.905Z`, blocked on relay URL/token/config/healthz and live owner sign-off only.
-- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T05:53:46.050Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, `noSideEffectsPerformed=true`, approval still required.
-- Latest blocked run request: `run-live-dream-memory-fabric-20260610T055045604Z-77bfa3e7`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input, requires run/artifact capture receipts, and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
+- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T06:17:08.942Z`, blocked on relay URL/token/config/healthz and live owner sign-off only.
+- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T06:17:23.191Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, `noSideEffectsPerformed=true`, approval still required.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T061707360Z-c143439a`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input, requires run/artifact capture receipts, and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
 
 Validation receipts after the dynamic runtime boundary correction:
 
