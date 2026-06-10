@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 
+import { spawnSync } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +23,8 @@ const defaultPreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultRunReceiptDir = ".wrangler/workflow-app/dream-runs";
 const defaultOutRoot = ".wrangler/workflow-app/dream-reports";
+const defaultPublishExpiresIn = "24h";
+const defaultWzrrdBin = "wzrrd";
 
 const LocalRelayProofReceiptSchema = z
   .object({
@@ -123,13 +126,73 @@ export type DreamReadinessReportReceipt = z.infer<
   typeof DreamReadinessReportReceiptSchema
 >;
 
+const WzrrdCliPublishResultSchema = z
+  .object({
+    command: z.string().min(1),
+    ok: z.literal(true),
+    result: z
+      .object({
+        bytes: z.number().int().min(0),
+        createdAt: z.string().min(1),
+        deleteAfter: z.string().min(1).optional(),
+        expiresAt: z.string().min(1).optional(),
+        fileCount: z.number().int().min(0),
+        indexing: z.literal("noindex"),
+        lifecycle: z.string().min(1),
+        slug: z.string().min(1),
+        source: z.string().min(1),
+        status: z.string().min(1),
+        updatedAt: z.string().min(1),
+        url: z.string().url(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export type WzrrdCliPublishResult = z.infer<typeof WzrrdCliPublishResultSchema>;
+
+const DreamReadinessReportPublishReceiptSchema = z.object({
+  command: z.array(z.string().min(1)),
+  expiresIn: z.string().min(1),
+  htmlHash: z.string().length(64),
+  mdsvxHash: z.string().length(64),
+  publishReceiptPath: z.string().min(1),
+  publishedAt: z.string().min(1),
+  redacted: z.literal(true),
+  renderReceiptPath: z.string().min(1),
+  result: z.object({
+    bytes: z.number().int().min(0),
+    deleteAfter: z.string().min(1).optional(),
+    expiresAt: z.string().min(1).optional(),
+    fileCount: z.number().int().min(0),
+    indexing: z.literal("noindex"),
+    lifecycle: z.string().min(1),
+    slug: z.string().min(1),
+    status: z.string().min(1),
+    url: z.string().url(),
+  }),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("workflow.dream-readiness-report.publish.v1"),
+  siteDir: z.string().min(1),
+  slug: z.string().min(1),
+  status: z.literal("published"),
+});
+
+export type DreamReadinessReportPublishReceipt = z.infer<
+  typeof DreamReadinessReportPublishReceiptSchema
+>;
+
 interface DreamReadinessReportArgs {
   readonly localProofPath: string;
   readonly outRoot: string;
   readonly preflightPath: string;
+  readonly publish: boolean;
+  readonly publishExpiresIn: string;
+  readonly publishSlug?: string;
   readonly receiptPath?: string;
   readonly runReceiptDir: string;
   readonly runReceiptPath?: string;
+  readonly wzrrdBin: string;
 }
 
 export interface DreamReadinessReportInput {
@@ -143,7 +206,18 @@ export interface RunDreamReadinessReportCliInput {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
   readonly now?: () => string;
+  readonly publishCommand?: (
+    input: WzrrdPublishCommandInput
+  ) => Promise<WzrrdCliPublishResult>;
   readonly repoRoot: string;
+}
+
+export interface WzrrdPublishCommandInput {
+  readonly expiresIn: string;
+  readonly repoRoot: string;
+  readonly siteDir: string;
+  readonly slug: string;
+  readonly wzrrdBin: string;
 }
 
 const isMain = (): boolean =>
@@ -168,15 +242,24 @@ const argValue = (
 const parseArgs = (argv: readonly string[]): DreamReadinessReportArgs => {
   const receiptPath = argValue(argv, "--receipt-path");
   const runReceiptPath = argValue(argv, "--run-receipt-path");
+  const publishSlug =
+    argValue(argv, "--publish-slug") ?? argValue(argv, "--slug");
 
   return {
     localProofPath:
       argValue(argv, "--local-proof-path") ?? defaultLocalProofPath,
     outRoot: argValue(argv, "--out-root") ?? defaultOutRoot,
     preflightPath: argValue(argv, "--preflight-path") ?? defaultPreflightPath,
+    publish: argv.includes("--publish"),
+    publishExpiresIn:
+      argValue(argv, "--publish-expires-in") ??
+      argValue(argv, "--expires-in") ??
+      defaultPublishExpiresIn,
+    ...(publishSlug === undefined ? {} : { publishSlug }),
     ...(receiptPath === undefined ? {} : { receiptPath }),
     runReceiptDir: argValue(argv, "--run-receipt-dir") ?? defaultRunReceiptDir,
     ...(runReceiptPath === undefined ? {} : { runReceiptPath }),
+    wzrrdBin: argValue(argv, "--wzrrd-bin") ?? defaultWzrrdBin,
   };
 };
 
@@ -629,6 +712,104 @@ const writeText = async (path: string, value: string): Promise<void> => {
   await writeFile(path, value, "utf-8");
 };
 
+const publishArgsFor = (input: WzrrdPublishCommandInput): readonly string[] => [
+  "publish",
+  "--file",
+  input.siteDir,
+  "--slug",
+  input.slug,
+  "--expires-in",
+  input.expiresIn,
+  "--non-interactive",
+];
+
+const runWzrrdPublishCommand = (
+  input: WzrrdPublishCommandInput
+): Promise<WzrrdCliPublishResult> => {
+  const args = publishArgsFor(input);
+  const result = spawnSync(input.wzrrdBin, args, {
+    cwd: input.repoRoot,
+    encoding: "utf-8",
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `wzrrd publish failed with exit ${String(result.status)}: ${result.stderr.trim()}`
+    );
+  }
+
+  return Promise.resolve(
+    WzrrdCliPublishResultSchema.parse(JSON.parse(result.stdout.trim()))
+  );
+};
+
+const publishDreamReadinessReport = async (input: {
+  readonly command?: (
+    commandInput: WzrrdPublishCommandInput
+  ) => Promise<WzrrdCliPublishResult>;
+  readonly expiresIn: string;
+  readonly now: () => string;
+  readonly receipt: DreamReadinessReportReceipt;
+  readonly repoRoot: string;
+  readonly slug: string;
+  readonly wzrrdBin: string;
+}): Promise<DreamReadinessReportPublishReceipt> => {
+  const commandInput: WzrrdPublishCommandInput = {
+    expiresIn: input.expiresIn,
+    repoRoot: input.repoRoot,
+    siteDir: input.receipt.siteDir,
+    slug: input.slug,
+    wzrrdBin: input.wzrrdBin,
+  };
+  const command = [input.wzrrdBin, ...publishArgsFor(commandInput)];
+  const publishResult = await (input.command ?? runWzrrdPublishCommand)(
+    commandInput
+  );
+  if (publishResult.result.slug !== input.slug) {
+    throw new Error("wzrrd returned a slug that did not match the request.");
+  }
+
+  const publishReceiptPath = join(
+    input.receipt.siteDir,
+    "publish-receipt.json"
+  );
+  const publishReceipt = DreamReadinessReportPublishReceiptSchema.parse({
+    command,
+    expiresIn: input.expiresIn,
+    htmlHash: input.receipt.htmlHash,
+    mdsvxHash: input.receipt.mdsvxHash,
+    publishReceiptPath,
+    publishedAt: input.now(),
+    redacted: true,
+    renderReceiptPath: input.receipt.receiptPath,
+    result: {
+      bytes: publishResult.result.bytes,
+      ...(publishResult.result.deleteAfter === undefined
+        ? {}
+        : { deleteAfter: publishResult.result.deleteAfter }),
+      ...(publishResult.result.expiresAt === undefined
+        ? {}
+        : { expiresAt: publishResult.result.expiresAt }),
+      fileCount: publishResult.result.fileCount,
+      indexing: publishResult.result.indexing,
+      lifecycle: publishResult.result.lifecycle,
+      slug: publishResult.result.slug,
+      status: publishResult.result.status,
+      url: publishResult.result.url,
+    },
+    runId: input.receipt.runId,
+    schemaVersion: "workflow.dream-readiness-report.publish.v1",
+    siteDir: input.receipt.siteDir,
+    slug: input.slug,
+    status: "published",
+  });
+  await writeText(
+    publishReceiptPath,
+    `${JSON.stringify(publishReceipt, null, 2)}\n`
+  );
+
+  return publishReceipt;
+};
+
 export const renderDreamReadinessReport = async (input: {
   readonly outRoot: string;
   readonly report: DreamReadinessReportInput;
@@ -725,9 +906,28 @@ export const runDreamReadinessReportCli = async (
   const log = input.log ?? console.log;
   log(JSON.stringify(receipt, null, 2));
   log(`wrote ${receipt.siteDir}`);
-  log(
-    `publish: wzrrd publish --file ${receipt.siteDir} --slug ${basename(receipt.siteDir).toLowerCase()} --expires-in 24h --non-interactive`
-  );
+  const publishSlug =
+    args.publishSlug ?? basename(receipt.siteDir).toLowerCase();
+  if (args.publish) {
+    const publishReceipt = await publishDreamReadinessReport({
+      ...(input.publishCommand === undefined
+        ? {}
+        : { command: input.publishCommand }),
+      expiresIn: args.publishExpiresIn,
+      now: input.now ?? (() => new Date().toISOString()),
+      receipt,
+      repoRoot: input.repoRoot,
+      slug: publishSlug,
+      wzrrdBin: args.wzrrdBin,
+    });
+    log(JSON.stringify(publishReceipt, null, 2));
+    log(`published ${publishReceipt.result.url}`);
+    log(`publish receipt ${publishReceipt.publishReceiptPath}`);
+  } else {
+    log(
+      `publish: ${args.wzrrdBin} publish --file ${receipt.siteDir} --slug ${publishSlug} --expires-in ${args.publishExpiresIn} --non-interactive`
+    );
+  }
 
   return receipt;
 };

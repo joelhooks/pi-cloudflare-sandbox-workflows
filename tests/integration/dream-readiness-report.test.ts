@@ -341,4 +341,95 @@ describe("Dream readiness report", () => {
       "Dream readiness report only renders blocked/pre-submit receipts."
     );
   });
+
+  it("publishes the rendered report behind an explicit publish flag and writes a receipt", async () => {
+    const repoRoot = await mkdtemp(
+      resolve(tmpdir(), "dream-readiness-report-")
+    );
+    const localProofPath = resolve(repoRoot, "proof.json");
+    const preflightPath = resolve(repoRoot, "preflight.json");
+    const runReceiptPath = resolve(repoRoot, "run-receipt.json");
+    const publishCalls: unknown[] = [];
+
+    await writeJson(localProofPath, localProof());
+    await writeJson(preflightPath, preflight());
+    await writeJson(runReceiptPath, runReceipt({ submitAttempted: false }));
+
+    const receipt = await runDreamReadinessReportCli({
+      argv: [
+        `--local-proof-path=${localProofPath}`,
+        `--preflight-path=${preflightPath}`,
+        `--run-receipt-path=${runReceiptPath}`,
+        "--out-root=out",
+        "--publish",
+        "--publish-slug=dream-readiness-report-test",
+        "--publish-expires-in=24h",
+      ],
+      log: () => {},
+      now: () => "2026-06-10T11:02:00.000Z",
+      publishCommand: (input) => {
+        publishCalls.push(input);
+
+        return Promise.resolve({
+          command: "wzrrd publish",
+          ok: true,
+          result: {
+            bytes: 12_345,
+            createdAt: "2026-06-10T11:02:01.000Z",
+            deleteAfter: "2026-06-18T11:02:01.000Z",
+            expiresAt: "2026-06-11T11:02:01.000Z",
+            fileCount: 4,
+            indexing: "noindex",
+            lifecycle: "expiring",
+            slug: input.slug,
+            source: input.siteDir,
+            status: "active",
+            updatedAt: "2026-06-10T11:02:01.000Z",
+            url: `https://${input.slug}.wzrrd.sh/`,
+          },
+        });
+      },
+      repoRoot,
+    });
+
+    const publishReceipt = await readFile(
+      resolve(receipt.siteDir, "publish-receipt.json"),
+      "utf-8"
+    );
+
+    expect({
+      noPrivateValues: [rawPrivatePath, rawRelayToken, rawRelayUrl].every(
+        (privateValue) => !publishReceipt.includes(privateValue)
+      ),
+      publishCalls,
+      publishReceipt: JSON.parse(publishReceipt) as unknown,
+    }).toMatchObject({
+      noPrivateValues: true,
+      publishCalls: [
+        {
+          expiresIn: "24h",
+          siteDir: receipt.siteDir,
+          slug: "dream-readiness-report-test",
+          wzrrdBin: "wzrrd",
+        },
+      ],
+      publishReceipt: {
+        expiresIn: "24h",
+        htmlHash: receipt.htmlHash,
+        mdsvxHash: receipt.mdsvxHash,
+        redacted: true,
+        result: {
+          expiresAt: "2026-06-11T11:02:01.000Z",
+          indexing: "noindex",
+          lifecycle: "expiring",
+          slug: "dream-readiness-report-test",
+          status: "active",
+          url: "https://dream-readiness-report-test.wzrrd.sh/",
+        },
+        runId,
+        schemaVersion: "workflow.dream-readiness-report.publish.v1",
+        status: "published",
+      },
+    });
+  });
 });

@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T11:02Z implementation progress: the Dream readiness report command now has an explicit receipt-backed Wzrrd publish path.
+
+Receipts:
+
+- `pnpm app:dream:report --publish --publish-slug=<slug> --publish-expires-in=24h` now renders the Tufte/MDSvX readiness report, executes `wzrrd publish`, parses the JSON CLI result, and writes `publish-receipt.json` next to the rendered report.
+- New receipt schema: `workflow.dream-readiness-report.publish.v1`. It records command argv, run id, site dir, slug, expiry, noindex lifecycle result, URL, file count, bytes, `report.mdsvx` hash, `index.html` hash, render receipt path, and publish receipt path.
+- The publish side effect is still explicit. Plain `pnpm app:dream:report` only renders and prints the publish command; `--publish` is required to publish.
+- Focused test coverage now proves explicit publish mode writes a redacted receipt, passes slug/expiry/site dir into the publisher, captures `noindex`/`expiring` Wzrrd result metadata, and does not leak private test values.
+- Dogfood publish receipt: `https://dream-readiness-receipt-20260610-1102.wzrrd.sh/`, noindex, expires `2026-06-11T11:01:42.057Z`, `report.mdsvx` hash `4fb5c5b6385eff359d7a0767634fdf00a05578a9e7181f6265688ae48909ada9`, `index.html` hash `c4a569157ac15fe2fd78920b8d8ab6eded9df42dc43defd0bd034176259d9d14`.
+
+This does not execute the live Cloudflare Dream. It tightens the output-target side: operator readiness handoffs now leave the same kind of publish receipt trail the real workflow must produce through leased `wzrrd.site.publish`.
+
 2026-06-10T10:55Z run attempt: Dreaming was run through the trusted local memory relay proof, the Cloudflare live preflight, the live submit gate, and a Wzrrd readiness handoff. Local proof passed; live Cloudflare submit correctly did not happen.
 
 Receipts:
