@@ -10,7 +10,7 @@ import {
   DreamCaptureReceiptDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamAdapterHealthStatus,
   DreamBackfillPlanAction,
@@ -29,17 +29,17 @@ import type {
   DreamSourceInventoryDocument,
   DreamSourceInventoryItem,
   DreamSourceScope,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import type {
-  DreamMemoryBackfillPort,
-  DreamMemoryCapturePort,
-  DreamMemoryFabricPort,
-} from "../../app/workflow-nodes/dream-memory-fabric.ts";
+} from "./schemas.ts";
 import {
   scanTrustedJoelClawSessionSource,
   trustedJoelClawSessionSourceForAuthorityRoot,
 } from "./trusted-joelclaw-session-source.ts";
 import type { TrustedJoelClawSessionBridgeCommand } from "./trusted-joelclaw-session-source.ts";
+import type {
+  DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
+  DreamMemoryFabricPort,
+} from "./workflow-node-adapter.ts";
 
 export interface TrustedLocalDreamDerivedIndexConfig {
   readonly derivedCount?: number;

@@ -58,7 +58,7 @@ import { createArtifactBackedWorkflowCartridgeAdapter } from "../../src/app/work
 import {
   createDreamGeneratedWorkflowProofRecorder,
   verifyDreamGeneratedWorkflow,
-} from "../../src/app/workflow-nodes/dream-generated-workflow-proof.ts";
+} from "../../src/cartridges/dream-memory-fabric/generated-workflow-proof.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
@@ -76,9 +76,9 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   DreamSourcePackDispositionSchema,
-} from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
+} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
+import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 import {
   buildIntegrationTestDreamRunRequest,
   buildIntegrationTestRunRequest,

@@ -16,11 +16,11 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
-} from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
   DreamMemoryRelayOperation,
   DreamSourceFamily,
-} from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import {
   startTrustedLocalDreamMemoryRelayHttpServer,
   TrustedLocalDreamMemoryRelayReadinessReceiptSchema,

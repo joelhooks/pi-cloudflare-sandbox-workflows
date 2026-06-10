@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { DynamicWorkflowStepSchema } from "../../src/app/domain/schemas.ts";
 import {
+  dreamMemoryFabricPackageSeedTemplate,
+  dreamMemoryFabricPackageMetadata,
+} from "../../src/cartridges/dream-memory-fabric/package-seed.ts";
+import {
   DreamBackfillRunReceiptDocumentSchema,
   DreamBackfillPlanDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
@@ -21,11 +25,7 @@ import {
   DreamSourcePackDispositionSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
-} from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import {
-  dreamMemoryFabricPackageSeedTemplate,
-  dreamMemoryFabricPackageMetadata,
-} from "../../src/cartridges/dream-memory-fabric/package-seed.ts";
+} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
 
 const timestamp = "2026-06-09T18:00:00.000Z";

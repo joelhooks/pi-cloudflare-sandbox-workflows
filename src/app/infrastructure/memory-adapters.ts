@@ -1,3 +1,33 @@
+import {
+  DreamBackfillPlanDocumentSchema,
+  DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
+  DreamCorrelationGraphDocumentSchema,
+  DreamHydrationDocumentSchema,
+  DreamMemorySearchDocumentSchema,
+  DreamSignalDocumentSchema,
+  DreamSourceHealthDocumentSchema,
+  DreamSourceInventoryDocumentSchema,
+} from "../../cartridges/dream-memory-fabric/schemas.ts";
+import type {
+  DreamCorrelationGraphDocument,
+  DreamMemoryRelayBackfillRunPayload,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
+  DreamMemoryRelayCorrelationPayload,
+  DreamReceiptRef,
+  DreamRuntime,
+  DreamSignalKind,
+  DreamSourceFamily,
+} from "../../cartridges/dream-memory-fabric/schemas.ts";
+import type {
+  DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
+  DreamMemoryCorrelationPort,
+  DreamMemoryFabricPort,
+  DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
+} from "../../cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 import type {
   ArtifactStoreContract,
   CapabilityLeaseBrokerActorContract,
@@ -60,36 +90,6 @@ import type {
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
 import { workflowTraceContextForLane } from "../domain/trace-context.ts";
-import {
-  DreamBackfillPlanDocumentSchema,
-  DreamBackfillRunReceiptDocumentSchema,
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamSignalDocumentSchema,
-  DreamSourceHealthDocumentSchema,
-  DreamSourceInventoryDocumentSchema,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
-import type {
-  DreamCorrelationGraphDocument,
-  DreamMemoryRelayBackfillRunPayload,
-  DreamMemoryRelayCaptureArtifactPayload,
-  DreamMemoryRelayCaptureRunPayload,
-  DreamMemoryRelayCorrelationPayload,
-  DreamReceiptRef,
-  DreamRuntime,
-  DreamSignalKind,
-  DreamSourceFamily,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
-import type {
-  DreamMemoryBackfillPort,
-  DreamMemoryCapturePort,
-  DreamMemoryCorrelationPort,
-  DreamMemoryFabricPort,
-  DreamMemoryRetrievalPort,
-  DreamMemorySignalPort,
-} from "../workflow-nodes/dream-memory-fabric.ts";
 
 type DreamCorrelationGraphNode = DreamCorrelationGraphDocument["nodes"][number];
 type DreamCorrelationGraphEdge = DreamCorrelationGraphDocument["edges"][number];

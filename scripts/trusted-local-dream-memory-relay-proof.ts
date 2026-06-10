@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import { ActorSchema, ArtifactRefSchema } from "../src/app/domain/schemas.ts";
+import { dreamMemoryRelayEndpointCatalog } from "../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
@@ -21,7 +22,7 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
-} from "../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
@@ -35,8 +36,7 @@ import type {
   DreamSourceFamily,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
-} from "../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+} from "../src/cartridges/dream-memory-fabric/schemas.ts";
 import {
   dreamTranscriptReviewRequiredMachineIds,
   dreamTranscriptReviewSourceProfile,

@@ -18,8 +18,8 @@ import {
   DreamHitlDecisionDocumentSchema,
   DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlDecisionWorkflowSeedDocumentSchema,
-} from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
+} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
+import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
 
 const at = "2026-06-10T08:00:00.000Z";

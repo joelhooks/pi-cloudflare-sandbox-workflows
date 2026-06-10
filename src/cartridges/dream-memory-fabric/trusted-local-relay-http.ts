@@ -5,6 +5,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { IsoDateTimeSchema } from "../../app/domain/schemas.ts";
+import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import {
   DreamDerivedIndexStatusSchema,
   DreamMemoryRelayEndpointCatalogSchema,
@@ -12,8 +13,7 @@ import {
   DreamRuntimeSchema,
   DreamSourceFamilySchema,
   DreamSourceScopeSchema,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
+} from "./schemas.ts";
 import { createTrustedLocalDreamMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
 import type {
   TrustedLocalDreamDerivedIndexConfig,

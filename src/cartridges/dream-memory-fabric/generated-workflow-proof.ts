@@ -1,8 +1,8 @@
 import type {
   ArtifactStoreContract,
   WorkflowPostExecutionArtifactRecorderPort,
-} from "../application/ports.ts";
-import { hashJson, sha256Hex } from "../domain/hash.ts";
+} from "../../app/application/ports.ts";
+import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
 import type {
   ArtifactRef,
   CapabilityBlocker,
@@ -12,7 +12,7 @@ import type {
   GeneratedHarnessArtifact,
   PlanArtifact,
   WorkflowExecutionProofDocument,
-} from "../domain/schemas.ts";
+} from "../../app/domain/schemas.ts";
 import {
   DreamCoverageHorizonSchema,
   DreamGeneratedWorkflowProofDocumentSchema,
@@ -21,7 +21,7 @@ import {
   DreamSourcePackDispositionSchema,
   DreamSourceFamilySchema,
   DreamWorkflowEffectSchema,
-} from "./dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamCoverageHorizon,
   DreamGeneratedWorkflowProofDocument,
@@ -32,7 +32,7 @@ import type {
   DreamSourcePackDisposition,
   DreamSourceProfile,
   DreamWorkflowEffect,
-} from "./dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 
 interface ProofCheck {
   readonly checkId: string;

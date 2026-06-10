@@ -5,9 +5,12 @@ import type {
   WorkflowNodeAdapterPort,
   WorkflowNodeExecutionResult,
   WorkflowNodeInvocationStep,
-} from "../application/ports.ts";
-import { hashJson, sha256Hex } from "../domain/hash.ts";
-import { ArtifactPinSchema, ArtifactRefSchema } from "../domain/schemas.ts";
+} from "../../app/application/ports.ts";
+import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
+import {
+  ArtifactPinSchema,
+  ArtifactRefSchema,
+} from "../../app/domain/schemas.ts";
 import type {
   Actor,
   ArtifactPin,
@@ -15,7 +18,7 @@ import type {
   CapabilityBlocker,
   DynamicWorkflowMachineDocument,
   DynamicWorkflowPlanDocument,
-} from "../domain/schemas.ts";
+} from "../../app/domain/schemas.ts";
 import {
   DREAM_HITL_REPORT_SECTION_ORDER,
   DreamBackfillPlanDocumentSchema,
@@ -46,7 +49,7 @@ import {
   DreamSourceFamilySchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
-} from "./dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
@@ -80,7 +83,7 @@ import type {
   DreamSourceFamily,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
-} from "./dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 
 export type DreamMemoryFabricResult<TDocument> =
   | {

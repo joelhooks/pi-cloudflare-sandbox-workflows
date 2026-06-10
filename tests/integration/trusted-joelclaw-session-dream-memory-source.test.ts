@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
-import type { DreamMemoryFabricResult } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
 import type { TrustedJoelClawSessionBridgeCommand } from "../../src/cartridges/dream-memory-fabric/trusted-joelclaw-session-source.ts";
 import { createTrustedLocalDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts";
 import { createTrustedLocalDreamMemoryRetrievalAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts";
+import type { DreamMemoryFabricResult } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 
 const timestamp = "2026-06-09T20:00:00.000Z";
 

@@ -26,6 +26,19 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:26Z implementation progress: Dream schemas, workflow-node adapter, and generated-workflow proof moved out of the app workflow-node surface and into the Dream cartridge.
+
+Receipts:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` moved to `src/cartridges/dream-memory-fabric/schemas.ts`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` moved to `src/cartridges/dream-memory-fabric/workflow-node-adapter.ts`.
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` moved to `src/cartridges/dream-memory-fabric/generated-workflow-proof.ts`.
+- `src/app/index.ts` no longer re-exports Dream ports, schemas, node adapters, or proof helpers as core app API.
+- Current Dream imports in scripts/tests/cartridge code point at `src/cartridges/dream-memory-fabric/*`; the only remaining app reference is the generic `artifact-backed-cartridge-adapter`, which is intentionally shared infrastructure.
+- Focused verification passed: `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-hitl-decision-seed-node.test.ts tests/integration/workflow-app.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts` and `pnpm typecheck`.
+
+This still does not execute Dream live in Cloudflare. It makes the package boundary more honest: Dream remains an installed cartridge with its own schemas/types/proof/node adapter, while the app keeps the generic workflow runner, artifact-backed cartridge adapter, and capability/worker infrastructure.
+
 2026-06-10T10:20Z implementation progress: Dream relay client/server adapters now live under the Dream cartridge boundary instead of app infrastructure.
 
 Receipts:

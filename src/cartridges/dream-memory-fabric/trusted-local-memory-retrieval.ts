@@ -10,7 +10,7 @@ import {
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
   DreamSignalDocumentSchema,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamCorrelationGraphDocument,
   DreamCoverageHorizon,
@@ -19,12 +19,7 @@ import type {
   DreamReceiptRef,
   DreamSignalKind,
   DreamSourceFamily,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
-import type {
-  DreamMemoryCorrelationPort,
-  DreamMemoryRetrievalPort,
-  DreamMemorySignalPort,
-} from "../../app/workflow-nodes/dream-memory-fabric.ts";
+} from "./schemas.ts";
 import {
   searchTrustedJoelClawSessionSource,
   trustedJoelClawSessionSourceForAuthorityRoot,
@@ -34,6 +29,11 @@ import type {
   TrustedJoelClawSessionHydrationRecord,
 } from "./trusted-joelclaw-session-source.ts";
 import type { TrustedLocalDreamSourceRoot } from "./trusted-local-memory-fabric.ts";
+import type {
+  DreamMemoryCorrelationPort,
+  DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
+} from "./workflow-node-adapter.ts";
 
 type DreamCorrelationGraphNode = DreamCorrelationGraphDocument["nodes"][number];
 type DreamCorrelationGraphEdge = DreamCorrelationGraphDocument["edges"][number];

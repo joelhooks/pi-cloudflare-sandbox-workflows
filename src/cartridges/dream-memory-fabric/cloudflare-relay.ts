@@ -28,7 +28,7 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
@@ -49,7 +49,7 @@ import type {
   DreamSourceHealthDocument,
   DreamSourceFamily,
   DreamSourceInventoryDocument,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 import type {
   DreamMemoryBackfillPort,
   DreamMemoryCapturePort,
@@ -58,7 +58,7 @@ import type {
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
   DreamMemorySignalPort,
-} from "../../app/workflow-nodes/dream-memory-fabric.ts";
+} from "./workflow-node-adapter.ts";
 
 export interface DreamMemoryRelayTokenSecretResolver {
   resolve(input: {

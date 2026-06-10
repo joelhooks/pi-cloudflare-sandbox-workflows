@@ -10,7 +10,7 @@ import type {
   DreamReceiptRef,
   DreamRuntime,
   DreamSourceFamily,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 
 export interface TrustedJoelClawSessionSourceConfig {
   readonly machineId: string;

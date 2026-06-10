@@ -2,14 +2,14 @@ import { z } from "zod";
 
 import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
-import { createDreamGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/dream-generated-workflow-proof.ts";
-import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../app/workflow-nodes/dream-memory-fabric.ts";
 import {
   createCloudflareDreamMemoryFabricRelay,
   createCloudflareDreamMemoryRelayTokenResolver,
 } from "./cloudflare-relay.ts";
+import { createDreamGeneratedWorkflowProofRecorder } from "./generated-workflow-proof.ts";
 import { dreamMemoryFabricPackageMetadata } from "./package-seed.ts";
 import { dreamTranscriptReviewSourceProfile } from "./source-profile.ts";
+import { createDreamMemoryFabricWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
 
 export const DreamMemoryFabricCloudflareEnvBindingSchema = z.object({
   DREAM_MEMORY_RELAY_BASE_URL: z.url().optional(),

@@ -1,11 +1,11 @@
-import { DreamSourceProfileSchema } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+import { DreamSourceProfileSchema } from "./schemas.ts";
 import type {
   DreamCoverageHorizon,
   DreamMemoryRelayOperation,
   DreamRuntime,
   DreamSourceFamily,
   DreamSourcePack,
-} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "./schemas.ts";
 
 export const dreamTranscriptReviewSourceFamilies = [
   "agent-transcripts",

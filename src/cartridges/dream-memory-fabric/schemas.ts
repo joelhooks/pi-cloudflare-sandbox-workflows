@@ -11,7 +11,7 @@ import {
   VerificationContractArtifactSchema,
   WorkflowRunRequestSchema,
   WorkflowTraceContextSchema,
-} from "../domain/schemas.ts";
+} from "../../app/domain/schemas.ts";
 
 export const DreamSourceFamilySchema = z.enum([
   "agent-transcripts",

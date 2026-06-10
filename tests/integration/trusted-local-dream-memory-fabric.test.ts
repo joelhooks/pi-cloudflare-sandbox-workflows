@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
-import type { DreamMemoryFabricResult } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
 import { createTrustedLocalDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts";
+import type { DreamMemoryFabricResult } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
 
 const timestamp = "2026-06-09T19:45:00.000Z";
 
