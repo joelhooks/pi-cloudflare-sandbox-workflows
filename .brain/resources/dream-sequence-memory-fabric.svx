@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:44Z report handoff: a redacted Dream readiness report was rendered and published as a 24h noindex Wzrrd page.
+
+Receipts:
+
+- New command `pnpm app:dream:report` rendered the latest blocked Dream run receipt plus local relay proof into `.wrangler/workflow-app/dream-reports/run-live-dream-memory-fabric-20260610T103545976Z-78082440/`.
+- Render receipt schema `workflow.dream-readiness-report.v1`: `runId=run-live-dream-memory-fabric-20260610T103545976Z-78082440`, `localProofRunId=run:dream-relay-local-proof:20260610T103510004Z`, `sourceRootCount=10`, `hydratedReceiptCount=12`, `correlationEdgeCount=48`, `blockerCount=4`, `submitAttempted=false`.
+- Report hashes: `report.mdsvx` hash `821697c5c4f83e4515493ad90be1c19cebc58b229415dca45ed9f51c417d0626`; `index.html` hash `a5fd693e5182e19f9df382e4f506ed77dd1627c5b8412069d7e81f343384d3cb`.
+- Wzrrd publish: `https://dream-readiness-20260610-103545.wzrrd.sh/`, noindex, expires `2026-06-11T10:44:54.469Z`, delete-after `2026-06-18T10:44:54.469Z`.
+- The report is explicitly not a completed Dream HITL report. It says no live Cloudflare Dream was submitted, no real Pi planner generated a Dream state machine, and no generated machine/harness/verifier/cartridge proof exists for this run attempt.
+
+This moves the human handoff forward without faking the generated workflow. The live blocker remains the approved Worker-facing relay URL/token/remote healthz boundary.
+
 2026-06-10T10:35Z run attempt: Dreaming exercised the trusted local memory fabric and prepared a live Cloudflare Dream request, but did not submit because the Worker-facing relay boundary is still unconfigured.
 
 Receipts:

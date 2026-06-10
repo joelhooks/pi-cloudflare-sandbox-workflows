@@ -1,0 +1,344 @@
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { runDreamReadinessReportCli } from "../../scripts/workflow-app-dream-readiness-report.ts";
+import { buildDreamLiveRunRequest } from "../../scripts/workflow-app-dream-run.ts";
+import {
+  DreamLiveRunRequestReceiptSchema,
+  WorkflowLivePreflightReceiptSchema,
+} from "../../src/app/domain/schemas.ts";
+
+const rawPrivatePath = "/private/tmp/do-not-publish-dream-path";
+const rawRelayToken = "do-not-publish-dream-relay-token";
+const rawRelayUrl = "https://private-relay.example.test";
+const runId = "run-live-dream-memory-fabric-report-test";
+
+const writeJson = async (path: string, value: unknown): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+};
+
+const localProof = () => ({
+  backfill: {
+    actionCount: 3,
+    captureFixCount: 1,
+    status: "backfill-required",
+  },
+  backfillRun: {
+    blockedCount: 0,
+    completedCount: 0,
+    failedCount: 0,
+    skippedCount: 3,
+  },
+  checkedAt: "2026-06-10T11:00:00.000Z",
+  correlation: {
+    edgeCount: 48,
+    nodeCount: 35,
+  },
+  health: {
+    blindSpotCount: 2,
+    degradedSourceCount: 3,
+    status: "degraded",
+  },
+  inventory: {
+    machineCoverage: [
+      {
+        authorityCount: 5125,
+        machineId: "blaine",
+        sourceCount: 3,
+        status: "captured",
+      },
+      {
+        authorityCount: 211,
+        machineId: "cloudflare",
+        sourceCount: 1,
+        status: "captured",
+      },
+    ],
+    runtimeCoverage: [
+      {
+        count: 4737,
+        runtime: "pi",
+        status: "captured",
+      },
+      {
+        count: 259,
+        runtime: "codex",
+        status: "captured",
+      },
+      {
+        count: 129,
+        runtime: "claude",
+        status: "captured",
+      },
+      {
+        count: 211,
+        runtime: "cloudflare",
+        status: "captured",
+      },
+    ],
+    sourceCount: 10,
+    sourceFamilyCoverage: [
+      {
+        authorityCount: 5132,
+        family: "agent-transcripts",
+        sourceCount: 5,
+        status: "captured",
+      },
+      {
+        authorityCount: 19,
+        family: "brain",
+        sourceCount: 2,
+        status: "captured",
+      },
+      {
+        authorityCount: 211,
+        family: "cloudflare-runs",
+        sourceCount: 1,
+        status: "captured",
+      },
+    ],
+  },
+  rawCredentialsReturned: false,
+  rawPathLeaked: false,
+  rawPathsReturned: false,
+  redacted: true,
+  runId: "run:dream-relay-local-proof:report-test",
+  schemaVersion: "trusted.dream-memory-relay.local-proof.v1",
+  search: {
+    hitCount: 12,
+    hydratedCount: 12,
+    skippedSourceCount: 1184,
+  },
+  signals: {
+    signalCount: 8,
+    signalKinds: ["agent-failure", "correction"],
+  },
+  sourceRootCount: 10,
+});
+
+const preflight = () =>
+  WorkflowLivePreflightReceiptSchema.parse({
+    artifactModel: {
+      cartridgeKind: "artifact-backed-workflow-cartridge",
+      dynamicWorkflowRequiresGeneratedMachine: true,
+      generatedArtifactsRequired: [
+        "planner prompt/transcript",
+        "workflow.xstate-machine.v1 config artifact",
+        "generated TypeScript harness source",
+        "machine/harness hashes",
+        "dream.hitl-report.v1 MDSvX report artifact",
+      ],
+      sideEffectsRequireCapabilityLeases: true,
+    },
+    checks: [
+      {
+        checkId: "env:DREAM_MEMORY_RELAY_BASE_URL",
+        message: "DREAM_MEMORY_RELAY_BASE_URL is not configured.",
+        redacted: true,
+        required: true,
+        requiredFor: ["dream-memory-relay-binding"],
+        status: "missing",
+      },
+      {
+        checkId: "env:DREAM_MEMORY_RELAY_TOKEN",
+        message: "DREAM_MEMORY_RELAY_TOKEN is not configured.",
+        redacted: true,
+        required: true,
+        requiredFor: ["dream-memory-relay-lease"],
+        status: "missing",
+      },
+      {
+        checkId: "relay:local-proof",
+        message: "Trusted local Dream relay proof passed.",
+        redacted: true,
+        required: true,
+        requiredFor: ["dream-memory-relay-local-proof"],
+        status: "passed",
+      },
+      {
+        checkId: "relay:healthz",
+        message: "Relay healthz missing.",
+        redacted: true,
+        required: true,
+        requiredFor: ["dream-memory-relay-readiness"],
+        status: "missing",
+      },
+    ],
+    expectedCartridgePackageId: "workflow/dream-memory-fabric",
+    generatedAt: "2026-06-10T11:00:10.000Z",
+    redacted: true,
+    relayCapability: {
+      allowedOperations: ["inventory", "search", "hydrate", "correlate"],
+      allowedSourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
+      budget: {
+        maxFiles: 500,
+        maxRows: 1000,
+        maxTokens: 100_000,
+      },
+      capability: "dream.memory.relay",
+      idempotencyKeyPrefix: "dream-memory-relay",
+      lease: {
+        required: true,
+        secretBindingName: "DREAM_MEMORY_RELAY_TOKEN",
+        secretRef: "secretref:dream-memory-relay",
+      },
+      readiness: {
+        endpointConfigured: false,
+        healthzStatus: "missing",
+        localProofStatus: "passed",
+        tokenConfigured: false,
+        workerBaseUrlConfigured: false,
+      },
+      redacted: true,
+      redactionPolicy: {
+        mode: "redacted-evidence",
+        noCustomerDataInPublicArtifacts: true,
+        noRawCredentials: true,
+        noRawPrivatePaths: true,
+        noRawTranscripts: true,
+      },
+      relayReceiptsRequired: true,
+      traceCapability: "dream.memory.relay",
+    },
+    remoteRegistry: {
+      command: [],
+      expectedPackageId: "workflow/dream-memory-fabric",
+      expectedPackageSeeded: true,
+      packageIds: ["workflow/dream-memory-fabric"],
+      redacted: true,
+      status: "queried",
+    },
+    remoteSecrets: {
+      command: [],
+      redacted: true,
+      secretNames: ["PI_AUTH_JSON_B64", "WZRRD_API_TOKEN"],
+      status: "queried",
+    },
+    requiredActions: [
+      "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+      "Provision DREAM_MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
+      "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
+    ],
+    schemaVersion: "workflow.live-preflight.v1",
+    status: "blocked",
+    workerUrl: "https://pi-cloudflare-sandbox-workflows.example.test",
+    workflowId: "dream.memory-fabric",
+  });
+
+const runReceipt = (input: { readonly submitAttempted: boolean }) =>
+  DreamLiveRunRequestReceiptSchema.parse({
+    blockedReasons: [
+      "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+      "Provision DREAM_MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
+      "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
+    ],
+    checkedAt: "2026-06-10T11:00:20.000Z",
+    preflight: {
+      generatedAt: "2026-06-10T11:00:10.000Z",
+      path: ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json",
+      refreshed: true,
+      requiredActions: [
+        "Set DREAM_MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
+      ],
+      status: "blocked",
+    },
+    redacted: true,
+    relayCapability: preflight().relayCapability,
+    request: buildDreamLiveRunRequest({ runId }),
+    requestPath: `.wrangler/workflow-app/dream-runs/${runId}-request.json`,
+    runId,
+    schemaVersion: "workflow.dream-live-run-request.v1",
+    status: "blocked",
+    submit: {
+      attempted: input.submitAttempted,
+    },
+    workerUrl: "https://pi-cloudflare-sandbox-workflows.example.test",
+  });
+
+describe("Dream readiness report", () => {
+  it("renders a Tufte MDSvX/static report from redacted blocked Dream receipts", async () => {
+    const repoRoot = await mkdtemp(
+      resolve(tmpdir(), "dream-readiness-report-")
+    );
+    const localProofPath = resolve(repoRoot, "proof.json");
+    const preflightPath = resolve(repoRoot, "preflight.json");
+    const runReceiptPath = resolve(repoRoot, "run-receipt.json");
+
+    await writeJson(localProofPath, localProof());
+    await writeJson(preflightPath, preflight());
+    await writeJson(runReceiptPath, runReceipt({ submitAttempted: false }));
+
+    const receipt = await runDreamReadinessReportCli({
+      argv: [
+        `--local-proof-path=${localProofPath}`,
+        `--preflight-path=${preflightPath}`,
+        `--run-receipt-path=${runReceiptPath}`,
+        "--out-root=out",
+      ],
+      log: () => {},
+      now: () => "2026-06-10T11:01:00.000Z",
+      repoRoot,
+    });
+    const mdsvx = await readFile(receipt.reportPath, "utf-8");
+    const html = await readFile(receipt.indexPath, "utf-8");
+    const receipts = await readFile(receipt.receiptsPath, "utf-8");
+    const combined = `${mdsvx}\n${html}\n${receipts}`;
+
+    expect({
+      blockerCount: receipt.summary.blockerCount,
+      hasCanonicalTemplate: mdsvx.includes(
+        'template: "joel/tufte-mdsvx@0.1.0"'
+      ),
+      hasHumanFindingBeforeProof:
+        mdsvx.indexOf("## The actual finding") < mdsvx.indexOf("## Proof"),
+      hasNoCandidateReview: !mdsvx.includes("Candidate review"),
+      hasNoRawPrivateValues: [rawPrivatePath, rawRelayToken, rawRelayUrl].every(
+        (privateValue) => !combined.includes(privateValue)
+      ),
+      htmlLinksSource: html.includes("report.mdsvx"),
+      localProofStatus: receipt.summary.localProofStatus,
+      submitAttempted: receipt.summary.submitAttempted,
+    }).toStrictEqual({
+      blockerCount: 3,
+      hasCanonicalTemplate: true,
+      hasHumanFindingBeforeProof: true,
+      hasNoCandidateReview: true,
+      hasNoRawPrivateValues: true,
+      htmlLinksSource: true,
+      localProofStatus: "passed",
+      submitAttempted: false,
+    });
+  });
+
+  it("refuses to render a readiness report for a submitted Dream receipt", async () => {
+    const repoRoot = await mkdtemp(
+      resolve(tmpdir(), "dream-readiness-report-")
+    );
+    const localProofPath = resolve(repoRoot, "proof.json");
+    const preflightPath = resolve(repoRoot, "preflight.json");
+    const runReceiptPath = resolve(repoRoot, "run-receipt.json");
+
+    await writeJson(localProofPath, localProof());
+    await writeJson(preflightPath, preflight());
+    await writeJson(runReceiptPath, runReceipt({ submitAttempted: true }));
+
+    await expect(
+      runDreamReadinessReportCli({
+        argv: [
+          `--local-proof-path=${localProofPath}`,
+          `--preflight-path=${preflightPath}`,
+          `--run-receipt-path=${runReceiptPath}`,
+          "--out-root=out",
+        ],
+        log: () => {},
+        repoRoot,
+      })
+    ).rejects.toThrow(
+      "Dream readiness report only renders blocked/pre-submit receipts."
+    );
+  });
+});
