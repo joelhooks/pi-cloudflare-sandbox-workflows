@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T08:44Z implementation progress: Dream generated-workflow proof now requires the HITL handoff, not just proposal/report output.
+
+Receipts:
+
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` now requires `refinement-proposals`, `hitl-decision-seed`, `hitl-follow-up-run-request`, and `hitl-report` effects for `plan:profile-effect-coverage`.
+- `tests/integration/workflow-app.test.ts` now drives a 14-step generated Dream machine through `joelclaw.dream.hitl-decision-seed` and `joelclaw.dream.hitl-follow-up-run-request` as package-backed `workflow.node.invoke` states.
+- The integration fixture prewrites a redacted human `dream.hitl-decision.v1` artifact, then proves the generated machine consumes it to write `dream.hitl-decision-workflow-seed.v1` and `dream.hitl-follow-up-run-request.v1`.
+- The follow-up run request remains `submitted:false`, carries `brain.update.review`, and is planner input for the next generated workflow rather than a hidden mutation.
+- Verification passed: `pnpm vitest run tests/integration/workflow-app.test.ts`, `pnpm test:integration`, `pnpm check`, `pnpm typecheck`, `pnpm typecheck:tsc`, and `git diff --check`.
+
+This still does not execute a live Cloudflare Dream. The trusted relay URL/token/config/healthz and exact network-boundary sign-off remain required before live submit.
+
 2026-06-10T08:33Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
 
 Receipts:

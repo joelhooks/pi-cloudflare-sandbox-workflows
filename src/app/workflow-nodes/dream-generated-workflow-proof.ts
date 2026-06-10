@@ -95,6 +95,8 @@ const dreamNodeTypeEffects = {
 
 const requiredDreamOutputEffects = [
   "refinement-proposals",
+  "hitl-decision-seed",
+  "hitl-follow-up-run-request",
   "hitl-report",
 ] as const satisfies readonly DreamWorkflowEffect[];
 

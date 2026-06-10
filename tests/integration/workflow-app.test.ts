@@ -65,6 +65,9 @@ import {
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamGeneratedWorkflowProofDocumentSchema,
+  DreamHitlDecisionDocumentSchema,
+  DreamHitlDecisionWorkflowSeedDocumentSchema,
+  DreamHitlFollowUpRunRequestDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
@@ -280,7 +283,10 @@ const machineStatesFor = (steps: readonly DynamicWorkflowStep[]) => {
 };
 
 const addDreamPreflightToBlueprint = (
-  blueprint: DynamicWorkflowBlueprint
+  blueprint: DynamicWorkflowBlueprint,
+  options: {
+    readonly hitlDecisionInputRef?: ArtifactRef;
+  } = {}
 ): DynamicWorkflowBlueprint => {
   const dreamCoverageHorizons = [
     ...dreamTranscriptReviewSourceProfile.timeHorizons,
@@ -502,6 +508,39 @@ const addDreamPreflightToBlueprint = (
     stepId: "render-dream-hitl-report",
     summary: "Render the canonical Dream HITL report artifact.",
   });
+  const hitlDecisionSeedStep = DynamicWorkflowStepSchema.parse({
+    config: {},
+    dependsOn: [reportStep.stepId],
+    inputRefs:
+      options.hitlDecisionInputRef === undefined
+        ? []
+        : [options.hitlDecisionInputRef],
+    kind: "workflow.node.invoke",
+    nodeType: "joelclaw.dream.hitl-decision-seed",
+    outputPath: "dream/hitl-decision-workflow-seed.json",
+    packageRefs: [dreamWorkflowPackageRef],
+    stepId: "seed-next-workflow-from-hitl",
+    summary:
+      "Turn the redacted human Dream HITL decision artifact into a next-workflow seed.",
+  });
+  const hitlFollowUpStep = DynamicWorkflowStepSchema.parse({
+    config: {
+      requestedPackageIds: [
+        "badass-courses/claw-kernel",
+        "joelhooks/configured-familiar-kernel",
+        "workflow/dream-memory-fabric",
+      ],
+      seedStepId: hitlDecisionSeedStep.stepId,
+    },
+    dependsOn: [hitlDecisionSeedStep.stepId],
+    kind: "workflow.node.invoke",
+    nodeType: "joelclaw.dream.hitl-follow-up-run-request",
+    outputPath: "dream/hitl-follow-up-run-request.json",
+    packageRefs: [dreamWorkflowPackageRef],
+    stepId: "draft-follow-up-run-request-from-hitl",
+    summary:
+      "Draft the next generated workflow request from accepted Dream HITL decisions without submitting it.",
+  });
   const captureArtifactStep = DynamicWorkflowStepSchema.parse({
     config: {
       artifactStepId: reportStep.stepId,
@@ -530,6 +569,8 @@ const addDreamPreflightToBlueprint = (
     correlationStep,
     refinementStep,
     reportStep,
+    hitlDecisionSeedStep,
+    hitlFollowUpStep,
     captureArtifactStep,
   ];
 
@@ -568,6 +609,102 @@ const addDreamPreflightToBlueprint = (
     },
   });
 };
+
+const integrationTestDreamHitlDecisionDocument = (input: {
+  readonly backfillRunRef: ArtifactRef;
+  readonly refinementProposalRef: ArtifactRef;
+  readonly reportRef: ArtifactRef;
+  readonly runId: string;
+  readonly workItemId: string;
+}) =>
+  DreamHitlDecisionDocumentSchema.parse({
+    decisionCount: 2,
+    decisions: [
+      {
+        decision: "accept",
+        decisionId: "decision:dream:generated-machine-proof",
+        rating: 9,
+        reasoning:
+          "The Dream report has enough generated-machine proof to promote this as a durable workflow constraint.",
+        recommendation:
+          "Capture the generated-machine proof requirement in Brain/package workflow constraints.",
+        reviewedAt: "2026-06-09T21:20:00.000Z",
+        sourceRefs: [input.reportRef, input.refinementProposalRef],
+        summary:
+          "Generated-machine proof should be required for Dream follow-up work.",
+        targetId: "proposal:dynamic-workflow-pattern:generated-machine-proof",
+        targetKind: "refinement-proposal",
+        targetTitle: "Require generated-machine proof for Dream work",
+      },
+      {
+        decision: "turn-into-work",
+        decisionId: "decision:dream:capture-ingest-fix",
+        rating: 10,
+        reasoning:
+          "Recovery backfill is useful, but recurring backfill means ingest is still broken and needs follow-up work.",
+        recommendation:
+          "Draft a generated workflow request that turns the capture-ingest repair into reviewed Brain/package/workflow updates.",
+        reviewedAt: "2026-06-09T21:20:00.000Z",
+        sourceRefs: [input.backfillRunRef, input.refinementProposalRef],
+        summary:
+          "Turn the Dream capture/backfill gap into a follow-up workflow.",
+        targetId: "proposal:capture-ingest-fix:runtime-capture",
+        targetKind: "refinement-proposal",
+        targetTitle: "Repair Dream capture ingest",
+      },
+    ],
+    generatedAt: "2026-06-09T21:20:00.000Z",
+    nextWorkflowSeed: {
+      artifactUpdateTargets: [
+        {
+          sourceRefs: [input.reportRef],
+          summary:
+            "Update Brain with the generated-machine proof requirement for Dream follow-up work.",
+          targetKind: "brain",
+        },
+        {
+          sourceRefs: [input.backfillRunRef, input.refinementProposalRef],
+          summary:
+            "Turn capture-ingest repair into package/workflow update artifacts.",
+          targetKind: "workflow",
+        },
+      ],
+      decisionIds: [
+        "decision:dream:generated-machine-proof",
+        "decision:dream:capture-ingest-fix",
+      ],
+      plannerInstructions: [
+        "Treat accepted Dream HITL decisions as constraints for the next generated workflow.",
+        "Turn work-conversion decisions into explicit package, Brain, schema, or workflow artifact updates.",
+        "Keep follow-up execution as generated workflow artifacts until side-effect capability leases are reviewed.",
+      ],
+      requiredCapabilityKinds: ["brain.update.review"],
+      sourceRefs: [
+        input.reportRef,
+        input.backfillRunRef,
+        input.refinementProposalRef,
+      ],
+    },
+    redacted: true,
+    refinementProposalRef: input.refinementProposalRef,
+    reportRef: input.reportRef,
+    reviewer: {
+      id: "actor:joel",
+      organizationId: "org:joelhooks",
+      roleIds: ["dream.reviewer"],
+      sessionId: "session:dream-hitl-review",
+      trustTier: "manual",
+      type: "human",
+    },
+    runId: input.runId,
+    schemaVersion: "dream.hitl-decision.v1",
+    sourceRefs: [
+      input.reportRef,
+      input.backfillRunRef,
+      input.refinementProposalRef,
+    ],
+    workItemId: input.workItemId,
+  });
 
 const addWorkflowNodeToBlueprint = (
   blueprint: DynamicWorkflowBlueprint
@@ -2888,6 +3025,32 @@ describe("workflow app integration contract", () => {
       "workflow-app-dream-step-adapter"
     );
     const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const request = buildIntegrationTestDreamRunRequest();
+    const hitlDecisionInputRef = artifacts.artifactRef({
+      path: "dream/hitl-decision.json",
+      runId: request.runId,
+    });
+    await artifacts.writeJson({
+      path: "dream/hitl-decision.json",
+      redacted: true,
+      runId: request.runId,
+      value: integrationTestDreamHitlDecisionDocument({
+        backfillRunRef: artifacts.artifactRef({
+          path: "dream/backfill-run-receipt.json",
+          runId: request.runId,
+        }),
+        refinementProposalRef: artifacts.artifactRef({
+          path: "dream/refinement-proposals.json",
+          runId: request.runId,
+        }),
+        reportRef: artifacts.artifactRef({
+          path: "dream/hitl-report.json",
+          runId: request.runId,
+        }),
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+    });
     const workflow = new WorkflowApp({
       artifacts,
       capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
@@ -2902,7 +3065,12 @@ describe("workflow app integration contract", () => {
       },
       dynamicWorkflowPlanner: {
         async proposePlan(input) {
-          return addDreamPreflightToBlueprint(await planner.proposePlan(input));
+          return addDreamPreflightToBlueprint(
+            await planner.proposePlan(input),
+            {
+              hitlDecisionInputRef,
+            }
+          );
         },
       },
       executionMode: "integration-test",
@@ -2951,7 +3119,7 @@ describe("workflow app integration contract", () => {
       wzrrdSiteRef: "wzrrd:test",
     });
 
-    const result = await workflow.run(buildIntegrationTestDreamRunRequest());
+    const result = await workflow.run(request);
     if (result.status !== "captured") {
       throw new Error(result.blocker.message);
     }
@@ -2992,6 +3160,12 @@ describe("workflow app integration contract", () => {
     const reportMdsvxRef = result.artifactRefs.find((artifactRef) =>
       artifactRef.endsWith("/dream/hitl-report.mdsvx")
     );
+    const hitlDecisionSeedRef = result.artifactRefs.find((artifactRef) =>
+      artifactRef.endsWith("/dream/hitl-decision-workflow-seed.json")
+    );
+    const hitlFollowUpRef = result.artifactRefs.find((artifactRef) =>
+      artifactRef.endsWith("/dream/hitl-follow-up-run-request.json")
+    );
     const captureArtifactRef = result.artifactRefs.find((artifactRef) =>
       artifactRef.endsWith("/dream/capture-artifact.json")
     );
@@ -3012,6 +3186,8 @@ describe("workflow app integration contract", () => {
         "correlate-dream-evidence",
         "propose-dream-refinements",
         "render-dream-hitl-report",
+        "seed-next-workflow-from-hitl",
+        "draft-follow-up-run-request-from-hitl",
         "capture-dream-report-artifact",
       ].map((stepId) =>
         result.artifactRefs.find((artifactRef) =>
@@ -3029,6 +3205,12 @@ describe("workflow app integration contract", () => {
       captureRunRef: requireArtifactRef("captureRunRef", captureRunRef),
       correlationRef: requireArtifactRef("correlationRef", correlationRef),
       healthRef: requireArtifactRef("healthRef", healthRef),
+      hitlDecisionInputRef,
+      hitlDecisionSeedRef: requireArtifactRef(
+        "hitlDecisionSeedRef",
+        hitlDecisionSeedRef
+      ),
+      hitlFollowUpRef: requireArtifactRef("hitlFollowUpRef", hitlFollowUpRef),
       hydrationRef: requireArtifactRef("hydrationRef", hydrationRef),
       inventoryRef: requireArtifactRef("inventoryRef", inventoryRef),
       refinementRef: requireArtifactRef("refinementRef", refinementRef),
@@ -3071,6 +3253,12 @@ describe("workflow app integration contract", () => {
     );
     const report = DreamHitlReportDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: dreamRefs.reportRef })
+    );
+    const hitlDecisionSeed = DreamHitlDecisionWorkflowSeedDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: dreamRefs.hitlDecisionSeedRef })
+    );
+    const hitlFollowUp = DreamHitlFollowUpRunRequestDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: dreamRefs.hitlFollowUpRef })
     );
     const captureArtifact = DreamCaptureReceiptDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: dreamRefs.captureArtifactRef })
@@ -3476,6 +3664,30 @@ describe("workflow app integration contract", () => {
       executionProofStatus: executionProof.status,
       healthInventoryRef: health.inventoryRef.artifactRef,
       healthStatus: health.status,
+      hitlDecisionSeedAcceptedDecisionIds: hitlDecisionSeed.acceptedDecisionIds,
+      hitlDecisionSeedActionableDecisionCount:
+        hitlDecisionSeed.actionableDecisionCount,
+      hitlDecisionSeedDecisionRef: hitlDecisionSeed.decisionRef,
+      hitlDecisionSeedRequiredCapabilities:
+        hitlDecisionSeed.nextWorkflowSeed.requiredCapabilityKinds,
+      hitlDecisionSeedSchemaVersion: hitlDecisionSeed.schemaVersion,
+      hitlDecisionSeedSourceRefs: hitlDecisionSeed.sourceRefs,
+      hitlDecisionSeedStatus: hitlDecisionSeed.status,
+      hitlDecisionSeedWorkItemDecisionIds: hitlDecisionSeed.workItemDecisionIds,
+      hitlFollowUpActionableDecisionCount: hitlFollowUp.actionableDecisionCount,
+      hitlFollowUpDecisionWorkflowSeedRef: hitlFollowUp.decisionWorkflowSeedRef,
+      hitlFollowUpRequestRunIdStartsWith:
+        hitlFollowUp.request?.runId.startsWith("run-dream-hitl-follow-up-") ??
+        false,
+      hitlFollowUpRequestWorkItemIdStartsWith:
+        hitlFollowUp.request?.workItemId.startsWith(
+          "work-item:dream-hitl-follow-up:"
+        ) ?? false,
+      hitlFollowUpRequestedPackageIds: hitlFollowUp.requestedPackageIds,
+      hitlFollowUpRequiredCapabilityKinds: hitlFollowUp.requiredCapabilityKinds,
+      hitlFollowUpSchemaVersion: hitlFollowUp.schemaVersion,
+      hitlFollowUpStatus: hitlFollowUp.status,
+      hitlFollowUpSubmitted: hitlFollowUp.submitted,
       hydratedReceiptCount: hydration.hydrated.length,
       inventoryRuntimeStatuses: inventory.runtimeCoverage.map(
         (coverage) => `${coverage.runtime}:${coverage.status}`
@@ -3731,6 +3943,30 @@ describe("workflow app integration contract", () => {
           },
         },
         {
+          nodeType: "joelclaw.dream.hitl-decision-seed",
+          packageId: "workflow/dream-memory-fabric",
+          packageRef: dreamWorkflowPackageRef,
+          status: "verified",
+          verification: {
+            exportMatched: true,
+            nodeTypeMatched: true,
+            packagePinned: true,
+            sideEffectsRequireLeases: true,
+          },
+        },
+        {
+          nodeType: "joelclaw.dream.hitl-follow-up-run-request",
+          packageId: "workflow/dream-memory-fabric",
+          packageRef: dreamWorkflowPackageRef,
+          status: "verified",
+          verification: {
+            exportMatched: true,
+            nodeTypeMatched: true,
+            packagePinned: true,
+            sideEffectsRequireLeases: true,
+          },
+        },
+        {
           nodeType: "joelclaw.dream.capture-artifact",
           packageId: "workflow/dream-memory-fabric",
           packageRef: dreamWorkflowPackageRef,
@@ -3753,6 +3989,8 @@ describe("workflow app integration contract", () => {
         "capture-artifact",
         "capture-run",
         "correlate",
+        "hitl-decision-seed",
+        "hitl-follow-up-run-request",
         "hitl-report",
         "hydrate",
         "inventory",
@@ -3762,7 +4000,7 @@ describe("workflow app integration contract", () => {
         "source-health",
       ],
       combinedEffectProofStatus: "verified",
-      combinedEffectProofStepCount: 11,
+      combinedEffectProofStepCount: 13,
       completedStepIds: [
         "inventory-memory-fabric",
         "check-source-health",
@@ -3775,6 +4013,8 @@ describe("workflow app integration contract", () => {
         "correlate-dream-evidence",
         "propose-dream-refinements",
         "render-dream-hitl-report",
+        "seed-next-workflow-from-hitl",
+        "draft-follow-up-run-request-from-hitl",
         "capture-dream-report-artifact",
       ],
       correlationEdgeCount: 5,
@@ -3802,6 +4042,8 @@ describe("workflow app integration contract", () => {
           "capture-artifact",
           "capture-run",
           "correlate",
+          "hitl-decision-seed",
+          "hitl-follow-up-run-request",
           "hitl-report",
           "hydrate",
           "inventory",
@@ -3816,6 +4058,8 @@ describe("workflow app integration contract", () => {
           "capture-artifact",
           "capture-run",
           "correlate",
+          "hitl-decision-seed",
+          "hitl-follow-up-run-request",
           "hitl-report",
           "hydrate",
           "inventory",
@@ -3842,6 +4086,8 @@ describe("workflow app integration contract", () => {
         "joelclaw.dream.correlate",
         "joelclaw.dream.refinement-proposals",
         "joelclaw.dream.hitl-report",
+        "joelclaw.dream.hitl-decision-seed",
+        "joelclaw.dream.hitl-follow-up-run-request",
         "joelclaw.dream.capture-artifact",
       ],
       dreamGeneratedProofRawTranscriptsReturned: false,
@@ -3936,11 +4182,41 @@ describe("workflow app integration contract", () => {
         workflowId: "dream.memory-fabric",
       },
       dreamGeneratedProofStatus: "verified",
-      dreamGeneratedProofStepCount: 12,
+      dreamGeneratedProofStepCount: 14,
       executionProofRelayLeaseRefs: [],
       executionProofStatus: "not-proven-local-integration",
       healthInventoryRef: dreamRefs.inventoryRef,
       healthStatus: "degraded",
+      hitlDecisionSeedAcceptedDecisionIds: [
+        "decision:dream:generated-machine-proof",
+      ],
+      hitlDecisionSeedActionableDecisionCount: 2,
+      hitlDecisionSeedDecisionRef: dreamRefs.hitlDecisionInputRef,
+      hitlDecisionSeedRequiredCapabilities: ["brain.update.review"],
+      hitlDecisionSeedSchemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      hitlDecisionSeedSourceRefs: [
+        dreamRefs.hitlDecisionInputRef,
+        dreamRefs.reportRef,
+        dreamRefs.refinementRef,
+        dreamRefs.backfillRunRef,
+      ],
+      hitlDecisionSeedStatus: "ready",
+      hitlDecisionSeedWorkItemDecisionIds: [
+        "decision:dream:capture-ingest-fix",
+      ],
+      hitlFollowUpActionableDecisionCount: 2,
+      hitlFollowUpDecisionWorkflowSeedRef: dreamRefs.hitlDecisionSeedRef,
+      hitlFollowUpRequestRunIdStartsWith: true,
+      hitlFollowUpRequestWorkItemIdStartsWith: true,
+      hitlFollowUpRequestedPackageIds: [
+        "badass-courses/claw-kernel",
+        "joelhooks/configured-familiar-kernel",
+        "workflow/dream-memory-fabric",
+      ],
+      hitlFollowUpRequiredCapabilityKinds: ["brain.update.review"],
+      hitlFollowUpSchemaVersion: "dream.hitl-follow-up-run-request.v1",
+      hitlFollowUpStatus: "drafted",
+      hitlFollowUpSubmitted: false,
       hydratedReceiptCount: 2,
       inventoryRuntimeStatuses: [
         "pi:captured",
@@ -4035,7 +4311,7 @@ describe("workflow app integration contract", () => {
         plan: {
           planId: plan.planId,
           planner: plan.planner,
-          stepCount: 12,
+          stepCount: 14,
         },
         verificationContract: result.verificationContractArtifact,
       },
@@ -4067,8 +4343,8 @@ describe("workflow app integration contract", () => {
         sourceHasFirstDreamStep: true,
         sourceHasStaticDreamLabel: false,
         sourceKind: "generated-xstate-machine",
-        stateCount: 15,
-        transitionCount: 25,
+        stateCount: 17,
+        transitionCount: 29,
       },
       reportTemplate: "joel/tufte-mdsvx@0.1.0",
       searchHitCount: 3,
