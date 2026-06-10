@@ -43,6 +43,22 @@ Receipts: updated relay proof run showing JoelClaw-backed hits across machines/r
 
 Note: an overnight session (2026-06-10 03:24–04:56 PDT) already moved the dream verticals out of `src/app/workflow-nodes/` and `infrastructure/` into the cartridge — M1.5/M1.6 finish that motion. Coordinate before editing; this working tree has more than one author.
 
+#### M1 execution receipts (2026-06-10, branch `m1-memory-fabric-carve`)
+
+Five-stage agent pipeline, each stage gate-green (oxfmt/oxlint, tsgo, tsc, 179/179 integration tests) and committed: `2957f8d` cut, `84cabd8` de-bake, `759a87b` rename, `87ab4f7` repoint, `3491a19` scripts. `grep -ri dream src/app` returns zero. Capability is `memory.relay`, bindings `MEMORY_RELAY_*`, cartridge `src/cartridges/memory-fabric`, packageId `workflow/memory-fabric`, nine scripts collapsed into `--profile` runners with `app:dream:*` aliases preserved as data. Redaction enforcement strengthened (new `rawTranscriptPathLeaked` check, never-walks-file-roots test, index-unavailable-is-caveat test).
+
+**Litmus verdict: FAIL (expected residue, now scoped).** Three hardcodings still force TypeScript for a second workflow:
+
+1. Profile registry is compile-time (`installedWorkflowCartridgeSourceProfiles` / seed-template arrays in `src/cartridges/cloudflare-workflow-cartridges.ts`) — needs a data loader seam.
+2. The proof recorder is pinned to the Dream profile and runs unconditionally on every run (`memory-fabric/cloudflare-installer.ts`, `plan:source-profile-bound` requires the dream profile id) — recorders must bind per-profile.
+3. Effect coverage uses closed dream-shaped enums (`requiredMemoryOutputEffects`, `MemoryWorkflowEffectSchema`) instead of profile-declared effects.
+
+Plus one should-fix from adversarial review: dream vocabulary (dreams/dreamCount fields, `dream/` artifact paths, `supports_dream` edges) still baked into the now-generic memory-fabric cartridge schemas. These four items are the remaining M1 tail — small compared to what landed.
+
+#### JoelClaw ingest findings (M1.4 probe — these are JoelClaw-repo work items, not Dreamer gates)
+
+Index is real and reachable (Typesense on `panda:8108`): blaine 12,285 runs / panda 1,187 / flagg 711, plus ghost machine id `dark-wizard` holding 9,876 pre-rename blaine runs. But: ~12,000 dead-letter capture payloads with no replay command (`joelclaw outbox flush` doesn't exist); panda index stale since 2026-05-20 and flagg/panda upload endpoint failing TODAY (JOELCLAW_CENTRAL_URL inconsistency); blaine codex capture bug (259 local transcripts vs 104 indexed); blaine claude backfill gap (133 local vs 27 indexed); flagg codex/claude capture only ever recorded hook smoke tests; CLI defaults still point at `dark-wizard`; `joelclaw status` reports the backplane down while the actual backend is healthy. First dream reports must caveat all of this.
+
 ### M2 — Reopen the live gates
 
 1. Reseed the Dream package manifest hash in remote D1 (needs `WORKFLOW_APP_ADMIN_TOKEN` lease) and redeploy.
