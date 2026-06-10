@@ -24,6 +24,20 @@ Cloudflare does not get raw credentials or private paths. It leases memory/searc
 
 The output is not just a report. It is a refinement mechanism: dreams propose kernel memories, package boundaries, workflow-node plugins, access leases, schema changes, report-node improvements, and dynamic workflow patterns. Each accepted dream should leave receipts, update Brain/package artifacts, and feed the next generated workflow so the system gets sharper instead of accumulating more bullshit.
 
+## Latest Run Receipts
+
+2026-06-10T05:57Z status: the Dream relay proof ran locally and passed, but the live Cloudflare Dream did not submit.
+
+Receipts:
+
+- Local trusted relay proof: `run:dream-relay-local-proof:20260610T055652906Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Local proof coverage: 10 source roots, Pi/Codex/Claude/Cloudflare runtime coverage, `blaine`/`panda`/`flagg`/Cloudflare machine coverage, 8 mined signals, 12 search hits, 12 hydrated redacted receipts, 48 correlation edges, and no raw path/credential leakage.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T05:57:16.446Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T055715035Z-85bc1536`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T055715035Z-85bc1536-receipt.json`, `submit.attempted=false`.
+- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T05:57:21.109Z`, status `blocked`, no side effects performed.
+
+Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
+
 ## Diagnosis
 
 The current dream hunt is useful proof that the idea has legs, but it is still too shallow.
