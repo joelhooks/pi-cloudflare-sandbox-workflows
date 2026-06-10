@@ -105,7 +105,8 @@ import type {
   WorkflowObservabilityPackArtifact,
   WorkflowObservabilityRecorderPort,
   WorkflowNodeAdapterPort,
-  WorkflowPostExecutionArtifactRecorderPort,
+  WorkflowPostExecutionArtifactRecorderBinding,
+  WorkflowPostExecutionArtifactRecorderRegistration,
   WorkflowStatusProjectionPort,
   WzrrdPublishCapabilityAdapter,
   WorkflowAppContract,
@@ -140,7 +141,7 @@ interface WorkflowDependencies {
   readonly runtimeEnvironment?: WorkflowRuntimeEnvironment;
   readonly packageRegistry: PackageRegistryActorContract;
   readonly observabilityRecorder: WorkflowObservabilityRecorderPort;
-  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderPort[];
+  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderRegistration[];
   readonly reviewGate: ReviewGateActorContract;
   readonly reviewSurfacePublisher: ReviewSurfacePublisherPort;
   readonly statusProjection: WorkflowStatusProjectionPort;
@@ -1503,6 +1504,7 @@ export class WorkflowApp implements WorkflowAppContract {
       loadedPlan,
       loadedSupportArtifacts,
       planArtifact,
+      request,
     });
     if (postExecutionArtifacts.status === "blocked") {
       return postExecutionArtifacts.result;
@@ -1590,6 +1592,32 @@ export class WorkflowApp implements WorkflowAppContract {
     });
   }
 
+  /**
+   * Runs only the recorders whose declared binding matches the run request's
+   * source profile. A run without a source profile, or with a profile no
+   * recorder is bound to, runs zero recorders.
+   */
+  private static selectPostExecutionArtifactRecorders(input: {
+    readonly registrations: readonly WorkflowPostExecutionArtifactRecorderRegistration[];
+    readonly sourceProfileId: string | undefined;
+  }): readonly WorkflowPostExecutionArtifactRecorderRegistration[] {
+    const { sourceProfileId } = input;
+    if (sourceProfileId === undefined) {
+      return [];
+    }
+
+    const bindingMatches = (
+      binding: WorkflowPostExecutionArtifactRecorderBinding
+    ): boolean =>
+      binding.kind === "profile-id"
+        ? binding.profileId === sourceProfileId
+        : binding.matchesProfileId(sourceProfileId);
+
+    return input.registrations.filter((registration) =>
+      bindingMatches(registration.binding)
+    );
+  }
+
   private async recordPostExecutionArtifacts(input: {
     readonly block: BlockRun;
     readonly executionProof: ExecutionProofCaptured;
@@ -1597,11 +1625,15 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly loadedPlan: DynamicWorkflowPlanDocument;
     readonly loadedSupportArtifacts: LoadedPinnedPlanSupportArtifacts;
     readonly planArtifact: PlanArtifact;
+    readonly request: WorkflowRunRequest;
   }): Promise<PostExecutionArtifactRecordingResult> {
     const artifactRefs: ArtifactRef[] = [];
+    const selectedRecorders = WorkflowApp.selectPostExecutionArtifactRecorders({
+      registrations: this.dependencies.postExecutionArtifactRecorders ?? [],
+      sourceProfileId: input.request.planProposal.sourceProfileId,
+    });
 
-    for (const recorder of this.dependencies.postExecutionArtifactRecorders ??
-      []) {
+    for (const { recorder } of selectedRecorders) {
       const recordResult = await recorder.record({
         executionProofArtifact: input.executionProof.proofArtifact,
         executionProofDocument: input.executionProof.proofDocument,

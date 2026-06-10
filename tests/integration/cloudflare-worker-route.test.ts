@@ -259,11 +259,16 @@ describe("Cloudflare Worker route", () => {
 
     expect("execute" in adapter).toBeTruthy();
     expect(recorders).toHaveLength(1);
-    const [recorder] = recorders;
-    if (recorder === undefined) {
-      throw new Error("Expected Dream proof recorder.");
+    const [registration] = recorders;
+    if (registration === undefined) {
+      throw new Error("Expected Dream proof recorder registration.");
     }
-    expect("record" in recorder).toBeTruthy();
+    expect(registration.binding).toStrictEqual({
+      kind: "profile-id",
+      packageId: "workflow/memory-fabric",
+      profileId: "joelhooks/dream-transcript-review",
+    });
+    expect("record" in registration.recorder).toBeTruthy();
   });
 
   it("returns a typed debugger attach document for an observed workflow run", async () => {

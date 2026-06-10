@@ -39,19 +39,26 @@ export const memoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartrid
 
       return {
         createPostExecutionArtifactRecorders: ({ artifacts }) => [
-          createMemoryGeneratedWorkflowProofRecorder({
-            artifacts,
-            buildAdditionalProofChecks: async ({ executionProof }) => [
-              await buildWorkflowHitlReportAuditProofCheck({
-                artifacts,
-                executionProof,
-              }),
-            ],
-            expectedPackageRef: memoryFabricPackageRef,
-            expectedSourceProfile: dreamTranscriptReviewSourceProfile,
-            expectedSourceProfileExportId:
-              "dream-transcript-review-source-profile",
-          }),
+          {
+            binding: {
+              kind: "profile-id",
+              packageId: dreamTranscriptReviewSourceProfile.packageId,
+              profileId: dreamTranscriptReviewSourceProfile.profileId,
+            },
+            recorder: createMemoryGeneratedWorkflowProofRecorder({
+              artifacts,
+              buildAdditionalProofChecks: async ({ executionProof }) => [
+                await buildWorkflowHitlReportAuditProofCheck({
+                  artifacts,
+                  executionProof,
+                }),
+              ],
+              expectedPackageRef: memoryFabricPackageRef,
+              expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+              expectedSourceProfileExportId:
+                "dream-transcript-review-source-profile",
+            }),
+          },
         ],
         createWorkflowNodeAdapter: ({ artifacts }) => {
           const memoryRelay = createCloudflareMemoryFabricRelay({

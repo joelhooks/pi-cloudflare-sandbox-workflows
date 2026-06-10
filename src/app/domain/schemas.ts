@@ -580,6 +580,7 @@ export const PlanProposalSchema = z.object({
     .optional(),
   intent: z.string().min(1),
   requestedPackageIds: z.array(z.string().min(1)).default([]),
+  sourceProfileId: z.string().min(1).optional(),
   stochasticNotes: z.array(z.string().min(1)).default([]),
 });
 

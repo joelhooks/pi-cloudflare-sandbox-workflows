@@ -238,6 +238,7 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
         ...request.planProposal.requestedPackageIds,
         integrationTestMemoryWorkflowPackageMetadata.packageId,
       ],
+      sourceProfileId: dreamTranscriptReviewSourceProfile.profileId,
       stochasticNotes: [
         ...request.planProposal.stochasticNotes,
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,

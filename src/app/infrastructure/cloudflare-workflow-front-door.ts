@@ -16,7 +16,7 @@ import type {
   ReviewGateActorContract,
   WorkerFrontDoorContract,
   WorkflowNodeAdapterPort,
-  WorkflowPostExecutionArtifactRecorderPort,
+  WorkflowPostExecutionArtifactRecorderRegistration,
   WzrrdPublishCapabilityAdapter,
 } from "../application/ports.ts";
 import { WorkflowApp } from "../application/workflow-app.ts";
@@ -105,7 +105,7 @@ export interface CloudflareWorkflowFrontDoorConfig {
   ) => WorkflowNodeAdapterPort;
   readonly createPostExecutionArtifactRecorders?: (
     input: CloudflarePostExecutionArtifactRecorderFactoryInput
-  ) => readonly WorkflowPostExecutionArtifactRecorderPort[];
+  ) => readonly WorkflowPostExecutionArtifactRecorderRegistration[];
   readonly d1: CloudflareD1PackageRegistryConfig["d1"];
   readonly discordMessages: DiscordMessageCapabilityAdapter;
   readonly discordSecretRefs: {
@@ -148,7 +148,7 @@ export interface CloudflareWorkflowFrontDoorConfig {
   readonly piAuthJsonBase64: string;
   readonly piAuthLeaseTtlSeconds?: number;
   readonly piAuthSecretRef: string;
-  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderPort[];
+  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderRegistration[];
   readonly provider?: "openai-codex";
   readonly provisionRunStore?: (
     request: WorkflowRunRequest
@@ -190,7 +190,7 @@ const postExecutionArtifactRecordersDependency = (
   config: CloudflareWorkflowFrontDoorConfig,
   input: CloudflarePostExecutionArtifactRecorderFactoryInput
 ): {
-  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderPort[];
+  readonly postExecutionArtifactRecorders?: readonly WorkflowPostExecutionArtifactRecorderRegistration[];
 } => {
   if (config.postExecutionArtifactRecorders !== undefined) {
     return {

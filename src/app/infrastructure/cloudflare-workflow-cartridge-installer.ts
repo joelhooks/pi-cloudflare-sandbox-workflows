@@ -2,7 +2,7 @@ import type {
   ArtifactStoreContract,
   WorkflowNodeAdapterPort,
   WorkflowNodeExecutionResult,
-  WorkflowPostExecutionArtifactRecorderPort,
+  WorkflowPostExecutionArtifactRecorderRegistration,
 } from "../application/ports.ts";
 import type { CapabilityBlocker } from "../domain/schemas.ts";
 
@@ -13,7 +13,7 @@ export interface CloudflareWorkflowCartridgeFactoryInput {
 export interface CloudflareWorkflowCartridgeDependencies {
   readonly createPostExecutionArtifactRecorders?: (
     input: CloudflareWorkflowCartridgeFactoryInput
-  ) => readonly WorkflowPostExecutionArtifactRecorderPort[];
+  ) => readonly WorkflowPostExecutionArtifactRecorderRegistration[];
   readonly createWorkflowNodeAdapter?: (
     input: CloudflareWorkflowCartridgeFactoryInput
   ) => WorkflowNodeAdapterPort;

@@ -379,6 +379,28 @@ export interface WorkflowPostExecutionArtifactRecorderPort {
   }): Promise<WorkflowPostExecutionArtifactRecorderResult>;
 }
 
+/**
+ * Declares which installed source profile a post-execution recorder is bound
+ * to. The app runs a recorder only when the run request's source profile
+ * matches the binding; a run with no matching recorder runs zero recorders.
+ */
+export type WorkflowPostExecutionArtifactRecorderBinding =
+  | {
+      readonly kind: "profile-id";
+      readonly packageId: string;
+      readonly profileId: string;
+    }
+  | {
+      readonly kind: "profile-id-predicate";
+      readonly matchesProfileId: (profileId: string) => boolean;
+      readonly packageId: string;
+    };
+
+export interface WorkflowPostExecutionArtifactRecorderRegistration {
+  readonly binding: WorkflowPostExecutionArtifactRecorderBinding;
+  readonly recorder: WorkflowPostExecutionArtifactRecorderPort;
+}
+
 export interface WorkflowObservabilityCaptureInput {
   readonly capabilityReceipts: readonly CapabilityLeaseReceipt[];
   readonly eventLog: readonly WorkflowEvent[];

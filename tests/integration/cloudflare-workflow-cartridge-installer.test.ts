@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   WorkflowNodeAdapterPort,
   WorkflowNodeInvocationStep,
-  WorkflowPostExecutionArtifactRecorderPort,
+  WorkflowPostExecutionArtifactRecorderRegistration,
 } from "../../src/app/application/ports.ts";
 import type {
   AgentLaneReceipt,
@@ -207,12 +207,19 @@ const executingAdapter = (
 
 const recorder = (
   label: string
-): WorkflowPostExecutionArtifactRecorderPort => ({
-  record() {
-    return Promise.resolve({
-      artifactRefs: [`artifact://cartridge-installer-test/${label}.json`],
-      status: "recorded",
-    });
+): WorkflowPostExecutionArtifactRecorderRegistration => ({
+  binding: {
+    kind: "profile-id",
+    packageId: `workflow/${label}`,
+    profileId: `integration-test/${label}`,
+  },
+  recorder: {
+    record() {
+      return Promise.resolve({
+        artifactRefs: [`artifact://cartridge-installer-test/${label}.json`],
+        status: "recorded",
+      });
+    },
   },
 });
 

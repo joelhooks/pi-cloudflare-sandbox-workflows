@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkflowNodeAdapterPort } from "../../src/app/application/ports.ts";
+import type {
+  WorkflowNodeAdapterPort,
+  WorkflowPostExecutionArtifactRecorderPort,
+} from "../../src/app/application/ports.ts";
 import { WorkflowApp } from "../../src/app/application/workflow-app.ts";
 import { hashJson, sha256Hex } from "../../src/app/domain/hash.ts";
 import {
@@ -704,6 +707,108 @@ const addWorkflowNodeToBlueprint = (
       steps,
     },
   });
+};
+
+/**
+ * Runs the plain (non-memory-fabric) integration workflow with the
+ * memory-fabric proof recorder registered under its dream-profile binding plus
+ * an observing recorder bound by profile-id predicate. Recorder selection must
+ * come from the run request's source profile, never from running everything.
+ */
+const runWorkflowWithProfileBoundRecorders = async (input: {
+  readonly sourceProfileId?: string;
+  readonly storeName: string;
+}) => {
+  const artifacts = createMemoryArtifactStore(input.storeName);
+  const recordedLabels: string[] = [];
+  const observingRecorder = (
+    label: string
+  ): WorkflowPostExecutionArtifactRecorderPort => ({
+    async record(recordInput) {
+      recordedLabels.push(label);
+      const write = await artifacts.writeJson({
+        path: `recorders/${label}.json`,
+        redacted: true,
+        runId: recordInput.plan.runId,
+        value: { label, redacted: true, runId: recordInput.plan.runId },
+      });
+
+      return { artifactRefs: [write.artifactRef], status: "recorded" };
+    },
+  });
+  const workflow = new WorkflowApp({
+    artifacts,
+    capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+      discordSecretRef: "secretref:discord-bot",
+      policyId: "discord-message-policy",
+    }),
+    contextCapsules: createMemoryContextCapsuleActor(),
+    discordMessages: createDryRunDiscordMessageAdapter(),
+    discordSecretRefs: {
+      dryRun: "secretref:discord-dry-run",
+      send: "secretref:discord-bot",
+    },
+    dynamicWorkflowPlanner: createIntegrationTestDynamicWorkflowPlanner(),
+    executionMode: "integration-test",
+    observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+      artifacts,
+    }),
+    packageRegistry: createMemoryPackageRegistryActor(
+      integrationTestPackageMetadata
+    ),
+    postExecutionArtifactRecorders: [
+      {
+        binding: {
+          kind: "profile-id",
+          packageId: dreamTranscriptReviewSourceProfile.packageId,
+          profileId: dreamTranscriptReviewSourceProfile.profileId,
+        },
+        recorder: createMemoryGeneratedWorkflowProofRecorder({
+          artifacts,
+          expectedPackageRef: memoryWorkflowPackageRef,
+          expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+          expectedSourceProfileExportId:
+            "dream-transcript-review-source-profile",
+        }),
+      },
+      {
+        binding: {
+          kind: "profile-id-predicate",
+          matchesProfileId: (profileId) =>
+            profileId.startsWith("badass-courses/"),
+          packageId: "workflow/aihero-support-sweep",
+        },
+        recorder: observingRecorder("support-sweep-proof"),
+      },
+    ],
+    reviewGate: createMemoryReviewGateActor(artifacts),
+    reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+      artifacts,
+    }),
+    statusProjection: createMemoryWorkflowStatusProjectionStore(),
+    wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+    wzrrdSecretRefs: {
+      dryRun: "secretref:wzrrd-dry-run",
+      publish: "secretref:wzrrd-api",
+    },
+    wzrrdSiteRef: "wzrrd:test",
+  });
+
+  const request = buildIntegrationTestRunRequest();
+  const result = await workflow.run({
+    ...request,
+    planProposal: {
+      ...request.planProposal,
+      ...(input.sourceProfileId === undefined
+        ? {}
+        : { sourceProfileId: input.sourceProfileId }),
+    },
+  });
+  if (result.status !== "captured") {
+    throw new Error(result.blocker.message);
+  }
+
+  return { recordedLabels, result };
 };
 
 describe("workflow app integration contract", () => {
@@ -3017,20 +3122,27 @@ describe("workflow app integration contract", () => {
         dreamIntegrationPackages
       ),
       postExecutionArtifactRecorders: [
-        createMemoryGeneratedWorkflowProofRecorder({
-          artifacts,
-          buildAdditionalProofChecks: async ({ executionProof }) => [
-            await buildWorkflowHitlReportAuditProofCheck({
-              artifacts,
-              executionProof,
-            }),
-          ],
-          expectedPackageRef: memoryWorkflowPackageRef,
-          expectedSourceProfile: dreamTranscriptReviewSourceProfile,
-          expectedSourceProfileExportId:
-            "dream-transcript-review-source-profile",
-          now: () => "2026-06-09T21:30:00.000Z",
-        }),
+        {
+          binding: {
+            kind: "profile-id",
+            packageId: dreamTranscriptReviewSourceProfile.packageId,
+            profileId: dreamTranscriptReviewSourceProfile.profileId,
+          },
+          recorder: createMemoryGeneratedWorkflowProofRecorder({
+            artifacts,
+            buildAdditionalProofChecks: async ({ executionProof }) => [
+              await buildWorkflowHitlReportAuditProofCheck({
+                artifacts,
+                executionProof,
+              }),
+            ],
+            expectedPackageRef: memoryWorkflowPackageRef,
+            expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+            expectedSourceProfileExportId:
+              "dream-transcript-review-source-profile",
+            now: () => "2026-06-09T21:30:00.000Z",
+          }),
+        },
       ],
       reviewGate: createMemoryReviewGateActor(artifacts),
       reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
@@ -4415,6 +4527,49 @@ describe("workflow app integration contract", () => {
       coverageWithoutDeclaredEffect: "failed",
       malformedEffectIdAccepted: false,
       requiredEffects: ["hydrate", "search", "support-digest"],
+    });
+  });
+
+  it("runs only post-execution recorders bound to the run's source profile", async () => {
+    const { recordedLabels, result } =
+      await runWorkflowWithProfileBoundRecorders({
+        sourceProfileId: "badass-courses/aihero-support-sweep",
+        storeName: "workflow-app-recorder-profile-binding",
+      });
+
+    expect({
+      memoryProofRecorded: result.artifactRefs.some((artifactRef) =>
+        artifactRef.endsWith("/memory/generated-workflow-proof.json")
+      ),
+      recordedLabels,
+      status: result.status,
+      supportSweepReceiptRecorded: result.artifactRefs.some((artifactRef) =>
+        artifactRef.endsWith("/recorders/support-sweep-proof.json")
+      ),
+    }).toStrictEqual({
+      memoryProofRecorded: false,
+      recordedLabels: ["support-sweep-proof"],
+      status: "captured",
+      supportSweepReceiptRecorded: true,
+    });
+  });
+
+  it("runs zero post-execution recorders when the run request declares no source profile", async () => {
+    const { recordedLabels, result } =
+      await runWorkflowWithProfileBoundRecorders({
+        storeName: "workflow-app-recorder-no-profile",
+      });
+
+    expect({
+      memoryProofRecorded: result.artifactRefs.some((artifactRef) =>
+        artifactRef.endsWith("/memory/generated-workflow-proof.json")
+      ),
+      recordedLabels,
+      status: result.status,
+    }).toStrictEqual({
+      memoryProofRecorded: false,
+      recordedLabels: [],
+      status: "captured",
     });
   });
 

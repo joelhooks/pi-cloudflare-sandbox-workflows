@@ -276,6 +276,7 @@ export const buildWorkflowLiveRunRequest = (
     planProposal: {
       intent: guidance?.intent ?? profile.purpose,
       requestedPackageIds,
+      sourceProfileId: profile.profileId,
       stochasticNotes: [...profileStochasticNotesFor(profile)],
     },
     runId: input.runId,
