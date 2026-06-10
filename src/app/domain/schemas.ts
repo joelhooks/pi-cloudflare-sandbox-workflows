@@ -312,7 +312,7 @@ export const PackageExportSchema = z
       "prompt",
       "skill",
     ]),
-    nodeType: z.string().min(1).optional(),
+    nodeType: WorkflowNodeTypeSchema.optional(),
   })
   .superRefine((exportRecord, context) => {
     if (
@@ -323,6 +323,18 @@ export const PackageExportSchema = z
         code: "custom",
         message: "Workflow-node package exports require nodeType.",
         path: ["nodeType"],
+      });
+    }
+
+    if (
+      exportRecord.kind === "workflow-node" &&
+      exportRecord.effects === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Workflow-node package exports must declare effects; an empty array is allowed only for genuinely effect-free nodes.",
+        path: ["effects"],
       });
     }
 
@@ -380,7 +392,7 @@ export const WorkflowCartridgeTrustPolicySchema = z.object({
 export const WorkflowCartridgeNodeExportSchema = z.object({
   contractRef: z.string().min(1),
   exportId: z.string().min(1),
-  nodeType: z.string().min(1),
+  nodeType: WorkflowNodeTypeSchema,
   packageId: z.string().min(1),
 });
 
@@ -397,7 +409,7 @@ export const WorkflowCartridgeInvocationProofDocumentSchema = z.object({
   contractRef: z.string().min(1),
   exportId: z.string().min(1),
   manifestHash: Sha256HexSchema,
-  nodeType: z.string().min(1),
+  nodeType: WorkflowNodeTypeSchema,
   packageId: z.string().min(1),
   packageRef: ArtifactRefSchema,
   redacted: z.literal(true),
@@ -700,7 +712,7 @@ export const DynamicWorkflowStepSchema = z.discriminatedUnion("kind", [
     dependsOn: z.array(z.string().min(1)).default([]),
     inputRefs: z.array(ArtifactRefSchema).default([]),
     kind: z.literal("workflow.node.invoke"),
-    nodeType: z.string().min(1),
+    nodeType: WorkflowNodeTypeSchema,
     outputPath: z.string().min(1),
     packageRefs: z.array(ArtifactRefSchema).default([]),
     stepId: z.string().min(1),

@@ -5,6 +5,7 @@ import type {
   WorkflowNodeInvocationStep,
   WorkflowPostExecutionArtifactRecorderRegistration,
 } from "../../src/app/application/ports.ts";
+import { WorkflowNodeTypeSchema } from "../../src/app/domain/schemas.ts";
 import type {
   AgentLaneReceipt,
   ArtifactPin,
@@ -68,7 +69,7 @@ const invocationStep = {
   dependsOn: [],
   inputRefs: [],
   kind: "workflow.node.invoke",
-  nodeType: "com.joelclaw.integration-fixture",
+  nodeType: WorkflowNodeTypeSchema.parse("com.joelclaw.integration-fixture"),
   outputPath: "nodes/integration-fixture-output.json",
   packageRefs: [workflowPackage.latestArtifactRef],
   stepId: "invoke-integration-node",

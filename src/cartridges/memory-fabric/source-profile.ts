@@ -97,10 +97,12 @@ export const dreamTranscriptReviewSourcePacks = [
   },
 ] as const satisfies readonly MemorySourcePack[];
 
-const memoryFabricWorkflowNodePalette = memoryFabricPackageMetadata.exports
-  .filter((exportRecord) => exportRecord.kind === "workflow-node")
-  .map((exportRecord) => exportRecord.nodeType)
-  .filter((nodeType): nodeType is string => nodeType !== undefined);
+const memoryFabricWorkflowNodePalette =
+  memoryFabricPackageMetadata.exports.flatMap((exportRecord) =>
+    exportRecord.kind === "workflow-node" && exportRecord.nodeType !== undefined
+      ? [exportRecord.nodeType]
+      : []
+  );
 
 export const dreamTranscriptReviewSourceProfile =
   MemorySourceProfileSchema.parse({
@@ -135,6 +137,7 @@ export const dreamTranscriptReviewSourceProfile =
       "Review agent transcripts and adjacent agent-run artifacts across the JoelClaw network, then surface source-backed kernel/package/workflow refinements.",
     requiredOutputEffects: [...dreamTranscriptReviewRequiredOutputEffects],
     requiredRuntimes: [...dreamTranscriptReviewRequiredRuntimes],
+    requiresGeneratedWorkflowProof: true,
     schemaVersion: "memory.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],
     sourcePacks: [...dreamTranscriptReviewSourcePacks],

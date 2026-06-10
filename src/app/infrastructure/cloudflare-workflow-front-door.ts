@@ -28,6 +28,7 @@ import {
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type { WorkflowRunRequest } from "../domain/schemas.ts";
+import type { MemorySourceProfile } from "../domain/source-profile.ts";
 import {
   createCloudflarePiPlannerLaneAdapter,
   createCloudflarePiVerifierLaneAdapter,
@@ -130,6 +131,7 @@ export interface CloudflareWorkflowFrontDoorConfig {
     readonly createPullRequest: string;
     readonly dryRun: string;
   };
+  readonly installedSourceProfiles?: readonly MemorySourceProfile[];
   readonly linearCommentAdapter?: {
     readonly authorizationScheme?: "api-key" | "bearer";
     readonly linearApiBaseUrl?: string;
@@ -184,6 +186,18 @@ const workflowNodeAdapterDependency = (
   }
 
   return {};
+};
+
+const installedSourceProfilesDependency = (
+  config: CloudflareWorkflowFrontDoorConfig
+): {
+  readonly installedSourceProfiles?: readonly MemorySourceProfile[];
+} => {
+  if (config.installedSourceProfiles === undefined) {
+    return {};
+  }
+
+  return { installedSourceProfiles: config.installedSourceProfiles };
 };
 
 const postExecutionArtifactRecordersDependency = (
@@ -510,6 +524,7 @@ export const createCloudflareWorkflowFrontDoor = (
                   }),
             })),
       githubSecretRefs,
+      ...installedSourceProfilesDependency(config),
       linearComments: resolveLinearComments({
         config,
         secretRefs: linearSecretRefs,

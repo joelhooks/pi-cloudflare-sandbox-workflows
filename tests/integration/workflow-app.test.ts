@@ -42,6 +42,7 @@ import {
   MemorySourcePackDispositionSchema,
   MemorySourceProfileSchema,
 } from "../../src/app/domain/source-profile.ts";
+import type { MemorySourceProfile } from "../../src/app/domain/source-profile.ts";
 import { createCloudflareArtifactsObservabilityRecorder } from "../../src/app/infrastructure/cloudflare-artifacts-observability-recorder.ts";
 import { createCloudflareArtifactsReviewSurfacePublisher } from "../../src/app/infrastructure/cloudflare-artifacts-review-surface.ts";
 import { createArtifactEvidenceDeterministicVerifier } from "../../src/app/infrastructure/deterministic-verifier.ts";
@@ -715,8 +716,13 @@ const addWorkflowNodeToBlueprint = (
  * memory-fabric proof recorder registered under its dream-profile binding plus
  * an observing recorder bound by profile-id predicate. Recorder selection must
  * come from the run request's source profile, never from running everything.
+ * The dream binding's profile id can be drifted to simulate a mismatched
+ * recorder registration, and installed source profiles drive the fail-closed
+ * proof-recorder requirement.
  */
 const runWorkflowWithProfileBoundRecorders = async (input: {
+  readonly dreamRecorderBindingProfileId?: string;
+  readonly installedSourceProfiles?: readonly MemorySourceProfile[];
   readonly sourceProfileId?: string;
   readonly storeName: string;
 }) => {
@@ -751,6 +757,9 @@ const runWorkflowWithProfileBoundRecorders = async (input: {
     },
     dynamicWorkflowPlanner: createIntegrationTestDynamicWorkflowPlanner(),
     executionMode: "integration-test",
+    ...(input.installedSourceProfiles === undefined
+      ? {}
+      : { installedSourceProfiles: input.installedSourceProfiles }),
     observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
       artifacts,
     }),
@@ -762,7 +771,9 @@ const runWorkflowWithProfileBoundRecorders = async (input: {
         binding: {
           kind: "profile-id",
           packageId: dreamTranscriptReviewSourceProfile.packageId,
-          profileId: dreamTranscriptReviewSourceProfile.profileId,
+          profileId:
+            input.dreamRecorderBindingProfileId ??
+            dreamTranscriptReviewSourceProfile.profileId,
         },
         recorder: createMemoryGeneratedWorkflowProofRecorder({
           artifacts,
@@ -805,9 +816,6 @@ const runWorkflowWithProfileBoundRecorders = async (input: {
         : { sourceProfileId: input.sourceProfileId }),
     },
   });
-  if (result.status !== "captured") {
-    throw new Error(result.blocker.message);
-  }
 
   return { recordedLabels, result };
 };
@@ -3381,6 +3389,7 @@ describe("workflow app integration contract", () => {
         },
       },
       executionMode: "integration-test",
+      installedSourceProfiles: [dreamTranscriptReviewSourceProfile],
       observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
         artifacts,
       }),
@@ -4802,6 +4811,9 @@ describe("workflow app integration contract", () => {
         sourceProfileId: "badass-courses/aihero-support-sweep",
         storeName: "workflow-app-recorder-profile-binding",
       });
+    if (result.status !== "captured") {
+      throw new Error(result.blocker.message);
+    }
 
     expect({
       memoryProofRecorded: result.artifactRefs.some((artifactRef) =>
@@ -4825,6 +4837,9 @@ describe("workflow app integration contract", () => {
       await runWorkflowWithProfileBoundRecorders({
         storeName: "workflow-app-recorder-no-profile",
       });
+    if (result.status !== "captured") {
+      throw new Error(result.blocker.message);
+    }
 
     expect({
       memoryProofRecorded: result.artifactRefs.some((artifactRef) =>
@@ -4835,6 +4850,81 @@ describe("workflow app integration contract", () => {
     }).toStrictEqual({
       memoryProofRecorded: false,
       recordedLabels: [],
+      status: "captured",
+    });
+  });
+
+  it("blocks a proof-required source profile whose recorder binding mismatches", async () => {
+    const { recordedLabels, result } =
+      await runWorkflowWithProfileBoundRecorders({
+        dreamRecorderBindingProfileId: `${dreamTranscriptReviewSourceProfile.profileId}-drifted`,
+        installedSourceProfiles: [dreamTranscriptReviewSourceProfile],
+        sourceProfileId: dreamTranscriptReviewSourceProfile.profileId,
+        storeName: "workflow-app-recorder-required-mismatch",
+      });
+    if (result.status !== "blocked") {
+      throw new Error("Expected the mismatched-recorder run to block.");
+    }
+
+    expect({
+      blockerCode: result.blocker.code,
+      blockerMessage: result.blocker.message,
+      recordedLabels,
+      status: result.status,
+    }).toStrictEqual({
+      blockerCode: "capability_denied",
+      blockerMessage: `Installed source profile "${dreamTranscriptReviewSourceProfile.profileId}" requires generated workflow proof recording, but no registered post-execution recorder binding matched it.`,
+      recordedLabels: [],
+      status: "blocked",
+    });
+  });
+
+  it("captures a recorder-free run whose installed source profile does not require generated workflow proof", async () => {
+    const dataOnlySourceProfile: MemorySourceProfile =
+      MemorySourceProfileSchema.parse({
+        allowedRelayOperations: ["search", "hydrate"],
+        defaultQuery: "aihero support sweep",
+        outputBoundary: {
+          noCustomerDataInPublicArtifacts: true,
+          noRawCredentials: true,
+          noRawPrivatePaths: true,
+          noRawTranscripts: true,
+        },
+        packageId: "workflow/memory-fabric",
+        profileId: "skill-recordings/aihero-support-sweep-data-only",
+        purpose:
+          "Sweep support threads across surfaces and digest them for review.",
+        requiredOutputEffects: ["support-digest"],
+        requiredRuntimes: ["cloudflare"],
+        schemaVersion: "memory.source-profile.v1",
+        sourceFamiliesExpected: ["support"],
+        sourcePacks: [],
+        timeHorizons: ["7d"],
+        title: "AIHero Support Sweep Data Only",
+        workflowId: "aihero.support-sweep",
+      });
+    const { recordedLabels, result } =
+      await runWorkflowWithProfileBoundRecorders({
+        installedSourceProfiles: [dataOnlySourceProfile],
+        sourceProfileId: dataOnlySourceProfile.profileId,
+        storeName: "workflow-app-recorder-data-only-profile",
+      });
+    if (result.status !== "captured") {
+      throw new Error(result.blocker.message);
+    }
+
+    expect({
+      memoryProofRecorded: result.artifactRefs.some((artifactRef) =>
+        artifactRef.endsWith("/memory/generated-workflow-proof.json")
+      ),
+      recordedLabels,
+      requiresGeneratedWorkflowProof:
+        dataOnlySourceProfile.requiresGeneratedWorkflowProof,
+      status: result.status,
+    }).toStrictEqual({
+      memoryProofRecorded: false,
+      recordedLabels: [],
+      requiresGeneratedWorkflowProof: false,
       status: "captured",
     });
   });

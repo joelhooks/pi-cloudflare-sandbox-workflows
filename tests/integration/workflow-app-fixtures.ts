@@ -41,72 +41,75 @@ export const integrationTestActor = {
   type: "agent",
 } satisfies Actor;
 
-export const integrationTestPackageMetadata = [
-  {
-    description:
-      "Default operating law, receipt-first behavior, package mount rules, and capability lease vocabulary.",
-    exports: [
-      {
-        contractRef: "contract://claw-kernel/operator-law.v1",
-        exportId: "operator-law",
-        kind: "prompt",
-      },
-    ],
-    kind: "kernel",
-    latestArtifactRef: "artifact://packages/badass-courses/claw-kernel/refs/v1",
-    latestVersion: "1.0.0",
-    manifestPath: "package.json",
-    ownerRef: "org:badass-courses",
-    packageId: "badass-courses/claw-kernel",
-    title: "Claw Kernel",
-    trustTier: "reviewed",
-  },
-  {
-    description:
-      "Configured familiar identity, voice, memory habits, adapter rules, and personal kernel overlays.",
-    exports: [
-      {
-        contractRef: "contract://joelhooks/kernel-overlay.v1",
-        exportId: "kernel-overlay",
-        kind: "prompt",
-      },
-    ],
-    kind: "kernel",
-    latestArtifactRef: "artifact://packages/joelhooks/shitrat-kernel/refs/v1",
-    latestVersion: "1.0.0",
-    manifestPath: "package.json",
-    ownerRef: "user:joel",
-    packageId: "@joelhooks/shitrat-kernel",
-    title: "Configured Familiar Kernel",
-    trustTier: "reviewed",
-  },
-  {
-    description:
-      "Research/review workflow with optional Discord notification through a capability lease.",
-    exports: [
-      {
-        contractRef: "contract://workflow/research-review-discord.v1",
-        exportId: "research-review-discord",
-        kind: "workflow",
-      },
-      {
-        contractRef: "contract://workflow/nodes/integration-fixture.v1",
-        exportId: "integration-fixture-node",
-        kind: "workflow-node",
-        nodeType: "com.joelclaw.integration-fixture",
-      },
-    ],
-    kind: "workflow-pack",
-    latestArtifactRef:
-      "artifact://packages/workflows/research-review-discord/refs/v1",
-    latestVersion: "1.0.0",
-    manifestPath: "package.json",
-    ownerRef: "org:badass-courses",
-    packageId: "workflow/research-review-discord",
-    title: "Research Review Discord Workflow",
-    trustTier: "reviewed",
-  },
-] satisfies PackageMetadata[];
+export const integrationTestPackageMetadata: PackageMetadata[] =
+  PackageMetadataSchema.array().parse([
+    {
+      description:
+        "Default operating law, receipt-first behavior, package mount rules, and capability lease vocabulary.",
+      exports: [
+        {
+          contractRef: "contract://claw-kernel/operator-law.v1",
+          exportId: "operator-law",
+          kind: "prompt",
+        },
+      ],
+      kind: "kernel",
+      latestArtifactRef:
+        "artifact://packages/badass-courses/claw-kernel/refs/v1",
+      latestVersion: "1.0.0",
+      manifestPath: "package.json",
+      ownerRef: "org:badass-courses",
+      packageId: "badass-courses/claw-kernel",
+      title: "Claw Kernel",
+      trustTier: "reviewed",
+    },
+    {
+      description:
+        "Configured familiar identity, voice, memory habits, adapter rules, and personal kernel overlays.",
+      exports: [
+        {
+          contractRef: "contract://joelhooks/kernel-overlay.v1",
+          exportId: "kernel-overlay",
+          kind: "prompt",
+        },
+      ],
+      kind: "kernel",
+      latestArtifactRef: "artifact://packages/joelhooks/shitrat-kernel/refs/v1",
+      latestVersion: "1.0.0",
+      manifestPath: "package.json",
+      ownerRef: "user:joel",
+      packageId: "@joelhooks/shitrat-kernel",
+      title: "Configured Familiar Kernel",
+      trustTier: "reviewed",
+    },
+    {
+      description:
+        "Research/review workflow with optional Discord notification through a capability lease.",
+      exports: [
+        {
+          contractRef: "contract://workflow/research-review-discord.v1",
+          exportId: "research-review-discord",
+          kind: "workflow",
+        },
+        {
+          contractRef: "contract://workflow/nodes/integration-fixture.v1",
+          effects: [],
+          exportId: "integration-fixture-node",
+          kind: "workflow-node",
+          nodeType: "com.joelclaw.integration-fixture",
+        },
+      ],
+      kind: "workflow-pack",
+      latestArtifactRef:
+        "artifact://packages/workflows/research-review-discord/refs/v1",
+      latestVersion: "1.0.0",
+      manifestPath: "package.json",
+      ownerRef: "org:badass-courses",
+      packageId: "workflow/research-review-discord",
+      title: "Research Review Discord Workflow",
+      trustTier: "reviewed",
+    },
+  ]);
 
 export const integrationTestMemoryWorkflowPackageMetadata: PackageMetadata =
   PackageMetadataSchema.parse({

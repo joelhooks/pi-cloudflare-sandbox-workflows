@@ -185,6 +185,13 @@ export const MemorySourceProfileSchema = z
     purpose: z.string().min(1),
     requiredOutputEffects: z.array(MemoryWorkflowEffectSchema),
     requiredRuntimes: z.array(MemoryRuntimeSchema).min(1),
+    /**
+     * Proof recording is profile data, never platform defaults: a profile
+     * that declares true cannot capture without a matching post-execution
+     * proof recorder, while data-only profiles (false or omitted) legitimately
+     * run recorder-free.
+     */
+    requiresGeneratedWorkflowProof: z.boolean().default(false),
     schemaVersion: z.literal("memory.source-profile.v1"),
     sourceFamiliesExpected: z.array(MemorySourceFamilySchema).min(1),
     sourcePacks: z.array(MemorySourcePackSchema).default([]),

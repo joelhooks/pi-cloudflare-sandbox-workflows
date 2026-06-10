@@ -4,6 +4,7 @@ import type {
   WorkflowNodeAdapterPort,
   WorkflowNodeInvocationStep,
 } from "../../src/app/application/ports.ts";
+import { WorkflowNodeTypeSchema } from "../../src/app/domain/schemas.ts";
 import type {
   AgentLaneReceipt,
   ArtifactPin,
@@ -50,7 +51,7 @@ const step = {
   dependsOn: [],
   inputRefs: [],
   kind: "workflow.node.invoke",
-  nodeType: "joelclaw.memory.hitl-decision-seed",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.hitl-decision-seed"),
   outputPath: "report/hitl-decision-workflow-seed.json",
   packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "seed-next-workflow-from-hitl",
@@ -69,7 +70,9 @@ const followUpStep = {
   dependsOn: [step.stepId],
   inputRefs: [],
   kind: "workflow.node.invoke",
-  nodeType: "joelclaw.memory.hitl-follow-up-run-request",
+  nodeType: WorkflowNodeTypeSchema.parse(
+    "joelclaw.memory.hitl-follow-up-run-request"
+  ),
   outputPath: "report/hitl-follow-up-run-request.json",
   packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "draft-follow-up-run-request-from-hitl",

@@ -76,6 +76,7 @@ import type {
   WorkflowStatusProjection,
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
+import type { MemorySourceProfile } from "../domain/source-profile.ts";
 import {
   workflowTraceContextForCapability,
   workflowTraceContextForLane,
@@ -138,6 +139,7 @@ interface WorkflowDependencies {
   readonly agentVerifierLane?: AgentVerifierLanePort;
   readonly agentWorkerLane?: AgentWorkerLanePort;
   readonly executionMode?: "integration-test" | "production";
+  readonly installedSourceProfiles?: readonly MemorySourceProfile[];
   readonly runtimeEnvironment?: WorkflowRuntimeEnvironment;
   readonly packageRegistry: PackageRegistryActorContract;
   readonly observabilityRecorder: WorkflowObservabilityRecorderPort;
@@ -1606,7 +1608,8 @@ export class WorkflowApp implements WorkflowAppContract {
   /**
    * Runs only the recorders whose declared binding matches the run request's
    * source profile. A run without a source profile, or with a profile no
-   * recorder is bound to, runs zero recorders.
+   * recorder is bound to, runs zero recorders; whether that is acceptable is
+   * profile data, enforced fail-closed in recordPostExecutionArtifacts.
    */
   private static selectPostExecutionArtifactRecorders(input: {
     readonly registrations: readonly WorkflowPostExecutionArtifactRecorderRegistration[];
@@ -1639,10 +1642,34 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly request: WorkflowRunRequest;
   }): Promise<PostExecutionArtifactRecordingResult> {
     const artifactRefs: ArtifactRef[] = [];
+    const { sourceProfileId } = input.request.planProposal;
     const selectedRecorders = WorkflowApp.selectPostExecutionArtifactRecorders({
       registrations: this.dependencies.postExecutionArtifactRecorders ?? [],
-      sourceProfileId: input.request.planProposal.sourceProfileId,
+      sourceProfileId,
     });
+    const installedSourceProfile =
+      sourceProfileId === undefined
+        ? undefined
+        : (this.dependencies.installedSourceProfiles ?? []).find(
+            (profile) => profile.profileId === sourceProfileId
+          );
+    if (
+      installedSourceProfile !== undefined &&
+      installedSourceProfile.requiresGeneratedWorkflowProof &&
+      selectedRecorders.length === 0
+    ) {
+      return {
+        result: await input.block(
+          {
+            code: "capability_denied",
+            message: `Installed source profile "${installedSourceProfile.profileId}" requires generated workflow proof recording, but no registered post-execution recorder binding matched it.`,
+            redacted: true,
+          },
+          "Proof-required source profile has no matching post-execution recorder."
+        ),
+        status: "blocked",
+      };
+    }
 
     for (const { recorder } of selectedRecorders) {
       const recordResult = await recorder.record({

@@ -176,10 +176,13 @@ const cartridgeExpectationsFor = (input: {
     expectedCartridgeSchemaExportIds: manifest.exports
       .filter((exportRecord) => exportRecord.kind === "schema")
       .map((exportRecord) => exportRecord.exportId),
-    expectedCartridgeWorkflowNodeTypes: manifest.exports
-      .filter((exportRecord) => exportRecord.kind === "workflow-node")
-      .map((exportRecord) => exportRecord.nodeType)
-      .filter((nodeType): nodeType is string => nodeType !== undefined),
+    expectedCartridgeWorkflowNodeTypes: manifest.exports.flatMap(
+      (exportRecord) =>
+        exportRecord.kind === "workflow-node" &&
+        exportRecord.nodeType !== undefined
+          ? [exportRecord.nodeType]
+          : []
+    ),
   };
 };
 

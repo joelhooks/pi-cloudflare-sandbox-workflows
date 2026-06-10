@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   InstalledWorkflowCartridgeEnvBindingSchema,
   defaultPackageSeedTemplatesWithInstalledCartridges,
+  installedWorkflowCartridgeSourceProfiles,
   workflowCartridgeDependenciesFromWorkerBindings,
 } from "../../cartridges/cloudflare-workflow-cartridges.ts";
 import type { WorkerFrontDoorContract } from "../application/ports.ts";
@@ -351,6 +352,7 @@ const createFrontDoorFromEnv = (env: unknown): WorkerFrontDoorContract => {
       createPullRequest: bindings.GITHUB_PULL_REQUEST_SECRET_REF,
       dryRun: bindings.GITHUB_DRY_RUN_SECRET_REF,
     },
+    installedSourceProfiles: installedWorkflowCartridgeSourceProfiles,
     linearCommentAdapter: {
       authorizationScheme: bindings.LINEAR_AUTHORIZATION_SCHEME,
       secretResolver: createCloudflareLinearApiTokenResolver({

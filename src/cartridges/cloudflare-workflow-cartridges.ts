@@ -29,9 +29,11 @@ export const installedWorkflowCartridgePackageSeedTemplates = [
 
 /**
  * Compiled source for materializing the built-in cartridge packages via
- * `pnpm app:packages:install-local`. Runtime profile resolution reads only the
- * installed-packages directory (scripts/workflow-app-installed-packages.ts);
- * do not resolve profiles from this array.
+ * `pnpm app:packages:install-local`. Local runtime profile resolution reads
+ * only the installed-packages directory
+ * (scripts/workflow-app-installed-packages.ts); the Worker treats this
+ * compiled array as its installed profile set for fail-closed proof-recorder
+ * enforcement.
  */
 export const installedWorkflowCartridgeSourceProfiles = [
   ...memoryFabricSourceProfiles,
