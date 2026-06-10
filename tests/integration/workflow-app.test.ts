@@ -3213,13 +3213,30 @@ describe("workflow app integration contract", () => {
       ),
       refinementSourceRefs: refinement.sourceRefs,
       reportDreamCount: report.dreamCount,
+      reportMdsvxIncludesAccessAdapter: report.mdsvx.includes(
+        "## Access adapter shape"
+      ),
       reportMdsvxIncludesD2: report.mdsvx.includes("```d2"),
       reportMdsvxIncludesDreamsFirst: report.mdsvx.includes(
         "## The actual dreams"
       ),
+      reportMdsvxIncludesDynamicProof: report.mdsvx.includes(
+        "## Dynamic generation proof"
+      ),
       reportMdsvxIncludesRefinement: report.mdsvx.includes(
         "Refinement proposals emitted: 5."
       ),
+      reportMdsvxIncludesReportNode: report.mdsvx.includes("## Report node"),
+      reportMdsvxIncludesReportStandard:
+        report.mdsvx.includes("## Report standard"),
+      reportMdsvxIncludesRunCoverage: report.mdsvx.includes("## Run coverage"),
+      reportMdsvxIncludesWhatDidNotHappen: report.mdsvx.includes(
+        "## What did not happen"
+      ),
+      reportMdsvxNoCandidateReview: !report.mdsvx.includes("Candidate review"),
+      reportMdsvxPutsDreamsBeforeProof:
+        report.mdsvx.indexOf("## The actual dreams") <
+        report.mdsvx.indexOf("## Dynamic generation proof"),
       reportMdsvxRefPublished: wzrrdPayload.primaryDocument?.artifactRef,
       reportMdsvxSourceMatchesJson: reportMdsvx === report.mdsvx,
       reportProofLevel: report.proof.dynamicGenerationProofLevel,
@@ -3500,9 +3517,17 @@ describe("workflow app integration contract", () => {
         correlationRef,
       ],
       reportDreamCount: 3,
+      reportMdsvxIncludesAccessAdapter: true,
       reportMdsvxIncludesD2: true,
       reportMdsvxIncludesDreamsFirst: true,
+      reportMdsvxIncludesDynamicProof: true,
       reportMdsvxIncludesRefinement: true,
+      reportMdsvxIncludesReportNode: true,
+      reportMdsvxIncludesReportStandard: true,
+      reportMdsvxIncludesRunCoverage: true,
+      reportMdsvxIncludesWhatDidNotHappen: true,
+      reportMdsvxNoCandidateReview: true,
+      reportMdsvxPutsDreamsBeforeProof: true,
       reportMdsvxRefPublished: reportMdsvxRef,
       reportMdsvxSourceMatchesJson: true,
       reportProofLevel: "generated-machine",

@@ -960,21 +960,26 @@ Decision:
 - The node writes `dream.hitl-report.v1`: redacted MDSvX report body, canonical `joel/tufte-mdsvx@0.1.0` template metadata, 24h/noindex defaults, source artifact refs, dream cards, receipt counts, and proof metadata.
 - Dream cards follow the HITL shape: concise summary, reasoning, numeric rating, recommendation, and receipt metadata. Raw transcripts stay behind the relay boundary.
 - The report embeds D2 state-machine source with a readable `4:5` aspect ratio and records the dynamic-generation proof level separately from live Cloudflare execution proof.
+- The report body now follows `docs/dream-report-canon.md` more directly: run context, actual dreams, what to do, actionable line items, report node, workflow state machine, dynamic generation proof, run coverage, access adapter shape, report standard, what did not happen, and technical appendix.
+- The report explicitly states what did not happen: raw transcripts were not returned, Wzrrd publication did not happen inside the report node, and Brain/package/source-index/capability-policy mutation did not happen inside the report node.
 - Wzrrd publishing remains a separate leased side effect. This node renders the report artifact; it does not publish it.
 
 Changed surfaces:
 
 - `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds `DreamHitlReportDocumentSchema`, report template/proof/section schemas, dream cards, and the canonical section order.
 - `src/app/workflow-nodes/dream-memory-fabric.ts` adds `joelclaw.dream.hitl-report`, report artifact loading, report-card assembly from search/hydration/correlation, D2 source generation, and `dream.hitl-report.v1` writing.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` now renders the report-node/access/proof/coverage/standard/negative-proof sections as first-class MDSvX headings instead of burying them in one appendix paragraph.
 - `src/app/infrastructure/cloudflare-package-seeder.ts` and `tests/integration/workflow-app-fixtures.ts` add the report node export to `workflow/dream-memory-fabric`.
 - `tests/integration/workflow-app.test.ts` inserts `render-dream-hitl-report` after correlation in the generated Dream preflight chain and proves the report node executes through `createArtifactBackedWorkflowCartridgeAdapter`.
+- `tests/integration/workflow-app.test.ts` now proves the generated report has dreams before proof, no `Candidate review` section, and the canonical report-node, dynamic-generation proof, run-coverage, access-adapter, report-standard, and what-did-not-happen sections.
 - `tests/integration/dream-memory-fabric-contract.test.ts` locks the report schema as redacted MDSvX with no raw transcript return.
 
 Validation receipts:
 
-- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `2` files, `30` tests.
+- `pnpm exec vitest run tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts tests/integration/cloudflare-wzrrd-publish-adapter.test.ts` passed: `3` files, `38` tests.
 - `pnpm typecheck` passed.
 - `pnpm check` passed.
+- `git diff --check` passed.
 
 This still does not prove a live Dream run in Cloudflare. It closes the report-node gap: the canonical Dream HITL report can now be selected by a generated workflow as an installed cartridge export, verified through package/cartridge proof, and written as a typed artifact without baking Dream report behavior into the generic runner.
 

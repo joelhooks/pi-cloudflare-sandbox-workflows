@@ -1274,6 +1274,31 @@ const refinementProposalActionLineFor = (
 ): string =>
   `- **${proposal.title}** ${proposal.rating}/10. ${proposal.recommendation}: ${proposal.proposedNextStep}`;
 
+const runtimeCoverageLineFor = (
+  coverage: DreamSourceInventoryDocument["runtimeCoverage"][number]
+): string => {
+  const horizonSummary =
+    coverage.horizonCounts.length === 0
+      ? "no horizon counts"
+      : coverage.horizonCounts
+          .map(
+            (horizon) =>
+              `${horizon.horizon}: ${horizon.hitCount} hit(s), ${horizon.hydrationCount} hydrated`
+          )
+          .join("; ");
+  const proofSummary =
+    coverage.nativeProof?.sourceId ??
+    coverage.missingReason ??
+    coverage.falsePositiveReason ??
+    "no proof detail";
+
+  return `- **${coverage.runtime}**: ${coverage.status}; native source ${coverage.sourceNative ? "yes" : "no"}; ${horizonSummary}; ${proofSummary}.`;
+};
+
+const runtimeCoverageSectionFor = (
+  inventory: DreamSourceInventoryDocument
+): string => inventory.runtimeCoverage.map(runtimeCoverageLineFor).join("\n");
+
 const reportMdsvxFor = (input: {
   readonly backfill: DreamBackfillPlanDocument;
   readonly backfillRun: DreamBackfillRunReceiptDocument;
@@ -1304,6 +1329,9 @@ const reportMdsvxFor = (input: {
   const completedBackfillActions = input.backfillRun.actionResults.filter(
     (action) => action.status === "completed"
   ).length;
+  const blockedBackfillActions = input.backfillRun.actionResults.filter(
+    (action) => action.status === "blocked" || action.status === "failed"
+  ).length;
 
   return [
     "---",
@@ -1315,9 +1343,13 @@ const reportMdsvxFor = (input: {
     "",
     `# ${input.title}`,
     "",
+    "This is a human review surface, not an autopatcher. The report puts dreams first, then proof, so the human can decide what to accept, hold, reject, or turn into work.",
+    "",
     "## Run context",
     "",
     `Run ${input.inventory.runId} searched ${input.search.hits.length} memory hits, hydrated ${input.hydration.hydrated.length} redacted receipts, and produced ${input.dreamCount} dreams for human review.`,
+    "",
+    `Dreams: ${input.dreamCount}. Unique receipts: ${input.receiptCount}. Status: ${input.health.status}. Expiry: 24h, noindex.`,
     "",
     "## The actual dreams",
     "",
@@ -1333,23 +1365,53 @@ const reportMdsvxFor = (input: {
     "",
     actionSection,
     "",
-    "## Proof",
+    "## Report node",
     "",
-    `Dynamic generation proof level: ${input.proofLevel}.`,
+    "`joelclaw.dream.hitl-report` rendered this artifact as an installed Dream workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.",
     "",
-    `Recovery receipt: ${input.backfillRun.actionResults.length} action result(s), ${completedBackfillActions} completed.`,
+    "## Workflow state machine",
     "",
-    `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
-    "",
-    "Workflow state machine:",
+    "The D2 source below is the report figure for the Dream node chain. It belongs below the dreams so proof does not bury the human decision.",
     "",
     "```d2",
     dreamReportStateMachineD2,
     "```",
     "",
-    `Receipt count: ${input.receiptCount}. Raw transcripts returned: no.`,
+    "## Dynamic generation proof",
+    "",
+    `Dynamic generation proof level: ${input.proofLevel}.`,
+    "",
+    "The report records the proof level supplied by the generated workflow. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, generated machine hashes, cartridge invocation proofs, and verifier result.",
+    "",
+    "## Run coverage",
+    "",
+    runtimeCoverageSectionFor(input.inventory),
+    "",
+    `Source health: ${input.health.status}. Recovery receipt: ${input.backfillRun.actionResults.length} action result(s), ${completedBackfillActions} completed, ${blockedBackfillActions} blocked or failed.`,
+    "",
+    `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
+    "",
+    "## Access adapter shape",
+    "",
+    "Dream memory access goes through the trusted Dream relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.",
+    "",
+    "## Report standard",
+    "",
+    "Template: `joel/tufte-mdsvx@0.1.0`. Public Wzrrd publication must remain `noindex` and expiring by default. The canonical source file is this MDSvX artifact, not a rendered preview.",
+    "",
+    "## What did not happen",
+    "",
+    "- Raw transcripts were not returned.",
+    "- This report did not directly publish to Wzrrd; publication remains a separate leased `wzrrd.site.publish` side effect.",
+    "- This report did not mutate Brain, packages, source indexes, or capability policies by itself.",
     "",
     "## Technical appendix",
+    "",
+    `Recovery receipt: ${input.backfillRun.actionResults.length} action result(s), ${completedBackfillActions} completed.`,
+    "",
+    `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
+    "",
+    `Receipt count: ${input.receiptCount}. Raw transcripts returned: no.`,
     "",
     `Source health: ${input.health.status}. Backfill plan status: ${input.backfill.status}. Backfill run schema: ${input.backfillRun.schemaVersion}. Correlation graph schema: ${input.correlation.schemaVersion}. Refinement proposal count: ${input.refinementProposals.length}. Template seed: joel/tufte-mdsvx@0.1.0. Publish policy: noindex and 24h expiry by default.`,
   ].join("\n");
