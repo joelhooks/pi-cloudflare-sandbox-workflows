@@ -905,6 +905,41 @@ const backfillActionResultFor = (input: {
   };
 };
 
+const captureFixResultFor = (input: {
+  readonly fix: DreamCaptureFix;
+  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+}): DreamBackfillRunReceiptDocument["captureFixResults"][number] => {
+  const sourceRoot = input.sourceRoots.find(
+    (candidate) => candidate.sourceId === input.fix.targetSourceId
+  );
+  if (sourceRoot === undefined) {
+    return {
+      failures: [
+        `No trusted local capture source is configured for ${input.fix.targetSourceId}.`,
+      ],
+      fixId: input.fix.fixId,
+      ownerRef: input.fix.ownerRef,
+      repairAction:
+        "Provision or repair the native capture adapter before treating this runtime as Dream-covered.",
+      skippedReasons: [],
+      status: "blocked",
+      targetSourceId: input.fix.targetSourceId,
+    };
+  }
+
+  return {
+    failures: [],
+    fixId: input.fix.fixId,
+    ownerRef: input.fix.ownerRef,
+    repairAction: `Repair native capture for ${sourceRoot.sourceSystem} so future Dream runs do not need recovery backfills for ${sourceRoot.sourceId}.`,
+    skippedReasons: [
+      "The trusted relay can identify this capture gap, but this adapter has no controlled capture-path repair writer registered yet.",
+    ],
+    status: "skipped",
+    targetSourceId: input.fix.targetSourceId,
+  };
+};
+
 export const createTrustedLocalDreamMemoryFabricAdapter = (
   config: TrustedLocalDreamMemoryFabricConfig
 ): DreamMemoryBackfillPort & DreamMemoryFabricPort => ({
@@ -1052,6 +1087,12 @@ export const createTrustedLocalDreamMemoryFabricAdapter = (
         actionResults: input.plan.actions.map((action) =>
           backfillActionResultFor({
             action,
+            sourceRoots: config.sourceRoots,
+          })
+        ),
+        captureFixResults: input.plan.captureFixes.map((fix) =>
+          captureFixResultFor({
+            fix,
             sourceRoots: config.sourceRoots,
           })
         ),

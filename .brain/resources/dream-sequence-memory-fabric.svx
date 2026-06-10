@@ -433,6 +433,47 @@ Remaining blocking gates:
 
 Do not phrase the 2026-06-10 receipt as "the Dreamer ran" unless the context explicitly means the local relay proof. The honest status is: local Dream memory proof completed; package seed unblocked; live generated Cloudflare Dream remains blocked on relay exposure/config.
 
+Latest refresh:
+
+- `pnpm app:dream:relay:proof` completed local trusted relay proof `run:dream-relay-local-proof:20260610T040541414Z`.
+- Receipt: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Runtime inventory coverage: Pi `4737`, Codex `259`, Claude `129`, Cloudflare `153`.
+- Machine inventory coverage: `blaine` `5125`, `panda` `1`, `flagg` `6`, Cloudflare `153`.
+- Source family inventory coverage remained complete for agent transcripts, Brain, Cloudflare runs, docs/pdf-brain, and repo outputs.
+- Search/hydration proof remained `12` hits, `12` hydrated receipts, and `48` correlation edges.
+- Recovery proof now separates index backfill action results from capture-fix results. Latest receipt: `10` index backfill actions planned, `10` skipped because no controlled writers are registered, `0` capture fixes planned, and `0` capture-fix results.
+- `pnpm app:dream:preflight --allow-missing` refreshed `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json` at `2026-06-10T04:05:54.227Z`; remote package seeding and manifest hash still matched.
+- `pnpm app:dream:run --submit` prepared run `run-live-dream-memory-fabric-20260610T040554622Z-79268321`.
+- Receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T040554622Z-79268321-receipt.json`.
+- Status stayed `blocked`; `submit.attempted=false`; the live Worker was not called.
+- `pnpm app:dream:relay:provisioning-preflight` refreshed `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json` at `2026-06-10T04:05:56.274Z` with `noSideEffectsPerformed=true`.
+
+## Capture-Fix Receipt Contract
+
+On 2026-06-10, `dream.backfill-run-receipt.v1` gained `captureFixResults`.
+
+Reason:
+
+- `dream.backfill-plan.v1` already had `captureFixes`, but the run receipt only reported derived-index backfill action results.
+- That made it too easy for a Dream report to blur two different problems: "the derived index is stale" and "the capture path is broken."
+- The contract now reports index backfill action results and capture-fix results separately. This supports the core rule that backfill is recovery, not normal operation.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds typed `captureFixResults` to `DreamBackfillRunReceiptDocumentSchema`, defaulting to `[]` so old receipts still parse when they had no capture fixes.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts` emits capture-fix results from planned capture fixes without mutating source systems.
+- `src/app/infrastructure/memory-adapters.ts` does the same for the integration fixture adapter.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` turns skipped, blocked, or failed capture-fix results into `capture-ingest-fix` refinement proposals and reports capture-fix counts in the HITL MDSvX proof section.
+- `scripts/trusted-local-dream-memory-relay-proof.ts` records capture-fix blocked/completed/failed/skipped counts in the local proof receipt.
+- `scripts/workflow-app-dream-preflight.ts` now fails local proof validation when planned capture fixes do not have matching capture-fix run receipt counts.
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` carries capture-fix counts into the relay provisioning preflight summary.
+
+Validation:
+
+- `pnpm exec vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts tests/integration/workflow-app.test.ts` passed: `8` files, `61` tests.
+
+This still does not complete Dreaming. It tightens the relay-side recovery evidence so the eventual Cloudflare-generated Dream can distinguish stale indexes from broken capture paths.
+
 ## Wzrrd Report Receipt
 
 On 2026-06-09, the Dreaming vision was rendered as a Wzrrd/Tufte review surface:

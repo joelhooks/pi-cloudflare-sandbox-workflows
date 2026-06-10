@@ -268,6 +268,10 @@ describe("trusted Dream memory relay server", () => {
 
     expect({
       backfillOperation: backfillEnvelope.operation,
+      backfillRunCaptureFixStatuses:
+        backfillRunEnvelope.document.captureFixResults.map(
+          (captureFix) => captureFix.status
+        ),
       backfillRunOperation: backfillRunEnvelope.operation,
       backfillRunSourceRefs: backfillRunEnvelope.sourceInventoryRefs,
       backfillRunStatuses: backfillRunEnvelope.document.actionResults.map(
@@ -294,6 +298,7 @@ describe("trusted Dream memory relay server", () => {
       usedAt: backfillEnvelope.leaseReceipt.usedAt,
     }).toStrictEqual({
       backfillOperation: "backfill-plan",
+      backfillRunCaptureFixStatuses: ["skipped"],
       backfillRunOperation: "backfill-run",
       backfillRunSourceRefs: [planRef],
       backfillRunStatuses: ["skipped"],

@@ -203,6 +203,10 @@ const LocalRelayProofReceiptSchema = z.object({
   }),
   backfillRun: z.object({
     blockedCount: z.number().int().min(0),
+    captureFixBlockedCount: z.number().int().min(0).optional(),
+    captureFixCompletedCount: z.number().int().min(0).optional(),
+    captureFixFailedCount: z.number().int().min(0).optional(),
+    captureFixSkippedCount: z.number().int().min(0).optional(),
     completedCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
     skippedCount: z.number().int().min(0),
@@ -726,6 +730,17 @@ export const checkLocalRelayProof = async (
     );
   }
 
+  const captureFixRunResultCount =
+    (proof.backfillRun.captureFixBlockedCount ?? 0) +
+    (proof.backfillRun.captureFixCompletedCount ?? 0) +
+    (proof.backfillRun.captureFixFailedCount ?? 0) +
+    (proof.backfillRun.captureFixSkippedCount ?? 0);
+  if (captureFixRunResultCount !== proof.backfill.captureFixCount) {
+    return failedLocalRelayProofCheck(
+      "Trusted local Dream relay proof capture-fix receipt does not match the planned capture-fix count."
+    );
+  }
+
   const familySummary = receiptFamilySummary(proof.search.hydratedFamilyCounts);
   const summarySuffix =
     familySummary === null
@@ -738,7 +753,7 @@ export const checkLocalRelayProof = async (
 
   return {
     checkId: "relay:local-proof",
-    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.backfill.actionCount} backfill action receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
+    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.backfill.actionCount} backfill action receipt(s), ${proof.backfill.captureFixCount} capture-fix receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
     redacted: true,
     required: true,
     requiredFor: [

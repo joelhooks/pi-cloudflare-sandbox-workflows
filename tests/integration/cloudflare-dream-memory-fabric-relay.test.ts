@@ -326,6 +326,10 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       authorizationHeaders: fakeFetch.calls.map(
         (call) => call.headers["authorization"]
       ),
+      backfillRunCaptureFixStatuses:
+        backfillRunResult.document.captureFixResults.map(
+          (captureFix) => captureFix.status
+        ),
       backfillRunStatuses: backfillRunResult.document.actionResults.map(
         (action) => action.status
       ),
@@ -391,6 +395,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `Bearer ${relayToken}`,
         `Bearer ${relayToken}`,
       ],
+      backfillRunCaptureFixStatuses: ["skipped"],
       backfillRunStatuses: ["skipped"],
       backfillStatus: "backfill-required",
       correlationEdgeCount: 4,

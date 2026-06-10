@@ -109,6 +109,10 @@ const LocalRelayProofReceiptSchema = z.object({
   }),
   backfillRun: z.object({
     blockedCount: z.number().int().min(0),
+    captureFixBlockedCount: z.number().int().min(0),
+    captureFixCompletedCount: z.number().int().min(0),
+    captureFixFailedCount: z.number().int().min(0),
+    captureFixSkippedCount: z.number().int().min(0),
     completedCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
     skippedCount: z.number().int().min(0),
@@ -686,6 +690,18 @@ const run = async (): Promise<void> => {
       backfillRun: {
         blockedCount: backfillRun.actionResults.filter(
           (action) => action.status === "blocked"
+        ).length,
+        captureFixBlockedCount: backfillRun.captureFixResults.filter(
+          (captureFix) => captureFix.status === "blocked"
+        ).length,
+        captureFixCompletedCount: backfillRun.captureFixResults.filter(
+          (captureFix) => captureFix.status === "completed"
+        ).length,
+        captureFixFailedCount: backfillRun.captureFixResults.filter(
+          (captureFix) => captureFix.status === "failed"
+        ).length,
+        captureFixSkippedCount: backfillRun.captureFixResults.filter(
+          (captureFix) => captureFix.status === "skipped"
         ).length,
         completedCount: backfillRun.actionResults.filter(
           (action) => action.status === "completed"

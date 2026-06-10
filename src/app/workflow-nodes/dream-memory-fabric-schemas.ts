@@ -846,6 +846,19 @@ export const DreamBackfillRunReceiptDocumentSchema = z.object({
       })
     )
     .default([]),
+  captureFixResults: z
+    .array(
+      z.object({
+        failures: z.array(z.string().min(1)).default([]),
+        fixId: z.string().min(1),
+        ownerRef: z.string().min(1),
+        repairAction: z.string().min(1),
+        skippedReasons: z.array(z.string().min(1)).default([]),
+        status: z.enum(["blocked", "completed", "failed", "skipped"]),
+        targetSourceId: z.string().min(1),
+      })
+    )
+    .default([]),
   completedAt: IsoDateTimeSchema,
   planRef: ArtifactPinSchema,
   redacted: z.literal(true),

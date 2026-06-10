@@ -3142,6 +3142,9 @@ describe("workflow app integration contract", () => {
 
     expect({
       backfillMode: backfill.mode,
+      backfillRunCaptureFixStatuses: backfillRun.captureFixResults.map(
+        (captureFix) => captureFix.status
+      ),
       backfillRunPlanRef: backfillRun.planRef.artifactRef,
       backfillRunStatuses: backfillRun.actionResults.map(
         (action) => action.status
@@ -3224,7 +3227,7 @@ describe("workflow app integration contract", () => {
         "## Dynamic generation proof"
       ),
       reportMdsvxIncludesRefinement: report.mdsvx.includes(
-        "Refinement proposals emitted: 5."
+        "Refinement proposals emitted: 6."
       ),
       reportMdsvxIncludesReportNode: report.mdsvx.includes("## Report node"),
       reportMdsvxIncludesReportStandard:
@@ -3253,6 +3256,7 @@ describe("workflow app integration contract", () => {
       wzrrdPrimaryDocument: wzrrdPayload.primaryDocument,
     }).toStrictEqual({
       backfillMode: "recovery-not-normal-operation",
+      backfillRunCaptureFixStatuses: ["skipped"],
       backfillRunPlanRef: backfillRef,
       backfillRunStatuses: ["skipped"],
       backfillStatus: "backfill-required",
@@ -3497,14 +3501,16 @@ describe("workflow app integration contract", () => {
         "proposal:capture-ingest-fix:runtime:claude",
         "proposal:dynamic-workflow-pattern:1:integration-dream-search-found-agent-tra",
         "proposal:kernel-memory:2:integration-dream-search-found-brain-evi",
+        "proposal:capture-ingest-fix:capture:1:capture-claude-relay",
         "proposal:dynamic-workflow-pattern:3:integration-dream-search-found-cloudflar",
         "proposal:capture-ingest-fix:backfill:1:backfill-claude-native-capture",
       ],
-      refinementProposalCount: 5,
+      refinementProposalCount: 6,
       refinementRecommendationKinds: [
         "capture-ingest-fix:turn-into-work",
         "dynamic-workflow-pattern:accept",
         "kernel-memory:accept",
+        "capture-ingest-fix:turn-into-work",
         "dynamic-workflow-pattern:turn-into-work",
         "capture-ingest-fix:turn-into-work",
       ],
@@ -3532,7 +3538,7 @@ describe("workflow app integration contract", () => {
       reportMdsvxSourceMatchesJson: true,
       reportProofLevel: "generated-machine",
       reportRawTranscriptsReturned: false,
-      reportRefinementProposalCount: 5,
+      reportRefinementProposalCount: 6,
       reportRefinementProposalRef: refinementRef,
       reportSectionOrder: [
         "run-context",

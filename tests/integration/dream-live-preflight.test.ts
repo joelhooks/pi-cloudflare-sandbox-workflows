@@ -515,6 +515,34 @@ Wrangler 4.97.0
         proofPath,
         JSON.stringify({
           ...validProof,
+          backfill: {
+            ...validProof.backfill,
+            captureFixCount: 1,
+          },
+        }),
+        "utf-8"
+      );
+      const captureFixMismatch = await checkLocalRelayProof(proofPath);
+      await writeFile(
+        proofPath,
+        JSON.stringify({
+          ...validProof,
+          backfill: {
+            ...validProof.backfill,
+            captureFixCount: 1,
+          },
+          backfillRun: {
+            ...validProof.backfillRun,
+            captureFixBlockedCount: 1,
+          },
+        }),
+        "utf-8"
+      );
+      const passedWithCaptureFix = await checkLocalRelayProof(proofPath);
+      await writeFile(
+        proofPath,
+        JSON.stringify({
+          ...validProof,
           inventory: {
             ...validProof.inventory,
             runtimeCoverage: [{ count: 10, runtime: "pi", status: "captured" }],
@@ -555,6 +583,8 @@ Wrangler 4.97.0
       const missingSourceFamilyCoverage = await checkLocalRelayProof(proofPath);
 
       expect({
+        captureFixMismatchMessage: captureFixMismatch.message,
+        captureFixMismatchStatus: captureFixMismatch.status,
         missingCoverageMessage: missingCoverage.message,
         missingCoverageStatus: missingCoverage.status,
         missingMachineCoverageMessage: missingMachineCoverage.message,
@@ -563,7 +593,12 @@ Wrangler 4.97.0
         missingSourceFamilyCoverageStatus: missingSourceFamilyCoverage.status,
         passedMessage: passed.message,
         passedStatus: passed.status,
+        passedWithCaptureFixMessage: passedWithCaptureFix.message,
+        passedWithCaptureFixStatus: passedWithCaptureFix.status,
       }).toStrictEqual({
+        captureFixMismatchMessage:
+          "Trusted local Dream relay proof capture-fix receipt does not match the planned capture-fix count.",
+        captureFixMismatchStatus: "failed",
         missingCoverageMessage:
           "Trusted local Dream relay proof is missing captured native runtime coverage for: codex, claude, cloudflare.",
         missingCoverageStatus: "failed",
@@ -574,8 +609,11 @@ Wrangler 4.97.0
           "Trusted local Dream relay proof is missing explicit source-family coverage for: docs-pdf-brain.",
         missingSourceFamilyCoverageStatus: "failed",
         passedMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
         passedStatus: "passed",
+        passedWithCaptureFixMessage:
+          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 1 capture-fix receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+        passedWithCaptureFixStatus: "passed",
       });
     } finally {
       await rm(proofRoot, { force: true, recursive: true });

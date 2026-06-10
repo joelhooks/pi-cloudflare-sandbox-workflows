@@ -245,6 +245,9 @@ describe("trusted local Dream memory fabric", () => {
         backfillActions: plan.actions.map((action) => action.actionId),
         backfillRunPlanRef: run.planRef.artifactRef,
         backfillRunStatuses: run.actionResults.map((action) => action.status),
+        captureFixRunStatuses: run.captureFixResults.map(
+          (captureFix) => captureFix.status
+        ),
         captureFixes: plan.captureFixes.map((fix) => fix.fixId),
         codexCoverage: inventory.runtimeCoverage.find(
           (coverage) => coverage.runtime === "codex"
@@ -271,6 +274,7 @@ describe("trusted local Dream memory fabric", () => {
         backfillRunPlanRef:
           "artifact://trusted-local-dream/run/backfill-plan.json",
         backfillRunStatuses: ["skipped", "skipped"],
+        captureFixRunStatuses: ["blocked"],
         captureFixes: ["capture:claude:trusted-local-relay"],
         codexCoverage: "captured",
         healthStatus: "degraded",

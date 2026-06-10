@@ -665,6 +665,18 @@ export const createIntegrationTestDreamMemoryFabricAdapter =
             ],
             status: "skipped",
           })),
+          captureFixResults: input.plan.captureFixes.map((fix) => ({
+            failures: [],
+            fixId: fix.fixId,
+            ownerRef: fix.ownerRef,
+            repairAction:
+              "Integration fixture records the capture repair candidate without mutating the capture path.",
+            skippedReasons: [
+              "Integration fixture does not mutate source capture adapters.",
+            ],
+            status: "skipped",
+            targetSourceId: fix.targetSourceId,
+          })),
           completedAt: nowIso(),
           planRef: {
             artifactRef: input.planRef,

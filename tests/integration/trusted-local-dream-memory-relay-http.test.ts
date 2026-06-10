@@ -489,6 +489,9 @@ describe("trusted local Dream memory relay HTTP server", () => {
           ),
           readinessSchema: readiness.schemaVersion,
           responseLeaksToken: serialized.includes(relayToken),
+          runCaptureFixStatuses: runEnvelope.document.captureFixResults.map(
+            (captureFix) => captureFix.status
+          ),
           runStatuses: runEnvelope.document.actionResults.map(
             (action) => action.status
           ),
@@ -513,6 +516,7 @@ describe("trusted local Dream memory relay HTTP server", () => {
           rawPathLeaked: false,
           readinessSchema: "trusted.dream-memory-relay.readiness.v1",
           responseLeaksToken: false,
+          runCaptureFixStatuses: ["blocked"],
           runStatuses: ["skipped", "skipped"],
           runtimeCoverage: [
             "pi:captured",

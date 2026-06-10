@@ -1165,6 +1165,35 @@ const backfillProposalFor = (input: {
   title: `Repair Dream backfill path: ${input.action.actionId}`,
 });
 
+const captureFixProposalFor = (input: {
+  readonly captureFix: DreamBackfillRunReceiptDocument["captureFixResults"][number];
+  readonly index: number;
+  readonly sourceRefs: readonly ArtifactRef[];
+}): DreamRefinementProposal => ({
+  proposalId: `proposal:capture-ingest-fix:capture:${input.index + 1}:${proposalSlugFor(
+    input.captureFix.fixId
+  )}`,
+  proposedNextStep:
+    "Turn this capture-fix result into source-adapter work so future dreams rely on normal ingest instead of recovery backfill.",
+  rating:
+    input.captureFix.status === "blocked" ||
+    input.captureFix.status === "failed"
+      ? 10
+      : 8,
+  reasoning:
+    "Dreaming is supposed to fix the memory fabric, not normalize backfills. A capture-fix result points at the ingest path that should be repaired.",
+  receipts: [],
+  recommendation: "turn-into-work",
+  sourceRefs: [...input.sourceRefs],
+  summary: `${input.captureFix.fixId} ended ${input.captureFix.status}. ${[
+    input.captureFix.repairAction,
+    ...input.captureFix.failures,
+    ...input.captureFix.skippedReasons,
+  ].join(" ")}`,
+  targetKind: "capture-ingest-fix",
+  title: `Repair Dream capture path: ${input.captureFix.fixId}`,
+});
+
 const refinementProposalDocumentFor = (input: {
   readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly backfillRunRef: ArtifactRef;
@@ -1209,6 +1238,15 @@ const refinementProposalDocumentFor = (input: {
         sourceRefs: [input.backfillRunRef],
       })
     );
+  const captureFixProposals = input.backfillRun.captureFixResults
+    .filter((captureFix) => captureFix.status !== "completed")
+    .map((captureFix, index) =>
+      captureFixProposalFor({
+        captureFix,
+        index,
+        sourceRefs: [input.backfillRunRef],
+      })
+    );
   const hitProposals = input.search.hits.map((hit, index) =>
     proposalForHit({
       hit,
@@ -1219,6 +1257,7 @@ const refinementProposalDocumentFor = (input: {
   );
   const proposals = [
     ...coverageProposals,
+    ...captureFixProposals,
     ...backfillProposals,
     ...hitProposals,
   ]
@@ -1332,6 +1371,13 @@ const reportMdsvxFor = (input: {
   const blockedBackfillActions = input.backfillRun.actionResults.filter(
     (action) => action.status === "blocked" || action.status === "failed"
   ).length;
+  const completedCaptureFixes = input.backfillRun.captureFixResults.filter(
+    (captureFix) => captureFix.status === "completed"
+  ).length;
+  const blockedCaptureFixes = input.backfillRun.captureFixResults.filter(
+    (captureFix) =>
+      captureFix.status === "blocked" || captureFix.status === "failed"
+  ).length;
 
   return [
     "---",
@@ -1387,7 +1433,7 @@ const reportMdsvxFor = (input: {
     "",
     runtimeCoverageSectionFor(input.inventory),
     "",
-    `Source health: ${input.health.status}. Recovery receipt: ${input.backfillRun.actionResults.length} action result(s), ${completedBackfillActions} completed, ${blockedBackfillActions} blocked or failed.`,
+    `Source health: ${input.health.status}. Recovery receipt: ${input.backfillRun.actionResults.length} index action result(s), ${completedBackfillActions} completed, ${blockedBackfillActions} blocked or failed. Capture fixes: ${input.backfillRun.captureFixResults.length} result(s), ${completedCaptureFixes} completed, ${blockedCaptureFixes} blocked or failed.`,
     "",
     `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
     "",
@@ -1407,7 +1453,7 @@ const reportMdsvxFor = (input: {
     "",
     "## Technical appendix",
     "",
-    `Recovery receipt: ${input.backfillRun.actionResults.length} action result(s), ${completedBackfillActions} completed.`,
+    `Recovery receipt: ${input.backfillRun.actionResults.length} index action result(s), ${completedBackfillActions} completed. Capture fixes: ${input.backfillRun.captureFixResults.length} result(s), ${completedCaptureFixes} completed.`,
     "",
     `Correlation graph: ${input.correlation.nodes.length} nodes, ${input.correlation.edges.length} source-backed edges.`,
     "",
