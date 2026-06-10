@@ -1894,7 +1894,7 @@ Latest corrected receipts:
 - Package reseed receipt: `.wrangler/workflow-app/latest-dream-package-reseed-receipt.json`, completed `2026-06-10T05:50:25.488Z`, deployed Worker version `ce3a3eec-a6c1-429c-8f4d-8c97e88928b9`, seeded `workflow/dream-memory-fabric` with manifest hash `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`, and wrote package seed commit `b1b5a8a7a0fc5b67c4d70fe31892f1e242f53039`.
 - Dream cartridge hash after adding capture exports: expected `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`; remote D1 now reports the same hash.
 - Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T05:50:46.905Z`, blocked on relay URL/token/config/healthz and live owner sign-off only.
-- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T03:43:39.973Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, approval still required.
+- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T05:53:46.050Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, `noSideEffectsPerformed=true`, approval still required.
 - Latest blocked run request: `run-live-dream-memory-fabric-20260610T055045604Z-77bfa3e7`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input, requires run/artifact capture receipts, and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
 
 Validation receipts after the dynamic runtime boundary correction:
