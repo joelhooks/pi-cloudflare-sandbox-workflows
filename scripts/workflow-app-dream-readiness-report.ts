@@ -94,7 +94,7 @@ export type DreamReadinessReportReceipt = z.infer<
   typeof DreamReadinessReportReceiptSchema
 >;
 
-const DreamDefinitionOfDoneAuditItemSchema = z.object({
+const WorkflowDefinitionOfDoneAuditItemSchema = z.object({
   blockerRefs: z.array(z.string().min(1)).default([]),
   evidenceRefs: z.array(z.string().min(1)).default([]),
   requirement: z.string().min(1),
@@ -103,9 +103,9 @@ const DreamDefinitionOfDoneAuditItemSchema = z.object({
   summary: z.string().min(1),
 });
 
-const DreamDefinitionOfDoneAuditSchema = z.object({
+const WorkflowDefinitionOfDoneAuditSchema = z.object({
   generatedAt: z.string().min(1),
-  items: z.array(DreamDefinitionOfDoneAuditItemSchema).min(1),
+  items: z.array(WorkflowDefinitionOfDoneAuditItemSchema).min(1),
   redacted: z.literal(true),
   runId: z.string().min(1),
   schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
@@ -119,14 +119,14 @@ const DreamDefinitionOfDoneAuditSchema = z.object({
   }),
 });
 
-export type DreamDefinitionOfDoneAudit = z.infer<
-  typeof DreamDefinitionOfDoneAuditSchema
+export type WorkflowDefinitionOfDoneAudit = z.infer<
+  typeof WorkflowDefinitionOfDoneAuditSchema
 >;
-type DreamDefinitionOfDoneAuditItem = z.infer<
-  typeof DreamDefinitionOfDoneAuditItemSchema
+type WorkflowDefinitionOfDoneAuditItem = z.infer<
+  typeof WorkflowDefinitionOfDoneAuditItemSchema
 >;
-type DreamDefinitionOfDoneAuditItemInput = z.input<
-  typeof DreamDefinitionOfDoneAuditItemSchema
+type WorkflowDefinitionOfDoneAuditItemInput = z.input<
+  typeof WorkflowDefinitionOfDoneAuditItemSchema
 >;
 
 const WzrrdCliPublishResultSchema = z
@@ -433,16 +433,16 @@ const preflightCheckStatus = (
   "missing";
 
 const parseAuditItem = (
-  item: DreamDefinitionOfDoneAuditItemInput
-): DreamDefinitionOfDoneAuditItem =>
-  DreamDefinitionOfDoneAuditItemSchema.parse(item);
+  item: WorkflowDefinitionOfDoneAuditItemInput
+): WorkflowDefinitionOfDoneAuditItem =>
+  WorkflowDefinitionOfDoneAuditItemSchema.parse(item);
 
 const liveSubmittedFor = (input: DreamReadinessReportInput): boolean =>
   input.runReceipt.submit.attempted && input.runReceipt.status === "submitted";
 
 const dreamCartridgePackageAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const packageCaptured =
     input.preflight.remoteRegistry.status === "queried" &&
     input.preflight.remoteRegistry.expectedPackageSeeded === true;
@@ -454,14 +454,14 @@ const dreamCartridgePackageAuditItem = (
     requirementId: "dream-cartridge-package",
     status: packageCaptured ? "captured" : "missing",
     summary: packageCaptured
-      ? "Remote registry has workflow/dream-memory-fabric seeded for invocation."
-      : "Remote registry did not prove workflow/dream-memory-fabric is seeded.",
+      ? "Remote registry has workflow/memory-fabric seeded for invocation."
+      : "Remote registry did not prove workflow/memory-fabric is seeded.",
   });
 };
 
 const trustedLocalRelayAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const localRelayCaptured =
     input.localProof.rawCredentialsReturned === false &&
     input.localProof.rawPathsReturned === false &&
@@ -482,7 +482,7 @@ const trustedLocalRelayAuditItem = (
 
 const workerFacingRelayAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const relayReady =
     input.preflight.relayCapability.readiness.endpointConfigured &&
     input.preflight.relayCapability.readiness.tokenConfigured &&
@@ -509,7 +509,7 @@ const workerFacingRelayAuditItem = (
 
 const liveCloudflareExecutionAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
   return parseAuditItem({
@@ -527,7 +527,7 @@ const liveCloudflareExecutionAuditItem = (
 
 const generatedMachineAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
   return parseAuditItem({
@@ -550,7 +550,7 @@ const generatedMachineAuditItem = (
 
 const tShapedCoverageAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const coverageCaptured = dreamCoverageCaptured(input.localProof);
 
   const missingFamilies = input.localProof.sourceFamilyCoverage
@@ -575,7 +575,7 @@ const tShapedCoverageAuditItem = (
 
 const workflowOwnedWzrrdAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
   return parseAuditItem({
@@ -593,7 +593,7 @@ const workflowOwnedWzrrdAuditItem = (
 
 const hitlRefinementLoopAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const liveSubmitted = liveSubmittedFor(input);
 
   return parseAuditItem({
@@ -611,7 +611,7 @@ const hitlRefinementLoopAuditItem = (
 
 const publicPrivateBoundaryAuditItem = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAuditItem => {
+): WorkflowDefinitionOfDoneAuditItem => {
   const redactionCaptured =
     input.localProof.rawCredentialsReturned === false &&
     input.localProof.rawPathsReturned === false &&
@@ -633,7 +633,7 @@ const auditStatusFor = (input: {
   readonly blockedCount: number;
   readonly missingCount: number;
   readonly notProvenCount: number;
-}): DreamDefinitionOfDoneAudit["status"] => {
+}): WorkflowDefinitionOfDoneAudit["status"] => {
   if (input.blockedCount > 0 || input.missingCount > 0) {
     return "blocked";
   }
@@ -645,9 +645,9 @@ const auditStatusFor = (input: {
   return "captured";
 };
 
-export const buildDreamDefinitionOfDoneAudit = (
+export const buildWorkflowDefinitionOfDoneAudit = (
   input: DreamReadinessReportInput
-): DreamDefinitionOfDoneAudit => {
+): WorkflowDefinitionOfDoneAudit => {
   const parsedItems = [
     dreamCartridgePackageAuditItem(input),
     trustedLocalRelayAuditItem(input),
@@ -672,7 +672,7 @@ export const buildDreamDefinitionOfDoneAudit = (
     (item) => item.status === "not-proven"
   ).length;
 
-  return DreamDefinitionOfDoneAuditSchema.parse({
+  return WorkflowDefinitionOfDoneAuditSchema.parse({
     generatedAt: input.generatedAt,
     items: parsedItems,
     redacted: true,
@@ -689,13 +689,13 @@ export const buildDreamDefinitionOfDoneAudit = (
   });
 };
 
-const auditLineFor = (item: DreamDefinitionOfDoneAudit["items"][number]) =>
+const auditLineFor = (item: WorkflowDefinitionOfDoneAudit["items"][number]) =>
   `- ${item.requirementId}: ${item.status} — ${item.summary}`;
 
 export const renderDreamReadinessReportMdsvx = (
   input: DreamReadinessReportInput
 ): string => {
-  const audit = buildDreamDefinitionOfDoneAudit(input);
+  const audit = buildWorkflowDefinitionOfDoneAudit(input);
 
   return [
     "---",
@@ -918,7 +918,7 @@ export const renderDreamReadinessReportHtml = (input: {
 
 const compactReceiptsFor = (
   input: DreamReadinessReportInput,
-  audit: DreamDefinitionOfDoneAudit
+  audit: WorkflowDefinitionOfDoneAudit
 ) => ({
   definitionOfDoneAudit: audit,
   generatedAt: input.generatedAt,
@@ -1084,7 +1084,7 @@ export const renderDreamReadinessReport = async (input: {
   const indexPath = join(siteDir, "index.html");
   const receiptsPath = join(siteDir, "receipts.json");
   const receiptPath = join(siteDir, "render-receipt.json");
-  const audit = buildDreamDefinitionOfDoneAudit(input.report);
+  const audit = buildWorkflowDefinitionOfDoneAudit(input.report);
   const mdsvx = renderDreamReadinessReportMdsvx(input.report);
   const html = renderDreamReadinessReportHtml({
     generatedAt: input.report.generatedAt,

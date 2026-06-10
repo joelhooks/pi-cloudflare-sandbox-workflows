@@ -17,8 +17,8 @@ import type {
   WorkflowLivePreflightReceipt,
   WorkflowRunRequest,
 } from "../src/app/domain/schemas.ts";
-import { dreamMemoryFabricPackageMetadata } from "../src/cartridges/dream-memory-fabric/package-seed.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
+import { memoryFabricPackageMetadata } from "../src/cartridges/memory-fabric/package-seed.ts";
+import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
 import { runDreamPreflightCli } from "./workflow-app-dream-preflight.ts";
 
 const defaultPreflightPath =
@@ -34,7 +34,7 @@ const missingSubmitSignoffAction =
 const requiredPackageIds = [
   "badass-courses/claw-kernel",
   "joelhooks/configured-familiar-kernel",
-  "workflow/dream-memory-fabric",
+  "workflow/memory-fabric",
 ] as const;
 
 const requiredRelayCheckIds = [
@@ -44,12 +44,12 @@ const requiredRelayCheckIds = [
   "relay:healthz",
 ] as const;
 
-const dreamWorkflowNodePalette = dreamMemoryFabricPackageMetadata.exports
+const memoryWorkflowNodePalette = memoryFabricPackageMetadata.exports
   .filter((exportRecord) => exportRecord.kind === "workflow-node")
   .map((exportRecord) => exportRecord.nodeType)
   .filter((nodeType): nodeType is string => nodeType !== undefined);
 
-const dreamSourcePackPlannerSummary =
+const memorySourcePackPlannerSummary =
   dreamTranscriptReviewSourceProfile.sourcePacks
     .map(
       (pack) =>
@@ -121,7 +121,7 @@ const timestampSegment = (date: Date): string =>
   date.toISOString().replaceAll(/[-:.]/gu, "").replace("000Z", "Z");
 
 const defaultRunId = (date: Date): string =>
-  `run-live-dream-memory-fabric-${timestampSegment(date)}-${randomUUID().slice(0, 8)}`;
+  `run-live-memory-fabric-${timestampSegment(date)}-${randomUUID().slice(0, 8)}`;
 
 const argValue = (
   argv: readonly string[],
@@ -249,26 +249,26 @@ export const buildDreamLiveRunRequest = (
       }),
     planProposal: {
       intent:
-        "Run Dreaming as a real Cloudflare-generated dynamic workflow over the installed workflow/dream-memory-fabric cartridge: mine redacted correction/friction/decision/workflow signals, search T-shaped across near-term and far-term memory, hydrate redacted receipts, correlate evidence, emit refinement proposals for kernel/package/workflow/schema/access-lease changes, render the canonical Dream HITL report, and publish the report through Wzrrd only after verifier acceptance.",
+        "Run Dreaming as a real Cloudflare-generated dynamic workflow over the installed workflow/memory-fabric cartridge: mine redacted correction/friction/decision/workflow signals, search T-shaped across near-term and far-term memory, hydrate redacted receipts, correlate evidence, emit refinement proposals for kernel/package/workflow/schema/access-lease changes, render the canonical Dream HITL report, and publish the report through Wzrrd only after verifier acceptance.",
       requestedPackageIds: [...requiredPackageIds],
       stochasticNotes: [
         "Use only generated workflow.node.invoke states for Dream cartridge work; do not use static Dream branches in the runner.",
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        `Dream cartridge node palette: ${dreamWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
-        `Source packs advertised by the installed profile: ${dreamSourcePackPlannerSummary}. Optional-lease packs may be used only when actor scope and leases allow them. Separate-workflow packs must be saved or linked as candidates, not silently folded into transcript-review Dream readiness.`,
+        `Dream cartridge node palette: ${memoryWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
+        `Source packs advertised by the installed profile: ${memorySourcePackPlannerSummary}. Optional-lease packs may be used only when actor scope and leases allow them. Separate-workflow packs must be saved or linked as candidates, not silently folded into transcript-review Dream readiness.`,
         "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
-        `Generated Dream retrieval and signal-mining steps must declare dreamCoverageHorizons covering: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        "Generated Dream planning steps must declare dreamSourcePackDispositions for every advertised source pack with requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs. Optional-lease packs are selected-with-lease only when scoped leases cover their requiredCapabilityKinds and leaseRefs are present; otherwise they must be skipped-missing-lease with explicit missingCapabilityKinds. Separate-workflow packs are separate-workflow-candidate and must not clear transcript-review Dream readiness.",
+        `Generated Dream retrieval and signal-mining steps must declare memoryCoverageHorizons covering: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
+        "Generated Dream planning steps must declare memorySourcePackDispositions for every advertised source pack with requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs. Optional-lease packs are selected-with-lease only when scoped leases cover their requiredCapabilityKinds and leaseRefs are present; otherwise they must be skipped-missing-lease with explicit missingCapabilityKinds. Separate-workflow packs are separate-workflow-candidate and must not clear transcript-review Dream readiness.",
         "Report runtime, machine, and source-family coverage gaps as explicit caveats in the dream report; coverage caveats never block the run. Memory-fabric repair is a separate workflow.",
         "Search across horizons: 24h, 7d, 30d, current quarter, and all-time. Do not collapse the dream into a recent-only summary.",
         'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
         "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
-        "Cloudflare must access memory only through the trusted Dream relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
-        "Accepted dreams must be reviewable as dream.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce dream.hitl-decision-workflow-seed.v1 and draft dream.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
+        "Cloudflare must access memory only through the trusted Memory relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
+        "Accepted dreams must be reviewable as memory.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce memory.hitl-decision-workflow-seed.v1 and draft memory.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
       ],
     },
     runId: input.runId,
-    workItemId: "work-item:dream-memory-fabric",
+    workItemId: "work-item:memory-fabric",
   });
 
 const missingReadyReasons = (

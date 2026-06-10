@@ -2,18 +2,18 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { DreamMemoryRelayTokenSecretResolver } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+import type { MemoryRelayOperation } from "../../src/app/domain/source-profile.ts";
+import type { MemoryRelayTokenSecretResolver } from "../../src/cartridges/memory-fabric/cloudflare-relay.ts";
 import {
-  createCloudflareDreamMemoryFabricRelay,
-  createCloudflareDreamMemoryRelayTokenResolver,
-  dreamMemoryRelayEndpointCatalog,
-} from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+  createCloudflareMemoryFabricRelay,
+  createCloudflareMemoryRelayTokenResolver,
+  memoryRelayEndpointCatalog,
+} from "../../src/cartridges/memory-fabric/cloudflare-relay.ts";
 import {
-  createIntegrationTestDreamMemoryCorrelationAdapter,
-  createIntegrationTestDreamMemoryRetrievalAdapter,
-} from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
-import { DreamMemoryRelayRequestEnvelopeSchema } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
-import type { DreamMemoryRelayOperation } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
+  createIntegrationTestMemoryCorrelationAdapter,
+  createIntegrationTestMemoryRetrievalAdapter,
+} from "../../src/cartridges/memory-fabric/integration-test-adapters.ts";
+import { MemoryRelayRequestEnvelopeSchema } from "../../src/cartridges/memory-fabric/schemas.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
 interface FetchCall {
@@ -32,7 +32,7 @@ const responseFrom = (body: unknown, status = 200): Response =>
 
 const relayResponseFrom = (input: {
   readonly document: unknown;
-  readonly operation: DreamMemoryRelayOperation;
+  readonly operation: MemoryRelayOperation;
   readonly runId: string;
   readonly workItemId: string;
 }): Response =>
@@ -51,7 +51,7 @@ const relayResponseFrom = (input: {
     operation: input.operation,
     redacted: true,
     runId: input.runId,
-    schemaVersion: "dream.memory-relay.response.v1",
+    schemaVersion: "memory.relay.response.v1",
     workItemId: input.workItemId,
   });
 
@@ -77,7 +77,9 @@ const createQueuedFetch = (responses: readonly Response[]) => {
     }
 
     if (typeof init?.body !== "string") {
-      throw new TypeError("Expected Dream relay request body to be JSON text.");
+      throw new TypeError(
+        "Expected Memory relay request body to be JSON text."
+      );
     }
 
     calls.push({
@@ -98,9 +100,8 @@ const parseJson = (value: string): unknown => JSON.parse(value);
 describe("Cloudflare Dream memory fabric relay adapter", () => {
   it("posts Dream retrieval and capture requests to the trusted relay without leaking the relay token into documents", async () => {
     const request = buildIntegrationTestRunRequest();
-    const correlationFixture =
-      createIntegrationTestDreamMemoryCorrelationAdapter();
-    const retrievalFixture = createIntegrationTestDreamMemoryRetrievalAdapter();
+    const correlationFixture = createIntegrationTestMemoryCorrelationAdapter();
+    const retrievalFixture = createIntegrationTestMemoryRetrievalAdapter();
     const captureRunDocument = {
       captureKind: "run" as const,
       capturedAt: "2026-06-09T18:00:00.000Z",
@@ -113,7 +114,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       readability: "actor-private" as const,
       redacted: true as const,
       runId: request.runId,
-      schemaVersion: "dream.capture-receipt.v1" as const,
+      schemaVersion: "memory.capture-receipt.v1" as const,
       sourceSystem: "cloudflare-workflow-run",
       workItemId: request.workItemId,
     };
@@ -128,7 +129,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       readability: "actor-private" as const,
       redacted: true as const,
       runId: request.runId,
-      schemaVersion: "dream.capture-receipt.v1" as const,
+      schemaVersion: "memory.capture-receipt.v1" as const,
       sourceSystem: "cloudflare-artifacts",
       workItemId: request.workItemId,
     };
@@ -201,11 +202,11 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         workItemId: request.workItemId,
       }),
     ]);
-    const adapter = createCloudflareDreamMemoryFabricRelay({
+    const adapter = createCloudflareMemoryFabricRelay({
       fetch: fakeFetch.fetcher,
       relayBaseUrl: "https://memory-relay.joelclaw.local",
       relaySecretRef: "secretref:memory-relay",
-      secretResolver: createCloudflareDreamMemoryRelayTokenResolver({
+      secretResolver: createCloudflareMemoryRelayTokenResolver({
         secret: relayToken,
         secretRef: "secretref:memory-relay",
       }),
@@ -269,7 +270,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       throw new Error(correlationResult.blocker.message);
     }
     const parsedRequestBodies = fakeFetch.calls.map((call) =>
-      DreamMemoryRelayRequestEnvelopeSchema.parse(parseJson(call.body))
+      MemoryRelayRequestEnvelopeSchema.parse(parseJson(call.body))
     );
 
     expect({
@@ -369,11 +370,11 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       relayLeaseStatuses: ["used", "used", "used", "used", "used"],
       requestBodiesLeakToken: false,
       requestSchemas: [
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
-        "dream.memory-relay.request.v1",
+        "memory.relay.request.v1",
+        "memory.relay.request.v1",
+        "memory.relay.request.v1",
+        "memory.relay.request.v1",
+        "memory.relay.request.v1",
       ],
       responseDocumentsLeakToken: false,
       searchHitCount: 2,
@@ -394,8 +395,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
     });
   });
 
-  it("publishes the full Dream memory relay endpoint catalog without direct private substrate paths", () => {
-    expect(dreamMemoryRelayEndpointCatalog).toStrictEqual({
+  it("publishes the full Memory relay endpoint catalog without direct private substrate paths", () => {
+    expect(memoryRelayEndpointCatalog).toStrictEqual({
       endpoints: [
         {
           operation: "capture-artifact",
@@ -422,17 +423,17 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
           path: "/memory/signals",
         },
       ],
-      schemaVersion: "dream.memory-relay.endpoint-catalog.v1",
+      schemaVersion: "memory.relay.endpoint-catalog.v1",
     });
   });
 
   it("blocks before fetch when the configured relay token cannot be resolved", async () => {
     const request = buildIntegrationTestRunRequest();
     const fakeFetch = createQueuedFetch([]);
-    const missingSecretResolver: DreamMemoryRelayTokenSecretResolver = {
+    const missingSecretResolver: MemoryRelayTokenSecretResolver = {
       resolve: () => Promise.resolve(null),
     };
-    const adapter = createCloudflareDreamMemoryFabricRelay({
+    const adapter = createCloudflareMemoryFabricRelay({
       fetch: fakeFetch.fetcher,
       relayBaseUrl: "https://memory-relay.joelclaw.local",
       relaySecretRef: "secretref:memory-relay",
@@ -456,7 +457,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
     }).toStrictEqual({
       blocker: {
         code: "secret_denied",
-        message: "Dream memory relay token is unavailable.",
+        message: "Memory relay token is unavailable.",
         redacted: true,
       },
       fetchCount: 0,

@@ -2,54 +2,54 @@
 
 import type { z } from "zod";
 
-import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
+import type { MemoryRelayOperation } from "../../app/domain/source-profile.ts";
+import { memoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemoryRelayCaptureArtifactPayloadSchema,
-  DreamMemoryRelayCaptureRunPayloadSchema,
-  DreamMemoryRelayCorrelationPayloadSchema,
-  DreamMemoryRelayHydrationPayloadSchema,
-  DreamMemoryRelayRequestEnvelopeSchema,
-  DreamMemoryRelaySearchPayloadSchema,
-  DreamMemoryRelaySignalsPayloadSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamSignalDocumentSchema,
-  dreamMemoryRelayResponseEnvelopeSchema,
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemoryRelayCaptureArtifactPayloadSchema,
+  MemoryRelayCaptureRunPayloadSchema,
+  MemoryRelayCorrelationPayloadSchema,
+  MemoryRelayHydrationPayloadSchema,
+  MemoryRelayRequestEnvelopeSchema,
+  MemoryRelaySearchPayloadSchema,
+  MemoryRelaySignalsPayloadSchema,
+  MemorySearchDocumentSchema,
+  MemorySignalDocumentSchema,
+  memoryRelayResponseEnvelopeSchema,
 } from "./schemas.ts";
 import type {
-  DreamCaptureReceiptDocument,
-  DreamCorrelationGraphDocument,
-  DreamHydrationDocument,
-  DreamMemoryRelayOperation,
-  DreamMemoryRelayRequestEnvelope,
-  DreamMemorySearchDocument,
-  DreamSignalDocument,
+  MemoryCaptureReceiptDocument,
+  MemoryCorrelationGraphDocument,
+  MemoryHydrationDocument,
+  MemoryRelayRequestEnvelope,
+  MemorySearchDocument,
+  MemorySignalDocument,
 } from "./schemas.ts";
 import type {
-  DreamMemoryCapturePort,
-  DreamMemoryCorrelationPort,
-  DreamMemoryFabricResult,
-  DreamMemoryRetrievalPort,
-  DreamMemorySignalPort,
+  MemoryCapturePort,
+  MemoryCorrelationPort,
+  MemoryFabricResult,
+  MemoryRetrievalPort,
+  MemorySignalPort,
 } from "./workflow-node-adapter.ts";
 
-export interface TrustedDreamMemoryRelayServerConfig {
-  readonly dreamMemoryCapture?: DreamMemoryCapturePort;
-  readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
-  readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
-  readonly dreamMemorySignals?: DreamMemorySignalPort;
+export interface TrustedMemoryRelayServerConfig {
+  readonly memoryCapture?: MemoryCapturePort;
+  readonly memoryCorrelation?: MemoryCorrelationPort;
+  readonly memoryRetrieval?: MemoryRetrievalPort;
+  readonly memorySignals?: MemorySignalPort;
   readonly expectedBearerToken: string;
   readonly now?: () => string;
 }
 
-export interface TrustedDreamMemoryRelayRequestInput {
-  readonly config: TrustedDreamMemoryRelayServerConfig;
+export interface TrustedMemoryRelayRequestInput {
+  readonly config: TrustedMemoryRelayServerConfig;
   readonly request: Request;
 }
 
-type SupportedDreamRelayOperation =
+type SupportedMemoryRelayOperation =
   | "capture-artifact"
   | "capture-run"
   | "correlate"
@@ -57,15 +57,15 @@ type SupportedDreamRelayOperation =
   | "search"
   | "signals";
 
-type SupportedDreamRelayDocument =
-  | DreamCaptureReceiptDocument
-  | DreamCorrelationGraphDocument
-  | DreamHydrationDocument
-  | DreamMemorySearchDocument
-  | DreamSignalDocument;
+type SupportedMemoryRelayDocument =
+  | MemoryCaptureReceiptDocument
+  | MemoryCorrelationGraphDocument
+  | MemoryHydrationDocument
+  | MemorySearchDocument
+  | MemorySignalDocument;
 
-const operationPathFor = (operation: DreamMemoryRelayOperation): string =>
-  dreamMemoryRelayEndpointCatalog.endpoints.find(
+const operationPathFor = (operation: MemoryRelayOperation): string =>
+  memoryRelayEndpointCatalog.endpoints.find(
     (endpoint) => endpoint.operation === operation
   )?.path ?? `/memory/${operation}`;
 
@@ -99,11 +99,9 @@ const parseJsonRequest = async (request: Request): Promise<unknown> => {
   }
 };
 
-const operationForRequest = (
-  request: Request
-): DreamMemoryRelayOperation | null => {
+const operationForRequest = (request: Request): MemoryRelayOperation | null => {
   const url = new URL(request.url);
-  const endpoint = dreamMemoryRelayEndpointCatalog.endpoints.find(
+  const endpoint = memoryRelayEndpointCatalog.endpoints.find(
     (candidate) => candidate.path === url.pathname
   );
 
@@ -111,8 +109,8 @@ const operationForRequest = (
 };
 
 const isSupportedOperation = (
-  operation: DreamMemoryRelayOperation
-): operation is SupportedDreamRelayOperation =>
+  operation: MemoryRelayOperation
+): operation is SupportedMemoryRelayOperation =>
   operation === "capture-artifact" ||
   operation === "capture-run" ||
   operation === "correlate" ||
@@ -126,18 +124,18 @@ const unsupportedRetrievalResponse = (
   jsonError(
     501,
     "adapter_unavailable",
-    `Dream memory relay operation ${operation} is not wired to a trusted retrieval adapter yet.`
+    `Memory relay operation ${operation} is not wired to a trusted retrieval adapter yet.`
   );
 
 const responseEnvelope = <
-  TDocument extends SupportedDreamRelayDocument,
+  TDocument extends SupportedMemoryRelayDocument,
 >(input: {
   readonly document: TDocument;
   readonly documentSchema: z.ZodType<TDocument>;
-  readonly envelope: DreamMemoryRelayRequestEnvelope;
+  readonly envelope: MemoryRelayRequestEnvelope;
   readonly now: string;
 }) =>
-  dreamMemoryRelayResponseEnvelopeSchema(input.documentSchema).parse({
+  memoryRelayResponseEnvelopeSchema(input.documentSchema).parse({
     document: input.document,
     followUpLinks: [],
     leaseReceipt: {
@@ -149,15 +147,15 @@ const responseEnvelope = <
     operation: input.envelope.operation,
     redacted: true,
     runId: input.envelope.runId,
-    schemaVersion: "dream.memory-relay.response.v1",
+    schemaVersion: "memory.relay.response.v1",
     workItemId: input.envelope.workItemId,
   });
 
-const resultResponse = <TDocument extends SupportedDreamRelayDocument>(input: {
+const resultResponse = <TDocument extends SupportedMemoryRelayDocument>(input: {
   readonly documentSchema: z.ZodType<TDocument>;
-  readonly envelope: DreamMemoryRelayRequestEnvelope;
+  readonly envelope: MemoryRelayRequestEnvelope;
   readonly now: string;
-  readonly result: DreamMemoryFabricResult<TDocument>;
+  readonly result: MemoryFabricResult<TDocument>;
 }): Response => {
   if (input.result.status === "blocked") {
     return Response.json(
@@ -179,25 +177,24 @@ const resultResponse = <TDocument extends SupportedDreamRelayDocument>(input: {
 };
 
 const dispatchSupportedOperation = async (input: {
-  readonly config: TrustedDreamMemoryRelayServerConfig;
-  readonly envelope: DreamMemoryRelayRequestEnvelope;
-  readonly operation: SupportedDreamRelayOperation;
+  readonly config: TrustedMemoryRelayServerConfig;
+  readonly envelope: MemoryRelayRequestEnvelope;
+  readonly operation: SupportedMemoryRelayOperation;
 }): Promise<Response> => {
   const now = input.config.now?.() ?? new Date().toISOString();
 
   if (input.operation === "search") {
-    if (input.config.dreamMemoryRetrieval === undefined) {
+    if (input.config.memoryRetrieval === undefined) {
       return unsupportedRetrievalResponse("search");
     }
 
-    const payload = DreamMemoryRelaySearchPayloadSchema.parse(
+    const payload = MemoryRelaySearchPayloadSchema.parse(
       input.envelope.payload
     );
-    const result =
-      await input.config.dreamMemoryRetrieval.searchMemories(payload);
+    const result = await input.config.memoryRetrieval.searchMemories(payload);
 
     return resultResponse({
-      documentSchema: DreamMemorySearchDocumentSchema,
+      documentSchema: MemorySearchDocumentSchema,
       envelope: input.envelope,
       now,
       result,
@@ -205,17 +202,17 @@ const dispatchSupportedOperation = async (input: {
   }
 
   if (input.operation === "signals") {
-    if (input.config.dreamMemorySignals === undefined) {
+    if (input.config.memorySignals === undefined) {
       return unsupportedRetrievalResponse("signals");
     }
 
-    const payload = DreamMemoryRelaySignalsPayloadSchema.parse(
+    const payload = MemoryRelaySignalsPayloadSchema.parse(
       input.envelope.payload
     );
-    const result = await input.config.dreamMemorySignals.mineSignals(payload);
+    const result = await input.config.memorySignals.mineSignals(payload);
 
     return resultResponse({
-      documentSchema: DreamSignalDocumentSchema,
+      documentSchema: MemorySignalDocumentSchema,
       envelope: input.envelope,
       now,
       result,
@@ -223,18 +220,17 @@ const dispatchSupportedOperation = async (input: {
   }
 
   if (input.operation === "hydrate") {
-    if (input.config.dreamMemoryRetrieval === undefined) {
+    if (input.config.memoryRetrieval === undefined) {
       return unsupportedRetrievalResponse("hydrate");
     }
 
-    const payload = DreamMemoryRelayHydrationPayloadSchema.parse(
+    const payload = MemoryRelayHydrationPayloadSchema.parse(
       input.envelope.payload
     );
-    const result =
-      await input.config.dreamMemoryRetrieval.hydrateMemories(payload);
+    const result = await input.config.memoryRetrieval.hydrateMemories(payload);
 
     return resultResponse({
-      documentSchema: DreamHydrationDocumentSchema,
+      documentSchema: MemoryHydrationDocumentSchema,
       envelope: input.envelope,
       now,
       result,
@@ -242,18 +238,18 @@ const dispatchSupportedOperation = async (input: {
   }
 
   if (input.operation === "correlate") {
-    if (input.config.dreamMemoryCorrelation === undefined) {
+    if (input.config.memoryCorrelation === undefined) {
       return unsupportedRetrievalResponse("correlate");
     }
 
-    const payload = DreamMemoryRelayCorrelationPayloadSchema.parse(
+    const payload = MemoryRelayCorrelationPayloadSchema.parse(
       input.envelope.payload
     );
     const result =
-      await input.config.dreamMemoryCorrelation.correlateMemories(payload);
+      await input.config.memoryCorrelation.correlateMemories(payload);
 
     return resultResponse({
-      documentSchema: DreamCorrelationGraphDocumentSchema,
+      documentSchema: MemoryCorrelationGraphDocumentSchema,
       envelope: input.envelope,
       now,
       result,
@@ -261,59 +257,62 @@ const dispatchSupportedOperation = async (input: {
   }
 
   if (input.operation === "capture-artifact") {
-    if (input.config.dreamMemoryCapture === undefined) {
+    if (input.config.memoryCapture === undefined) {
       return jsonError(
         501,
         "adapter_unavailable",
-        "Dream memory relay operation capture-artifact is not wired to a trusted capture adapter yet."
+        "Memory relay operation capture-artifact is not wired to a trusted capture adapter yet."
       );
     }
 
-    const payload = DreamMemoryRelayCaptureArtifactPayloadSchema.parse(
+    const payload = MemoryRelayCaptureArtifactPayloadSchema.parse(
       input.envelope.payload
     );
-    const result =
-      await input.config.dreamMemoryCapture.captureArtifact(payload);
+    const result = await input.config.memoryCapture.captureArtifact(payload);
 
     return resultResponse({
-      documentSchema: DreamCaptureReceiptDocumentSchema,
+      documentSchema: MemoryCaptureReceiptDocumentSchema,
       envelope: input.envelope,
       now,
       result,
     });
   }
 
-  if (input.config.dreamMemoryCapture === undefined) {
+  if (input.config.memoryCapture === undefined) {
     return jsonError(
       501,
       "adapter_unavailable",
-      "Dream memory relay operation capture-run is not wired to a trusted capture adapter yet."
+      "Memory relay operation capture-run is not wired to a trusted capture adapter yet."
     );
   }
 
-  const payload = DreamMemoryRelayCaptureRunPayloadSchema.parse(
+  const payload = MemoryRelayCaptureRunPayloadSchema.parse(
     input.envelope.payload
   );
-  const result = await input.config.dreamMemoryCapture.captureRun(payload);
+  const result = await input.config.memoryCapture.captureRun(payload);
 
   return resultResponse({
-    documentSchema: DreamCaptureReceiptDocumentSchema,
+    documentSchema: MemoryCaptureReceiptDocumentSchema,
     envelope: input.envelope,
     now,
     result,
   });
 };
 
-export const handleTrustedDreamMemoryRelayRequest = async (
-  input: TrustedDreamMemoryRelayRequestInput
+export const handleTrustedMemoryRelayRequest = async (
+  input: TrustedMemoryRelayRequestInput
 ): Promise<Response> => {
   if (input.request.method !== "POST") {
-    return jsonError(405, "method_not_allowed", "Dream relay routes use POST.");
+    return jsonError(
+      405,
+      "method_not_allowed",
+      "Memory relay routes use POST."
+    );
   }
 
   const operation = operationForRequest(input.request);
   if (operation === null) {
-    return jsonError(404, "not_found", "Dream memory relay route not found.");
+    return jsonError(404, "not_found", "Memory relay route not found.");
   }
 
   const token = bearerTokenFrom(input.request);
@@ -325,9 +324,9 @@ export const handleTrustedDreamMemoryRelayRequest = async (
     return jsonError(403, "secret_denied", "Invalid relay bearer token.");
   }
 
-  let envelope: DreamMemoryRelayRequestEnvelope;
+  let envelope: MemoryRelayRequestEnvelope;
   try {
-    envelope = DreamMemoryRelayRequestEnvelopeSchema.parse(
+    envelope = MemoryRelayRequestEnvelopeSchema.parse(
       await parseJsonRequest(input.request)
     );
   } catch (error) {
@@ -342,7 +341,7 @@ export const handleTrustedDreamMemoryRelayRequest = async (
     return jsonError(
       400,
       "operation_mismatch",
-      `Dream relay route ${operationPathFor(operation)} received operation ${envelope.operation}.`
+      `Memory relay route ${operationPathFor(operation)} received operation ${envelope.operation}.`
     );
   }
 
@@ -350,7 +349,7 @@ export const handleTrustedDreamMemoryRelayRequest = async (
     return jsonError(
       501,
       "adapter_unavailable",
-      `Dream memory relay operation ${String(operation)} is not wired to a trusted adapter yet.`
+      `Memory relay operation ${String(operation)} is not wired to a trusted adapter yet.`
     );
   }
 

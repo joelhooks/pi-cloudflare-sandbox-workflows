@@ -7,10 +7,10 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import {
-  startTrustedLocalDreamMemoryRelayHttpServer,
-  trustedLocalDreamMemoryRelayHttpConfigFromEnv,
-  TrustedLocalDreamMemoryRelayReadinessReceiptSchema,
-} from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+  startTrustedLocalMemoryRelayHttpServer,
+  trustedLocalMemoryRelayHttpConfigFromEnv,
+  TrustedLocalMemoryRelayReadinessReceiptSchema,
+} from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultLocalRelayStartupEnvPath =
   ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
@@ -30,7 +30,7 @@ export const DreamRelayLocalReadinessProofReceiptSchema = z.object({
     httpStatus: z.literal(200),
     rawCredentialsReturned: z.literal(false),
     rawPathsReturned: z.literal(false),
-    schemaVersion: z.literal("trusted.dream-memory-relay.readiness.v1"),
+    schemaVersion: z.literal("trusted.memory-relay.readiness.v1"),
     sourceRootCount: z.number().int().min(1),
     status: z.literal("passed"),
     supportedOperationCount: z.number().int().min(1),
@@ -125,11 +125,11 @@ const fetchHealthz = async (input: {
 
   if (!response.ok) {
     throw new Error(
-      `Local Dream relay /healthz returned HTTP ${response.status}.`
+      `Local Memory relay /healthz returned HTTP ${response.status}.`
     );
   }
 
-  return TrustedLocalDreamMemoryRelayReadinessReceiptSchema.parse(
+  return TrustedLocalMemoryRelayReadinessReceiptSchema.parse(
     await response.json()
   );
 };
@@ -144,12 +144,12 @@ export const runDreamRelayLocalReadinessCli = async (
     )),
     ...(input.processEnv ?? process.env),
   };
-  const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(startupEnv);
+  const config = trustedLocalMemoryRelayHttpConfigFromEnv(startupEnv);
   const serverConfig = {
     ...config,
     port: args.bindConfiguredPort ? config.port : 0,
   };
-  const relay = await startTrustedLocalDreamMemoryRelayHttpServer(serverConfig);
+  const relay = await startTrustedLocalMemoryRelayHttpServer(serverConfig);
 
   try {
     const readiness = await fetchHealthz({
@@ -211,7 +211,7 @@ if (isMain()) {
             message:
               error instanceof Error
                 ? error.message
-                : "Dream relay local readiness proof failed.",
+                : "Memory relay local readiness proof failed.",
             redacted: true,
           },
           redacted: true,

@@ -3,7 +3,7 @@ import type {
   PackageMetadata,
   WorkflowRunRequest,
 } from "../../src/app/domain/schemas.ts";
-import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 export const integrationTestActor = {
   id: "actor:integration-test-agent",
@@ -81,90 +81,86 @@ export const integrationTestPackageMetadata = [
   },
 ] satisfies PackageMetadata[];
 
-export const integrationTestDreamWorkflowPackageMetadata = {
+export const integrationTestMemoryWorkflowPackageMetadata = {
   description:
-    "Dream memory fabric workflow nodes for run/artifact capture receipts, memory search, redacted hydration, correlation, refinement proposals, HITL reports, HITL decision workflow seeds, and HITL follow-up run request drafts.",
+    "Memory fabric workflow nodes for run/artifact capture receipts, memory search, redacted hydration, correlation, refinement proposals, HITL reports, HITL decision workflow seeds, and HITL follow-up run request drafts.",
   exports: [
     {
       contractRef:
-        "contract://workflow/dream-memory-fabric/source-profile/dream-transcript-review.v1",
+        "contract://workflow/memory-fabric/source-profile/dream-transcript-review.v1",
       exportId: "dream-transcript-review-source-profile",
       kind: "source-profile",
     },
     {
-      contractRef: "contract://workflow/dream-memory-fabric/capture-run.v1",
-      exportId: "dream-capture-run",
+      contractRef: "contract://workflow/memory-fabric/capture-run.v1",
+      exportId: "memory-capture-run",
       kind: "workflow-node",
-      nodeType: "joelclaw.dream.capture-run",
+      nodeType: "joelclaw.memory.capture-run",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/capture-artifact.v1",
+      exportId: "memory-capture-artifact",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.capture-artifact",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/memory-search.v1",
+      exportId: "memory-search",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.search",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/signals.v1",
+      exportId: "memory-signals",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.signals",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/hydration.v1",
+      exportId: "memory-hydration",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.hydrate",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/correlation-graph.v1",
+      exportId: "memory-correlation-graph",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.correlate",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/refinement-proposals.v1",
+      exportId: "memory-refinement-proposals",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.refinement-proposals",
+    },
+    {
+      contractRef: "contract://workflow/memory-fabric/hitl-report.v1",
+      exportId: "memory-hitl-report",
+      kind: "workflow-node",
+      nodeType: "joelclaw.memory.hitl-report",
     },
     {
       contractRef:
-        "contract://workflow/dream-memory-fabric/capture-artifact.v1",
-      exportId: "dream-capture-artifact",
+        "contract://workflow/memory-fabric/hitl-decision-workflow-seed.v1",
+      exportId: "memory-hitl-decision-workflow-seed",
       kind: "workflow-node",
-      nodeType: "joelclaw.dream.capture-artifact",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/memory-search.v1",
-      exportId: "dream-memory-search",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.memory-search",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/signals.v1",
-      exportId: "dream-signals",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.signals",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/hydration.v1",
-      exportId: "dream-hydration",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.hydrate",
+      nodeType: "joelclaw.memory.hitl-decision-seed",
     },
     {
       contractRef:
-        "contract://workflow/dream-memory-fabric/correlation-graph.v1",
-      exportId: "dream-correlation-graph",
+        "contract://workflow/memory-fabric/hitl-follow-up-run-request.v1",
+      exportId: "memory-hitl-follow-up-run-request",
       kind: "workflow-node",
-      nodeType: "joelclaw.dream.correlate",
-    },
-    {
-      contractRef:
-        "contract://workflow/dream-memory-fabric/refinement-proposals.v1",
-      exportId: "dream-refinement-proposals",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.refinement-proposals",
-    },
-    {
-      contractRef: "contract://workflow/dream-memory-fabric/hitl-report.v1",
-      exportId: "dream-hitl-report",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.hitl-report",
-    },
-    {
-      contractRef:
-        "contract://workflow/dream-memory-fabric/hitl-decision-workflow-seed.v1",
-      exportId: "dream-hitl-decision-workflow-seed",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.hitl-decision-seed",
-    },
-    {
-      contractRef:
-        "contract://workflow/dream-memory-fabric/hitl-follow-up-run-request.v1",
-      exportId: "dream-hitl-follow-up-run-request",
-      kind: "workflow-node",
-      nodeType: "joelclaw.dream.hitl-follow-up-run-request",
+      nodeType: "joelclaw.memory.hitl-follow-up-run-request",
     },
   ],
   kind: "workflow-pack",
-  latestArtifactRef:
-    "artifact://packages/workflows/dream-memory-fabric/refs/v1",
+  latestArtifactRef: "artifact://packages/workflows/memory-fabric/refs/v1",
   latestVersion: "0.1.0",
   manifestPath: "package.json",
   ownerRef: "org:joelhooks",
-  packageId: "workflow/dream-memory-fabric",
-  title: "Dream Memory Fabric Workflow",
+  packageId: "workflow/memory-fabric",
+  title: "Memory Fabric Workflow",
   trustTier: "reviewed",
 } satisfies PackageMetadata;
 
@@ -201,13 +197,13 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
       ...request.planProposal,
       requestedPackageIds: [
         ...request.planProposal.requestedPackageIds,
-        integrationTestDreamWorkflowPackageMetadata.packageId,
+        integrationTestMemoryWorkflowPackageMetadata.packageId,
       ],
       stochasticNotes: [
         ...request.planProposal.stochasticNotes,
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        `Generated Dream retrieval steps must declare dreamCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        "Generated Dream planning steps must declare dreamSourcePackDispositions for every advertised source pack, including requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs.",
+        `Generated Dream retrieval steps must declare memoryCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
+        "Generated Dream planning steps must declare memorySourcePackDispositions for every advertised source pack, including requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs.",
       ],
     },
     workItemId: "work-item:integration-test-dream",

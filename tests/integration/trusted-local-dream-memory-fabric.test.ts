@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
-import { createTrustedLocalDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts";
-import type { DreamMemoryFabricResult } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
+import { createTrustedLocalMemoryFabricAdapter } from "../../src/cartridges/memory-fabric/trusted-local-memory-fabric.ts";
+import type { MemoryFabricResult } from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
 
 const timestamp = "2026-06-09T19:45:00.000Z";
 
@@ -16,7 +16,7 @@ const actor: Actor = {
 };
 
 const readyDocument = <TDocument>(
-  result: DreamMemoryFabricResult<TDocument>
+  result: MemoryFabricResult<TDocument>
 ): TDocument => {
   if (result.status === "blocked") {
     throw new Error(result.blocker.message);
@@ -28,7 +28,7 @@ const readyDocument = <TDocument>(
 describe("trusted local Dream memory fabric", () => {
   it("captures run and artifact receipts with redacted refs and no raw local paths", async () => {
     const rawLocalPath = "/Users/joel/.pi/agent/sessions";
-    const adapter = createTrustedLocalDreamMemoryFabricAdapter({
+    const adapter = createTrustedLocalMemoryFabricAdapter({
       now: () => timestamp,
       sourceRoots: [
         {
@@ -90,9 +90,12 @@ describe("trusted local Dream memory fabric", () => {
       runCaptureKind: "run",
       runCapturedAt: timestamp,
       runCapturedRef:
-        "artifact://trusted-dream-memory-relay/captures/cloudflare-workflow-run/runs/run%3Atrusted-local-dream.json",
+        "artifact://trusted-memory-relay/captures/cloudflare-workflow-run/runs/run%3Atrusted-local-dream.json",
       runRedacted: true,
-      schemaVersions: ["dream.capture-receipt.v1", "dream.capture-receipt.v1"],
+      schemaVersions: [
+        "memory.capture-receipt.v1",
+        "memory.capture-receipt.v1",
+      ],
     });
   });
 });

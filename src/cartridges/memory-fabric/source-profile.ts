@@ -1,11 +1,11 @@
-import { DreamSourceProfileSchema } from "./schemas.ts";
+import { MemorySourceProfileSchema } from "../../app/domain/source-profile.ts";
 import type {
-  DreamCoverageHorizon,
-  DreamMemoryRelayOperation,
-  DreamRuntime,
-  DreamSourceFamily,
-  DreamSourcePack,
-} from "./schemas.ts";
+  MemoryCoverageHorizon,
+  MemoryRelayOperation,
+  MemoryRuntime,
+  MemorySourceFamily,
+  MemorySourcePack,
+} from "../../app/domain/source-profile.ts";
 
 export const dreamTranscriptReviewSourceFamilies = [
   "agent-transcripts",
@@ -13,14 +13,14 @@ export const dreamTranscriptReviewSourceFamilies = [
   "cloudflare-runs",
   "docs-pdf-brain",
   "repo-outputs",
-] as const satisfies readonly DreamSourceFamily[];
+] as const satisfies readonly MemorySourceFamily[];
 
 export const dreamTranscriptReviewRequiredRuntimes = [
   "pi",
   "codex",
   "claude",
   "cloudflare",
-] as const satisfies readonly DreamRuntime[];
+] as const satisfies readonly MemoryRuntime[];
 
 export const dreamTranscriptReviewRelayOperations = [
   "capture-run",
@@ -29,7 +29,7 @@ export const dreamTranscriptReviewRelayOperations = [
   "search",
   "hydrate",
   "correlate",
-] as const satisfies readonly DreamMemoryRelayOperation[];
+] as const satisfies readonly MemoryRelayOperation[];
 
 export const dreamTranscriptReviewTimeHorizons = [
   "24h",
@@ -37,7 +37,7 @@ export const dreamTranscriptReviewTimeHorizons = [
   "30d",
   "quarter",
   "all-time",
-] as const satisfies readonly DreamCoverageHorizon[];
+] as const satisfies readonly MemoryCoverageHorizon[];
 
 export const dreamTranscriptReviewSourcePacks = [
   {
@@ -81,10 +81,10 @@ export const dreamTranscriptReviewSourcePacks = [
     surfaces: ["brain", "front", "slack", "org-project-graph"],
     title: "AIHero Support Sweep Source Pack Candidate",
   },
-] as const satisfies readonly DreamSourcePack[];
+] as const satisfies readonly MemorySourcePack[];
 
 export const dreamTranscriptReviewSourceProfile =
-  DreamSourceProfileSchema.parse({
+  MemorySourceProfileSchema.parse({
     allowedRelayOperations: [...dreamTranscriptReviewRelayOperations],
     defaultQuery: "dream workflow",
     outputBoundary: {
@@ -93,12 +93,12 @@ export const dreamTranscriptReviewSourceProfile =
       noRawPrivatePaths: true,
       noRawTranscripts: true,
     },
-    packageId: "workflow/dream-memory-fabric",
+    packageId: "workflow/memory-fabric",
     profileId: "joelhooks/dream-transcript-review",
     purpose:
       "Review agent transcripts and adjacent agent-run artifacts across the JoelClaw network, then surface source-backed kernel/package/workflow refinements.",
     requiredRuntimes: [...dreamTranscriptReviewRequiredRuntimes],
-    schemaVersion: "dream.source-profile.v1",
+    schemaVersion: "memory.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],
     sourcePacks: [...dreamTranscriptReviewSourcePacks],
     timeHorizons: [...dreamTranscriptReviewTimeHorizons],

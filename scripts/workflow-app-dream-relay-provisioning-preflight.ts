@@ -7,8 +7,8 @@ import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
 
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
-import { trustedLocalDreamMemoryRelayHttpConfigFromEnv } from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultLivePreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
@@ -22,7 +22,7 @@ const defaultReceiptPath =
   ".wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json";
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
 const exactSignoffAction =
-  "Get explicit owner sign-off for exposing the trusted Dream relay over a new network boundary.";
+  "Get explicit owner sign-off for exposing the trusted Memory relay over a new network boundary.";
 const invalidSignoffAction =
   "Recorded relay exposure sign-off did not match the required phrase; provide the exact sign-off phrase before provisioning.";
 const localRelaySourceRootsAction =
@@ -276,7 +276,7 @@ const LocalRelayReadinessProofSchema = z.object({
     httpStatus: z.literal(200),
     rawCredentialsReturned: z.literal(false),
     rawPathsReturned: z.literal(false),
-    schemaVersion: z.literal("trusted.dream-memory-relay.readiness.v1"),
+    schemaVersion: z.literal("trusted.memory-relay.readiness.v1"),
     sourceRootCount: z.number().int().min(1),
     status: z.literal("passed"),
     supportedOperationCount: z.number().int().min(1),
@@ -585,7 +585,7 @@ const localRelayStartupSummary = (
   }
 
   try {
-    const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(env);
+    const config = trustedLocalMemoryRelayHttpConfigFromEnv(env);
 
     return {
       ...summaryMetadata,
@@ -910,8 +910,8 @@ const buildProvisioningPlan = (input: {
         blockedBy: baseBlockers,
         commandTemplate: "pnpm app:dream:relay",
         description:
-          "Start the trusted Dream relay bound to localhost with approved source roots and a non-printed token.",
-        expectedReceipt: "trusted.dream-memory-relay.readiness.v1",
+          "Start the trusted Memory relay bound to localhost with approved source roots and a non-printed token.",
+        expectedReceipt: "trusted.memory-relay.readiness.v1",
         requiresSignoff: true,
         sideEffectClass: "local-process",
         stepId: "start-local-trusted-relay",
@@ -1164,7 +1164,7 @@ if (isMain()) {
             message:
               error instanceof Error
                 ? error.message
-                : "Dream relay provisioning preflight failed.",
+                : "Memory relay provisioning preflight failed.",
             redacted: true,
           },
           redacted: true,

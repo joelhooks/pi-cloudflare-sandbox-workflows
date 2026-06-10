@@ -5,24 +5,24 @@ import type { PackageSeedTemplate } from "../app/infrastructure/cloudflare-packa
 import { combineCloudflareWorkflowCartridgeDependencies } from "../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import type { CloudflareWorkflowCartridgeDependencies } from "../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import {
-  DreamMemoryFabricCloudflareEnvBindingSchema,
-  dreamMemoryFabricCloudflareCartridgeInstaller,
-} from "./dream-memory-fabric/cloudflare-installer.ts";
-import { dreamMemoryFabricPackageSeedTemplate } from "./dream-memory-fabric/package-seed.ts";
+  MemoryFabricCloudflareEnvBindingSchema,
+  memoryFabricCloudflareCartridgeInstaller,
+} from "./memory-fabric/cloudflare-installer.ts";
+import { memoryFabricPackageSeedTemplate } from "./memory-fabric/package-seed.ts";
 
 export const InstalledWorkflowCartridgeEnvBindingSchema =
-  DreamMemoryFabricCloudflareEnvBindingSchema;
+  MemoryFabricCloudflareEnvBindingSchema;
 
 export type InstalledWorkflowCartridgeEnvBindings = z.infer<
   typeof InstalledWorkflowCartridgeEnvBindingSchema
 >;
 
 export const installedCloudflareWorkflowCartridgeInstallers = [
-  dreamMemoryFabricCloudflareCartridgeInstaller,
+  memoryFabricCloudflareCartridgeInstaller,
 ] as const;
 
 export const installedWorkflowCartridgePackageSeedTemplates = [
-  dreamMemoryFabricPackageSeedTemplate,
+  memoryFabricPackageSeedTemplate,
 ] as const satisfies readonly PackageSeedTemplate[];
 
 export const defaultPackageSeedTemplatesWithInstalledCartridges = [

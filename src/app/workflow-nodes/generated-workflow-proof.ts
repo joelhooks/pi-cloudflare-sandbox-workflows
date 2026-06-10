@@ -1,8 +1,15 @@
+import { z } from "zod";
+
 import type {
   ArtifactStoreContract,
   WorkflowPostExecutionArtifactRecorderPort,
-} from "../../app/application/ports.ts";
-import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
+} from "../application/ports.ts";
+import { hashJson, sha256Hex } from "../domain/hash.ts";
+import {
+  ArtifactRefSchema,
+  IsoDateTimeSchema,
+  Sha256HexSchema,
+} from "../domain/schemas.ts";
 import type {
   ArtifactRef,
   CapabilityBlocker,
@@ -12,41 +19,124 @@ import type {
   GeneratedHarnessArtifact,
   PlanArtifact,
   WorkflowExecutionProofDocument,
-} from "../../app/domain/schemas.ts";
+} from "../domain/schemas.ts";
 import {
-  DreamCoverageHorizonSchema,
-  DreamGeneratedWorkflowProofDocumentSchema,
-  DreamHitlReportDocumentSchema,
-  DreamMemoryFabricNodeTypeSchema,
-  DreamSourcePackDispositionSchema,
-  DreamWorkflowEffectSchema,
-} from "./schemas.ts";
+  MemoryCoverageHorizonSchema,
+  MemoryFabricNodeTypeSchema,
+  MemoryRelayOperationSchema,
+  MemoryRuntimeSchema,
+  MemorySourceFamilySchema,
+  MemorySourcePackDispositionSchema,
+  MemorySourcePackSchema,
+  MemoryWorkflowEffectSchema,
+} from "../domain/source-profile.ts";
 import type {
-  DreamCoverageHorizon,
-  DreamGeneratedWorkflowProofDocument,
-  DreamMemoryFabricNodeType,
-  DreamSourcePack,
-  DreamSourcePackDisposition,
-  DreamSourceProfile,
-  DreamWorkflowEffect,
-} from "./schemas.ts";
+  MemoryCoverageHorizon,
+  MemoryFabricNodeType,
+  MemorySourcePack,
+  MemorySourcePackDisposition,
+  MemorySourceProfile,
+  MemoryWorkflowEffect,
+} from "../domain/source-profile.ts";
 
-export interface DreamGeneratedWorkflowAdditionalProofCheck {
+export const MemoryGeneratedWorkflowProofCheckSchema = z.object({
+  checkId: z.string().min(1),
+  evidenceRefs: z.array(ArtifactRefSchema).default([]),
+  status: z.enum(["failed", "passed"]),
+  summary: z.string().min(1),
+});
+
+export const MemoryGeneratedWorkflowProofDocumentSchema = z.object({
+  checks: z.array(MemoryGeneratedWorkflowProofCheckSchema).min(1),
+  completedStepIds: z.array(z.string().min(1)),
+  effectCoverage: z.object({
+    coveredEffects: z.array(MemoryWorkflowEffectSchema),
+    requiredEffects: z.array(MemoryWorkflowEffectSchema).min(1),
+  }),
+  executionProofRef: ArtifactRefSchema,
+  executionProofStatus: z.string().min(1),
+  failures: z.array(z.string().min(1)).default([]),
+  generatedAt: IsoDateTimeSchema,
+  generatedStateSequence: z.array(z.string().min(1)).min(1),
+  harnessArtifact: z.object({
+    artifactRef: ArtifactRefSchema,
+    entrypoint: z.literal("workflows/harness.ts"),
+    harnessId: z.string().min(1),
+    hash: Sha256HexSchema,
+    language: z.literal("typescript"),
+  }),
+  horizonCoverage: z.object({
+    coveredHorizons: z.array(MemoryCoverageHorizonSchema),
+    requiredHorizons: z.array(MemoryCoverageHorizonSchema).min(1),
+  }),
+  machineArtifact: z.object({
+    artifactRef: ArtifactRefSchema,
+    hash: Sha256HexSchema,
+    machineId: z.string().min(1),
+    sourceArtifactRef: ArtifactRefSchema,
+    sourceHash: Sha256HexSchema,
+  }),
+  nodeTypes: z.array(MemoryFabricNodeTypeSchema),
+  packageRef: ArtifactRefSchema,
+  planArtifact: z.object({
+    artifactRef: ArtifactRefSchema,
+    hash: Sha256HexSchema,
+    pinnedAt: IsoDateTimeSchema,
+    runId: z.string().min(1),
+  }),
+  plannerPromptRef: ArtifactRefSchema,
+  plannerTranscriptRef: ArtifactRefSchema,
+  proofId: z.string().min(1),
+  rawTranscriptsReturned: z.literal(false),
+  redacted: z.literal(true),
+  relayLeaseReceiptRefs: z.array(ArtifactRefSchema).default([]),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("memory.generated-workflow-proof.v1"),
+  sourcePackDisposition: z.object({
+    dispositionCount: z.number().int().min(0),
+    dispositions: z.array(MemorySourcePackDispositionSchema).default([]),
+    expectedPackIds: z.array(z.string().min(1)).default([]),
+    missingPackIds: z.array(z.string().min(1)).default([]),
+    unexpectedPackIds: z.array(z.string().min(1)).default([]),
+  }),
+  sourceProfile: z.object({
+    allowedRelayOperations: z.array(MemoryRelayOperationSchema).min(1),
+    hash: Sha256HexSchema,
+    packageExportId: z.string().min(1),
+    packageId: z.string().min(1),
+    profileId: z.string().min(1),
+    requiredRuntimes: z.array(MemoryRuntimeSchema).min(1),
+    sourceFamiliesExpected: z.array(MemorySourceFamilySchema).min(1),
+    sourcePacks: z.array(MemorySourcePackSchema).default([]),
+    timeHorizons: z.array(MemoryCoverageHorizonSchema).min(1),
+    workflowId: z.string().min(1),
+  }),
+  status: z.enum(["failed", "verified"]),
+  stepCount: z.number().int().min(1),
+  stepIds: z.array(z.string().min(1)).min(1),
+  workItemId: z.string().min(1),
+});
+
+export type MemoryGeneratedWorkflowProofDocument = z.infer<
+  typeof MemoryGeneratedWorkflowProofDocumentSchema
+>;
+
+export interface MemoryGeneratedWorkflowAdditionalProofCheck {
   readonly checkId: string;
   readonly evidenceRefs: ArtifactRef[];
   readonly passed: boolean;
   readonly summary: string;
 }
 
-type ProofCheck = DreamGeneratedWorkflowAdditionalProofCheck;
+type ProofCheck = MemoryGeneratedWorkflowAdditionalProofCheck;
 
-export interface VerifyDreamGeneratedWorkflowInput {
+export interface VerifyMemoryGeneratedWorkflowInput {
   readonly executionProof: WorkflowExecutionProofDocument;
   readonly executionProofRef: ArtifactRef;
   readonly expectedPackageRef: ArtifactRef;
-  readonly expectedSourceProfile: DreamSourceProfile;
+  readonly expectedSourceProfile: MemorySourceProfile;
   readonly expectedSourceProfileExportId: string;
-  readonly extraChecks?: readonly DreamGeneratedWorkflowAdditionalProofCheck[];
+  readonly extraChecks?: readonly MemoryGeneratedWorkflowAdditionalProofCheck[];
   readonly generatedAt?: string;
   readonly harnessArtifact: GeneratedHarnessArtifact;
   readonly harnessSource: string;
@@ -57,63 +147,46 @@ export interface VerifyDreamGeneratedWorkflowInput {
   readonly planArtifact: PlanArtifact;
 }
 
-export interface DreamGeneratedWorkflowProofRecorderConfig {
+export interface MemoryGeneratedWorkflowProofRecorderConfig {
   readonly artifacts: ArtifactStoreContract;
+  readonly buildAdditionalProofChecks?: (input: {
+    readonly executionProof: WorkflowExecutionProofDocument;
+    readonly plan: DynamicWorkflowPlanDocument;
+  }) => Promise<readonly MemoryGeneratedWorkflowAdditionalProofCheck[]>;
   readonly expectedPackageRef: ArtifactRef;
-  readonly expectedSourceProfile: DreamSourceProfile;
+  readonly expectedSourceProfile: MemorySourceProfile;
   readonly expectedSourceProfileExportId: string;
   readonly now?: () => string;
 }
 
-const isRelayBackedDreamNodeType = (
-  nodeType: DreamMemoryFabricNodeType
-): boolean =>
-  nodeType !== "joelclaw.dream.hitl-follow-up-run-request" &&
-  nodeType !== "joelclaw.dream.hitl-decision-seed" &&
-  nodeType !== "joelclaw.dream.hitl-report" &&
-  nodeType !== "joelclaw.dream.refinement-proposals";
+const isRelayBackedMemoryNodeType = (nodeType: MemoryFabricNodeType): boolean =>
+  nodeType !== "joelclaw.memory.hitl-follow-up-run-request" &&
+  nodeType !== "joelclaw.memory.hitl-decision-seed" &&
+  nodeType !== "joelclaw.memory.hitl-report" &&
+  nodeType !== "joelclaw.memory.refinement-proposals";
 
-const dreamNodeTypeEffects = {
-  "joelclaw.dream.capture-artifact": ["capture-artifact"],
-  "joelclaw.dream.capture-run": ["capture-run"],
-  "joelclaw.dream.correlate": ["correlate"],
-  "joelclaw.dream.hitl-decision-seed": ["hitl-decision-seed"],
-  "joelclaw.dream.hitl-follow-up-run-request": ["hitl-follow-up-run-request"],
-  "joelclaw.dream.hitl-report": ["hitl-report"],
-  "joelclaw.dream.hydrate": ["hydrate"],
-  "joelclaw.dream.memory-search": ["search"],
-  "joelclaw.dream.refinement-proposals": ["refinement-proposals"],
-  "joelclaw.dream.signals": ["signals"],
+const memoryNodeTypeEffects = {
+  "joelclaw.memory.capture-artifact": ["capture-artifact"],
+  "joelclaw.memory.capture-run": ["capture-run"],
+  "joelclaw.memory.correlate": ["correlate"],
+  "joelclaw.memory.hitl-decision-seed": ["hitl-decision-seed"],
+  "joelclaw.memory.hitl-follow-up-run-request": ["hitl-follow-up-run-request"],
+  "joelclaw.memory.hitl-report": ["hitl-report"],
+  "joelclaw.memory.hydrate": ["hydrate"],
+  "joelclaw.memory.refinement-proposals": ["refinement-proposals"],
+  "joelclaw.memory.search": ["search"],
+  "joelclaw.memory.signals": ["signals"],
 } as const satisfies Record<
-  DreamMemoryFabricNodeType,
-  readonly DreamWorkflowEffect[]
+  MemoryFabricNodeType,
+  readonly MemoryWorkflowEffect[]
 >;
 
-const requiredDreamOutputEffects = [
+const requiredMemoryOutputEffects = [
   "refinement-proposals",
   "hitl-decision-seed",
   "hitl-follow-up-run-request",
   "hitl-report",
-] as const satisfies readonly DreamWorkflowEffect[];
-
-const requiredReportAuditRequirementIds = [
-  "dream-cartridge-package",
-  "worker-facing-relay-capability-lease",
-  "live-cloudflare-execution",
-  "generated-machine-and-harness",
-  "t-shaped-memory-coverage",
-  "dreams-and-refinement-proposals",
-  "hitl-refinement-loop",
-  "workflow-owned-wzrrd-output",
-  "public-private-redaction-boundary",
-] as const;
-
-const reportAuditPostReportRequirementIds = [
-  "worker-facing-relay-capability-lease",
-  "live-cloudflare-execution",
-  "hitl-refinement-loop",
-  "workflow-owned-wzrrd-output",
-] as const;
+] as const satisfies readonly MemoryWorkflowEffect[];
 
 type DynamicWorkflowStep = DynamicWorkflowPlanDocument["steps"][number];
 
@@ -144,7 +217,7 @@ const checkDocument = (input: ProofCheck) => ({
 
 const sourceProfileFingerprint = (input: {
   readonly exportId: string;
-  readonly profile: DreamSourceProfile;
+  readonly profile: MemorySourceProfile;
 }) => ({
   allowedRelayOperations: input.profile.allowedRelayOperations,
   hash: hashJson(input.profile),
@@ -160,7 +233,7 @@ const sourceProfileFingerprint = (input: {
 
 const planMentionsSourceProfile = (input: {
   readonly plan: DynamicWorkflowPlanDocument;
-  readonly profile: DreamSourceProfile;
+  readonly profile: MemorySourceProfile;
 }): boolean => {
   const serializedProposal = [
     input.plan.proposal.intent,
@@ -181,84 +254,84 @@ const planMentionsSourceProfile = (input: {
   );
 };
 
-const dreamEffectOrder = (effect: DreamWorkflowEffect): number =>
-  DreamWorkflowEffectSchema.options.indexOf(effect);
+const memoryEffectOrder = (effect: MemoryWorkflowEffect): number =>
+  MemoryWorkflowEffectSchema.options.indexOf(effect);
 
-const uniqueDreamEffects = (
-  effects: readonly DreamWorkflowEffect[]
-): DreamWorkflowEffect[] =>
+const uniqueMemoryEffects = (
+  effects: readonly MemoryWorkflowEffect[]
+): MemoryWorkflowEffect[] =>
   [...new Set(effects)].toSorted(
-    (left, right) => dreamEffectOrder(left) - dreamEffectOrder(right)
+    (left, right) => memoryEffectOrder(left) - memoryEffectOrder(right)
   );
 
-const declaredDreamEffectsFor = (
+const declaredMemoryEffectsFor = (
   step: DynamicWorkflowStep
-): DreamWorkflowEffect[] => {
+): MemoryWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
   }
 
-  const declaredEffects = step.config["dreamEffects"];
+  const declaredEffects = step.config["memoryEffects"];
   if (!Array.isArray(declaredEffects)) {
     return [];
   }
 
-  return uniqueDreamEffects(
+  return uniqueMemoryEffects(
     declaredEffects.flatMap((declaredEffect) => {
-      const parsed = DreamWorkflowEffectSchema.safeParse(declaredEffect);
+      const parsed = MemoryWorkflowEffectSchema.safeParse(declaredEffect);
 
       return parsed.success ? [parsed.data] : [];
     })
   );
 };
 
-const dreamCoverageHorizonOrder = (horizon: DreamCoverageHorizon): number =>
-  DreamCoverageHorizonSchema.options.indexOf(horizon);
+const memoryCoverageHorizonOrder = (horizon: MemoryCoverageHorizon): number =>
+  MemoryCoverageHorizonSchema.options.indexOf(horizon);
 
-const uniqueDreamCoverageHorizons = (
-  horizons: readonly DreamCoverageHorizon[]
-): DreamCoverageHorizon[] =>
+const uniqueMemoryCoverageHorizons = (
+  horizons: readonly MemoryCoverageHorizon[]
+): MemoryCoverageHorizon[] =>
   [...new Set(horizons)].toSorted(
     (left, right) =>
-      dreamCoverageHorizonOrder(left) - dreamCoverageHorizonOrder(right)
+      memoryCoverageHorizonOrder(left) - memoryCoverageHorizonOrder(right)
   );
 
-const dreamCoverageHorizonsFor = (
+const memoryCoverageHorizonsFor = (
   step: DynamicWorkflowStep
-): DreamCoverageHorizon[] => {
+): MemoryCoverageHorizon[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
   }
 
-  const declaredHorizons = step.config["dreamCoverageHorizons"];
+  const declaredHorizons = step.config["memoryCoverageHorizons"];
   if (!Array.isArray(declaredHorizons)) {
     return [];
   }
 
-  return uniqueDreamCoverageHorizons(
+  return uniqueMemoryCoverageHorizons(
     declaredHorizons.flatMap((declaredHorizon) => {
-      const parsed = DreamCoverageHorizonSchema.safeParse(declaredHorizon);
+      const parsed = MemoryCoverageHorizonSchema.safeParse(declaredHorizon);
 
       return parsed.success ? [parsed.data] : [];
     })
   );
 };
 
-const dreamSourcePackDispositionsFor = (
+const memorySourcePackDispositionsFor = (
   step: DynamicWorkflowStep
-): DreamSourcePackDisposition[] => {
+): MemorySourcePackDisposition[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
   }
 
-  const declaredDispositions = step.config["dreamSourcePackDispositions"];
+  const declaredDispositions = step.config["memorySourcePackDispositions"];
   if (!Array.isArray(declaredDispositions)) {
     return [];
   }
 
   return declaredDispositions.flatMap((declaredDisposition) => {
     const parsed =
-      DreamSourcePackDispositionSchema.safeParse(declaredDisposition);
+      MemorySourcePackDispositionSchema.safeParse(declaredDisposition);
 
     return parsed.success ? [parsed.data] : [];
   });
@@ -266,10 +339,10 @@ const dreamSourcePackDispositionsFor = (
 
 const sourcePackDispositionsFor = (
   plan: DynamicWorkflowPlanDocument
-): DreamSourcePackDisposition[] => {
-  const dispositionByPackId = new Map<string, DreamSourcePackDisposition>();
+): MemorySourcePackDisposition[] => {
+  const dispositionByPackId = new Map<string, MemorySourcePackDisposition>();
   for (const disposition of plan.steps.flatMap(
-    dreamSourcePackDispositionsFor
+    memorySourcePackDispositionsFor
   )) {
     if (!dispositionByPackId.has(disposition.packId)) {
       dispositionByPackId.set(disposition.packId, disposition);
@@ -280,16 +353,16 @@ const sourcePackDispositionsFor = (
 };
 
 const capabilityKindsCoverPack = (input: {
-  readonly disposition: DreamSourcePackDisposition;
-  readonly pack: DreamSourcePack;
+  readonly disposition: MemorySourcePackDisposition;
+  readonly pack: MemorySourcePack;
 }): boolean =>
   input.pack.requiredCapabilityKinds.every((capabilityKind) =>
     input.disposition.capabilityKinds.includes(capabilityKind)
   );
 
 const missingCapabilityKindsForPack = (input: {
-  readonly disposition: DreamSourcePackDisposition;
-  readonly pack: DreamSourcePack;
+  readonly disposition: MemorySourcePackDisposition;
+  readonly pack: MemorySourcePack;
 }): string[] =>
   input.pack.requiredCapabilityKinds.filter(
     (capabilityKind) =>
@@ -297,8 +370,8 @@ const missingCapabilityKindsForPack = (input: {
   );
 
 const dispositionMatchesPack = (input: {
-  readonly disposition: DreamSourcePackDisposition;
-  readonly pack: DreamSourcePack;
+  readonly disposition: MemorySourcePackDisposition;
+  readonly pack: MemorySourcePack;
 }): boolean =>
   input.disposition.packageId === input.pack.packageId &&
   input.disposition.selectionPolicy === input.pack.selectionPolicy &&
@@ -313,8 +386,8 @@ const dispositionMatchesPack = (input: {
   sameItemsInOrder(input.disposition.surfaces, input.pack.surfaces);
 
 const dispositionStatusMatchesPolicy = (input: {
-  readonly disposition: DreamSourcePackDisposition;
-  readonly pack: DreamSourcePack;
+  readonly disposition: MemorySourcePackDisposition;
+  readonly pack: MemorySourcePack;
 }): boolean => {
   if (!dispositionMatchesPack(input)) {
     return false;
@@ -346,8 +419,8 @@ const dispositionStatusMatchesPolicy = (input: {
 };
 
 const sourcePackDispositionSummaryFor = (input: {
-  readonly dispositions: readonly DreamSourcePackDisposition[];
-  readonly sourcePacks: readonly DreamSourcePack[];
+  readonly dispositions: readonly MemorySourcePackDisposition[];
+  readonly sourcePacks: readonly MemorySourcePack[];
 }) => {
   const expectedPackIds = input.sourcePacks.map((pack) => pack.packId);
   const declaredPackIds = input.dispositions.map(
@@ -368,8 +441,8 @@ const sourcePackDispositionSummaryFor = (input: {
 };
 
 const generatedPlanDisposesSourcePacks = (input: {
-  readonly dispositions: readonly DreamSourcePackDisposition[];
-  readonly sourcePacks: readonly DreamSourcePack[];
+  readonly dispositions: readonly MemorySourcePackDisposition[];
+  readonly sourcePacks: readonly MemorySourcePack[];
 }): boolean => {
   const dispositionByPackId = new Map(
     input.dispositions.map((disposition) => [disposition.packId, disposition])
@@ -390,38 +463,38 @@ const generatedPlanDisposesSourcePacks = (input: {
   );
 };
 
-const dreamEffectsFor = (step: DynamicWorkflowStep): DreamWorkflowEffect[] => {
+const memoryEffectsFor = (
+  step: DynamicWorkflowStep
+): MemoryWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
   }
 
-  const parsedNodeType = DreamMemoryFabricNodeTypeSchema.safeParse(
-    step.nodeType
-  );
+  const parsedNodeType = MemoryFabricNodeTypeSchema.safeParse(step.nodeType);
 
-  return uniqueDreamEffects([
-    ...declaredDreamEffectsFor(step),
+  return uniqueMemoryEffects([
+    ...declaredMemoryEffectsFor(step),
     ...(parsedNodeType.success
-      ? dreamNodeTypeEffects[parsedNodeType.data]
+      ? memoryNodeTypeEffects[parsedNodeType.data]
       : []),
   ]);
 };
 
-const requiredDreamEffectsFor = (
-  profile: DreamSourceProfile
-): DreamWorkflowEffect[] =>
-  uniqueDreamEffects([
+const requiredMemoryEffectsFor = (
+  profile: MemorySourceProfile
+): MemoryWorkflowEffect[] =>
+  uniqueMemoryEffects([
     ...profile.allowedRelayOperations,
-    ...requiredDreamOutputEffects,
+    ...requiredMemoryOutputEffects,
   ]);
 
-const generatedPlanCoversDreamEffects = (input: {
+const generatedPlanCoversMemoryEffects = (input: {
   readonly expectedPackageRef: ArtifactRef;
   readonly plan: DynamicWorkflowPlanDocument;
-  readonly requiredEffects: readonly DreamWorkflowEffect[];
+  readonly requiredEffects: readonly MemoryWorkflowEffect[];
 }): boolean => {
-  const coveredEffects = uniqueDreamEffects(
-    input.plan.steps.flatMap(dreamEffectsFor)
+  const coveredEffects = uniqueMemoryEffects(
+    input.plan.steps.flatMap(memoryEffectsFor)
   );
 
   return (
@@ -429,15 +502,15 @@ const generatedPlanCoversDreamEffects = (input: {
       (step) =>
         step.kind === "workflow.node.invoke" &&
         step.packageRefs.includes(input.expectedPackageRef) &&
-        dreamEffectsFor(step).length > 0
+        memoryEffectsFor(step).length > 0
     ) &&
     input.requiredEffects.every((effect) => coveredEffects.includes(effect))
   );
 };
 
 const generatedPlanCoversHorizons = (input: {
-  readonly coveredHorizons: readonly DreamCoverageHorizon[];
-  readonly requiredHorizons: readonly DreamCoverageHorizon[];
+  readonly coveredHorizons: readonly MemoryCoverageHorizon[];
+  readonly requiredHorizons: readonly MemoryCoverageHorizon[];
 }): boolean =>
   input.requiredHorizons.every((horizon) =>
     input.coveredHorizons.includes(horizon)
@@ -447,7 +520,7 @@ const pinnedPackageExportsSourceProfile = (input: {
   readonly exportId: string;
   readonly packageRef: ArtifactRef;
   readonly plan: DynamicWorkflowPlanDocument;
-  readonly profile: DreamSourceProfile;
+  readonly profile: MemorySourceProfile;
 }): boolean => {
   const pinnedPackage = input.plan.pinnedPackages.find(
     (candidate) => candidate.artifactRef === input.packageRef
@@ -464,120 +537,16 @@ const pinnedPackageExportsSourceProfile = (input: {
   );
 };
 
-const reportAuditSummaryMatchesItems = (
-  audit: ReturnType<
-    typeof DreamHitlReportDocumentSchema.parse
-  >["definitionOfDoneAudit"]
-): boolean =>
-  audit.summary.blockedCount ===
-    audit.items.filter((item) => item.status === "blocked").length &&
-  audit.summary.capturedCount ===
-    audit.items.filter((item) => item.status === "captured").length &&
-  audit.summary.missingCount ===
-    audit.items.filter((item) => item.status === "missing").length &&
-  audit.summary.notProvenCount ===
-    audit.items.filter((item) => item.status === "not-proven").length &&
-  audit.summary.totalCount === audit.items.length;
-
-const reportAuditRequirementStatusById = (
-  audit: ReturnType<
-    typeof DreamHitlReportDocumentSchema.parse
-  >["definitionOfDoneAudit"]
-): Map<string, string> =>
-  new Map(
-    audit.items.map((item) => [item.requirementId, item.status] as const)
-  );
-
-const reportAuditCheckSummaryFor = (input: {
-  readonly missingRequirementIds: readonly string[];
-  readonly overclaimedPostReportRequirementIds: readonly string[];
-  readonly reportAuditStatus?: string;
-  readonly reportRef: ArtifactRef;
-  readonly summaryMatches: boolean;
-}): string => {
-  if (input.missingRequirementIds.length > 0) {
-    return `Dream HITL report ${input.reportRef} is missing definition-of-done audit requirement(s): ${input.missingRequirementIds.join(", ")}.`;
-  }
-
-  if (input.overclaimedPostReportRequirementIds.length > 0) {
-    return `Dream HITL report ${input.reportRef} overclaims post-report proof gate(s): ${input.overclaimedPostReportRequirementIds.join(", ")}.`;
-  }
-
-  if (!input.summaryMatches) {
-    return `Dream HITL report ${input.reportRef} definition-of-done audit summary does not match its items.`;
-  }
-
-  return `Dream HITL report ${input.reportRef} carries ${input.reportAuditStatus ?? "unknown"} definition-of-done audit without overclaiming post-report gates.`;
-};
-
-const buildDreamHitlReportAuditProofCheck = async (input: {
-  readonly artifacts: ArtifactStoreContract;
-  readonly executionProof: WorkflowExecutionProofDocument;
-}): Promise<DreamGeneratedWorkflowAdditionalProofCheck> => {
-  const reportRef = input.executionProof.workflowNodeOutputRefs.find(
-    (artifactRef) => artifactRef.endsWith("/dream/hitl-report.json")
-  );
-  if (reportRef === undefined) {
-    return {
-      checkId: "report:definition-of-done-audit",
-      evidenceRefs: [],
-      passed: false,
-      summary:
-        "Dream execution proof did not include the generated HITL report JSON artifact.",
-    };
-  }
-
-  try {
-    const report = DreamHitlReportDocumentSchema.parse(
-      await input.artifacts.readJson({ artifactRef: reportRef })
-    );
-    const audit = report.definitionOfDoneAudit;
-    const statusById = reportAuditRequirementStatusById(audit);
-    const missingRequirementIds = requiredReportAuditRequirementIds.filter(
-      (requirementId) => !statusById.has(requirementId)
-    );
-    const overclaimedPostReportRequirementIds =
-      reportAuditPostReportRequirementIds.filter(
-        (requirementId) => statusById.get(requirementId) !== "not-proven"
-      );
-    const summaryMatches = reportAuditSummaryMatchesItems(audit);
-
-    return {
-      checkId: "report:definition-of-done-audit",
-      evidenceRefs: [reportRef],
-      passed:
-        missingRequirementIds.length === 0 &&
-        overclaimedPostReportRequirementIds.length === 0 &&
-        summaryMatches,
-      summary: reportAuditCheckSummaryFor({
-        missingRequirementIds,
-        overclaimedPostReportRequirementIds,
-        reportAuditStatus: audit.status,
-        reportRef,
-        summaryMatches,
-      }),
-    };
-  } catch {
-    return {
-      checkId: "report:definition-of-done-audit",
-      evidenceRefs: [reportRef],
-      passed: false,
-      summary:
-        "Dream HITL report JSON artifact could not be parsed as dream.hitl-report.v1 with a definition-of-done audit.",
-    };
-  }
-};
-
-export const verifyDreamGeneratedWorkflow = (
-  input: VerifyDreamGeneratedWorkflowInput
-): DreamGeneratedWorkflowProofDocument => {
+export const verifyMemoryGeneratedWorkflow = (
+  input: VerifyMemoryGeneratedWorkflowInput
+): MemoryGeneratedWorkflowProofDocument => {
   const stepIds = input.plan.steps.map((step) => step.stepId);
-  const coveredEffects = uniqueDreamEffects(
-    input.plan.steps.flatMap(dreamEffectsFor)
+  const coveredEffects = uniqueMemoryEffects(
+    input.plan.steps.flatMap(memoryEffectsFor)
   );
-  const requiredEffects = requiredDreamEffectsFor(input.expectedSourceProfile);
-  const coveredHorizons = uniqueDreamCoverageHorizons(
-    input.plan.steps.flatMap(dreamCoverageHorizonsFor)
+  const requiredEffects = requiredMemoryEffectsFor(input.expectedSourceProfile);
+  const coveredHorizons = uniqueMemoryCoverageHorizons(
+    input.plan.steps.flatMap(memoryCoverageHorizonsFor)
   );
   const requiredHorizons = input.expectedSourceProfile.timeHorizons;
   const sourcePackDisposition = sourcePackDispositionSummaryFor({
@@ -589,7 +558,7 @@ export const verifyDreamGeneratedWorkflow = (
       return [];
     }
 
-    const parsed = DreamMemoryFabricNodeTypeSchema.safeParse(step.nodeType);
+    const parsed = MemoryFabricNodeTypeSchema.safeParse(step.nodeType);
 
     return parsed.success ? [parsed.data] : [];
   });
@@ -598,20 +567,20 @@ export const verifyDreamGeneratedWorkflow = (
       return [];
     }
 
-    const parsed = DreamMemoryFabricNodeTypeSchema.safeParse(step.nodeType);
+    const parsed = MemoryFabricNodeTypeSchema.safeParse(step.nodeType);
 
-    return parsed.success && isRelayBackedDreamNodeType(parsed.data)
+    return parsed.success && isRelayBackedMemoryNodeType(parsed.data)
       ? [step.stepId]
       : [];
   });
   const relayLeaseReceiptRefs =
     input.executionProof.workflowNodeOutputRefs.filter((artifactRef) =>
-      artifactRef.includes("/dream/relay-lease-receipts/")
+      artifactRef.includes("/memory/relay-lease-receipts/")
     );
   const missingRelayLeaseReceiptStepIds = relayBackedStepIds.filter(
     (stepId) =>
       !relayLeaseReceiptRefs.some((artifactRef) =>
-        artifactRef.endsWith(`/dream/relay-lease-receipts/${stepId}.json`)
+        artifactRef.endsWith(`/memory/relay-lease-receipts/${stepId}.json`)
       )
   );
   const checks: ProofCheck[] = [
@@ -619,7 +588,7 @@ export const verifyDreamGeneratedWorkflow = (
       checkId: "plan:hash-pinned",
       evidenceRefs: [input.planArtifact.artifactRef],
       passed: hashJson(input.plan) === input.planArtifact.hash,
-      summary: "Pinned Dream plan hash matches the loaded plan artifact.",
+      summary: "Pinned plan hash matches the loaded plan artifact.",
     },
     {
       checkId: "machine:hash-pinned",
@@ -645,13 +614,13 @@ export const verifyDreamGeneratedWorkflow = (
     {
       checkId: "plan:profile-effect-coverage",
       evidenceRefs: [input.planArtifact.artifactRef],
-      passed: generatedPlanCoversDreamEffects({
+      passed: generatedPlanCoversMemoryEffects({
         expectedPackageRef: input.expectedPackageRef,
         plan: input.plan,
         requiredEffects,
       }),
       summary:
-        "Dream plan uses artifact-backed package invocations and covers the installed source profile's required effects.",
+        "Generated plan uses artifact-backed package invocations and covers the installed source profile's required effects.",
     },
     {
       checkId: "plan:horizon-coverage",
@@ -661,7 +630,7 @@ export const verifyDreamGeneratedWorkflow = (
         requiredHorizons,
       }),
       summary:
-        "Dream generated plan declares coverage for every source-profile horizon so the run cannot collapse into recent-only retrieval.",
+        "Generated plan declares coverage for every source-profile horizon so the run cannot collapse into recent-only retrieval.",
     },
     {
       checkId: "plan:source-profile-bound",
@@ -681,7 +650,7 @@ export const verifyDreamGeneratedWorkflow = (
           profile: input.expectedSourceProfile,
         }),
       summary:
-        "Dream generated plan is bound to the installed transcript-review source profile instead of generic Dream lore.",
+        "Generated plan is bound to the installed source profile instead of generic workflow lore.",
     },
     {
       checkId: "plan:source-pack-disposition",
@@ -691,7 +660,7 @@ export const verifyDreamGeneratedWorkflow = (
         sourcePacks: input.expectedSourceProfile.sourcePacks,
       }),
       summary:
-        "Dream generated plan explicitly declares whether each advertised source pack was selected under leases, skipped for missing leases, or saved as a separate workflow candidate.",
+        "Generated plan explicitly declares whether each advertised source pack was selected under leases, skipped for missing leases, or saved as a separate workflow candidate.",
     },
     {
       checkId: "machine:step-order-bound",
@@ -704,7 +673,7 @@ export const verifyDreamGeneratedWorkflow = (
         input.machine.workItemId === input.plan.workItemId &&
         sameItemsInOrder(input.machine.stepOrder, stepIds),
       summary:
-        "Generated XState machine stepOrder is bound to the pinned Dream plan step ids.",
+        "Generated XState machine stepOrder is bound to the pinned plan step ids.",
     },
     {
       checkId: "execution:generated-machine-sequence",
@@ -715,7 +684,7 @@ export const verifyDreamGeneratedWorkflow = (
           input.executionProof.generatedStateSequence.includes(stateName)
         ),
       summary:
-        "Execution proof completed the generated Dream machine states instead of a static phase list.",
+        "Execution proof completed the generated machine states instead of a static phase list.",
     },
     {
       checkId: "execution:relay-lease-sidecars",
@@ -725,14 +694,14 @@ export const verifyDreamGeneratedWorkflow = (
           "cloudflare-generated-machine-executed" ||
         missingRelayLeaseReceiptStepIds.length === 0,
       summary:
-        "Cloudflare Dream execution proof includes relay lease receipt sidecars for each relay-backed generated step.",
+        "Cloudflare execution proof includes relay lease receipt sidecars for each relay-backed generated step.",
     },
     {
       checkId: "execution:no-raw-transcripts",
       evidenceRefs: [input.executionProofRef],
       passed: true,
       summary:
-        "Dream generated workflow proof returns artifact refs, hashes, and state evidence only; raw transcripts remain behind the relay boundary.",
+        "Memory generated workflow proof returns artifact refs, hashes, and state evidence only; raw transcripts remain behind the relay boundary.",
     },
     ...(input.extraChecks ?? []),
   ];
@@ -741,7 +710,7 @@ export const verifyDreamGeneratedWorkflow = (
     .filter((check) => check.status === "failed")
     .map((check) => check.summary);
 
-  return DreamGeneratedWorkflowProofDocumentSchema.parse({
+  return MemoryGeneratedWorkflowProofDocumentSchema.parse({
     checks: parsedChecks,
     completedStepIds: input.executionProof.completedStepIds,
     effectCoverage: {
@@ -764,12 +733,12 @@ export const verifyDreamGeneratedWorkflow = (
     planArtifact: input.planArtifact,
     plannerPromptRef: input.plan.plannerLane.prompt.artifactRef,
     plannerTranscriptRef: input.plan.plannerLane.transcript.artifactRef,
-    proofId: `dream-generated-workflow-proof:${input.plan.runId}`,
+    proofId: `memory-generated-workflow-proof:${input.plan.runId}`,
     rawTranscriptsReturned: false,
     redacted: true,
     relayLeaseReceiptRefs,
     runId: input.plan.runId,
-    schemaVersion: "dream.generated-workflow-proof.v1",
+    schemaVersion: "memory.generated-workflow-proof.v1",
     sourcePackDisposition,
     sourceProfile: sourceProfileFingerprint({
       exportId: input.expectedSourceProfileExportId,
@@ -782,29 +751,30 @@ export const verifyDreamGeneratedWorkflow = (
   });
 };
 
-const dreamGeneratedWorkflowProofBlocker = (
-  proof: DreamGeneratedWorkflowProofDocument
+const memoryGeneratedWorkflowProofBlocker = (
+  proof: MemoryGeneratedWorkflowProofDocument
 ): CapabilityBlocker => ({
   code: "capability_denied",
-  message: `Dream generated workflow proof failed: ${proof.failures.join("; ")}`,
+  message: `Memory generated workflow proof failed: ${proof.failures.join("; ")}`,
   redacted: true,
 });
 
-export const createDreamGeneratedWorkflowProofRecorder = (
-  config: DreamGeneratedWorkflowProofRecorderConfig
+export const createMemoryGeneratedWorkflowProofRecorder = (
+  config: MemoryGeneratedWorkflowProofRecorderConfig
 ): WorkflowPostExecutionArtifactRecorderPort => ({
   async record(input) {
-    const reportAuditCheck = await buildDreamHitlReportAuditProofCheck({
-      artifacts: config.artifacts,
-      executionProof: input.executionProofDocument,
-    });
-    const proof = verifyDreamGeneratedWorkflow({
+    const extraChecks =
+      (await config.buildAdditionalProofChecks?.({
+        executionProof: input.executionProofDocument,
+        plan: input.plan,
+      })) ?? [];
+    const proof = verifyMemoryGeneratedWorkflow({
       executionProof: input.executionProofDocument,
       executionProofRef: input.executionProofArtifact.artifactRef,
       expectedPackageRef: config.expectedPackageRef,
       expectedSourceProfile: config.expectedSourceProfile,
       expectedSourceProfileExportId: config.expectedSourceProfileExportId,
-      extraChecks: [reportAuditCheck],
+      extraChecks,
       generatedAt: config.now?.() ?? new Date().toISOString(),
       harnessArtifact: input.harnessArtifact,
       harnessSource: input.harnessSource,
@@ -817,13 +787,13 @@ export const createDreamGeneratedWorkflowProofRecorder = (
 
     if (proof.status === "failed") {
       return {
-        blocker: dreamGeneratedWorkflowProofBlocker(proof),
+        blocker: memoryGeneratedWorkflowProofBlocker(proof),
         status: "blocked",
       };
     }
 
     const write = await config.artifacts.writeJson({
-      path: "dream/generated-workflow-proof.json",
+      path: "memory/generated-workflow-proof.json",
       redacted: true,
       runId: input.plan.runId,
       value: proof,

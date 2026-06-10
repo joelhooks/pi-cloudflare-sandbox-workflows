@@ -4,12 +4,11 @@ import { z } from "zod";
 
 import { sha256Hex } from "../../app/domain/hash.ts";
 import type {
-  DreamCoverageHorizon,
-  DreamMemorySearchHit,
-  DreamReceiptRef,
-  DreamRuntime,
-  DreamSourceFamily,
-} from "./schemas.ts";
+  MemoryCoverageHorizon,
+  MemoryRuntime,
+  MemorySourceFamily,
+} from "../../app/domain/source-profile.ts";
+import type { MemorySearchHit, MemoryReceiptRef } from "./schemas.ts";
 
 export interface TrustedJoelClawSessionSourceConfig {
   readonly machineId: string;
@@ -30,13 +29,13 @@ export type TrustedJoelClawSessionBridgeCommand = (
 }>;
 
 export interface TrustedJoelClawSessionHydrationRecord {
-  readonly receipt: DreamReceiptRef;
+  readonly receipt: MemoryReceiptRef;
   readonly redactedExcerpt: string;
   readonly summary: string;
 }
 
 export interface TrustedJoelClawSessionSearchResult {
-  readonly hits: DreamMemorySearchHit[];
+  readonly hits: MemorySearchHit[];
   readonly hydrations: TrustedJoelClawSessionHydrationRecord[];
   readonly skippedSources: string[];
 }
@@ -127,7 +126,7 @@ const parsePositiveInt = (input: string | null): number | undefined => {
 };
 
 const runtimeFor = (
-  runtime: DreamRuntime | undefined
+  runtime: MemoryRuntime | undefined
 ): JoelClawSessionRuntime => {
   if (runtime === "pi" || runtime === "codex" || runtime === "claude") {
     return runtime;
@@ -138,7 +137,7 @@ const runtimeFor = (
 
 export const trustedJoelClawSessionSourceForAuthorityRoot = (
   authorityRoot: string,
-  runtime?: DreamRuntime
+  runtime?: MemoryRuntime
 ): TrustedJoelClawSessionSourceConfig | null => {
   let url: URL;
   try {
@@ -270,14 +269,14 @@ const hitStableId = (hit: JoelClawSessionSearchHit, index: number): string =>
   hit.sessionId ?? hit.id ?? `hit-${index + 1}`;
 
 const receiptFor = (input: {
-  readonly family: DreamSourceFamily;
+  readonly family: MemorySourceFamily;
   readonly hash: string;
   readonly hit: JoelClawSessionSearchHit;
   readonly index: number;
-  readonly runtime: DreamRuntime | undefined;
+  readonly runtime: MemoryRuntime | undefined;
   readonly sourceId: string;
   readonly sourceMachineId: string;
-}): DreamReceiptRef => {
+}): MemoryReceiptRef => {
   const stableId = hitStableId(input.hit, input.index);
 
   return {
@@ -298,13 +297,13 @@ const scoreFor = (hit: JoelClawSessionSearchHit, index: number): number =>
 
 export const searchTrustedJoelClawSessionSource = async (input: {
   readonly command?: TrustedJoelClawSessionBridgeCommand;
-  readonly family: DreamSourceFamily;
+  readonly family: MemorySourceFamily;
   readonly label: string;
   readonly maxFiles: number;
   readonly maxHits: number;
   readonly now: string;
   readonly query: string;
-  readonly runtime?: DreamRuntime;
+  readonly runtime?: MemoryRuntime;
   readonly source: TrustedJoelClawSessionSourceConfig;
   readonly sourceId: string;
 }): Promise<TrustedJoelClawSessionSearchResult> => {
@@ -316,7 +315,7 @@ export const searchTrustedJoelClawSessionSource = async (input: {
       query: input.query,
       source: input.source,
     });
-    const hits: DreamMemorySearchHit[] = [];
+    const hits: MemorySearchHit[] = [];
     const hydrations: TrustedJoelClawSessionHydrationRecord[] = [];
 
     for (const [index, hit] of result.result.hits.entries()) {
@@ -344,7 +343,7 @@ export const searchTrustedJoelClawSessionSource = async (input: {
       const summary = `Matched remote JoelClaw session memory in ${input.label}.`;
 
       hits.push({
-        horizon: horizonFor(hit.startedAt, input.now) as DreamCoverageHorizon,
+        horizon: horizonFor(hit.startedAt, input.now) as MemoryCoverageHorizon,
         receipts: [receipt],
         ...(redactedExcerpt.length === 0 ? {} : { redactedExcerpt }),
         score: scoreFor(hit, index),

@@ -20,9 +20,9 @@ import type {
   WorkflowLivePreflightRemoteRegistry,
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../src/app/domain/schemas.ts";
-import { dreamMemoryFabricPackageMetadata } from "../src/cartridges/dream-memory-fabric/package-seed.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
-import { TrustedLocalDreamMemoryRelayReadinessReceiptSchema } from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+import { memoryFabricPackageMetadata } from "../src/cartridges/memory-fabric/package-seed.ts";
+import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import { TrustedLocalMemoryRelayReadinessReceiptSchema } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultReceiptPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
@@ -30,28 +30,24 @@ const defaultLocalRelayProofPath =
   ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
-const expectedCartridgePackageId = "workflow/dream-memory-fabric";
+const expectedCartridgePackageId = "workflow/memory-fabric";
 const workflowId = "dream.memory-fabric";
-if (dreamMemoryFabricPackageMetadata.packageId !== expectedCartridgePackageId) {
+if (memoryFabricPackageMetadata.packageId !== expectedCartridgePackageId) {
   throw new Error(
     `Expected package seed template not found: ${expectedCartridgePackageId}`
   );
 }
 
 const expectedCartridgeArtifactRef =
-  dreamMemoryFabricPackageMetadata.latestArtifactRef;
-const expectedCartridgeManifestHash = hashJson(
-  dreamMemoryFabricPackageMetadata
-);
-const expectedCartridgeWorkflowNodeTypes =
-  dreamMemoryFabricPackageMetadata.exports
-    .filter((exportRecord) => exportRecord.kind === "workflow-node")
-    .map((exportRecord) => exportRecord.nodeType)
-    .filter((nodeType): nodeType is string => nodeType !== undefined);
-const expectedCartridgeSchemaExportIds =
-  dreamMemoryFabricPackageMetadata.exports
-    .filter((exportRecord) => exportRecord.kind === "schema")
-    .map((exportRecord) => exportRecord.exportId);
+  memoryFabricPackageMetadata.latestArtifactRef;
+const expectedCartridgeManifestHash = hashJson(memoryFabricPackageMetadata);
+const expectedCartridgeWorkflowNodeTypes = memoryFabricPackageMetadata.exports
+  .filter((exportRecord) => exportRecord.kind === "workflow-node")
+  .map((exportRecord) => exportRecord.nodeType)
+  .filter((nodeType): nodeType is string => nodeType !== undefined);
+const expectedCartridgeSchemaExportIds = memoryFabricPackageMetadata.exports
+  .filter((exportRecord) => exportRecord.kind === "schema")
+  .map((exportRecord) => exportRecord.exportId);
 
 const RelayReceiptFamilyCountSchema = z.object({
   family: z.string().min(1),
@@ -143,7 +139,7 @@ const envRequirements: readonly EnvRequirement[] = [
   {
     name: "WZRRD_API_TOKEN",
     required: true,
-    requiredFor: ["dream-hitl-report-wzrrd-publish"],
+    requiredFor: ["memory-hitl-report-wzrrd-publish"],
   },
 ] as const;
 
@@ -468,13 +464,13 @@ export const checkDreamRelayReadiness = async (input: {
   const relayToken = input.env["MEMORY_RELAY_TOKEN"];
   if (relayBaseUrl === undefined || relayBaseUrl.trim().length === 0) {
     return missingRelayReadinessCheck(
-      "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing."
+      "Memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing."
     );
   }
 
   if (relayToken === undefined || relayToken.trim().length === 0) {
     return missingRelayReadinessCheck(
-      "Dream memory relay readiness was not checked because MEMORY_RELAY_TOKEN is missing."
+      "Memory relay readiness was not checked because MEMORY_RELAY_TOKEN is missing."
     );
   }
 
@@ -489,17 +485,17 @@ export const checkDreamRelayReadiness = async (input: {
     const responseText = await response.text();
     if (!response.ok) {
       return failedRelayReadinessCheck(
-        `Dream memory relay /healthz returned HTTP ${response.status}.`
+        `Memory relay /healthz returned HTTP ${response.status}.`
       );
     }
 
     const readinessResult =
-      TrustedLocalDreamMemoryRelayReadinessReceiptSchema.safeParse(
+      TrustedLocalMemoryRelayReadinessReceiptSchema.safeParse(
         JSON.parse(responseText)
       );
     if (!readinessResult.success) {
       return failedRelayReadinessCheck(
-        "Dream memory relay /healthz returned an invalid redacted readiness receipt."
+        "Memory relay /healthz returned an invalid redacted readiness receipt."
       );
     }
 
@@ -510,20 +506,20 @@ export const checkDreamRelayReadiness = async (input: {
     );
     if (missingOperations.length > 0) {
       return failedRelayReadinessCheck(
-        `Dream memory relay readiness is missing required operations: ${missingOperations.join(", ")}.`
+        `Memory relay readiness is missing required operations: ${missingOperations.join(", ")}.`
       );
     }
 
     if (readiness.rawCredentialsReturned || readiness.rawPathsReturned) {
       return failedRelayReadinessCheck(
-        "Dream memory relay readiness reported raw credentials or raw paths."
+        "Memory relay readiness reported raw credentials or raw paths."
       );
     }
 
     return {
       checkId: "relay:healthz",
       message:
-        "Dream memory relay /healthz returned a redacted readiness receipt with required operations.",
+        "Memory relay /healthz returned a redacted readiness receipt with required operations.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
@@ -531,7 +527,7 @@ export const checkDreamRelayReadiness = async (input: {
     };
   } catch (error) {
     return failedRelayReadinessCheck(
-      `Dream memory relay readiness check failed: ${
+      `Memory relay readiness check failed: ${
         error instanceof Error
           ? redactText(error.message, [relayToken])
           : "Unknown relay readiness error."
@@ -586,7 +582,7 @@ export const checkLocalRelayProof = async (
   const proofText = await readTextOrEmpty(proofPath);
   if (proofText.trim().length === 0) {
     return missingLocalRelayProofCheck(
-      `Trusted local Dream relay proof receipt is missing at ${proofPath}.`
+      `Trusted local Memory relay proof receipt is missing at ${proofPath}.`
     );
   }
 
@@ -595,14 +591,14 @@ export const checkLocalRelayProof = async (
     parsed = JSON.parse(proofText);
   } catch {
     return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof receipt is not valid JSON."
+      "Trusted local Memory relay proof receipt is not valid JSON."
     );
   }
 
   const proofResult = LocalRelayProofReceiptSchema.safeParse(parsed);
   if (!proofResult.success) {
     return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof receipt failed schema validation."
+      "Trusted local Memory relay proof receipt failed schema validation."
     );
   }
 
@@ -624,13 +620,13 @@ export const checkLocalRelayProof = async (
 
   if (proof.rawPathLeaked || proof.rawPathsReturned) {
     return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof reported raw path leakage."
+      "Trusted local Memory relay proof reported raw path leakage."
     );
   }
 
   if (proof.rawCredentialsReturned) {
     return failedLocalRelayProofCheck(
-      "Trusted local Dream relay proof reported raw credential leakage."
+      "Trusted local Memory relay proof reported raw credential leakage."
     );
   }
 
@@ -646,7 +642,7 @@ export const checkLocalRelayProof = async (
 
   return {
     checkId: "relay:local-proof",
-    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.signals.signalCount} signal receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
+    message: `Trusted local Memory relay proof passed with ${proof.sourceRootCount} source roots, ${proof.signals.signalCount} signal receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
     redacted: true,
     required: true,
     requiredFor: [
@@ -849,7 +845,7 @@ const requiredActionForCheck = (
   }
 
   if (check.checkId === "relay:healthz") {
-    return "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.";
+    return "Start or provision the trusted Memory relay and verify its authenticated /healthz readiness receipt.";
   }
 
   return check.message ?? `Resolve ${check.checkId}.`;
@@ -1036,11 +1032,11 @@ export const buildDreamLivePreflightReceipt = (
         "workflow.xstate-machine.v1 config artifact",
         "generated TypeScript harness source",
         "machine/harness hashes",
-        "dream.refinement-proposals.v1 proposal artifact",
-        "dream.hitl-report.v1 MDSvX report artifact",
-        "dream.hitl-decision.v1 decision contract artifact",
-        "dream.hitl-decision-workflow-seed.v1 seed artifact",
-        "dream.hitl-follow-up-run-request.v1 draft artifact",
+        "memory.refinement-proposals.v1 proposal artifact",
+        "workflow.hitl-report.v1 MDSvX report artifact",
+        "memory.hitl-decision.v1 decision contract artifact",
+        "memory.hitl-decision-workflow-seed.v1 seed artifact",
+        "memory.hitl-follow-up-run-request.v1 draft artifact",
         "workflow.execution-proof.v1 Cloudflare execution proof",
         "workflow.cartridge-invocation-proof.v1 per-node proofs",
         "wzrrd.site.publish capability receipt for the Dream report",

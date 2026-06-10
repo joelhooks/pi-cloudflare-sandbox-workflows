@@ -216,7 +216,7 @@ const isFakeRouteUpgradeResponse = (
 };
 
 describe("Cloudflare Worker route", () => {
-  it("does not install a workflow-node adapter when the Dream memory relay is unconfigured", () => {
+  it("does not install a workflow-node adapter when the Memory relay is unconfigured", () => {
     const bindings =
       __cloudflareWorkerRouteTestHooks.WorkerEnvBindingSchema.parse(
         createWorkerEnv()
@@ -1060,7 +1060,7 @@ describe("Cloudflare Worker route", () => {
         "badass-courses/claw-kernel",
         "joelhooks/configured-familiar-kernel",
         "workflow/research-review-discord",
-        "workflow/dream-memory-fabric",
+        "workflow/memory-fabric",
       ],
       status: 200,
       subject: {

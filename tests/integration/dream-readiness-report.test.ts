@@ -15,9 +15,9 @@ import {
 const rawPrivatePath = "/private/tmp/do-not-publish-dream-path";
 const rawRelayToken = "do-not-publish-dream-relay-token";
 const rawRelayUrl = "https://private-relay.example.test";
-const runId = "run-live-dream-memory-fabric-report-test";
+const runId = "run-live-memory-fabric-report-test";
 
-const DreamDefinitionOfDoneAuditSummarySchema = z.object({
+const WorkflowDefinitionOfDoneAuditSummarySchema = z.object({
   schemaVersion: z.literal("workflow.dream-definition-of-done-audit.v1"),
   status: z.string().min(1),
   summary: z.object({
@@ -95,7 +95,7 @@ const preflight = () =>
         "workflow.xstate-machine.v1 config artifact",
         "generated TypeScript harness source",
         "machine/harness hashes",
-        "dream.hitl-report.v1 MDSvX report artifact",
+        "workflow.hitl-report.v1 MDSvX report artifact",
       ],
       sideEffectsRequireCapabilityLeases: true,
     },
@@ -118,7 +118,7 @@ const preflight = () =>
       },
       {
         checkId: "relay:local-proof",
-        message: "Trusted local Dream relay proof passed.",
+        message: "Trusted local Memory relay proof passed.",
         redacted: true,
         required: true,
         requiredFor: ["dream-memory-relay-local-proof"],
@@ -133,7 +133,7 @@ const preflight = () =>
         status: "missing",
       },
     ],
-    expectedCartridgePackageId: "workflow/dream-memory-fabric",
+    expectedCartridgePackageId: "workflow/memory-fabric",
     generatedAt: "2026-06-10T11:00:10.000Z",
     redacted: true,
     relayCapability: {
@@ -171,9 +171,9 @@ const preflight = () =>
     },
     remoteRegistry: {
       command: [],
-      expectedPackageId: "workflow/dream-memory-fabric",
+      expectedPackageId: "workflow/memory-fabric",
       expectedPackageSeeded: true,
-      packageIds: ["workflow/dream-memory-fabric"],
+      packageIds: ["workflow/memory-fabric"],
       redacted: true,
       status: "queried",
     },
@@ -186,7 +186,7 @@ const preflight = () =>
     requiredActions: [
       "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
       "Provision MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
-      "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
+      "Start or provision the trusted Memory relay and verify its authenticated /healthz readiness receipt.",
     ],
     schemaVersion: "workflow.live-preflight.v1",
     status: "blocked",
@@ -199,7 +199,7 @@ const runReceipt = (input: { readonly submitAttempted: boolean }) =>
     blockedReasons: [
       "Set MEMORY_RELAY_BASE_URL for the trusted memory relay endpoint.",
       "Provision MEMORY_RELAY_TOKEN as a Worker secret for the trusted memory relay.",
-      "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
+      "Start or provision the trusted Memory relay and verify its authenticated /healthz readiness receipt.",
     ],
     checkedAt: "2026-06-10T11:00:20.000Z",
     preflight: {
@@ -251,7 +251,7 @@ describe("Dream readiness report", () => {
     const mdsvx = await readFile(receipt.reportPath, "utf-8");
     const html = await readFile(receipt.indexPath, "utf-8");
     const receipts = await readFile(receipt.receiptsPath, "utf-8");
-    const audit = DreamDefinitionOfDoneAuditSummarySchema.parse(
+    const audit = WorkflowDefinitionOfDoneAuditSummarySchema.parse(
       JSON.parse(await readFile(receipt.definitionOfDoneAuditPath, "utf-8"))
     );
     const combined = `${mdsvx}\n${html}\n${receipts}\n${JSON.stringify(audit)}`;

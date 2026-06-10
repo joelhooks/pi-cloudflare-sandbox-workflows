@@ -5,40 +5,40 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { IsoDateTimeSchema } from "../../app/domain/schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import {
-  DreamMemoryRelayEndpointCatalogSchema,
-  DreamPrivacyTierSchema,
-  DreamRuntimeSchema,
-  DreamSourceFamilySchema,
-  DreamSourceScopeSchema,
-} from "./schemas.ts";
-import { createTrustedLocalDreamMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
+  MemoryPrivacyTierSchema,
+  MemoryRuntimeSchema,
+  MemorySourceFamilySchema,
+  MemorySourceScopeSchema,
+} from "../../app/domain/source-profile.ts";
+import { memoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
+import { MemoryRelayEndpointCatalogSchema } from "./schemas.ts";
+import { createTrustedLocalMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
 import type {
-  TrustedLocalDreamMemoryFabricConfig,
-  TrustedLocalDreamSourceRoot,
+  TrustedLocalMemoryFabricConfig,
+  TrustedLocalMemorySourceRoot,
 } from "./trusted-local-memory-fabric.ts";
-import { createTrustedLocalDreamMemoryRetrievalAdapter } from "./trusted-local-memory-retrieval.ts";
-import type { TrustedDocsApiDreamMemoryRetrievalConfig } from "./trusted-local-memory-retrieval.ts";
-import { handleTrustedDreamMemoryRelayRequest } from "./trusted-relay-server.ts";
+import { createTrustedLocalMemoryRetrievalAdapter } from "./trusted-local-memory-retrieval.ts";
+import type { TrustedDocsApiMemoryRetrievalConfig } from "./trusted-local-memory-retrieval.ts";
+import { handleTrustedMemoryRelayRequest } from "./trusted-relay-server.ts";
 
-export interface TrustedLocalDreamMemoryRelayHttpConfig {
-  readonly docsApi?: TrustedDocsApiDreamMemoryRetrievalConfig;
+export interface TrustedLocalMemoryRelayHttpConfig {
+  readonly docsApi?: TrustedDocsApiMemoryRetrievalConfig;
   readonly expectedBearerToken: string;
   readonly host: string;
   readonly maxBodyBytes?: number;
-  readonly memoryFabric: TrustedLocalDreamMemoryFabricConfig;
+  readonly memoryFabric: TrustedLocalMemoryFabricConfig;
   readonly now?: () => string;
   readonly port: number;
 }
 
-export interface TrustedLocalDreamMemoryRelayHttpServer {
+export interface TrustedLocalMemoryRelayHttpServer {
   readonly close: () => Promise<void>;
   readonly server: Server;
   readonly url: string;
 }
 
-export type TrustedLocalDreamMemoryRelayEnvironment = Readonly<
+export type TrustedLocalMemoryRelayEnvironment = Readonly<
   Record<string, string | undefined>
 >;
 
@@ -46,7 +46,7 @@ const DEFAULT_MAX_BODY_BYTES = 4_000_000;
 const DEFAULT_MAX_FILES_PER_SOURCE = 10_000;
 const DEFAULT_RELAY_HOST = "127.0.0.1";
 const DEFAULT_RELAY_PORT = 8789;
-const TRUSTED_LOCAL_PORT = "TrustedLocalDreamMemoryFabricPort";
+const TRUSTED_LOCAL_PORT = "TrustedLocalMemoryFabricPort";
 
 const SupportedRelayOperationSchema = z.enum([
   "capture-artifact",
@@ -57,32 +57,32 @@ const SupportedRelayOperationSchema = z.enum([
   "signals",
 ]);
 
-const TrustedLocalDreamSourceRootConfigSchema = z.object({
+const TrustedLocalMemorySourceRootConfigSchema = z.object({
   authorityRoot: z.string().min(1),
-  family: DreamSourceFamilySchema,
+  family: MemorySourceFamilySchema,
   includeExtensions: z.array(z.string().min(1)).optional(),
   label: z.string().min(1),
-  privacyTier: DreamPrivacyTierSchema,
-  runtime: DreamRuntimeSchema.optional(),
-  scope: DreamSourceScopeSchema.optional(),
+  privacyTier: MemoryPrivacyTierSchema,
+  runtime: MemoryRuntimeSchema.optional(),
+  scope: MemorySourceScopeSchema.optional(),
   sourceId: z.string().min(1),
   sourceSystem: z.string().min(1),
 });
 
-const TrustedLocalDreamSourceRootsConfigSchema = z
-  .array(TrustedLocalDreamSourceRootConfigSchema)
+const TrustedLocalMemorySourceRootsConfigSchema = z
+  .array(TrustedLocalMemorySourceRootConfigSchema)
   .min(1);
 
-export const TrustedLocalDreamMemoryRelayReadinessReceiptSchema = z.object({
+export const TrustedLocalMemoryRelayReadinessReceiptSchema = z.object({
   adapter: z.object({
     port: z.literal(TRUSTED_LOCAL_PORT),
     sourceRoots: z
       .array(
         z.object({
-          family: DreamSourceFamilySchema,
+          family: MemorySourceFamilySchema,
           includeExtensionCount: z.number().int().min(0),
-          privacyTier: DreamPrivacyTierSchema,
-          runtime: DreamRuntimeSchema.optional(),
+          privacyTier: MemoryPrivacyTierSchema,
+          runtime: MemoryRuntimeSchema.optional(),
           sourceId: z.string().min(1),
         })
       )
@@ -93,22 +93,22 @@ export const TrustedLocalDreamMemoryRelayReadinessReceiptSchema = z.object({
     required: z.literal(true),
   }),
   checkedAt: IsoDateTimeSchema,
-  endpointCatalog: DreamMemoryRelayEndpointCatalogSchema,
+  endpointCatalog: MemoryRelayEndpointCatalogSchema,
   maxFilesPerSource: z.number().int().min(1),
   rawCredentialsReturned: z.literal(false),
   rawPathsReturned: z.literal(false),
   redacted: z.literal(true),
-  schemaVersion: z.literal("trusted.dream-memory-relay.readiness.v1"),
+  schemaVersion: z.literal("trusted.memory-relay.readiness.v1"),
   supportedOperations: z.array(SupportedRelayOperationSchema).min(1),
 });
 
-export type TrustedLocalDreamMemoryRelayReadinessReceipt = z.infer<
-  typeof TrustedLocalDreamMemoryRelayReadinessReceiptSchema
+export type TrustedLocalMemoryRelayReadinessReceipt = z.infer<
+  typeof TrustedLocalMemoryRelayReadinessReceiptSchema
 >;
 
 const normalizeSourceRoot = (
-  input: z.infer<typeof TrustedLocalDreamSourceRootConfigSchema>
-): TrustedLocalDreamSourceRoot => ({
+  input: z.infer<typeof TrustedLocalMemorySourceRootConfigSchema>
+): TrustedLocalMemorySourceRoot => ({
   authorityRoot: input.authorityRoot,
   family: input.family,
   ...(input.includeExtensions === undefined
@@ -124,7 +124,7 @@ const normalizeSourceRoot = (
 
 const parseSourceRootsJson = (
   sourceRootsJson: string
-): TrustedLocalDreamSourceRoot[] => {
+): TrustedLocalMemorySourceRoot[] => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(sourceRootsJson);
@@ -132,7 +132,7 @@ const parseSourceRootsJson = (
     throw new TypeError("MEMORY_RELAY_SOURCE_ROOTS_JSON must be valid JSON.");
   }
 
-  return TrustedLocalDreamSourceRootsConfigSchema.parse(parsed).map(
+  return TrustedLocalMemorySourceRootsConfigSchema.parse(parsed).map(
     normalizeSourceRoot
   );
 };
@@ -160,7 +160,7 @@ const parsePositiveInt = (input: {
 };
 
 const requiredEnv = (input: {
-  readonly env: TrustedLocalDreamMemoryRelayEnvironment;
+  readonly env: TrustedLocalMemoryRelayEnvironment;
   readonly name: string;
 }): string => {
   const value = input.env[input.name];
@@ -171,9 +171,9 @@ const requiredEnv = (input: {
   return value;
 };
 
-export const trustedLocalDreamMemoryRelayHttpConfigFromEnv = (
-  env: TrustedLocalDreamMemoryRelayEnvironment
-): TrustedLocalDreamMemoryRelayHttpConfig => {
+export const trustedLocalMemoryRelayHttpConfigFromEnv = (
+  env: TrustedLocalMemoryRelayEnvironment
+): TrustedLocalMemoryRelayHttpConfig => {
   const sourceRoots = parseSourceRootsJson(
     requiredEnv({ env, name: "MEMORY_RELAY_SOURCE_ROOTS_JSON" })
   );
@@ -184,15 +184,15 @@ export const trustedLocalDreamMemoryRelayHttpConfigFromEnv = (
   });
 
   return {
-    ...(env["DREAM_DOCS_API_BASE_URL"] === undefined ||
-    env["DREAM_DOCS_API_BASE_URL"].length === 0
+    ...(env["MEMORY_DOCS_API_BASE_URL"] === undefined ||
+    env["MEMORY_DOCS_API_BASE_URL"].length === 0
       ? {}
       : {
           docsApi: {
-            baseUrl: env["DREAM_DOCS_API_BASE_URL"],
-            ...(env["DREAM_DOCS_API_USER_AGENT"] === undefined
+            baseUrl: env["MEMORY_DOCS_API_BASE_URL"],
+            ...(env["MEMORY_DOCS_API_USER_AGENT"] === undefined
               ? {}
-              : { userAgent: env["DREAM_DOCS_API_USER_AGENT"] }),
+              : { userAgent: env["MEMORY_DOCS_API_USER_AGENT"] }),
           },
         }),
     expectedBearerToken: requiredEnv({
@@ -239,7 +239,7 @@ const jsonError = (status: number, code: string, message: string): Response =>
     { status }
   );
 
-const sourceRootSummary = (sourceRoot: TrustedLocalDreamSourceRoot) => ({
+const sourceRootSummary = (sourceRoot: TrustedLocalMemorySourceRoot) => ({
   family: sourceRoot.family,
   includeExtensionCount: sourceRoot.includeExtensions?.length ?? 0,
   privacyTier: sourceRoot.privacyTier,
@@ -247,11 +247,11 @@ const sourceRootSummary = (sourceRoot: TrustedLocalDreamSourceRoot) => ({
   sourceId: sourceRoot.sourceId,
 });
 
-export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
-  readonly config: TrustedLocalDreamMemoryRelayHttpConfig;
+export const trustedLocalMemoryRelayReadinessReceipt = (input: {
+  readonly config: TrustedLocalMemoryRelayHttpConfig;
   readonly now?: string;
-}): TrustedLocalDreamMemoryRelayReadinessReceipt =>
-  TrustedLocalDreamMemoryRelayReadinessReceiptSchema.parse({
+}): TrustedLocalMemoryRelayReadinessReceipt =>
+  TrustedLocalMemoryRelayReadinessReceiptSchema.parse({
     adapter: {
       port: TRUSTED_LOCAL_PORT,
       sourceRoots: input.config.memoryFabric.sourceRoots.map(sourceRootSummary),
@@ -261,14 +261,14 @@ export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
       required: true,
     },
     checkedAt: input.now ?? input.config.now?.() ?? new Date().toISOString(),
-    endpointCatalog: dreamMemoryRelayEndpointCatalog,
+    endpointCatalog: memoryRelayEndpointCatalog,
     maxFilesPerSource:
       input.config.memoryFabric.maxFilesPerSource ??
       DEFAULT_MAX_FILES_PER_SOURCE,
     rawCredentialsReturned: false,
     rawPathsReturned: false,
     redacted: true,
-    schemaVersion: "trusted.dream-memory-relay.readiness.v1",
+    schemaVersion: "trusted.memory-relay.readiness.v1",
     supportedOperations: [
       "capture-run",
       "capture-artifact",
@@ -280,7 +280,7 @@ export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
   });
 
 const healthResponse = (input: {
-  readonly config: TrustedLocalDreamMemoryRelayHttpConfig;
+  readonly config: TrustedLocalMemoryRelayHttpConfig;
   readonly request: Request;
 }): Response => {
   const token = authorizationToken(input.request);
@@ -293,17 +293,17 @@ const healthResponse = (input: {
   }
 
   return Response.json(
-    trustedLocalDreamMemoryRelayReadinessReceipt({
+    trustedLocalMemoryRelayReadinessReceipt({
       config: input.config,
     })
   );
 };
 
-export const createTrustedLocalDreamMemoryRelayFetchHandler = (
-  config: TrustedLocalDreamMemoryRelayHttpConfig
+export const createTrustedLocalMemoryRelayFetchHandler = (
+  config: TrustedLocalMemoryRelayHttpConfig
 ): ((request: Request) => Promise<Response>) => {
   const adapterNow = config.memoryFabric.now ?? config.now;
-  const dreamMemoryRetrieval = createTrustedLocalDreamMemoryRetrievalAdapter({
+  const memoryRetrieval = createTrustedLocalMemoryRetrievalAdapter({
     ...(config.docsApi === undefined ? {} : { docsApi: config.docsApi }),
     ...(config.memoryFabric.maxFilesPerSource === undefined
       ? {}
@@ -311,16 +311,16 @@ export const createTrustedLocalDreamMemoryRelayFetchHandler = (
     ...(adapterNow === undefined ? {} : { now: adapterNow }),
     sourceRoots: config.memoryFabric.sourceRoots,
   });
-  const dreamMemoryCapture = createTrustedLocalDreamMemoryFabricAdapter({
+  const memoryCapture = createTrustedLocalMemoryFabricAdapter({
     ...config.memoryFabric,
     ...(adapterNow === undefined ? {} : { now: adapterNow }),
   });
   const relayConfig = {
-    dreamMemoryCapture,
-    dreamMemoryCorrelation: dreamMemoryRetrieval,
-    dreamMemoryRetrieval,
-    dreamMemorySignals: dreamMemoryRetrieval,
     expectedBearerToken: config.expectedBearerToken,
+    memoryCapture,
+    memoryCorrelation: memoryRetrieval,
+    memoryRetrieval,
+    memorySignals: memoryRetrieval,
     ...(config.now === undefined ? {} : { now: config.now }),
   };
 
@@ -330,7 +330,7 @@ export const createTrustedLocalDreamMemoryRelayFetchHandler = (
       return Promise.resolve(healthResponse({ config, request }));
     }
 
-    return handleTrustedDreamMemoryRelayRequest({
+    return handleTrustedMemoryRelayRequest({
       config: relayConfig,
       request,
     });
@@ -369,7 +369,7 @@ const bodyFromIncomingMessage = async (input: {
     const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     size += buffer.byteLength;
     if (size > input.maxBodyBytes) {
-      throw new RangeError("Dream relay request body is too large.");
+      throw new RangeError("Memory relay request body is too large.");
     }
 
     chunks.push(buffer);
@@ -423,7 +423,7 @@ const writeServerError = (input: {
     input.error instanceof RangeError ? "request_too_large" : "relay_error",
     input.error instanceof Error
       ? input.error.message
-      : "Dream relay server failed."
+      : "Memory relay server failed."
   );
   input.serverResponse.statusCode = response.status;
   input.serverResponse.setHeader("content-type", "application/json");
@@ -437,17 +437,17 @@ const writeServerError = (input: {
         message:
           input.error instanceof Error
             ? input.error.message
-            : "Dream relay server failed.",
+            : "Memory relay server failed.",
         redacted: true,
       },
     })
   );
 };
 
-export const startTrustedLocalDreamMemoryRelayHttpServer = async (
-  config: TrustedLocalDreamMemoryRelayHttpConfig
-): Promise<TrustedLocalDreamMemoryRelayHttpServer> => {
-  const handler = createTrustedLocalDreamMemoryRelayFetchHandler(config);
+export const startTrustedLocalMemoryRelayHttpServer = async (
+  config: TrustedLocalMemoryRelayHttpConfig
+): Promise<TrustedLocalMemoryRelayHttpServer> => {
+  const handler = createTrustedLocalMemoryRelayFetchHandler(config);
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const server = createServer((request, serverResponse) => {
     void (async () => {
@@ -471,7 +471,7 @@ export const startTrustedLocalDreamMemoryRelayHttpServer = async (
   await once(server, "listening");
   const address = server.address();
   if (address === null || typeof address === "string") {
-    throw new Error("Trusted local Dream relay did not expose a TCP address.");
+    throw new Error("Trusted local Memory relay did not expose a TCP address.");
   }
 
   return {

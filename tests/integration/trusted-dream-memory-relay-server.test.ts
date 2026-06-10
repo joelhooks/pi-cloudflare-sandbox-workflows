@@ -2,34 +2,34 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  createIntegrationTestDreamMemoryCorrelationAdapter,
-  createIntegrationTestDreamMemoryFabricAdapter,
-  createIntegrationTestDreamMemoryRetrievalAdapter,
-} from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
-import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamMemoryRelayRequestEnvelopeSchema,
-  dreamMemoryRelayResponseEnvelopeSchema,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
-  DreamMemoryRelayOperation,
-  DreamSourceFamily,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
-import { handleTrustedDreamMemoryRelayRequest } from "../../src/cartridges/dream-memory-fabric/trusted-relay-server.ts";
+  MemoryRelayOperation,
+  MemorySourceFamily,
+} from "../../src/app/domain/source-profile.ts";
+import {
+  createIntegrationTestMemoryCorrelationAdapter,
+  createIntegrationTestMemoryFabricAdapter,
+  createIntegrationTestMemoryRetrievalAdapter,
+} from "../../src/cartridges/memory-fabric/integration-test-adapters.ts";
+import {
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemorySearchDocumentSchema,
+  MemoryRelayRequestEnvelopeSchema,
+  memoryRelayResponseEnvelopeSchema,
+} from "../../src/cartridges/memory-fabric/schemas.ts";
+import { handleTrustedMemoryRelayRequest } from "../../src/cartridges/memory-fabric/trusted-relay-server.ts";
 import type {
-  DreamMemoryCapturePort,
-  DreamMemoryFabricResult,
-} from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
+  MemoryCapturePort,
+  MemoryFabricResult,
+} from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
 const relayToken = "trusted-relay-token-never-in-response";
 const timestamp = "2026-06-09T18:00:00.000Z";
 
-const operationPath = (operation: DreamMemoryRelayOperation): string => {
+const operationPath = (operation: MemoryRelayOperation): string => {
   if (operation === "capture-run") {
     return "/memory/capture/run";
   }
@@ -43,7 +43,7 @@ const operationPath = (operation: DreamMemoryRelayOperation): string => {
 
 const sourceFamiliesForPayload = (
   payload: unknown
-): readonly DreamSourceFamily[] => {
+): readonly MemorySourceFamily[] => {
   if (
     typeof payload === "object" &&
     payload !== null &&
@@ -51,7 +51,7 @@ const sourceFamiliesForPayload = (
     Array.isArray(payload.sourceFamilies)
   ) {
     return payload.sourceFamilies.filter(
-      (family): family is DreamSourceFamily => typeof family === "string"
+      (family): family is MemorySourceFamily => typeof family === "string"
     );
   }
 
@@ -59,12 +59,12 @@ const sourceFamiliesForPayload = (
 };
 
 const relayRequest = (input: {
-  readonly operation: DreamMemoryRelayOperation;
+  readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
   readonly token?: string;
 }) => {
   const run = buildIntegrationTestRunRequest();
-  const body = DreamMemoryRelayRequestEnvelopeSchema.parse({
+  const body = MemoryRelayRequestEnvelopeSchema.parse({
     actor: run.actor,
     allowedSourceFamilies: [...sourceFamiliesForPayload(input.payload)],
     budget: {
@@ -90,7 +90,7 @@ const relayRequest = (input: {
       noRawTranscripts: true,
     },
     runId: run.runId,
-    schemaVersion: "dream.memory-relay.request.v1",
+    schemaVersion: "memory.relay.request.v1",
     scope: {
       organizationId: run.actor.organizationId,
       projectId: "project:system-dreaming",
@@ -125,7 +125,7 @@ const relayRequest = (input: {
 
 const parseJson = (response: Response): Promise<unknown> => response.json();
 
-const blocked = <TDocument>(): Promise<DreamMemoryFabricResult<TDocument>> =>
+const blocked = <TDocument>(): Promise<MemoryFabricResult<TDocument>> =>
   Promise.resolve({
     blocker: {
       code: "adapter_unavailable",
@@ -135,9 +135,9 @@ const blocked = <TDocument>(): Promise<DreamMemoryFabricResult<TDocument>> =>
     status: "blocked",
   });
 
-const createCountingDreamMemoryCapture = (): {
+const createCountingMemoryCapture = (): {
   readonly calls: string[];
-  readonly port: DreamMemoryCapturePort;
+  readonly port: MemoryCapturePort;
 } => {
   const calls: string[] = [];
 
@@ -158,16 +158,16 @@ const createCountingDreamMemoryCapture = (): {
   };
 };
 
-describe("trusted Dream memory relay server", () => {
+describe("trusted Memory relay server", () => {
   it("serves capture-run and capture-artifact through typed relay envelopes without leaking the bearer token", async () => {
     const run = buildIntegrationTestRunRequest();
     const config = {
-      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
       expectedBearerToken: relayToken,
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
       now: () => timestamp,
     };
 
-    const captureRunResponse = await handleTrustedDreamMemoryRelayRequest({
+    const captureRunResponse = await handleTrustedMemoryRelayRequest({
       config,
       request: relayRequest({
         operation: "capture-run",
@@ -183,11 +183,11 @@ describe("trusted Dream memory relay server", () => {
         token: relayToken,
       }),
     });
-    const captureRunEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamCaptureReceiptDocumentSchema
+    const captureRunEnvelope = memoryRelayResponseEnvelopeSchema(
+      MemoryCaptureReceiptDocumentSchema
     ).parse(await parseJson(captureRunResponse));
 
-    const captureArtifactResponse = await handleTrustedDreamMemoryRelayRequest({
+    const captureArtifactResponse = await handleTrustedMemoryRelayRequest({
       config,
       request: relayRequest({
         operation: "capture-artifact",
@@ -207,8 +207,8 @@ describe("trusted Dream memory relay server", () => {
         token: relayToken,
       }),
     });
-    const captureArtifactEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamCaptureReceiptDocumentSchema
+    const captureArtifactEnvelope = memoryRelayResponseEnvelopeSchema(
+      MemoryCaptureReceiptDocumentSchema
     ).parse(await parseJson(captureArtifactResponse));
 
     expect({
@@ -244,14 +244,13 @@ describe("trusted Dream memory relay server", () => {
   it("serves search, hydrate, and correlate through trusted ports without returning raw transcripts", async () => {
     const run = buildIntegrationTestRunRequest();
     const config = {
-      dreamMemoryCorrelation:
-        createIntegrationTestDreamMemoryCorrelationAdapter(),
-      dreamMemoryRetrieval: createIntegrationTestDreamMemoryRetrievalAdapter(),
       expectedBearerToken: relayToken,
+      memoryCorrelation: createIntegrationTestMemoryCorrelationAdapter(),
+      memoryRetrieval: createIntegrationTestMemoryRetrievalAdapter(),
       now: () => timestamp,
     };
 
-    const searchResponse = await handleTrustedDreamMemoryRelayRequest({
+    const searchResponse = await handleTrustedMemoryRelayRequest({
       config,
       request: relayRequest({
         operation: "search",
@@ -266,14 +265,14 @@ describe("trusted Dream memory relay server", () => {
         token: relayToken,
       }),
     });
-    const searchEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamMemorySearchDocumentSchema
+    const searchEnvelope = memoryRelayResponseEnvelopeSchema(
+      MemorySearchDocumentSchema
     ).parse(await parseJson(searchResponse));
     const receipts = searchEnvelope.document.hits.flatMap(
       (hit) => hit.receipts
     );
 
-    const hydrationResponse = await handleTrustedDreamMemoryRelayRequest({
+    const hydrationResponse = await handleTrustedMemoryRelayRequest({
       config,
       request: relayRequest({
         operation: "hydrate",
@@ -286,11 +285,11 @@ describe("trusted Dream memory relay server", () => {
         token: relayToken,
       }),
     });
-    const hydrationEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamHydrationDocumentSchema
+    const hydrationEnvelope = memoryRelayResponseEnvelopeSchema(
+      MemoryHydrationDocumentSchema
     ).parse(await parseJson(hydrationResponse));
 
-    const correlationResponse = await handleTrustedDreamMemoryRelayRequest({
+    const correlationResponse = await handleTrustedMemoryRelayRequest({
       config,
       request: relayRequest({
         operation: "correlate",
@@ -306,8 +305,8 @@ describe("trusted Dream memory relay server", () => {
         token: relayToken,
       }),
     });
-    const correlationEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-      DreamCorrelationGraphDocumentSchema
+    const correlationEnvelope = memoryRelayResponseEnvelopeSchema(
+      MemoryCorrelationGraphDocumentSchema
     ).parse(await parseJson(correlationResponse));
 
     expect({
@@ -324,22 +323,22 @@ describe("trusted Dream memory relay server", () => {
     }).toStrictEqual({
       correlationEdgeCount: 4,
       correlationOperation: "correlate",
-      correlationSchema: "dream.correlation-graph.v1",
+      correlationSchema: "memory.correlation-graph.v1",
       hydrationFullTranscriptFlags: [false, false],
       hydrationOperation: "hydrate",
       searchHitCount: 2,
       searchOperation: "search",
-      searchSchema: "dream.memory-search.v1",
+      searchSchema: "memory.search.v1",
     });
   });
 
   it("rejects unauthenticated relay requests before invoking trusted memory ports", async () => {
-    const counting = createCountingDreamMemoryCapture();
+    const counting = createCountingMemoryCapture();
     const run = buildIntegrationTestRunRequest();
-    const response = await handleTrustedDreamMemoryRelayRequest({
+    const response = await handleTrustedMemoryRelayRequest({
       config: {
-        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
+        memoryCapture: counting.port,
       },
       request: relayRequest({
         operation: "capture-run",
@@ -364,11 +363,11 @@ describe("trusted Dream memory relay server", () => {
   });
 
   it("blocks retrieval and correlation operations when no trusted adapter is installed", async () => {
-    const counting = createCountingDreamMemoryCapture();
-    const searchResponse = await handleTrustedDreamMemoryRelayRequest({
+    const counting = createCountingMemoryCapture();
+    const searchResponse = await handleTrustedMemoryRelayRequest({
       config: {
-        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
+        memoryCapture: counting.port,
       },
       request: relayRequest({
         operation: "search",
@@ -380,10 +379,10 @@ describe("trusted Dream memory relay server", () => {
     });
     const searchJson = await parseJson(searchResponse);
 
-    const correlationResponse = await handleTrustedDreamMemoryRelayRequest({
+    const correlationResponse = await handleTrustedMemoryRelayRequest({
       config: {
-        dreamMemoryCapture: counting.port,
         expectedBearerToken: relayToken,
+        memoryCapture: counting.port,
       },
       request: relayRequest({
         operation: "correlate",

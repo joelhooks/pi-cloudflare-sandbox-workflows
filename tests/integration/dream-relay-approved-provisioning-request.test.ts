@@ -43,7 +43,7 @@ const localReadiness = () => ({
     httpStatus: 200,
     rawCredentialsReturned: false,
     rawPathsReturned: false,
-    schemaVersion: "trusted.dream-memory-relay.readiness.v1",
+    schemaVersion: "trusted.memory-relay.readiness.v1",
     sourceRootCount: 1,
     status: "passed",
     supportedOperationCount: 10,
@@ -166,7 +166,7 @@ const forbiddenPrivateValuesIn = (value: string): string[] =>
     value.includes(privateValue)
   );
 
-describe("Dream relay approved provisioning request", () => {
+describe("Memory relay approved provisioning request", () => {
   it("blocks without exact signoff and does not leak token, source root, or relay URL", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-approved-"));
     const logs: string[] = [];

@@ -1,35 +1,37 @@
 import { hashJson } from "../../app/domain/hash.ts";
 import { ArtifactPinSchema } from "../../app/domain/schemas.ts";
-import { DreamCaptureReceiptDocumentSchema } from "./schemas.ts";
 import type {
-  DreamCaptureReceiptDocument,
-  DreamMemoryRelayCaptureArtifactPayload,
-  DreamMemoryRelayCaptureRunPayload,
-  DreamPrivacyTier,
-  DreamRuntime,
-  DreamSourceFamily,
-  DreamSourceScope,
+  MemoryPrivacyTier,
+  MemoryRuntime,
+  MemorySourceFamily,
+  MemorySourceScope,
+} from "../../app/domain/source-profile.ts";
+import { MemoryCaptureReceiptDocumentSchema } from "./schemas.ts";
+import type {
+  MemoryCaptureReceiptDocument,
+  MemoryRelayCaptureArtifactPayload,
+  MemoryRelayCaptureRunPayload,
 } from "./schemas.ts";
 import type { TrustedJoelClawSessionBridgeCommand } from "./trusted-joelclaw-session-source.ts";
-import type { DreamMemoryCapturePort } from "./workflow-node-adapter.ts";
+import type { MemoryCapturePort } from "./workflow-node-adapter.ts";
 
-export interface TrustedLocalDreamSourceRoot {
+export interface TrustedLocalMemorySourceRoot {
   readonly authorityRoot: string;
-  readonly family: DreamSourceFamily;
+  readonly family: MemorySourceFamily;
   readonly includeExtensions?: readonly string[];
   readonly label: string;
-  readonly privacyTier: DreamPrivacyTier;
-  readonly runtime?: DreamRuntime;
-  readonly scope?: DreamSourceScope;
+  readonly privacyTier: MemoryPrivacyTier;
+  readonly runtime?: MemoryRuntime;
+  readonly scope?: MemorySourceScope;
   readonly sourceId: string;
   readonly sourceSystem: string;
 }
 
-export interface TrustedLocalDreamMemoryFabricConfig {
+export interface TrustedLocalMemoryFabricConfig {
   readonly maxFilesPerSource?: number;
   readonly now?: () => string;
   readonly sessionBridgeCommand?: TrustedJoelClawSessionBridgeCommand;
-  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+  readonly sourceRoots: readonly TrustedLocalMemorySourceRoot[];
 }
 
 const captureArtifactRefSegment = (value: string): string =>
@@ -37,10 +39,10 @@ const captureArtifactRefSegment = (value: string): string =>
 
 const capturedRunPinFor = (input: {
   readonly capturedAt: string;
-  readonly payload: DreamMemoryRelayCaptureRunPayload;
+  readonly payload: MemoryRelayCaptureRunPayload;
 }) =>
   ArtifactPinSchema.parse({
-    artifactRef: `artifact://trusted-dream-memory-relay/captures/${captureArtifactRefSegment(
+    artifactRef: `artifact://trusted-memory-relay/captures/${captureArtifactRefSegment(
       input.payload.sourceSystem
     )}/runs/${captureArtifactRefSegment(
       input.payload.targetRunId ?? input.payload.runId
@@ -49,7 +51,7 @@ const capturedRunPinFor = (input: {
       capturedAt: input.capturedAt,
       redacted: true,
       runId: input.payload.runId,
-      schemaVersion: "dream.capture-target.run.v1",
+      schemaVersion: "memory.capture-target.run.v1",
       sourceSystem: input.payload.sourceSystem,
       targetRunId: input.payload.targetRunId ?? input.payload.runId,
       workItemId: input.payload.workItemId,
@@ -58,20 +60,20 @@ const capturedRunPinFor = (input: {
   });
 
 const captureReceiptFor = (input: {
-  readonly captureKind: DreamCaptureReceiptDocument["captureKind"];
+  readonly captureKind: MemoryCaptureReceiptDocument["captureKind"];
   readonly capturedAt: string;
-  readonly capturedRef: DreamCaptureReceiptDocument["capturedRef"];
+  readonly capturedRef: MemoryCaptureReceiptDocument["capturedRef"];
   readonly payload:
-    | DreamMemoryRelayCaptureArtifactPayload
-    | DreamMemoryRelayCaptureRunPayload;
-}): DreamCaptureReceiptDocument => {
+    | MemoryRelayCaptureArtifactPayload
+    | MemoryRelayCaptureRunPayload;
+}): MemoryCaptureReceiptDocument => {
   const baseReceipt = {
     capturedAt: input.capturedAt,
     capturedRef: input.capturedRef,
     readability: input.payload.readability,
     redacted: true,
     runId: input.payload.runId,
-    schemaVersion: "dream.capture-receipt.v1",
+    schemaVersion: "memory.capture-receipt.v1",
     sourceSystem: input.payload.sourceSystem,
     workItemId: input.payload.workItemId,
   } as const;
@@ -82,22 +84,22 @@ const captureReceiptFor = (input: {
         ? input.payload.targetRunId
         : input.payload.runId;
 
-    return DreamCaptureReceiptDocumentSchema.parse({
+    return MemoryCaptureReceiptDocumentSchema.parse({
       ...baseReceipt,
       captureKind: "run",
       capturedRunId,
     });
   }
 
-  return DreamCaptureReceiptDocumentSchema.parse({
+  return MemoryCaptureReceiptDocumentSchema.parse({
     ...baseReceipt,
     captureKind: input.captureKind,
   });
 };
 
-export const createTrustedLocalDreamMemoryFabricAdapter = (
-  config: TrustedLocalDreamMemoryFabricConfig
-): DreamMemoryCapturePort => ({
+export const createTrustedLocalMemoryFabricAdapter = (
+  config: TrustedLocalMemoryFabricConfig
+): MemoryCapturePort => ({
   captureArtifact(input) {
     const capturedAt = config.now?.() ?? new Date().toISOString();
 

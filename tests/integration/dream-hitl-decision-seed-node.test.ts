@@ -11,13 +11,13 @@ import type {
   DynamicWorkflowPlanDocument,
 } from "../../src/app/domain/schemas.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
-import { createIntegrationTestDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
+import { createIntegrationTestMemoryFabricAdapter } from "../../src/cartridges/memory-fabric/integration-test-adapters.ts";
 import {
-  DreamHitlDecisionDocumentSchema,
-  DreamHitlFollowUpRunRequestDocumentSchema,
-  DreamHitlDecisionWorkflowSeedDocumentSchema,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
-import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/dream-memory-fabric/workflow-node-adapter.ts";
+  MemoryHitlDecisionDocumentSchema,
+  MemoryHitlFollowUpRunRequestDocumentSchema,
+  MemoryHitlDecisionWorkflowSeedDocumentSchema,
+} from "../../src/cartridges/memory-fabric/schemas.ts";
+import { createMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
 
 const at = "2026-06-10T08:00:00.000Z";
@@ -50,9 +50,9 @@ const step = {
   dependsOn: [],
   inputRefs: [],
   kind: "workflow.node.invoke",
-  nodeType: "joelclaw.dream.hitl-decision-seed",
+  nodeType: "joelclaw.memory.hitl-decision-seed",
   outputPath: "dream/hitl-decision-workflow-seed.json",
-  packageRefs: ["artifact://packages/workflows/dream-memory-fabric/refs/v1"],
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "seed-next-workflow-from-hitl",
   summary: "Turn accepted Dream HITL decisions into next workflow input.",
 } satisfies WorkflowNodeInvocationStep;
@@ -60,18 +60,18 @@ const step = {
 const followUpStep = {
   config: {
     requestedPackageIds: [
-      "workflow/dream-memory-fabric",
+      "workflow/memory-fabric",
       "badass-courses/claw-kernel",
     ],
-    runId: "run-dream-hitl-follow-up-test",
-    workItemId: "work-item:dream-hitl-follow-up-test",
+    runId: "run-memory-hitl-follow-up-test",
+    workItemId: "work-item:memory-hitl-follow-up-test",
   },
   dependsOn: [step.stepId],
   inputRefs: [],
   kind: "workflow.node.invoke",
-  nodeType: "joelclaw.dream.hitl-follow-up-run-request",
+  nodeType: "joelclaw.memory.hitl-follow-up-run-request",
   outputPath: "dream/hitl-follow-up-run-request.json",
-  packageRefs: ["artifact://packages/workflows/dream-memory-fabric/refs/v1"],
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "draft-follow-up-run-request-from-hitl",
   summary: "Draft the next generated workflow request from Dream HITL seed.",
 } satisfies WorkflowNodeInvocationStep;
@@ -142,7 +142,7 @@ const plan = {
   proposal: {
     intent:
       "Use human Dream HITL decisions as constraints for the next generated workflow.",
-    requestedPackageIds: ["workflow/dream-memory-fabric"],
+    requestedPackageIds: ["workflow/memory-fabric"],
     stochasticNotes: [
       "The HITL decision seed node is package-backed and must not be runner logic.",
     ],
@@ -166,7 +166,7 @@ const plan = {
   workItemId: machine.workItemId,
 } satisfies DynamicWorkflowPlanDocument;
 
-const decisionDocument = DreamHitlDecisionDocumentSchema.parse({
+const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
   decisionCount: 2,
   decisions: [
     {
@@ -245,7 +245,7 @@ const decisionDocument = DreamHitlDecisionDocumentSchema.parse({
     type: "human",
   },
   runId: machine.runId,
-  schemaVersion: "dream.hitl-decision.v1",
+  schemaVersion: "memory.hitl-decision.v1",
   sourceRefs: [
     "artifact://dream-hitl-seed-test/dream/hitl-report.json",
     "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
@@ -262,9 +262,9 @@ describe("Dream HITL decision workflow-seed node", () => {
       runId: machine.runId,
       value: decisionDocument,
     });
-    const adapter = createDreamMemoryFabricWorkflowNodeAdapter({
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
       artifacts,
-      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
     });
     const executeInput = {
       actor: integrationTestActor,
@@ -286,7 +286,7 @@ describe("Dream HITL decision workflow-seed node", () => {
       throw new Error("Expected HITL decision workflow seed output ref.");
     }
 
-    const seed = DreamHitlDecisionWorkflowSeedDocumentSchema.parse(
+    const seed = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: seedRef })
     );
 
@@ -308,15 +308,15 @@ describe("Dream HITL decision workflow-seed node", () => {
       ],
       outputRefCount: 1,
       requiredCapabilities: ["brain.update.review"],
-      schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       status: "ready",
       workItemDecisionIds: ["decision:dream:capture-ingest-fix"],
     });
   });
 
   it("drafts a follow-up run request from the HITL workflow seed without submitting it", async () => {
-    const artifacts = createMemoryArtifactStore("dream-hitl-follow-up-node");
-    const seedDocument = DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+    const artifacts = createMemoryArtifactStore("memory-hitl-follow-up-node");
+    const seedDocument = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
       acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
       actionableDecisionCount: 2,
       actionableDecisions: decisionDocument.decisions,
@@ -330,7 +330,7 @@ describe("Dream HITL decision workflow-seed node", () => {
       rejectedDecisionIds: [],
       reportRef: decisionDocument.reportRef,
       runId: machine.runId,
-      schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       sourceRefs: [
         "artifact://dream-hitl-seed-test/dream/hitl-decision.json",
         "artifact://dream-hitl-seed-test/dream/hitl-report.json",
@@ -349,9 +349,9 @@ describe("Dream HITL decision workflow-seed node", () => {
       runId: machine.runId,
       value: seedDocument,
     });
-    const adapter = createDreamMemoryFabricWorkflowNodeAdapter({
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
       artifacts,
-      dreamMemoryCapture: createIntegrationTestDreamMemoryFabricAdapter(),
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
     });
     const executeInput = {
       actor: integrationTestActor,
@@ -373,7 +373,7 @@ describe("Dream HITL decision workflow-seed node", () => {
       throw new Error("Expected HITL follow-up run request output ref.");
     }
 
-    const followUp = DreamHitlFollowUpRunRequestDocumentSchema.parse(
+    const followUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: requestRef })
     );
 
@@ -393,13 +393,13 @@ describe("Dream HITL decision workflow-seed node", () => {
     }).toStrictEqual({
       actionableDecisionCount: 2,
       outputRefCount: 1,
-      requestRunId: "run-dream-hitl-follow-up-test",
-      requestWorkItemId: "work-item:dream-hitl-follow-up-test",
+      requestRunId: "run-memory-hitl-follow-up-test",
+      requestWorkItemId: "work-item:memory-hitl-follow-up-test",
       requestedPackageIds: [
-        "workflow/dream-memory-fabric",
+        "workflow/memory-fabric",
         "badass-courses/claw-kernel",
       ],
-      schemaVersion: "dream.hitl-follow-up-run-request.v1",
+      schemaVersion: "memory.hitl-follow-up-run-request.v1",
       status: "drafted",
       submitted: false,
       usesPlannerInstruction: true,

@@ -1,69 +1,71 @@
 import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
+import type { MemorySourceFamily } from "../../app/domain/source-profile.ts";
 import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamSignalDocumentSchema,
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemorySearchDocumentSchema,
+  MemorySignalDocumentSchema,
 } from "./schemas.ts";
 import type {
-  DreamCorrelationGraphDocument,
-  DreamMemoryRelayCaptureArtifactPayload,
-  DreamMemoryRelayCaptureRunPayload,
-  DreamMemoryRelayCorrelationPayload,
-  DreamReceiptRef,
-  DreamSignalKind,
-  DreamSourceFamily,
+  MemoryCorrelationGraphDocument,
+  MemoryRelayCaptureArtifactPayload,
+  MemoryRelayCaptureRunPayload,
+  MemoryRelayCorrelationPayload,
+  MemoryReceiptRef,
+  MemorySignalKind,
 } from "./schemas.ts";
 import type {
-  DreamMemoryCapturePort,
-  DreamMemoryCorrelationPort,
-  DreamMemoryRetrievalPort,
-  DreamMemorySignalPort,
+  MemoryCapturePort,
+  MemoryCorrelationPort,
+  MemoryRetrievalPort,
+  MemorySignalPort,
 } from "./workflow-node-adapter.ts";
 
-type DreamCorrelationGraphNode = DreamCorrelationGraphDocument["nodes"][number];
-type DreamCorrelationGraphEdge = DreamCorrelationGraphDocument["edges"][number];
+type MemoryCorrelationGraphNode =
+  MemoryCorrelationGraphDocument["nodes"][number];
+type MemoryCorrelationGraphEdge =
+  MemoryCorrelationGraphDocument["edges"][number];
 
 const nowIso = (): string => new Date().toISOString();
 
-const dreamSourceIdFor = (family: DreamSourceFamily): string =>
+const memorySourceIdFor = (family: MemorySourceFamily): string =>
   `source:${family}:integration`;
 
-export const createIntegrationTestDreamMemoryFabricAdapter =
-  (): DreamMemoryCapturePort => ({
-    captureArtifact(input: DreamMemoryRelayCaptureArtifactPayload) {
+export const createIntegrationTestMemoryFabricAdapter =
+  (): MemoryCapturePort => ({
+    captureArtifact(input: MemoryRelayCaptureArtifactPayload) {
       return Promise.resolve({
-        document: DreamCaptureReceiptDocumentSchema.parse({
+        document: MemoryCaptureReceiptDocumentSchema.parse({
           captureKind: "artifact",
           capturedAt: nowIso(),
           capturedRef: input.capturedRef,
           readability: input.readability,
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.capture-receipt.v1",
+          schemaVersion: "memory.capture-receipt.v1",
           sourceSystem: input.sourceSystem,
           workItemId: input.workItemId,
         }),
         status: "ready",
       });
     },
-    captureRun(input: DreamMemoryRelayCaptureRunPayload) {
+    captureRun(input: MemoryRelayCaptureRunPayload) {
       const capturedAt = nowIso();
 
       return Promise.resolve({
-        document: DreamCaptureReceiptDocumentSchema.parse({
+        document: MemoryCaptureReceiptDocumentSchema.parse({
           captureKind: "run",
           capturedAt,
           capturedRef: input.capturedRef ?? {
-            artifactRef: `artifact://integration-dream/runs/${
+            artifactRef: `artifact://integration-memory/runs/${
               input.targetRunId ?? input.runId
             }/capture/run.json`,
             hash: hashJson({
               capturedAt,
               redacted: true,
               runId: input.runId,
-              schemaVersion: "integration.dream.capture-run.v1",
+              schemaVersion: "integration.memory.capture-run.v1",
               sourceSystem: input.sourceSystem,
               targetRunId: input.targetRunId ?? input.runId,
               workItemId: input.workItemId,
@@ -74,7 +76,7 @@ export const createIntegrationTestDreamMemoryFabricAdapter =
           readability: input.readability,
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.capture-receipt.v1",
+          schemaVersion: "memory.capture-receipt.v1",
           sourceSystem: input.sourceSystem,
           workItemId: input.workItemId,
         }),
@@ -83,30 +85,30 @@ export const createIntegrationTestDreamMemoryFabricAdapter =
     },
   });
 
-const dreamSearchReceiptFor = (input: {
-  readonly family: DreamSourceFamily;
+const memorySearchReceiptFor = (input: {
+  readonly family: MemorySourceFamily;
   readonly runId: string;
-}): DreamReceiptRef => ({
-  artifactRef: `artifact://integration-dream/runs/${input.runId}/receipts/${input.family}.json`,
+}): MemoryReceiptRef => ({
+  artifactRef: `artifact://integration-memory/runs/${input.runId}/receipts/${input.family}.json`,
   family: input.family,
-  hash: sha256Hex(`${input.runId}:${input.family}:dream-search-receipt`),
-  receiptId: `receipt:integration-dream:${input.family}`,
-  redactedLocator: `redacted://integration-dream/${input.family}`,
+  hash: sha256Hex(`${input.runId}:${input.family}:memory-search-receipt`),
+  receiptId: `receipt:integration-memory:${input.family}`,
+  redactedLocator: `redacted://integration-memory/${input.family}`,
   ...(input.family === "agent-transcripts"
     ? { runtime: "codex" as const }
     : {}),
-  sourceId: dreamSourceIdFor(input.family),
+  sourceId: memorySourceIdFor(input.family),
   timestamp: nowIso(),
 });
 
-export const createIntegrationTestDreamMemoryRetrievalAdapter =
-  (): DreamMemoryRetrievalPort & DreamMemorySignalPort => ({
+export const createIntegrationTestMemoryRetrievalAdapter =
+  (): MemoryRetrievalPort & MemorySignalPort => ({
     hydrateMemories(input) {
       return Promise.resolve({
-        document: DreamHydrationDocumentSchema.parse({
+        document: MemoryHydrationDocumentSchema.parse({
           generatedAt: nowIso(),
           hydrated: input.receipts.map((receipt) => ({
-            evidenceRef: `artifact://integration-dream/runs/${input.runId}/hydrated/${receipt.sourceId}.json`,
+            evidenceRef: `artifact://integration-memory/runs/${input.runId}/hydrated/${receipt.sourceId}.json`,
             fullTranscriptReturned: false,
             receipt,
             redactedExcerpt: `Redacted integration evidence for ${receipt.sourceId}; no raw transcript body returned.`,
@@ -114,24 +116,24 @@ export const createIntegrationTestDreamMemoryRetrievalAdapter =
           })),
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.hydration.v1",
+          schemaVersion: "memory.hydration.v1",
           workItemId: input.workItemId,
         }),
         status: "ready",
       });
     },
     mineSignals(input) {
-      const signalKind: DreamSignalKind =
+      const signalKind: MemorySignalKind =
         input.signalKinds?.at(0) ?? "workflow-pattern";
       const family = input.sourceFamilies?.at(0) ?? "agent-transcripts";
-      const receipt = dreamSearchReceiptFor({ family, runId: input.runId });
+      const receipt = memorySearchReceiptFor({ family, runId: input.runId });
 
       return Promise.resolve({
-        document: DreamSignalDocumentSchema.parse({
+        document: MemorySignalDocumentSchema.parse({
           generatedAt: nowIso(),
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.signals.v1",
+          schemaVersion: "memory.signals.v1",
           signals: [
             {
               confidence: 0.94,
@@ -154,11 +156,11 @@ export const createIntegrationTestDreamMemoryRetrievalAdapter =
       const families = input.sourceFamilies ?? (["agent-transcripts"] as const);
 
       return Promise.resolve({
-        document: DreamMemorySearchDocumentSchema.parse({
+        document: MemorySearchDocumentSchema.parse({
           generatedAt: nowIso(),
           hits: families.slice(0, input.maxHits).map((family, index) => ({
             horizon: index === 0 ? ("all-time" as const) : ("30d" as const),
-            receipts: [dreamSearchReceiptFor({ family, runId: input.runId })],
+            receipts: [memorySearchReceiptFor({ family, runId: input.runId })],
             redactedExcerpt: `Redacted integration search hit for ${input.query} in ${family}.`,
             score: 1 - index / 10,
             summary: `Integration Dream search found ${family} evidence for ${input.query}.`,
@@ -166,7 +168,7 @@ export const createIntegrationTestDreamMemoryRetrievalAdapter =
           query: input.query,
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.memory-search.v1",
+          schemaVersion: "memory.search.v1",
           skippedSources: [],
           workItemId: input.workItemId,
         }),
@@ -175,18 +177,18 @@ export const createIntegrationTestDreamMemoryRetrievalAdapter =
     },
   });
 
-const integrationCorrelationReceiptKey = (receipt: DreamReceiptRef): string =>
+const integrationCorrelationReceiptKey = (receipt: MemoryReceiptRef): string =>
   `${receipt.sourceId}:${receipt.receiptId}:${receipt.hash ?? ""}`;
 
 const integrationCorrelationGraphFor = (
-  input: DreamMemoryRelayCorrelationPayload
+  input: MemoryRelayCorrelationPayload
 ) => {
   const hydratedReceiptKeys = new Set(
     input.hydration.hydrated.map((hydrated) =>
       integrationCorrelationReceiptKey(hydrated.receipt)
     )
   );
-  const nodes: DreamCorrelationGraphNode[] = [
+  const nodes: MemoryCorrelationGraphNode[] = [
     {
       label: "Integration Dream review",
       nodeId: "dream:integration-review",
@@ -194,7 +196,7 @@ const integrationCorrelationGraphFor = (
       redacted: true,
     },
   ];
-  const edges: DreamCorrelationGraphEdge[] = [];
+  const edges: MemoryCorrelationGraphEdge[] = [];
 
   for (const [index, hit] of input.search.hits.entries()) {
     const hitNodeId = `memory-hit:${index + 1}`;
@@ -233,19 +235,19 @@ const integrationCorrelationGraphFor = (
     }
   }
 
-  return DreamCorrelationGraphDocumentSchema.parse({
+  return MemoryCorrelationGraphDocumentSchema.parse({
     edges,
     generatedAt: nowIso(),
     nodes,
     redacted: true,
     runId: input.runId,
-    schemaVersion: "dream.correlation-graph.v1",
+    schemaVersion: "memory.correlation-graph.v1",
     workItemId: input.workItemId,
   });
 };
 
-export const createIntegrationTestDreamMemoryCorrelationAdapter =
-  (): DreamMemoryCorrelationPort => ({
+export const createIntegrationTestMemoryCorrelationAdapter =
+  (): MemoryCorrelationPort => ({
     correlateMemories(input) {
       return Promise.resolve({
         document: integrationCorrelationGraphFor(input),

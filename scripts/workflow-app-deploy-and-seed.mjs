@@ -185,7 +185,7 @@ const injectDreamRelayWorkerVars = (configText, vars) => {
   const varsMarker = /("vars"\s*:\s*\{\n)/u;
   if (!varsMarker.test(configText)) {
     throw new Error(
-      "wrangler.jsonc must contain a top-level vars object before injecting Dream relay Worker vars."
+      "wrangler.jsonc must contain a top-level vars object before injecting Memory relay Worker vars."
     );
   }
 

@@ -19,118 +19,120 @@ import type {
   DynamicWorkflowPlanDocument,
 } from "../../app/domain/schemas.ts";
 import {
-  DREAM_HITL_REPORT_SECTION_ORDER,
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHitlDecisionContractSchema,
-  DreamHitlDecisionDocumentSchema,
-  DreamHitlFollowUpRunRequestDocumentSchema,
-  DreamHitlDecisionWorkflowSeedDocumentSchema,
-  DreamHitlReportDefinitionOfDoneAuditSchema,
-  DreamHitlReportDocumentSchema,
-  DreamHitlReportProofLevelSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemoryFabricNodeTypeSchema,
-  DreamMemoryRelayCaptureArtifactPayloadSchema,
-  DreamMemoryRelayCaptureRunPayloadSchema,
-  DreamMemoryRelayCorrelationPayloadSchema,
-  DreamMemoryRelayHydrationPayloadSchema,
-  DreamMemoryRelayLeaseReceiptSchema,
-  DreamMemoryRelaySearchPayloadSchema,
-  DreamMemoryRelaySignalsPayloadSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamRefinementProposalDocumentSchema,
-  DreamSignalDocumentSchema,
-  DreamSignalKindSchema,
-  DreamSourceFamilySchema,
+  MemoryFabricNodeTypeSchema,
+  MemorySourceFamilySchema,
+} from "../../app/domain/source-profile.ts";
+import type { MemorySourceFamily } from "../../app/domain/source-profile.ts";
+import {
+  WORKFLOW_HITL_REPORT_SECTION_ORDER,
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHitlDecisionContractSchema,
+  MemoryHitlDecisionDocumentSchema,
+  MemoryHitlFollowUpRunRequestDocumentSchema,
+  MemoryHitlDecisionWorkflowSeedDocumentSchema,
+  WorkflowHitlReportDefinitionOfDoneAuditSchema,
+  WorkflowHitlReportDocumentSchema,
+  WorkflowHitlReportProofLevelSchema,
+  MemoryHydrationDocumentSchema,
+  MemoryRelayCaptureArtifactPayloadSchema,
+  MemoryRelayCaptureRunPayloadSchema,
+  MemoryRelayCorrelationPayloadSchema,
+  MemoryRelayHydrationPayloadSchema,
+  MemoryRelayLeaseReceiptSchema,
+  MemoryRelaySearchPayloadSchema,
+  MemoryRelaySignalsPayloadSchema,
+  MemorySearchDocumentSchema,
+  MemoryRefinementProposalDocumentSchema,
+  MemorySignalDocumentSchema,
+  MemorySignalKindSchema,
 } from "./schemas.ts";
 import type {
-  DreamCaptureReceiptDocument,
-  DreamCorrelationGraphDocument,
-  DreamHitlDecisionContract,
-  DreamHitlDecisionDocument,
-  DreamHitlFollowUpRunRequestDocument,
-  DreamHitlDecisionWorkflowSeedDocument,
-  DreamHitlDreamCard,
-  DreamHitlReportDefinitionOfDoneAudit,
-  DreamHitlReportDefinitionOfDoneAuditItem,
-  DreamHitlReportDocument,
-  DreamHitlReportProofLevel,
-  DreamHydrationDocument,
-  DreamMemoryRelayCaptureArtifactPayload,
-  DreamMemoryRelayCaptureRunPayload,
-  DreamMemoryRelayCorrelationPayload,
-  DreamMemoryRelayHydrationPayload,
-  DreamMemoryRelayLeaseReceipt,
-  DreamMemoryRelaySearchPayload,
-  DreamMemoryRelaySignalsPayload,
-  DreamMemorySearchDocument,
-  DreamMemorySearchHit,
-  DreamReceiptRef,
-  DreamRefinementProposal,
-  DreamRefinementProposalDocument,
-  DreamRefinementProposalRecommendation,
-  DreamRefinementProposalTargetKind,
-  DreamSignalDocument,
-  DreamSourceFamily,
+  MemoryCaptureReceiptDocument,
+  MemoryCorrelationGraphDocument,
+  MemoryHitlDecisionContract,
+  MemoryHitlDecisionDocument,
+  MemoryHitlFollowUpRunRequestDocument,
+  MemoryHitlDecisionWorkflowSeedDocument,
+  WorkflowHitlReportCard,
+  WorkflowHitlReportDefinitionOfDoneAudit,
+  WorkflowHitlReportDefinitionOfDoneAuditItem,
+  WorkflowHitlReportDocument,
+  WorkflowHitlReportProofLevel,
+  MemoryHydrationDocument,
+  MemoryRelayCaptureArtifactPayload,
+  MemoryRelayCaptureRunPayload,
+  MemoryRelayCorrelationPayload,
+  MemoryRelayHydrationPayload,
+  MemoryRelayLeaseReceipt,
+  MemoryRelaySearchPayload,
+  MemoryRelaySignalsPayload,
+  MemorySearchDocument,
+  MemorySearchHit,
+  MemoryReceiptRef,
+  MemoryRefinementProposal,
+  MemoryRefinementProposalDocument,
+  MemoryRefinementProposalRecommendation,
+  MemoryRefinementProposalTargetKind,
+  MemorySignalDocument,
 } from "./schemas.ts";
 
-export type DreamMemoryFabricResult<TDocument> =
+export type MemoryFabricResult<TDocument> =
   | {
       readonly blocker: CapabilityBlocker;
       readonly status: "blocked";
     }
   | {
       readonly document: TDocument;
-      readonly relayLeaseReceipt?: DreamMemoryRelayLeaseReceipt;
+      readonly relayLeaseReceipt?: MemoryRelayLeaseReceipt;
       readonly status: "ready";
     };
 
-export interface DreamMemoryRetrievalPort {
+export interface MemoryRetrievalPort {
   hydrateMemories(
-    input: DreamMemoryRelayHydrationPayload
-  ): Promise<DreamMemoryFabricResult<DreamHydrationDocument>>;
+    input: MemoryRelayHydrationPayload
+  ): Promise<MemoryFabricResult<MemoryHydrationDocument>>;
 
   searchMemories(
-    input: DreamMemoryRelaySearchPayload
-  ): Promise<DreamMemoryFabricResult<DreamMemorySearchDocument>>;
+    input: MemoryRelaySearchPayload
+  ): Promise<MemoryFabricResult<MemorySearchDocument>>;
 }
 
-export interface DreamMemorySignalPort {
+export interface MemorySignalPort {
   mineSignals(
-    input: DreamMemoryRelaySignalsPayload
-  ): Promise<DreamMemoryFabricResult<DreamSignalDocument>>;
+    input: MemoryRelaySignalsPayload
+  ): Promise<MemoryFabricResult<MemorySignalDocument>>;
 }
 
-export interface DreamMemoryCorrelationPort {
+export interface MemoryCorrelationPort {
   correlateMemories(
-    input: DreamMemoryRelayCorrelationPayload
-  ): Promise<DreamMemoryFabricResult<DreamCorrelationGraphDocument>>;
+    input: MemoryRelayCorrelationPayload
+  ): Promise<MemoryFabricResult<MemoryCorrelationGraphDocument>>;
 }
 
-export interface DreamMemoryCapturePort {
+export interface MemoryCapturePort {
   captureArtifact(
-    input: DreamMemoryRelayCaptureArtifactPayload
-  ): Promise<DreamMemoryFabricResult<DreamCaptureReceiptDocument>>;
+    input: MemoryRelayCaptureArtifactPayload
+  ): Promise<MemoryFabricResult<MemoryCaptureReceiptDocument>>;
 
   captureRun(
-    input: DreamMemoryRelayCaptureRunPayload
-  ): Promise<DreamMemoryFabricResult<DreamCaptureReceiptDocument>>;
+    input: MemoryRelayCaptureRunPayload
+  ): Promise<MemoryFabricResult<MemoryCaptureReceiptDocument>>;
 }
 
-export interface DreamMemoryFabricWorkflowNodeAdapterConfig {
+export interface MemoryFabricWorkflowNodeAdapterConfig {
   readonly artifacts: ArtifactStoreContract;
-  readonly dreamMemoryCapture?: DreamMemoryCapturePort;
-  readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
-  readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
-  readonly dreamMemorySignals?: DreamMemorySignalPort;
+  readonly memoryCapture?: MemoryCapturePort;
+  readonly memoryCorrelation?: MemoryCorrelationPort;
+  readonly memoryRetrieval?: MemoryRetrievalPort;
+  readonly memorySignals?: MemorySignalPort;
 }
 
 type BlockedWorkflowNodeExecutionResult = Extract<
   WorkflowNodeExecutionResult,
   { readonly status: "blocked" }
 >;
-type DreamWorkflowNodeExecutionInput = Parameters<
+type MemoryWorkflowNodeExecutionInput = Parameters<
   WorkflowNodeAdapterPort["execute"]
 >[0];
 
@@ -143,62 +145,63 @@ const CAPTURABLE_ARTIFACT_MEDIA_TYPES = [
   "text/typescript",
 ] as const;
 
-const DreamCapturableArtifactMediaTypeSchema = z.enum(
+const MemoryCapturableArtifactMediaTypeSchema = z.enum(
   CAPTURABLE_ARTIFACT_MEDIA_TYPES,
   {
     error:
-      "Dream capture artifact mediaType must be application/json or a supported text media type.",
+      "Memory capture artifact mediaType must be application/json or a supported text media type.",
   }
 );
 
-const DreamCaptureRunNodeConfigSchema = z.object({
+const MemoryCaptureRunNodeConfigSchema = z.object({
   capturedRef: ArtifactPinSchema.optional(),
   readability: z
     .enum(["actor-private", "org-private", "public"])
     .default("actor-private"),
-  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
   sourceSystem: z.string().min(1).default("cloudflare-workflow-run"),
   targetRunId: z.string().min(1).optional(),
 });
 
-const DreamCaptureArtifactNodeConfigSchema = z.object({
+const MemoryCaptureArtifactNodeConfigSchema = z.object({
   artifactRef: ArtifactRefSchema.optional(),
   artifactStepId: z.string().min(1).optional(),
-  mediaType: DreamCapturableArtifactMediaTypeSchema.default("application/json"),
+  mediaType:
+    MemoryCapturableArtifactMediaTypeSchema.default("application/json"),
   readability: z
     .enum(["actor-private", "org-private", "public"])
     .default("actor-private"),
-  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
   sourceSystem: z.string().min(1).default("cloudflare-artifacts"),
 });
 
-const DreamMemorySearchNodeConfigSchema = z.object({
+const MemorySearchNodeConfigSchema = z.object({
   maxHits: z.number().int().min(1).max(100).default(10),
   query: z.string().min(1),
-  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
 });
 
-const DreamSignalsNodeConfigSchema = z.object({
+const MemorySignalsNodeConfigSchema = z.object({
   maxSignals: z.number().int().min(1).max(100).default(10),
   query: z.string().min(1),
-  signalKinds: z.array(DreamSignalKindSchema).min(1).optional(),
-  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  signalKinds: z.array(MemorySignalKindSchema).min(1).optional(),
+  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
 });
 
-const DreamHydrationNodeConfigSchema = z.object({
+const MemoryHydrationNodeConfigSchema = z.object({
   maxReceipts: z.number().int().min(1).max(100).default(10),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
 });
 
-const DreamCorrelationNodeConfigSchema = z.object({
+const MemoryCorrelationNodeConfigSchema = z.object({
   hydrationRef: ArtifactRefSchema.optional(),
   hydrationStepId: z.string().min(1).optional(),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
 });
 
-const DreamRefinementProposalNodeConfigSchema = z.object({
+const MemoryRefinementProposalNodeConfigSchema = z.object({
   correlationRef: ArtifactRefSchema.optional(),
   correlationStepId: z.string().min(1).optional(),
   hydrationRef: ArtifactRefSchema.optional(),
@@ -210,11 +213,11 @@ const DreamRefinementProposalNodeConfigSchema = z.object({
   signalsStepId: z.string().min(1).optional(),
 });
 
-const DreamHitlReportNodeConfigSchema = z.object({
+const WorkflowHitlReportNodeConfigSchema = z.object({
   correlationRef: ArtifactRefSchema.optional(),
   correlationStepId: z.string().min(1).optional(),
   dynamicGenerationProofLevel:
-    DreamHitlReportProofLevelSchema.default("plan-derived"),
+    WorkflowHitlReportProofLevelSchema.default("plan-derived"),
   hydrationRef: ArtifactRefSchema.optional(),
   hydrationStepId: z.string().min(1).optional(),
   refinementProposalRef: ArtifactRefSchema.optional(),
@@ -224,18 +227,18 @@ const DreamHitlReportNodeConfigSchema = z.object({
   title: z.string().min(1).default("Dream review"),
 });
 
-const DreamHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
+const MemoryHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
   decisionRef: ArtifactRefSchema.optional(),
   decisionStepId: z.string().min(1).optional(),
 });
 
-const DreamHitlFollowUpRunRequestNodeConfigSchema = z.object({
+const MemoryHitlFollowUpRunRequestNodeConfigSchema = z.object({
   requestedPackageIds: z
     .array(z.string().min(1))
     .default([
       "badass-courses/claw-kernel",
       "joelhooks/configured-familiar-kernel",
-      "workflow/dream-memory-fabric",
+      "workflow/memory-fabric",
     ]),
   runId: z.string().min(1).optional(),
   seedRef: ArtifactRefSchema.optional(),
@@ -267,21 +270,21 @@ const siblingArtifactPath = (input: {
 };
 
 const relayLeaseReceiptPathFor = (step: WorkflowNodeInvocationStep): string =>
-  `dream/relay-lease-receipts/${step.stepId}.json`;
+  `memory/relay-lease-receipts/${step.stepId}.json`;
 
 const writeDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly document:
-    | DreamCaptureReceiptDocument
-    | DreamCorrelationGraphDocument
-    | DreamHitlFollowUpRunRequestDocument
-    | DreamHitlDecisionWorkflowSeedDocument
-    | DreamHitlReportDocument
-    | DreamHydrationDocument
-    | DreamMemorySearchDocument
-    | DreamRefinementProposalDocument
-    | DreamSignalDocument;
-  readonly relayLeaseReceipt?: DreamMemoryRelayLeaseReceipt | undefined;
+    | MemoryCaptureReceiptDocument
+    | MemoryCorrelationGraphDocument
+    | MemoryHitlFollowUpRunRequestDocument
+    | MemoryHitlDecisionWorkflowSeedDocument
+    | WorkflowHitlReportDocument
+    | MemoryHydrationDocument
+    | MemorySearchDocument
+    | MemoryRefinementProposalDocument
+    | MemorySignalDocument;
+  readonly relayLeaseReceipt?: MemoryRelayLeaseReceipt | undefined;
   readonly step: WorkflowNodeInvocationStep;
 }): Promise<WorkflowNodeExecutionResult> => {
   const write = await input.artifacts.writeJson({
@@ -298,7 +301,7 @@ const writeDocument = async (input: {
     path: relayLeaseReceiptPathFor(input.step),
     redacted: true,
     runId: input.document.runId,
-    value: DreamMemoryRelayLeaseReceiptSchema.parse(input.relayLeaseReceipt),
+    value: MemoryRelayLeaseReceiptSchema.parse(input.relayLeaseReceipt),
   });
 
   return {
@@ -309,7 +312,7 @@ const writeDocument = async (input: {
 
 const writeHitlReportDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
-  readonly document: DreamHitlReportDocument;
+  readonly document: WorkflowHitlReportDocument;
   readonly step: WorkflowNodeInvocationStep;
 }): Promise<WorkflowNodeExecutionResult> => {
   const jsonWrite = await input.artifacts.writeJson({
@@ -351,14 +354,14 @@ const loadSearch = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamMemorySearchDocument;
+      readonly document: MemorySearchDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamMemorySearchDocumentSchema.parse(
+      document: MemorySearchDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -366,7 +369,7 @@ const loadSearch = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream memory search artifact could not be loaded by the Dream node."
+      "Memory search artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -376,14 +379,14 @@ const loadHydration = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamHydrationDocument;
+      readonly document: MemoryHydrationDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamHydrationDocumentSchema.parse(
+      document: MemoryHydrationDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -391,7 +394,7 @@ const loadHydration = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream hydration artifact could not be loaded by the Dream node."
+      "Memory hydration artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -401,14 +404,14 @@ const loadSignals = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamSignalDocument;
+      readonly document: MemorySignalDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamSignalDocumentSchema.parse(
+      document: MemorySignalDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -416,7 +419,7 @@ const loadSignals = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream signals artifact could not be loaded by the Dream node."
+      "Memory signals artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -426,14 +429,14 @@ const loadCorrelation = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamCorrelationGraphDocument;
+      readonly document: MemoryCorrelationGraphDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamCorrelationGraphDocumentSchema.parse(
+      document: MemoryCorrelationGraphDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -441,7 +444,7 @@ const loadCorrelation = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream correlation graph artifact could not be loaded by the Dream node."
+      "Memory correlation graph artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -451,14 +454,14 @@ const loadRefinementProposals = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamRefinementProposalDocument;
+      readonly document: MemoryRefinementProposalDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamRefinementProposalDocumentSchema.parse(
+      document: MemoryRefinementProposalDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -466,7 +469,7 @@ const loadRefinementProposals = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream refinement proposal artifact could not be loaded by the Dream node."
+      "Memory refinement proposal artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -476,14 +479,14 @@ const loadHitlDecision = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamHitlDecisionDocument;
+      readonly document: MemoryHitlDecisionDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamHitlDecisionDocumentSchema.parse(
+      document: MemoryHitlDecisionDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -491,7 +494,7 @@ const loadHitlDecision = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream HITL decision artifact could not be loaded by the Dream node."
+      "Memory HITL decision artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -501,14 +504,14 @@ const loadHitlDecisionWorkflowSeed = async (input: {
   readonly artifactRef: ArtifactRef;
 }): Promise<
   | {
-      readonly document: DreamHitlDecisionWorkflowSeedDocument;
+      readonly document: MemoryHitlDecisionWorkflowSeedDocument;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
   try {
     return {
-      document: DreamHitlDecisionWorkflowSeedDocumentSchema.parse(
+      document: MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
         await input.artifacts.readJson({ artifactRef: input.artifactRef })
       ),
       status: "loaded",
@@ -516,13 +519,13 @@ const loadHitlDecisionWorkflowSeed = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream HITL decision workflow seed artifact could not be loaded by the Dream node."
+      "Memory HITL decision workflow seed artifact could not be loaded by the memory-fabric node."
     );
   }
 };
 
 const captureArtifactRefFor = (input: {
-  readonly config: z.infer<typeof DreamCaptureArtifactNodeConfigSchema>;
+  readonly config: z.infer<typeof MemoryCaptureArtifactNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): ArtifactRef | null =>
   input.config.artifactRef ??
@@ -573,13 +576,13 @@ const captureArtifactPinFor = async (input: {
   } catch {
     return blocker(
       "stale_package",
-      "Dream capture artifact node requires a readable generated artifact ref."
+      "Memory capture artifact node requires a readable generated artifact ref."
     );
   }
 };
 
 const searchRefFor = (input: {
-  readonly config: z.infer<typeof DreamHydrationNodeConfigSchema>;
+  readonly config: z.infer<typeof MemoryHydrationNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): ArtifactRef | null =>
   input.config.searchRef ??
@@ -589,7 +592,7 @@ const searchRefFor = (input: {
   });
 
 const correlationRefsFor = (input: {
-  readonly config: z.infer<typeof DreamCorrelationNodeConfigSchema>;
+  readonly config: z.infer<typeof MemoryCorrelationNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): {
   readonly hydrationRef: ArtifactRef | null;
@@ -615,7 +618,7 @@ const correlationRefsFor = (input: {
 };
 
 const refinementProposalRefsFor = (input: {
-  readonly config: z.infer<typeof DreamRefinementProposalNodeConfigSchema>;
+  readonly config: z.infer<typeof MemoryRefinementProposalNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): {
   readonly correlationRef: ArtifactRef | null;
@@ -650,7 +653,7 @@ const refinementProposalRefsFor = (input: {
 });
 
 const reportRefsFor = (input: {
-  readonly config: z.infer<typeof DreamHitlReportNodeConfigSchema>;
+  readonly config: z.infer<typeof WorkflowHitlReportNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
 }): {
   readonly correlationRef: ArtifactRef | null;
@@ -686,7 +689,7 @@ const reportRefsFor = (input: {
 
 const hitlDecisionRefFor = (input: {
   readonly config: z.infer<
-    typeof DreamHitlDecisionWorkflowSeedNodeConfigSchema
+    typeof MemoryHitlDecisionWorkflowSeedNodeConfigSchema
   >;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly inputRefs: readonly ArtifactRef[];
@@ -700,7 +703,7 @@ const hitlDecisionRefFor = (input: {
   null;
 
 const hitlDecisionWorkflowSeedRefFor = (input: {
-  readonly config: z.infer<typeof DreamHitlFollowUpRunRequestNodeConfigSchema>;
+  readonly config: z.infer<typeof MemoryHitlFollowUpRunRequestNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly inputRefs: readonly ArtifactRef[];
 }): ArtifactRef | null =>
@@ -719,9 +722,9 @@ interface RequiredReportRefs {
 }
 
 interface LoadedReportInputs {
-  readonly correlation: DreamCorrelationGraphDocument;
-  readonly hydration: DreamHydrationDocument;
-  readonly search: DreamMemorySearchDocument;
+  readonly correlation: MemoryCorrelationGraphDocument;
+  readonly hydration: MemoryHydrationDocument;
+  readonly search: MemorySearchDocument;
 }
 
 const requiredReportRefsFor = (
@@ -734,7 +737,7 @@ const requiredReportRefsFor = (
   ) {
     return blocker(
       "stale_package",
-      "Dream HITL report node requires search, hydration, and correlation artifact refs."
+      "Memory HITL report node requires search, hydration, and correlation artifact refs."
     );
   }
 
@@ -785,7 +788,7 @@ const loadOptionalRefinementProposalDocument = async (input: {
   readonly refinementProposalRef: ArtifactRef | null;
 }): Promise<
   | {
-      readonly document: DreamRefinementProposalDocument | null;
+      readonly document: MemoryRefinementProposalDocument | null;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
@@ -811,14 +814,14 @@ const loadOptionalRefinementProposalDocument = async (input: {
   };
 };
 
-const receiptKey = (receipt: DreamReceiptRef): string =>
+const receiptKey = (receipt: MemoryReceiptRef): string =>
   `${receipt.sourceId}:${receipt.receiptId}:${receipt.hash ?? ""}`;
 
 const hydrationReceiptsFor = (input: {
   readonly maxReceipts: number;
-  readonly search: DreamMemorySearchDocument;
-}): DreamReceiptRef[] => {
-  const receipts: DreamReceiptRef[] = [];
+  readonly search: MemorySearchDocument;
+}): MemoryReceiptRef[] => {
+  const receipts: MemoryReceiptRef[] = [];
   const seen = new Set<string>();
 
   for (const hit of input.search.hits) {
@@ -839,7 +842,7 @@ const hydrationReceiptsFor = (input: {
   return receipts;
 };
 
-const dreamFamilyLabels: Record<DreamSourceFamily, string> = {
+const memoryFamilyLabels: Record<MemorySourceFamily, string> = {
   "agent-transcripts": "agent transcripts",
   brain: "Brain notes",
   "cloudflare-runs": "Cloudflare runs",
@@ -855,13 +858,13 @@ const d2Label = (value: string): string => JSON.stringify(value);
 const mdsvxAttributeString = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 
-const dreamReportStateMachineFigureFor = (input: {
+const reportStateMachineFigureFor = (input: {
   readonly machine: DynamicWorkflowMachineDocument;
   readonly machineArtifact: DynamicWorkflowPlanDocument["machine"];
-}): DreamHitlReportDocument["proof"]["stateMachineFigure"] => {
+}): WorkflowHitlReportDocument["proof"]["stateMachineFigure"] => {
   if (input.machine.machineId !== input.machineArtifact.machineId) {
     throw new Error(
-      `Generated Dream report machine id mismatch: ${input.machine.machineId} != ${input.machineArtifact.machineId}.`
+      `Generated report machine id mismatch: ${input.machine.machineId} != ${input.machineArtifact.machineId}.`
     );
   }
 
@@ -939,20 +942,22 @@ const dreamReportStateMachineFigureFor = (input: {
 
 const frontMatterString = (value: string): string => JSON.stringify(value);
 
-const receiptLineFor = (receipt: DreamReceiptRef): string =>
+const receiptLineFor = (receipt: MemoryReceiptRef): string =>
   `- ${receipt.family} / ${receipt.sourceId} / ${receipt.receiptId}`;
 
-const ratingForHit = (hit: DreamMemorySearchHit): number =>
+const ratingForHit = (hit: MemorySearchHit): number =>
   Math.min(10, Math.max(1, Math.round(hit.score * 10)));
 
-const dreamCardForHit = (input: {
+const reportCardForHit = (input: {
   readonly hydratedReceiptKeys: ReadonlySet<string>;
-  readonly hit: DreamMemorySearchHit;
+  readonly hit: MemorySearchHit;
   readonly index: number;
-}): DreamHitlDreamCard => {
+}): WorkflowHitlReportCard => {
   const receipt = input.hit.receipts.at(0);
   const familyLabel =
-    receipt === undefined ? "memory fabric" : dreamFamilyLabels[receipt.family];
+    receipt === undefined
+      ? "memory fabric"
+      : memoryFamilyLabels[receipt.family];
   const hydrated = input.hit.receipts.some((candidate) =>
     input.hydratedReceiptKeys.has(receiptKey(candidate))
   );
@@ -970,16 +975,16 @@ const dreamCardForHit = (input: {
   };
 };
 
-const dreamCardsFor = (input: {
-  readonly hydration: DreamHydrationDocument;
-  readonly search: DreamMemorySearchDocument;
-}): DreamHitlDreamCard[] => {
+const reportCardsFor = (input: {
+  readonly hydration: MemoryHydrationDocument;
+  readonly search: MemorySearchDocument;
+}): WorkflowHitlReportCard[] => {
   const hydratedReceiptKeys = new Set(
     input.hydration.hydrated.map((hydrated) => receiptKey(hydrated.receipt))
   );
 
   return input.search.hits.map((hit, index) =>
-    dreamCardForHit({
+    reportCardForHit({
       hit,
       hydratedReceiptKeys,
       index,
@@ -994,12 +999,12 @@ const proposalSlugFor = (value: string): string => {
     .replaceAll(/^-|-$/gu, "")
     .slice(0, 40);
 
-  return slug.length === 0 ? "dream" : slug;
+  return slug.length === 0 ? "memory" : slug;
 };
 
 const targetKindForHit = (
-  hit: DreamMemorySearchHit
-): DreamRefinementProposalTargetKind => {
+  hit: MemorySearchHit
+): MemoryRefinementProposalTargetKind => {
   const text = hit.summary.toLowerCase();
   const family = hit.receipts.at(0)?.family;
 
@@ -1039,7 +1044,7 @@ const targetKindForHit = (
 };
 
 const proposedNextStepFor = (
-  targetKind: DreamRefinementProposalTargetKind
+  targetKind: MemoryRefinementProposalTargetKind
 ): string => {
   if (targetKind === "capability-lease") {
     return "Review the capability boundary and decide whether the next generated workflow needs a new leased port.";
@@ -1075,8 +1080,8 @@ const proposedNextStepFor = (
 const recommendationForProposal = (input: {
   readonly hydrated: boolean;
   readonly rating: number;
-  readonly targetKind: DreamRefinementProposalTargetKind;
-}): DreamRefinementProposalRecommendation => {
+  readonly targetKind: MemoryRefinementProposalTargetKind;
+}): MemoryRefinementProposalRecommendation => {
   if (input.targetKind === "capture-ingest-fix") {
     return "turn-into-work";
   }
@@ -1093,11 +1098,11 @@ const recommendationForProposal = (input: {
 };
 
 const proposalForHit = (input: {
-  readonly hit: DreamMemorySearchHit;
+  readonly hit: MemorySearchHit;
   readonly hydratedReceiptKeys: ReadonlySet<string>;
   readonly index: number;
   readonly sourceRefs: readonly ArtifactRef[];
-}): DreamRefinementProposal => {
+}): MemoryRefinementProposal => {
   const hydrated = input.hit.receipts.some((receipt) =>
     input.hydratedReceiptKeys.has(receiptKey(receipt))
   );
@@ -1127,8 +1132,8 @@ const proposalForHit = (input: {
 };
 
 const targetKindForSignal = (
-  signal: DreamSignalDocument["signals"][number]
-): DreamRefinementProposalTargetKind => {
+  signal: MemorySignalDocument["signals"][number]
+): MemoryRefinementProposalTargetKind => {
   if (signal.kind === "workflow-pattern") {
     return "dynamic-workflow-pattern";
   }
@@ -1146,9 +1151,9 @@ const targetKindForSignal = (
 
 const signalProposalFor = (input: {
   readonly index: number;
-  readonly signal: DreamSignalDocument["signals"][number];
+  readonly signal: MemorySignalDocument["signals"][number];
   readonly sourceRefs: readonly ArtifactRef[];
-}): DreamRefinementProposal => {
+}): MemoryRefinementProposal => {
   const targetKind = targetKindForSignal(input.signal);
 
   return {
@@ -1171,16 +1176,16 @@ const signalProposalFor = (input: {
 };
 
 const refinementProposalDocumentFor = (input: {
-  readonly correlation: DreamCorrelationGraphDocument;
+  readonly correlation: MemoryCorrelationGraphDocument;
   readonly correlationRef: ArtifactRef;
-  readonly hydration: DreamHydrationDocument;
+  readonly hydration: MemoryHydrationDocument;
   readonly hydrationRef: ArtifactRef;
   readonly maxProposals: number;
-  readonly search: DreamMemorySearchDocument;
+  readonly search: MemorySearchDocument;
   readonly searchRef: ArtifactRef;
-  readonly signals: DreamSignalDocument;
+  readonly signals: MemorySignalDocument;
   readonly signalsRef: ArtifactRef;
-}): DreamRefinementProposalDocument => {
+}): MemoryRefinementProposalDocument => {
   const sourceRefs = [
     input.signalsRef,
     input.searchRef,
@@ -1209,7 +1214,7 @@ const refinementProposalDocumentFor = (input: {
     .toSorted((left, right) => right.rating - left.rating)
     .slice(0, input.maxProposals);
 
-  return DreamRefinementProposalDocumentSchema.parse({
+  return MemoryRefinementProposalDocumentSchema.parse({
     generatedAt: new Date().toISOString(),
     nextWorkflowSeed: {
       plannerInstructions: [
@@ -1233,15 +1238,15 @@ const refinementProposalDocumentFor = (input: {
     proposals,
     redacted: true,
     runId: input.search.runId,
-    schemaVersion: "dream.refinement-proposals.v1",
+    schemaVersion: "memory.refinement-proposals.v1",
     sourceRefs,
     workItemId: input.search.workItemId,
   });
 };
 
 const actionableHitlDecisionsFor = (
-  document: DreamHitlDecisionDocument
-): DreamHitlDecisionDocument["decisions"] =>
+  document: MemoryHitlDecisionDocument
+): MemoryHitlDecisionDocument["decisions"] =>
   document.decisions.filter(
     (decision) =>
       decision.decision === "accept" || decision.decision === "turn-into-work"
@@ -1256,9 +1261,9 @@ const uniqueStrings = (values: readonly string[]): string[] => [
 ];
 
 const hitlDecisionWorkflowSeedDocumentFor = (input: {
-  readonly decision: DreamHitlDecisionDocument;
+  readonly decision: MemoryHitlDecisionDocument;
   readonly decisionRef: ArtifactRef;
-}): DreamHitlDecisionWorkflowSeedDocument => {
+}): MemoryHitlDecisionWorkflowSeedDocument => {
   const actionableDecisions = actionableHitlDecisionsFor(input.decision);
   const acceptedDecisionIds = input.decision.decisions
     .filter((decision) => decision.decision === "accept")
@@ -1294,7 +1299,7 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
       ? `HITL accepted ${acceptedDecisionIds.length} decision(s) and turned ${workItemDecisionIds.length} decision(s) into work; the next generated workflow must consume ${input.decision.nextWorkflowSeed.plannerInstructions.length} planner instruction(s).`
       : "HITL review did not accept or turn any Dream decision into work; the next generated workflow seed is intentionally empty.";
 
-  return DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+  return MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
     acceptedDecisionIds,
     actionableDecisionCount: actionableDecisions.length,
     actionableDecisions,
@@ -1309,7 +1314,7 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
     rejectedDecisionIds,
     reportRef: input.decision.reportRef,
     runId: input.decision.runId,
-    schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+    schemaVersion: "memory.hitl-decision-workflow-seed.v1",
     sourceRefs,
     status,
     summary,
@@ -1319,12 +1324,12 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
 };
 
 const followUpRunRequestIntentFor = (
-  seed: DreamHitlDecisionWorkflowSeedDocument
+  seed: MemoryHitlDecisionWorkflowSeedDocument
 ): string =>
   `Run the next generated workflow from accepted Dream HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
 
 const followUpRunRequestNotesFor = (input: {
-  readonly seed: DreamHitlDecisionWorkflowSeedDocument;
+  readonly seed: MemoryHitlDecisionWorkflowSeedDocument;
   readonly seedRef: ArtifactRef;
 }): string[] => {
   const artifactTargets = input.seed.nextWorkflowSeed.artifactUpdateTargets.map(
@@ -1352,11 +1357,11 @@ const followUpRunRequestNotesFor = (input: {
 };
 
 const hitlFollowUpRunRequestDocumentFor = (input: {
-  readonly actor: DreamWorkflowNodeExecutionInput["actor"];
-  readonly config: z.infer<typeof DreamHitlFollowUpRunRequestNodeConfigSchema>;
-  readonly seed: DreamHitlDecisionWorkflowSeedDocument;
+  readonly actor: MemoryWorkflowNodeExecutionInput["actor"];
+  readonly config: z.infer<typeof MemoryHitlFollowUpRunRequestNodeConfigSchema>;
+  readonly seed: MemoryHitlDecisionWorkflowSeedDocument;
   readonly seedRef: ArtifactRef;
-}): DreamHitlFollowUpRunRequestDocument => {
+}): MemoryHitlFollowUpRunRequestDocument => {
   const status =
     input.seed.status === "ready" && input.seed.actionableDecisionCount > 0
       ? "drafted"
@@ -1364,10 +1369,10 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
   const requestedPackageIds = uniqueStrings(input.config.requestedPackageIds);
   const followUpRunId =
     input.config.runId ??
-    `run-dream-hitl-follow-up-${proposalSlugFor(input.seed.runId)}`;
+    `run-memory-hitl-follow-up-${proposalSlugFor(input.seed.runId)}`;
   const followUpWorkItemId =
     input.config.workItemId ??
-    `work-item:dream-hitl-follow-up:${proposalSlugFor(input.seed.workItemId)}`;
+    `work-item:memory-hitl-follow-up:${proposalSlugFor(input.seed.workItemId)}`;
   const request =
     status === "drafted"
       ? {
@@ -1389,7 +1394,7 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
       ? `Drafted follow-up workflow request ${followUpRunId} from ${input.seed.actionableDecisionCount} actionable Dream HITL decision(s).`
       : "No follow-up workflow request was drafted because the HITL decision seed had no actionable decisions.";
 
-  return DreamHitlFollowUpRunRequestDocumentSchema.parse({
+  return MemoryHitlFollowUpRunRequestDocumentSchema.parse({
     actionableDecisionCount: input.seed.actionableDecisionCount,
     artifactUpdateTargets: input.seed.nextWorkflowSeed.artifactUpdateTargets,
     decisionWorkflowSeedRef: input.seedRef,
@@ -1400,7 +1405,7 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
     requiredCapabilityKinds:
       input.seed.nextWorkflowSeed.requiredCapabilityKinds,
     runId: input.seed.runId,
-    schemaVersion: "dream.hitl-follow-up-run-request.v1",
+    schemaVersion: "memory.hitl-follow-up-run-request.v1",
     sourceRefs: uniqueArtifactRefs([input.seedRef, ...input.seed.sourceRefs]),
     status,
     submitted: false,
@@ -1409,7 +1414,7 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
   });
 };
 
-const dreamCardMdsvxFor = (dream: DreamHitlDreamCard): string =>
+const reportCardMdsvxFor = (dream: WorkflowHitlReportCard): string =>
   [
     `### ${dream.title}`,
     dream.summary,
@@ -1420,29 +1425,29 @@ const dreamCardMdsvxFor = (dream: DreamHitlDreamCard): string =>
     dream.receipts.map(receiptLineFor).join("\n"),
   ].join("\n\n");
 
-const dreamActionLineFor = (dream: DreamHitlDreamCard): string =>
+const reportActionLineFor = (dream: WorkflowHitlReportCard): string =>
   `- **${dream.title}** Rating ${dream.rating}/10. ${dream.recommendation}`;
 
 const refinementProposalActionLineFor = (
-  proposal: DreamRefinementProposal
+  proposal: MemoryRefinementProposal
 ): string =>
   `- **${proposal.title}** ${proposal.rating}/10. ${proposal.recommendation}: ${proposal.proposedNextStep}`;
 
 const hitlDecisionContractFor = (
   sourceRefs: readonly ArtifactRef[]
-): DreamHitlDecisionContract =>
-  DreamHitlDecisionContractSchema.parse({
+): MemoryHitlDecisionContract =>
+  MemoryHitlDecisionContractSchema.parse({
     artifactPath: "dream/hitl-decision.json",
-    contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
-    decisionSchemaVersion: "dream.hitl-decision.v1",
-    exportId: "dream-hitl-decision-schema",
+    contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
+    decisionSchemaVersion: "memory.hitl-decision.v1",
+    exportId: "memory-hitl-decision-schema",
     nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
     sourceRefs,
     targetKinds: ["dream-card", "refinement-proposal"],
   });
 
-type DreamHitlReportDefinitionOfDoneAuditItemInput = Omit<
-  DreamHitlReportDefinitionOfDoneAuditItem,
+type WorkflowHitlReportDefinitionOfDoneAuditItemInput = Omit<
+  WorkflowHitlReportDefinitionOfDoneAuditItem,
   "blockerRefs" | "evidenceRefs"
 > & {
   readonly blockerRefs?: readonly string[];
@@ -1450,8 +1455,8 @@ type DreamHitlReportDefinitionOfDoneAuditItemInput = Omit<
 };
 
 const reportAuditItem = (
-  item: DreamHitlReportDefinitionOfDoneAuditItemInput
-): DreamHitlReportDefinitionOfDoneAuditItem => ({
+  item: WorkflowHitlReportDefinitionOfDoneAuditItemInput
+): WorkflowHitlReportDefinitionOfDoneAuditItem => ({
   blockerRefs: [...(item.blockerRefs ?? [])],
   evidenceRefs: [...(item.evidenceRefs ?? [])],
   requirement: item.requirement,
@@ -1461,8 +1466,8 @@ const reportAuditItem = (
 });
 
 const reportAuditStatusFor = (
-  items: readonly DreamHitlReportDefinitionOfDoneAuditItem[]
-): DreamHitlReportDefinitionOfDoneAudit["status"] => {
+  items: readonly WorkflowHitlReportDefinitionOfDoneAuditItem[]
+): WorkflowHitlReportDefinitionOfDoneAudit["status"] => {
   if (
     items.some((item) => item.status === "blocked" || item.status === "missing")
   ) {
@@ -1475,18 +1480,18 @@ const reportAuditStatusFor = (
 };
 
 const reportDefinitionOfDoneAuditFor = (input: {
-  readonly correlation: DreamCorrelationGraphDocument;
+  readonly correlation: MemoryCorrelationGraphDocument;
   readonly dreamCount: number;
   readonly generatedAt: string;
-  readonly hydration: DreamHydrationDocument;
+  readonly hydration: MemoryHydrationDocument;
   readonly plan: DynamicWorkflowPlanDocument;
-  readonly proofLevel: DreamHitlReportProofLevel;
+  readonly proofLevel: WorkflowHitlReportProofLevel;
   readonly refinementProposalCount: number;
   readonly runId: string;
-  readonly search: DreamMemorySearchDocument;
+  readonly search: MemorySearchDocument;
   readonly sourceRefs: readonly ArtifactRef[];
-  readonly stateMachineFigure: DreamHitlReportDocument["proof"]["stateMachineFigure"];
-}): DreamHitlReportDefinitionOfDoneAudit => {
+  readonly stateMachineFigure: WorkflowHitlReportDocument["proof"]["stateMachineFigure"];
+}): WorkflowHitlReportDefinitionOfDoneAudit => {
   const generatedArtifactRefs = [
     input.plan.machine.artifactRef,
     input.plan.machine.sourceArtifactRef,
@@ -1508,13 +1513,13 @@ const reportDefinitionOfDoneAuditFor = (input: {
 
   const items = [
     reportAuditItem({
-      evidenceRefs: ["node:joelclaw.dream.hitl-report", ...input.sourceRefs],
+      evidenceRefs: ["node:joelclaw.memory.hitl-report", ...input.sourceRefs],
       requirement:
         "Dream report is emitted by the installed Dream workflow cartridge/package.",
       requirementId: "dream-cartridge-package",
       status: "captured",
       summary:
-        "`joelclaw.dream.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
+        "`joelclaw.memory.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
     }),
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
@@ -1523,7 +1528,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
       requirementId: "worker-facing-relay-capability-lease",
       status: "not-proven",
       summary:
-        "This report consumes Dream artifacts but does not prove relay lease sidecars; `dream.generated-workflow-proof.v1` must verify them.",
+        "This report consumes Dream artifacts but does not prove relay lease sidecars; `memory.generated-workflow-proof.v1` must verify them.",
     }),
     reportAuditItem({
       evidenceRefs: generatedArtifactRefs,
@@ -1608,19 +1613,19 @@ const reportDefinitionOfDoneAuditFor = (input: {
     totalCount: items.length,
   };
 
-  return DreamHitlReportDefinitionOfDoneAuditSchema.parse({
+  return WorkflowHitlReportDefinitionOfDoneAuditSchema.parse({
     generatedAt: input.generatedAt,
     items,
     redacted: true,
     runId: input.runId,
-    schemaVersion: "dream.hitl-report.definition-of-done-audit.v1",
+    schemaVersion: "workflow.hitl-report.definition-of-done-audit.v1",
     status: reportAuditStatusFor(items),
     summary,
   });
 };
 
 const reportDefinitionOfDoneAuditMdsvxFor = (
-  audit: DreamHitlReportDefinitionOfDoneAudit
+  audit: WorkflowHitlReportDefinitionOfDoneAudit
 ): string =>
   [
     `Audit status: ${audit.status}. Captured ${audit.summary.capturedCount}/${audit.summary.totalCount}; blocked ${audit.summary.blockedCount}; missing ${audit.summary.missingCount}; not proven ${audit.summary.notProvenCount}.`,
@@ -1631,31 +1636,31 @@ const reportDefinitionOfDoneAuditMdsvxFor = (
   ].join("\n");
 
 const reportMdsvxFor = (input: {
-  readonly correlation: DreamCorrelationGraphDocument;
-  readonly definitionOfDoneAudit: DreamHitlReportDefinitionOfDoneAudit;
-  readonly hitlDecisionContract: DreamHitlDecisionContract;
+  readonly correlation: MemoryCorrelationGraphDocument;
+  readonly definitionOfDoneAudit: WorkflowHitlReportDefinitionOfDoneAudit;
+  readonly hitlDecisionContract: MemoryHitlDecisionContract;
   readonly dreamCount: number;
-  readonly dreams: readonly DreamHitlDreamCard[];
-  readonly hydration: DreamHydrationDocument;
+  readonly dreams: readonly WorkflowHitlReportCard[];
+  readonly hydration: MemoryHydrationDocument;
   readonly plan: DynamicWorkflowPlanDocument;
-  readonly proofLevel: DreamHitlReportProofLevel;
+  readonly proofLevel: WorkflowHitlReportProofLevel;
   readonly receiptCount: number;
-  readonly refinementProposals: readonly DreamRefinementProposal[];
-  readonly search: DreamMemorySearchDocument;
-  readonly stateMachineFigure: DreamHitlReportDocument["proof"]["stateMachineFigure"];
+  readonly refinementProposals: readonly MemoryRefinementProposal[];
+  readonly search: MemorySearchDocument;
+  readonly stateMachineFigure: WorkflowHitlReportDocument["proof"]["stateMachineFigure"];
   readonly title: string;
 }): string => {
   const dreamSection =
     input.dreams.length === 0
       ? "No dreams cleared the receipt threshold in this run."
-      : input.dreams.map(dreamCardMdsvxFor).join("\n\n");
+      : input.dreams.map(reportCardMdsvxFor).join("\n\n");
   let actionSection = "- Treat this run as a retrieval/capture diagnostic.";
   if (input.refinementProposals.length > 0) {
     actionSection = input.refinementProposals
       .map(refinementProposalActionLineFor)
       .join("\n");
   } else if (input.dreams.length > 0) {
-    actionSection = input.dreams.map(dreamActionLineFor).join("\n");
+    actionSection = input.dreams.map(reportActionLineFor).join("\n");
   }
   const skippedSourceSummary =
     input.search.skippedSources.length === 0
@@ -1704,7 +1709,7 @@ const reportMdsvxFor = (input: {
     "",
     "## Report node",
     "",
-    "`joelclaw.dream.hitl-report` rendered this artifact as an installed Dream workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.",
+    "`joelclaw.memory.hitl-report` rendered this artifact as an installed Dream workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.",
     "",
     "## Workflow state machine",
     "",
@@ -1734,7 +1739,7 @@ const reportMdsvxFor = (input: {
     "",
     `Planner lane: ${input.plan.planner.source}, nonce ${input.plan.planner.nonce}. Plan ${input.plan.planId} has ${input.plan.steps.length} step(s).`,
     "",
-    "The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `dream.generated-workflow-proof.v1`, and verifier result.",
+    "The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `memory.generated-workflow-proof.v1`, and verifier result.",
     "",
     "## Definition of done audit",
     "",
@@ -1748,7 +1753,7 @@ const reportMdsvxFor = (input: {
     "",
     "## Access adapter shape",
     "",
-    "Dream memory access goes through the trusted Dream relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.",
+    "Dream memory access goes through the trusted Memory relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.",
     "",
     "## Report standard",
     "",
@@ -1770,7 +1775,7 @@ const reportMdsvxFor = (input: {
   ].join("\n");
 };
 
-const uniqueReceiptCountFor = (search: DreamMemorySearchDocument): number =>
+const uniqueReceiptCountFor = (search: MemorySearchDocument): number =>
   new Set(
     search.hits.flatMap((hit) =>
       hit.receipts.map((receipt) => receiptKey(receipt))
@@ -1778,19 +1783,19 @@ const uniqueReceiptCountFor = (search: DreamMemorySearchDocument): number =>
   ).size;
 
 const executeMemorySearchNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryRetrieval === undefined) {
+  if (config.memoryRetrieval === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream memory search node requires a Dream memory retrieval adapter."
+      "Memory search node requires a memory retrieval adapter."
     );
   }
 
-  const nodeConfig = DreamMemorySearchNodeConfigSchema.parse(input.step.config);
-  const result = await config.dreamMemoryRetrieval.searchMemories(
-    DreamMemoryRelaySearchPayloadSchema.parse({
+  const nodeConfig = MemorySearchNodeConfigSchema.parse(input.step.config);
+  const result = await config.memoryRetrieval.searchMemories(
+    MemoryRelaySearchPayloadSchema.parse({
       actor: input.actor,
       maxHits: nodeConfig.maxHits,
       query: nodeConfig.query,
@@ -1807,26 +1812,26 @@ const executeMemorySearchNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamMemorySearchDocumentSchema.parse(result.document),
+    document: MemorySearchDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
 const executeSignalsNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemorySignals === undefined) {
+  if (config.memorySignals === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream signals node requires a Dream memory signal adapter."
+      "Memory signals node requires a memory signal adapter."
     );
   }
 
-  const nodeConfig = DreamSignalsNodeConfigSchema.parse(input.step.config);
-  const result = await config.dreamMemorySignals.mineSignals(
-    DreamMemoryRelaySignalsPayloadSchema.parse({
+  const nodeConfig = MemorySignalsNodeConfigSchema.parse(input.step.config);
+  const result = await config.memorySignals.mineSignals(
+    MemoryRelaySignalsPayloadSchema.parse({
       actor: input.actor,
       maxSignals: nodeConfig.maxSignals,
       query: nodeConfig.query,
@@ -1846,24 +1851,24 @@ const executeSignalsNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamSignalDocumentSchema.parse(result.document),
+    document: MemorySignalDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
 const executeHydrationNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryRetrieval === undefined) {
+  if (config.memoryRetrieval === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream hydration node requires a Dream memory retrieval adapter."
+      "Memory hydration node requires a memory retrieval adapter."
     );
   }
 
-  const nodeConfig = DreamHydrationNodeConfigSchema.parse(input.step.config);
+  const nodeConfig = MemoryHydrationNodeConfigSchema.parse(input.step.config);
   const searchRef = searchRefFor({
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
@@ -1871,7 +1876,7 @@ const executeHydrationNode = async (
   if (searchRef === null) {
     return blocker(
       "stale_package",
-      "Dream hydration node requires a memory search artifact ref."
+      "Memory hydration node requires a memory search artifact ref."
     );
   }
 
@@ -1890,12 +1895,12 @@ const executeHydrationNode = async (
   if (receipts.length === 0) {
     return blocker(
       "stale_package",
-      "Dream hydration node requires at least one receipt from memory search."
+      "Memory hydration node requires at least one receipt from memory search."
     );
   }
 
-  const result = await config.dreamMemoryRetrieval.hydrateMemories(
-    DreamMemoryRelayHydrationPayloadSchema.parse({
+  const result = await config.memoryRetrieval.hydrateMemories(
+    MemoryRelayHydrationPayloadSchema.parse({
       actor: input.actor,
       receipts,
       runId: input.plan.runId,
@@ -1908,24 +1913,24 @@ const executeHydrationNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamHydrationDocumentSchema.parse(result.document),
+    document: MemoryHydrationDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
 const executeCorrelationNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryCorrelation === undefined) {
+  if (config.memoryCorrelation === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream correlation node requires a Dream memory correlation adapter."
+      "Memory correlation node requires a memory correlation adapter."
     );
   }
 
-  const nodeConfig = DreamCorrelationNodeConfigSchema.parse(input.step.config);
+  const nodeConfig = MemoryCorrelationNodeConfigSchema.parse(input.step.config);
   const refs = correlationRefsFor({
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
@@ -1933,7 +1938,7 @@ const executeCorrelationNode = async (
   if (refs.searchRef === null || refs.hydrationRef === null) {
     return blocker(
       "stale_package",
-      "Dream correlation node requires memory search and hydration artifact refs."
+      "Memory correlation node requires memory search and hydration artifact refs."
     );
   }
 
@@ -1953,8 +1958,8 @@ const executeCorrelationNode = async (
     return hydration;
   }
 
-  const result = await config.dreamMemoryCorrelation.correlateMemories(
-    DreamMemoryRelayCorrelationPayloadSchema.parse({
+  const result = await config.memoryCorrelation.correlateMemories(
+    MemoryRelayCorrelationPayloadSchema.parse({
       actor: input.actor,
       hydration: hydration.document,
       hydrationRef: refs.hydrationRef,
@@ -1970,17 +1975,17 @@ const executeCorrelationNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamCorrelationGraphDocumentSchema.parse(result.document),
+    document: MemoryCorrelationGraphDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
 const executeRefinementProposalsNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamRefinementProposalNodeConfigSchema.parse(
+  const nodeConfig = MemoryRefinementProposalNodeConfigSchema.parse(
     input.step.config
   );
   const refs = refinementProposalRefsFor({
@@ -1995,7 +2000,7 @@ const executeRefinementProposalsNode = async (
   ) {
     return blocker(
       "stale_package",
-      "Dream refinement proposal node requires signals, search, hydration, and correlation artifact refs."
+      "Memory refinement proposal node requires signals, search, hydration, and correlation artifact refs."
     );
   }
 
@@ -2051,10 +2056,12 @@ const executeRefinementProposalsNode = async (
 };
 
 const executeHitlReportNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamHitlReportNodeConfigSchema.parse(input.step.config);
+  const nodeConfig = WorkflowHitlReportNodeConfigSchema.parse(
+    input.step.config
+  );
   const refs = reportRefsFor({
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
@@ -2080,12 +2087,12 @@ const executeHitlReportNode = async (
     return refinementProposals;
   }
 
-  const dreams = dreamCardsFor({
+  const dreams = reportCardsFor({
     hydration: reportInputs.hydration,
     search: reportInputs.search,
   });
   const receiptCount = uniqueReceiptCountFor(reportInputs.search);
-  const stateMachineFigure = dreamReportStateMachineFigureFor({
+  const stateMachineFigure = reportStateMachineFigureFor({
     machine: input.machine,
     machineArtifact: input.plan.machine,
   });
@@ -2127,7 +2134,7 @@ const executeHitlReportNode = async (
     stateMachineFigure,
     title: nodeConfig.title,
   });
-  const document = DreamHitlReportDocumentSchema.parse({
+  const document = WorkflowHitlReportDocumentSchema.parse({
     definitionOfDoneAudit,
     dreamCount: dreams.length,
     dreams,
@@ -2159,8 +2166,8 @@ const executeHitlReportNode = async (
       : { refinementProposalRef: refs.refinementProposalRef }),
     refinementProposals: refinementProposals.document?.proposals ?? [],
     runId: input.plan.runId,
-    schemaVersion: "dream.hitl-report.v1",
-    sectionOrder: DREAM_HITL_REPORT_SECTION_ORDER,
+    schemaVersion: "workflow.hitl-report.v1",
+    sectionOrder: WORKFLOW_HITL_REPORT_SECTION_ORDER,
     sourceRefs,
     template: {
       defaultExpiresIn: "24h",
@@ -2181,10 +2188,10 @@ const executeHitlReportNode = async (
 };
 
 const executeHitlDecisionWorkflowSeedNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamHitlDecisionWorkflowSeedNodeConfigSchema.parse(
+  const nodeConfig = MemoryHitlDecisionWorkflowSeedNodeConfigSchema.parse(
     input.step.config
   );
   const decisionRef = hitlDecisionRefFor({
@@ -2195,7 +2202,7 @@ const executeHitlDecisionWorkflowSeedNode = async (
   if (decisionRef === null) {
     return blocker(
       "stale_package",
-      "Dream HITL decision seed node requires a dream.hitl-decision.v1 artifact ref."
+      "Memory HITL decision seed node requires a memory.hitl-decision.v1 artifact ref."
     );
   }
 
@@ -2218,10 +2225,10 @@ const executeHitlDecisionWorkflowSeedNode = async (
 };
 
 const executeHitlFollowUpRunRequestNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  const nodeConfig = DreamHitlFollowUpRunRequestNodeConfigSchema.parse(
+  const nodeConfig = MemoryHitlFollowUpRunRequestNodeConfigSchema.parse(
     input.step.config
   );
   const seedRef = hitlDecisionWorkflowSeedRefFor({
@@ -2232,7 +2239,7 @@ const executeHitlFollowUpRunRequestNode = async (
   if (seedRef === null) {
     return blocker(
       "stale_package",
-      "Dream HITL follow-up run request node requires a dream.hitl-decision-workflow-seed.v1 artifact ref."
+      "Memory HITL follow-up run request node requires a memory.hitl-decision-workflow-seed.v1 artifact ref."
     );
   }
 
@@ -2257,19 +2264,19 @@ const executeHitlFollowUpRunRequestNode = async (
 };
 
 const executeCaptureRunNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryCapture === undefined) {
+  if (config.memoryCapture === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream capture run node requires a Dream memory capture adapter."
+      "Memory capture run node requires a memory capture adapter."
     );
   }
 
-  const nodeConfig = DreamCaptureRunNodeConfigSchema.parse(input.step.config);
-  const result = await config.dreamMemoryCapture.captureRun(
-    DreamMemoryRelayCaptureRunPayloadSchema.parse({
+  const nodeConfig = MemoryCaptureRunNodeConfigSchema.parse(input.step.config);
+  const result = await config.memoryCapture.captureRun(
+    MemoryRelayCaptureRunPayloadSchema.parse({
       actor: input.actor,
       ...(nodeConfig.capturedRef === undefined
         ? {}
@@ -2290,24 +2297,24 @@ const executeCaptureRunNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamCaptureReceiptDocumentSchema.parse(result.document),
+    document: MemoryCaptureReceiptDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
 const executeCaptureArtifactNode = async (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
-  input: DreamWorkflowNodeExecutionInput
+  config: MemoryFabricWorkflowNodeAdapterConfig,
+  input: MemoryWorkflowNodeExecutionInput
 ): Promise<WorkflowNodeExecutionResult> => {
-  if (config.dreamMemoryCapture === undefined) {
+  if (config.memoryCapture === undefined) {
     return blocker(
       "adapter_unavailable",
-      "Dream capture artifact node requires a Dream memory capture adapter."
+      "Memory capture artifact node requires a memory capture adapter."
     );
   }
 
-  const nodeConfig = DreamCaptureArtifactNodeConfigSchema.parse(
+  const nodeConfig = MemoryCaptureArtifactNodeConfigSchema.parse(
     input.step.config
   );
   const artifactRef = captureArtifactRefFor({
@@ -2317,7 +2324,7 @@ const executeCaptureArtifactNode = async (
   if (artifactRef === null) {
     return blocker(
       "stale_package",
-      "Dream capture artifact node requires a generated artifact ref."
+      "Memory capture artifact node requires a generated artifact ref."
     );
   }
 
@@ -2330,8 +2337,8 @@ const executeCaptureArtifactNode = async (
     return capturedRef;
   }
 
-  const result = await config.dreamMemoryCapture.captureArtifact(
-    DreamMemoryRelayCaptureArtifactPayloadSchema.parse({
+  const result = await config.memoryCapture.captureArtifact(
+    MemoryRelayCaptureArtifactPayloadSchema.parse({
       actor: input.actor,
       capturedRef: capturedRef.pin,
       readability: nodeConfig.readability,
@@ -2349,59 +2356,59 @@ const executeCaptureArtifactNode = async (
 
   return await writeDocument({
     artifacts: config.artifacts,
-    document: DreamCaptureReceiptDocumentSchema.parse(result.document),
+    document: MemoryCaptureReceiptDocumentSchema.parse(result.document),
     relayLeaseReceipt: result.relayLeaseReceipt,
     step: input.step,
   });
 };
 
-export const createDreamMemoryFabricWorkflowNodeAdapter = (
-  config: DreamMemoryFabricWorkflowNodeAdapterConfig
+export const createMemoryFabricWorkflowNodeAdapter = (
+  config: MemoryFabricWorkflowNodeAdapterConfig
 ): WorkflowNodeAdapterPort => ({
   async execute(input) {
-    const nodeTypeResult = DreamMemoryFabricNodeTypeSchema.safeParse(
+    const nodeTypeResult = MemoryFabricNodeTypeSchema.safeParse(
       input.step.nodeType
     );
     if (!nodeTypeResult.success) {
       return blocker(
         "adapter_unavailable",
-        `Dream workflow node adapter does not support nodeType ${input.step.nodeType}.`
+        `Memory fabric workflow node adapter does not support nodeType ${input.step.nodeType}.`
       );
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.memory-search") {
+    if (nodeTypeResult.data === "joelclaw.memory.search") {
       return await executeMemorySearchNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.signals") {
+    if (nodeTypeResult.data === "joelclaw.memory.signals") {
       return await executeSignalsNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.capture-run") {
+    if (nodeTypeResult.data === "joelclaw.memory.capture-run") {
       return await executeCaptureRunNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.capture-artifact") {
+    if (nodeTypeResult.data === "joelclaw.memory.capture-artifact") {
       return await executeCaptureArtifactNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.correlate") {
+    if (nodeTypeResult.data === "joelclaw.memory.correlate") {
       return await executeCorrelationNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.refinement-proposals") {
+    if (nodeTypeResult.data === "joelclaw.memory.refinement-proposals") {
       return await executeRefinementProposalsNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.hitl-decision-seed") {
+    if (nodeTypeResult.data === "joelclaw.memory.hitl-decision-seed") {
       return await executeHitlDecisionWorkflowSeedNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.hitl-follow-up-run-request") {
+    if (nodeTypeResult.data === "joelclaw.memory.hitl-follow-up-run-request") {
       return await executeHitlFollowUpRunRequestNode(config, input);
     }
 
-    if (nodeTypeResult.data === "joelclaw.dream.hitl-report") {
+    if (nodeTypeResult.data === "joelclaw.memory.hitl-report") {
       return await executeHitlReportNode(config, input);
     }
 

@@ -19,7 +19,7 @@ const readStartupEnv = async (
 ): Promise<Readonly<Record<string, string>>> =>
   StartupEnvArtifactSchema.parse(JSON.parse(await readFile(path, "utf-8")));
 
-describe("Dream relay local startup env", () => {
+describe("Memory relay local startup env", () => {
   it("writes a private startup env artifact and redacted receipt", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-env-"));
     const sourceRootsPath =

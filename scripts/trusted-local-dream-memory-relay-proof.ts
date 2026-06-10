@@ -8,33 +8,35 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import { ActorSchema, ArtifactRefSchema } from "../src/app/domain/schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
-import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemoryRelayRequestEnvelopeSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamSignalDocumentSchema,
-  DreamSourceFamilySchema,
-  dreamMemoryRelayResponseEnvelopeSchema,
-} from "../src/cartridges/dream-memory-fabric/schemas.ts";
+import { MemorySourceFamilySchema } from "../src/app/domain/source-profile.ts";
 import type {
-  DreamCaptureReceiptDocument,
-  DreamCorrelationGraphDocument,
-  DreamHydrationDocument,
-  DreamMemoryRelayOperation,
-  DreamMemorySearchDocument,
-  DreamReceiptRef,
-  DreamSignalDocument,
-  DreamSourceFamily,
-} from "../src/cartridges/dream-memory-fabric/schemas.ts";
-import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
+  MemoryRelayOperation,
+  MemorySourceFamily,
+} from "../src/app/domain/source-profile.ts";
+import { memoryRelayEndpointCatalog } from "../src/cartridges/memory-fabric/cloudflare-relay.ts";
 import {
-  startTrustedLocalDreamMemoryRelayHttpServer,
-  trustedLocalDreamMemoryRelayHttpConfigFromEnv,
-  TrustedLocalDreamMemoryRelayReadinessReceiptSchema,
-} from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemoryRelayRequestEnvelopeSchema,
+  MemorySearchDocumentSchema,
+  MemorySignalDocumentSchema,
+  memoryRelayResponseEnvelopeSchema,
+} from "../src/cartridges/memory-fabric/schemas.ts";
+import type {
+  MemoryCaptureReceiptDocument,
+  MemoryCorrelationGraphDocument,
+  MemoryHydrationDocument,
+  MemorySearchDocument,
+  MemoryReceiptRef,
+  MemorySignalDocument,
+} from "../src/cartridges/memory-fabric/schemas.ts";
+import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import {
+  startTrustedLocalMemoryRelayHttpServer,
+  trustedLocalMemoryRelayHttpConfigFromEnv,
+  TrustedLocalMemoryRelayReadinessReceiptSchema,
+} from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const DEFAULT_SOURCE_ROOTS_PATH =
   ".wrangler/workflow-app/dream-relay/source-roots.json";
@@ -55,18 +57,18 @@ const SourceRootsJsonSchema = z.array(
 );
 
 const ReceiptFamilyCountSchema = z.object({
-  family: DreamSourceFamilySchema,
+  family: MemorySourceFamilySchema,
   receiptCount: z.number().int().min(0),
 });
 
 const ReceiptSourceCountSchema = z.object({
-  family: DreamSourceFamilySchema,
+  family: MemorySourceFamilySchema,
   receiptCount: z.number().int().min(0),
   sourceId: z.string().min(1),
 });
 
 const SourceFamilyCoverageSchema = z.object({
-  family: DreamSourceFamilySchema,
+  family: MemorySourceFamilySchema,
   missingReason: z.string().min(1).optional(),
   receiptCount: z.number().int().min(0),
   sourceIds: z.array(z.string().min(1)).default([]),
@@ -134,12 +136,12 @@ const argValue = (name: string): string | undefined => {
   return undefined;
 };
 
-const operationPath = (operation: DreamMemoryRelayOperation): string => {
-  const endpoint = dreamMemoryRelayEndpointCatalog.endpoints.find(
+const operationPath = (operation: MemoryRelayOperation): string => {
+  const endpoint = memoryRelayEndpointCatalog.endpoints.find(
     (candidate) => candidate.operation === operation
   );
   if (endpoint === undefined) {
-    throw new Error(`No Dream relay endpoint path for ${operation}.`);
+    throw new Error(`No Memory relay endpoint path for ${operation}.`);
   }
 
   return endpoint.path;
@@ -158,26 +160,26 @@ const dreamTranscriptReviewSourceFamilies =
   dreamTranscriptReviewSourceProfile.sourceFamiliesExpected;
 
 const sourceFamiliesForPayload = (payload: {
-  readonly sourceFamilies?: readonly DreamSourceFamily[] | undefined;
-  readonly sourceFamiliesExpected?: readonly DreamSourceFamily[] | undefined;
-}): readonly DreamSourceFamily[] =>
+  readonly sourceFamilies?: readonly MemorySourceFamily[] | undefined;
+  readonly sourceFamiliesExpected?: readonly MemorySourceFamily[] | undefined;
+}): readonly MemorySourceFamily[] =>
   payload.sourceFamilies ??
   payload.sourceFamiliesExpected ??
   dreamTranscriptReviewSourceFamilies;
 
 const relayEnvelope = (input: {
-  readonly operation: DreamMemoryRelayOperation;
+  readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
 }) => {
   const payloadWithFamilies = z
     .object({
-      sourceFamilies: z.array(DreamSourceFamilySchema).optional(),
-      sourceFamiliesExpected: z.array(DreamSourceFamilySchema).optional(),
+      sourceFamilies: z.array(MemorySourceFamilySchema).optional(),
+      sourceFamiliesExpected: z.array(MemorySourceFamilySchema).optional(),
     })
     .passthrough()
     .parse(input.payload);
 
-  return DreamMemoryRelayRequestEnvelopeSchema.parse({
+  return MemoryRelayRequestEnvelopeSchema.parse({
     actor,
     allowedSourceFamilies: [...sourceFamiliesForPayload(payloadWithFamilies)],
     budget: {
@@ -194,7 +196,7 @@ const relayEnvelope = (input: {
     },
     operation: input.operation,
     payload: input.payload,
-    purpose: `Local trusted Dream memory relay proof for ${input.operation}.`,
+    purpose: `Local trusted Memory relay proof for ${input.operation}.`,
     redactionPolicy: {
       mode: "redacted-evidence",
       noCustomerDataInPublicArtifacts: true,
@@ -203,7 +205,7 @@ const relayEnvelope = (input: {
       noRawTranscripts: true,
     },
     runId,
-    schemaVersion: "dream.memory-relay.request.v1",
+    schemaVersion: "memory.relay.request.v1",
     scope: {
       organizationId: actor.organizationId,
     },
@@ -223,7 +225,7 @@ const relayEnvelope = (input: {
 const postOperation = async <TDocument>(input: {
   readonly baseUrl: string;
   readonly documentSchema: z.ZodType<TDocument>;
-  readonly operation: DreamMemoryRelayOperation;
+  readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
   readonly token: string;
 }): Promise<TDocument> => {
@@ -245,11 +247,11 @@ const postOperation = async <TDocument>(input: {
   );
   if (!response.ok) {
     throw new Error(
-      `Dream relay ${input.operation} returned HTTP ${response.status}.`
+      `Memory relay ${input.operation} returned HTTP ${response.status}.`
     );
   }
 
-  return dreamMemoryRelayResponseEnvelopeSchema(input.documentSchema).parse(
+  return memoryRelayResponseEnvelopeSchema(input.documentSchema).parse(
     await response.json()
   ).document;
 };
@@ -265,10 +267,10 @@ const healthz = async (input: {
     method: "GET",
   });
   if (!response.ok) {
-    throw new Error(`Dream relay /healthz returned HTTP ${response.status}.`);
+    throw new Error(`Memory relay /healthz returned HTTP ${response.status}.`);
   }
 
-  return TrustedLocalDreamMemoryRelayReadinessReceiptSchema.parse(
+  return TrustedLocalMemoryRelayReadinessReceiptSchema.parse(
     await response.json()
   );
 };
@@ -282,12 +284,12 @@ const rawRootsFromConfig = (sourceRootsJson: string): readonly string[] => {
   return sourceRoots.map((sourceRoot) => sourceRoot.authorityRoot);
 };
 
-const receiptCountsFor = (receipts: readonly DreamReceiptRef[]) => {
-  const familyCounts = new Map<DreamSourceFamily, number>();
+const receiptCountsFor = (receipts: readonly MemoryReceiptRef[]) => {
+  const familyCounts = new Map<MemorySourceFamily, number>();
   const sourceCounts = new Map<
     string,
     {
-      family: DreamSourceFamily;
+      family: MemorySourceFamily;
       receiptCount: number;
       sourceId: string;
     }
@@ -329,11 +331,11 @@ const receiptCountsFor = (receipts: readonly DreamReceiptRef[]) => {
 };
 
 const sourceFamilyCoverageFor = (input: {
-  readonly evidenceReceipts: readonly DreamReceiptRef[];
-  readonly expectedSourceFamilies: readonly DreamSourceFamily[];
+  readonly evidenceReceipts: readonly MemoryReceiptRef[];
+  readonly expectedSourceFamilies: readonly MemorySourceFamily[];
 }): z.infer<typeof SourceFamilyCoverageSchema>[] => {
-  const sourceIdsByFamily = new Map<DreamSourceFamily, Set<string>>();
-  const receiptCountsByFamily = new Map<DreamSourceFamily, number>();
+  const sourceIdsByFamily = new Map<MemorySourceFamily, Set<string>>();
+  const receiptCountsByFamily = new Map<MemorySourceFamily, number>();
 
   for (const receipt of input.evidenceReceipts) {
     const sourceIds =
@@ -379,27 +381,27 @@ const run = async (): Promise<void> => {
   const query = argValue("--query") ?? DEFAULT_QUERY;
   const sourceRootsJson = await readFile(sourceRootsPath, "utf-8");
   const token = randomBytes(32).toString("hex");
-  const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv({
-    DREAM_DOCS_API_BASE_URL:
-      process.env["DREAM_DOCS_API_BASE_URL"] ?? DEFAULT_DOCS_API_BASE_URL,
-    DREAM_DOCS_API_USER_AGENT:
-      process.env["DREAM_DOCS_API_USER_AGENT"] ??
+  const config = trustedLocalMemoryRelayHttpConfigFromEnv({
+    MEMORY_DOCS_API_BASE_URL:
+      process.env["MEMORY_DOCS_API_BASE_URL"] ?? DEFAULT_DOCS_API_BASE_URL,
+    MEMORY_DOCS_API_USER_AGENT:
+      process.env["MEMORY_DOCS_API_USER_AGENT"] ??
       "pi-cloudflare-sandbox-workflows-dream-relay-proof/0.0.0",
     MEMORY_RELAY_MAX_FILES_PER_SOURCE:
       process.env["MEMORY_RELAY_MAX_FILES_PER_SOURCE"] ?? "5000",
     MEMORY_RELAY_SOURCE_ROOTS_JSON: sourceRootsJson,
     MEMORY_RELAY_TOKEN: token,
   });
-  const relay = await startTrustedLocalDreamMemoryRelayHttpServer({
+  const relay = await startTrustedLocalMemoryRelayHttpServer({
     ...config,
     port: 0,
   });
 
   try {
     const readiness = await healthz({ baseUrl: relay.url, token });
-    const captureRun = await postOperation<DreamCaptureReceiptDocument>({
+    const captureRun = await postOperation<MemoryCaptureReceiptDocument>({
       baseUrl: relay.url,
-      documentSchema: DreamCaptureReceiptDocumentSchema,
+      documentSchema: MemoryCaptureReceiptDocumentSchema,
       operation: "capture-run",
       payload: {
         actor,
@@ -412,9 +414,9 @@ const run = async (): Promise<void> => {
       },
       token,
     });
-    const captureArtifact = await postOperation<DreamCaptureReceiptDocument>({
+    const captureArtifact = await postOperation<MemoryCaptureReceiptDocument>({
       baseUrl: relay.url,
-      documentSchema: DreamCaptureReceiptDocumentSchema,
+      documentSchema: MemoryCaptureReceiptDocumentSchema,
       operation: "capture-artifact",
       payload: {
         actor,
@@ -431,9 +433,9 @@ const run = async (): Promise<void> => {
       },
       token,
     });
-    const signals = await postOperation<DreamSignalDocument>({
+    const signals = await postOperation<MemorySignalDocument>({
       baseUrl: relay.url,
-      documentSchema: DreamSignalDocumentSchema,
+      documentSchema: MemorySignalDocumentSchema,
       operation: "signals",
       payload: {
         actor,
@@ -445,9 +447,9 @@ const run = async (): Promise<void> => {
       },
       token,
     });
-    const search = await postOperation<DreamMemorySearchDocument>({
+    const search = await postOperation<MemorySearchDocument>({
       baseUrl: relay.url,
-      documentSchema: DreamMemorySearchDocumentSchema,
+      documentSchema: MemorySearchDocumentSchema,
       operation: "search",
       payload: {
         actor,
@@ -461,17 +463,17 @@ const run = async (): Promise<void> => {
     });
     const hydration =
       search.hits.length === 0
-        ? DreamHydrationDocumentSchema.parse({
+        ? MemoryHydrationDocumentSchema.parse({
             generatedAt: new Date().toISOString(),
             hydrated: [],
             redacted: true,
             runId,
-            schemaVersion: "dream.hydration.v1",
+            schemaVersion: "memory.hydration.v1",
             workItemId,
           })
-        : await postOperation<DreamHydrationDocument>({
+        : await postOperation<MemoryHydrationDocument>({
             baseUrl: relay.url,
-            documentSchema: DreamHydrationDocumentSchema,
+            documentSchema: MemoryHydrationDocumentSchema,
             operation: "hydrate",
             payload: {
               actor,
@@ -481,9 +483,9 @@ const run = async (): Promise<void> => {
             },
             token,
           });
-    const correlation = await postOperation<DreamCorrelationGraphDocument>({
+    const correlation = await postOperation<MemoryCorrelationGraphDocument>({
       baseUrl: relay.url,
-      documentSchema: DreamCorrelationGraphDocumentSchema,
+      documentSchema: MemoryCorrelationGraphDocumentSchema,
       operation: "correlate",
       payload: {
         actor,

@@ -5,22 +5,22 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
-import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemoryRelayRequestEnvelopeSchema,
-  DreamMemorySearchDocumentSchema,
-  dreamMemoryRelayResponseEnvelopeSchema,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type {
-  DreamMemoryRelayOperation,
-  DreamSourceFamily,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
+  MemoryRelayOperation,
+  MemorySourceFamily,
+} from "../../src/app/domain/source-profile.ts";
 import {
-  startTrustedLocalDreamMemoryRelayHttpServer,
-  TrustedLocalDreamMemoryRelayReadinessReceiptSchema,
-} from "../../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemoryRelayRequestEnvelopeSchema,
+  MemorySearchDocumentSchema,
+  memoryRelayResponseEnvelopeSchema,
+} from "../../src/cartridges/memory-fabric/schemas.ts";
+import {
+  startTrustedLocalMemoryRelayHttpServer,
+  TrustedLocalMemoryRelayReadinessReceiptSchema,
+} from "../../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const actor: Actor = {
   id: "actor:trusted-local-relay-http",
@@ -34,7 +34,7 @@ const actor: Actor = {
 const relayToken = "trusted-local-relay-token-never-returned";
 const timestamp = "2026-06-09T20:30:00.000Z";
 
-const operationPath = (operation: DreamMemoryRelayOperation): string => {
+const operationPath = (operation: MemoryRelayOperation): string => {
   if (operation === "capture-run") {
     return "/memory/capture/run";
   }
@@ -47,11 +47,11 @@ const operationPath = (operation: DreamMemoryRelayOperation): string => {
 };
 
 const relayEnvelope = (input: {
-  readonly allowedSourceFamilies: readonly DreamSourceFamily[];
-  readonly operation: DreamMemoryRelayOperation;
+  readonly allowedSourceFamilies: readonly MemorySourceFamily[];
+  readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
 }) =>
-  DreamMemoryRelayRequestEnvelopeSchema.parse({
+  MemoryRelayRequestEnvelopeSchema.parse({
     actor,
     allowedSourceFamilies: [...input.allowedSourceFamilies],
     budget: {
@@ -77,7 +77,7 @@ const relayEnvelope = (input: {
       noRawTranscripts: true,
     },
     runId: "run:trusted-local-relay-http",
-    schemaVersion: "dream.memory-relay.request.v1",
+    schemaVersion: "memory.relay.request.v1",
     scope: {
       organizationId: actor.organizationId,
       projectId: "project:system-dreaming",
@@ -95,8 +95,8 @@ const relayEnvelope = (input: {
   });
 
 const postRelay = async (input: {
-  readonly allowedSourceFamilies: readonly DreamSourceFamily[];
-  readonly operation: DreamMemoryRelayOperation;
+  readonly allowedSourceFamilies: readonly MemorySourceFamily[];
+  readonly operation: MemoryRelayOperation;
   readonly payload: unknown;
   readonly url: string;
 }): Promise<unknown> => {
@@ -132,7 +132,7 @@ const writeTextFile = async (input: {
   await writeFile(input.path, input.content, "utf-8");
 };
 
-describe("trusted local Dream memory relay HTTP server", () => {
+describe("trusted local Memory relay HTTP server", () => {
   it("serves auth-gated health and memory relay operations without leaking local authority paths", async () => {
     const root = await mkdtemp(join(tmpdir(), "trusted-dream-relay-http-"));
 
@@ -180,7 +180,7 @@ describe("trusted local Dream memory relay HTTP server", () => {
         content: "dream workflow report canon",
         path: join(repoOutputsRoot, "dream-report-canon.md"),
       });
-      const relay = await startTrustedLocalDreamMemoryRelayHttpServer({
+      const relay = await startTrustedLocalMemoryRelayHttpServer({
         expectedBearerToken: relayToken,
         host: "127.0.0.1",
         memoryFabric: {
@@ -248,10 +248,9 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
         });
         const healthText = await healthResponse.text();
-        const readiness =
-          TrustedLocalDreamMemoryRelayReadinessReceiptSchema.parse(
-            JSON.parse(healthText)
-          );
+        const readiness = TrustedLocalMemoryRelayReadinessReceiptSchema.parse(
+          JSON.parse(healthText)
+        );
         const captureRunJson = await postRelay({
           allowedSourceFamilies: ["agent-transcripts", "cloudflare-runs"],
           operation: "capture-run",
@@ -266,8 +265,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
           url: relay.url,
         });
-        const captureRunEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamCaptureReceiptDocumentSchema
+        const captureRunEnvelope = memoryRelayResponseEnvelopeSchema(
+          MemoryCaptureReceiptDocumentSchema
         ).parse(captureRunJson);
         const captureArtifactJson = await postRelay({
           allowedSourceFamilies: ["repo-outputs", "cloudflare-runs"],
@@ -288,8 +287,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
           url: relay.url,
         });
-        const captureArtifactEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamCaptureReceiptDocumentSchema
+        const captureArtifactEnvelope = memoryRelayResponseEnvelopeSchema(
+          MemoryCaptureReceiptDocumentSchema
         ).parse(captureArtifactJson);
         const searchJson = await postRelay({
           allowedSourceFamilies: ["agent-transcripts"],
@@ -304,8 +303,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
           url: relay.url,
         });
-        const searchEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamMemorySearchDocumentSchema
+        const searchEnvelope = memoryRelayResponseEnvelopeSchema(
+          MemorySearchDocumentSchema
         ).parse(searchJson);
         const receipt = searchEnvelope.document.hits.at(0)?.receipts.at(0);
         if (receipt === undefined) {
@@ -323,8 +322,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
           url: relay.url,
         });
-        const hydrationEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamHydrationDocumentSchema
+        const hydrationEnvelope = memoryRelayResponseEnvelopeSchema(
+          MemoryHydrationDocumentSchema
         ).parse(hydrationJson);
         const correlationJson = await postRelay({
           allowedSourceFamilies: ["agent-transcripts"],
@@ -340,8 +339,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           },
           url: relay.url,
         });
-        const correlationEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
-          DreamCorrelationGraphDocumentSchema
+        const correlationEnvelope = memoryRelayResponseEnvelopeSchema(
+          MemoryCorrelationGraphDocumentSchema
         ).parse(correlationJson);
         const serialized = JSON.stringify({
           captureArtifact: captureArtifactJson,
@@ -379,12 +378,12 @@ describe("trusted local Dream memory relay HTTP server", () => {
           captureRunCapturedRunId: "run:trusted-local-relay-http",
           captureRunKind: "run",
           correlationEdgeCount: 4,
-          correlationSchema: "dream.correlation-graph.v1",
+          correlationSchema: "memory.correlation-graph.v1",
           deniedHealthStatus: 401,
           hydratedFullTranscriptReturned: false,
           operationCatalogCount: 6,
           rawPathLeaked: false,
-          readinessSchema: "trusted.dream-memory-relay.readiness.v1",
+          readinessSchema: "trusted.memory-relay.readiness.v1",
           responseLeaksToken: false,
           searchHitCount: 1,
           searchReceiptSourceId: "source:codex-transcripts",

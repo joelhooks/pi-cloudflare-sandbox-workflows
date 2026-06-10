@@ -11,7 +11,7 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 };
 
-describe("Dream relay local readiness", () => {
+describe("Memory relay local readiness", () => {
   it("boots from the local startup env and writes a redacted healthz proof", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-ready-"));
     const startupEnvPath =

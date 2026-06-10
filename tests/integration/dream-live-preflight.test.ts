@@ -19,24 +19,24 @@ import type {
   WorkflowLivePreflightRemoteRegistry,
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../../src/app/domain/schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+import { memoryRelayEndpointCatalog } from "../../src/cartridges/memory-fabric/cloudflare-relay.ts";
 
 const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   command: ["pnpm", "exec", "wrangler", "d1", "execute"],
-  expectedPackageId: "workflow/dream-memory-fabric",
+  expectedPackageId: "workflow/memory-fabric",
   expectedPackageSeeded: false,
-  expectedSchemaExportIds: ["dream-hitl-decision-schema"],
+  expectedSchemaExportIds: ["memory-hitl-decision-schema"],
   expectedWorkflowNodeTypes: [
-    "joelclaw.dream.capture-run",
-    "joelclaw.dream.capture-artifact",
-    "joelclaw.dream.memory-search",
-    "joelclaw.dream.signals",
-    "joelclaw.dream.hydrate",
-    "joelclaw.dream.correlate",
-    "joelclaw.dream.refinement-proposals",
-    "joelclaw.dream.hitl-report",
-    "joelclaw.dream.hitl-decision-seed",
-    "joelclaw.dream.hitl-follow-up-run-request",
+    "joelclaw.memory.capture-run",
+    "joelclaw.memory.capture-artifact",
+    "joelclaw.memory.search",
+    "joelclaw.memory.signals",
+    "joelclaw.memory.hydrate",
+    "joelclaw.memory.correlate",
+    "joelclaw.memory.refinement-proposals",
+    "joelclaw.memory.hitl-report",
+    "joelclaw.memory.hitl-decision-seed",
+    "joelclaw.memory.hitl-follow-up-run-request",
   ],
   packageIds: [
     "badass-courses/claw-kernel",
@@ -54,7 +54,7 @@ const seededRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   expectedPackageSeeded: true,
   packageIds: [
     "badass-courses/claw-kernel",
-    "workflow/dream-memory-fabric",
+    "workflow/memory-fabric",
     "workflow/research-review-discord",
   ],
 };
@@ -93,7 +93,7 @@ const deployScriptWithSignoffGatedDreamRelayConfig = [
 const relayReadinessPassed: WorkflowLivePreflightCheck = {
   checkId: "relay:healthz",
   message:
-    "Dream memory relay /healthz returned a redacted readiness receipt with required operations.",
+    "Memory relay /healthz returned a redacted readiness receipt with required operations.",
   redacted: true,
   required: true,
   requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
@@ -103,7 +103,7 @@ const relayReadinessPassed: WorkflowLivePreflightCheck = {
 const relayReadinessMissing: WorkflowLivePreflightCheck = {
   checkId: "relay:healthz",
   message:
-    "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
+    "Memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
   redacted: true,
   required: true,
   requiredFor: ["dream-memory-relay-readiness", "dream-memory-relay-lease"],
@@ -113,7 +113,7 @@ const relayReadinessMissing: WorkflowLivePreflightCheck = {
 const localRelayProofPassed: WorkflowLivePreflightCheck = {
   checkId: "relay:local-proof",
   message:
-    "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+    "Trusted local Memory relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
   redacted: true,
   required: true,
   requiredFor: [
@@ -126,7 +126,7 @@ const localRelayProofPassed: WorkflowLivePreflightCheck = {
 const localRelayProofMissing: WorkflowLivePreflightCheck = {
   checkId: "relay:local-proof",
   message:
-    "Trusted local Dream relay proof receipt is missing at .wrangler/workflow-app/dream-relay/latest-local-proof.json.",
+    "Trusted local Memory relay proof receipt is missing at .wrangler/workflow-app/dream-relay/latest-local-proof.json.",
   redacted: true,
   required: true,
   requiredFor: [
@@ -140,7 +140,7 @@ const relayReadinessReceipt = (input: {
   readonly rawPathsReturned: boolean;
 }) => ({
   adapter: {
-    port: "TrustedLocalDreamMemoryFabricPort",
+    port: "TrustedLocalMemoryFabricPort",
     sourceRoots: [
       {
         family: "agent-transcripts",
@@ -156,12 +156,12 @@ const relayReadinessReceipt = (input: {
     required: true,
   },
   checkedAt: "2026-06-09T10:00:00.000Z",
-  endpointCatalog: dreamMemoryRelayEndpointCatalog,
+  endpointCatalog: memoryRelayEndpointCatalog,
   maxFilesPerSource: 100,
   rawCredentialsReturned: false,
   rawPathsReturned: input.rawPathsReturned,
   redacted: true,
-  schemaVersion: "trusted.dream-memory-relay.readiness.v1",
+  schemaVersion: "trusted.memory-relay.readiness.v1",
   supportedOperations: [
     "capture-run",
     "capture-artifact",
@@ -185,9 +185,9 @@ Wrangler 4.97.0
         "package_id": "badass-courses/claw-kernel"
       },
       {
-        "artifact_ref": "artifact://cloudflare-artifacts/pkg-workflow-dream-memory-fabric/package.json",
+        "artifact_ref": "artifact://cloudflare-artifacts/pkg-workflow-memory-fabric/package.json",
         "manifest_hash": "${"b".repeat(64)}",
-        "package_id": "workflow/dream-memory-fabric"
+        "package_id": "workflow/memory-fabric"
       }
     ],
     "success": true
@@ -196,13 +196,13 @@ Wrangler 4.97.0
 
     expect(extractPackageIdsFromD1Output(output)).toStrictEqual([
       "badass-courses/claw-kernel",
-      "workflow/dream-memory-fabric",
+      "workflow/memory-fabric",
     ]);
     expect(extractPackageRowsFromD1Output(output).at(1)).toStrictEqual({
       artifactRef:
-        "artifact://cloudflare-artifacts/pkg-workflow-dream-memory-fabric/package.json",
+        "artifact://cloudflare-artifacts/pkg-workflow-memory-fabric/package.json",
       manifestHash: "b".repeat(64),
-      packageId: "workflow/dream-memory-fabric",
+      packageId: "workflow/memory-fabric",
     });
   });
 
@@ -338,11 +338,11 @@ Wrangler 4.97.0
         "workflow.xstate-machine.v1 config artifact",
         "generated TypeScript harness source",
         "machine/harness hashes",
-        "dream.refinement-proposals.v1 proposal artifact",
-        "dream.hitl-report.v1 MDSvX report artifact",
-        "dream.hitl-decision.v1 decision contract artifact",
-        "dream.hitl-decision-workflow-seed.v1 seed artifact",
-        "dream.hitl-follow-up-run-request.v1 draft artifact",
+        "memory.refinement-proposals.v1 proposal artifact",
+        "workflow.hitl-report.v1 MDSvX report artifact",
+        "memory.hitl-decision.v1 decision contract artifact",
+        "memory.hitl-decision-workflow-seed.v1 seed artifact",
+        "memory.hitl-follow-up-run-request.v1 draft artifact",
         "workflow.execution-proof.v1 Cloudflare execution proof",
         "workflow.cartridge-invocation-proof.v1 per-node proofs",
         "wzrrd.site.publish capability receipt for the Dream report",
@@ -407,7 +407,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.memory-search, joelclaw.dream.signals, joelclaw.dream.hydrate, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, joelclaw.dream.hitl-report, joelclaw.dream.hitl-decision-seed, joelclaw.dream.hitl-follow-up-run-request, dream-hitl-decision-schema.",
+        "Re-seed workflow/memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.memory.capture-run, joelclaw.memory.capture-artifact, joelclaw.memory.search, joelclaw.memory.signals, joelclaw.memory.hydrate, joelclaw.memory.correlate, joelclaw.memory.refinement-proposals, joelclaw.memory.hitl-report, joelclaw.memory.hitl-decision-seed, joelclaw.memory.hitl-follow-up-run-request, memory-hitl-decision-schema.",
       status: "blocked",
     });
   });
@@ -532,13 +532,13 @@ Wrangler 4.97.0
         staleProofStatus: staleProof.status,
       }).toStrictEqual({
         missingSourceFamilyCoverageMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges. Coverage caveat (reported, not blocking): missing source families docs-pdf-brain.",
+          "Trusted local Memory relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges. Coverage caveat (reported, not blocking): missing source families docs-pdf-brain.",
         missingSourceFamilyCoverageStatus: "passed",
         passedMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+          "Trusted local Memory relay proof passed with 8 source roots, 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
         passedStatus: "passed",
         staleProofMessage:
-          "Trusted local Dream relay proof receipt failed schema validation.",
+          "Trusted local Memory relay proof receipt failed schema validation.",
         staleProofStatus: "failed",
       });
     } finally {
@@ -568,7 +568,7 @@ Wrangler 4.97.0
       missingStatus: "missing",
       missingTokenLeak: false,
       unsafeMessage:
-        "Dream memory relay /healthz returned an invalid redacted readiness receipt.",
+        "Memory relay /healthz returned an invalid redacted readiness receipt.",
       unsafeStatus: "failed",
     });
   });

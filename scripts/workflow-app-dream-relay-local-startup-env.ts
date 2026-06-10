@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
 
-import { trustedLocalDreamMemoryRelayHttpConfigFromEnv } from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultSourceRootsPath =
   ".wrangler/workflow-app/dream-relay/source-roots.json";
@@ -149,10 +149,10 @@ const buildStartupEnv = (input: {
     ? existingToken
     : randomBytes(32).toString("hex");
   const startupEnv = StartupEnvArtifactSchema.parse({
-    DREAM_DOCS_API_BASE_URL:
-      processEnv["DREAM_DOCS_API_BASE_URL"] ?? defaultDocsApiBaseUrl,
-    DREAM_DOCS_API_USER_AGENT:
-      processEnv["DREAM_DOCS_API_USER_AGENT"] ?? defaultDocsApiUserAgent,
+    MEMORY_DOCS_API_BASE_URL:
+      processEnv["MEMORY_DOCS_API_BASE_URL"] ?? defaultDocsApiBaseUrl,
+    MEMORY_DOCS_API_USER_AGENT:
+      processEnv["MEMORY_DOCS_API_USER_AGENT"] ?? defaultDocsApiUserAgent,
     MEMORY_RELAY_HOST:
       processEnv["MEMORY_RELAY_HOST"] ??
       existingEnv?.["MEMORY_RELAY_HOST"] ??
@@ -177,9 +177,7 @@ const buildStartupEnv = (input: {
 };
 
 const receiptFor = (input: {
-  readonly config: ReturnType<
-    typeof trustedLocalDreamMemoryRelayHttpConfigFromEnv
-  >;
+  readonly config: ReturnType<typeof trustedLocalMemoryRelayHttpConfigFromEnv>;
   readonly generatedAt: string;
   readonly sourceRootsPath: string;
   readonly startupEnvPath: string;
@@ -217,7 +215,7 @@ export const runDreamRelayLocalStartupEnvCli = async (
     rotateToken: args.rotateToken,
     sourceRootsJson,
   });
-  const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(startupEnv);
+  const config = trustedLocalMemoryRelayHttpConfigFromEnv(startupEnv);
   const receipt = receiptFor({
     config,
     generatedAt: input.now?.() ?? new Date().toISOString(),
@@ -251,7 +249,7 @@ if (isMain()) {
             message:
               error instanceof Error
                 ? error.message
-                : "Dream relay local startup env generation failed.",
+                : "Memory relay local startup env generation failed.",
             redacted: true,
           },
           redacted: true,

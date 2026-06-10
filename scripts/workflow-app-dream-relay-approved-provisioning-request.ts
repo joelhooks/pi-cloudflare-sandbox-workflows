@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import { z } from "zod";
 
-import { trustedLocalDreamMemoryRelayHttpConfigFromEnv } from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 import { DreamRelayLocalReadinessProofReceiptSchema } from "./workflow-app-dream-relay-local-readiness.ts";
 import { DreamRelayProvisioningPreflightReceiptSchema } from "./workflow-app-dream-relay-provisioning-preflight.ts";
 
@@ -230,7 +230,7 @@ const startupSummary = async (
   }
 
   try {
-    const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(parsed.data);
+    const config = trustedLocalMemoryRelayHttpConfigFromEnv(parsed.data);
 
     return {
       blockers: [],
@@ -469,7 +469,7 @@ if (isMain()) {
             message:
               error instanceof Error
                 ? error.message
-                : "Dream relay approved provisioning request failed.",
+                : "Memory relay approved provisioning request failed.",
             redacted: true,
           },
           redacted: true,

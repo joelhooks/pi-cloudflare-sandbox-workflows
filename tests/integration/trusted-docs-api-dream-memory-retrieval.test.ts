@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createTrustedLocalDreamMemoryRetrievalAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts";
+import { createTrustedLocalMemoryRetrievalAdapter } from "../../src/cartridges/memory-fabric/trusted-local-memory-retrieval.ts";
 
 const urlForFetchInput = (input: Parameters<typeof fetch>[0]): string => {
   if (input instanceof Request) {
@@ -69,7 +69,7 @@ describe("trusted docs API Dream memory retrieval", () => {
         })
       );
     };
-    const adapter = createTrustedLocalDreamMemoryRetrievalAdapter({
+    const adapter = createTrustedLocalMemoryRetrievalAdapter({
       docsApi: {
         baseUrl: "https://joelclaw.com/api/docs",
         fetch: fetcher,
@@ -178,7 +178,7 @@ describe("trusted docs API Dream memory retrieval", () => {
           })
         );
       };
-      const adapter = createTrustedLocalDreamMemoryRetrievalAdapter({
+      const adapter = createTrustedLocalMemoryRetrievalAdapter({
         docsApi: {
           baseUrl: "https://joelclaw.com/api/docs",
           fetch: fetcher,

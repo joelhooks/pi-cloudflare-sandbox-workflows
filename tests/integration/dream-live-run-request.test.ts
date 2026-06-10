@@ -76,11 +76,11 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "workflow.xstate-machine.v1 config artifact",
       "generated TypeScript harness source",
       "machine/harness hashes",
-      "dream.refinement-proposals.v1 proposal artifact",
-      "dream.hitl-report.v1 MDSvX report artifact",
-      "dream.hitl-decision.v1 decision contract artifact",
-      "dream.hitl-decision-workflow-seed.v1 seed artifact",
-      "dream.hitl-follow-up-run-request.v1 draft artifact",
+      "memory.refinement-proposals.v1 proposal artifact",
+      "workflow.hitl-report.v1 MDSvX report artifact",
+      "memory.hitl-decision.v1 decision contract artifact",
+      "memory.hitl-decision-workflow-seed.v1 seed artifact",
+      "memory.hitl-follow-up-run-request.v1 draft artifact",
       "workflow.execution-proof.v1 Cloudflare execution proof",
       "workflow.cartridge-invocation-proof.v1 per-node proofs",
       "wzrrd.site.publish capability receipt for the Dream report",
@@ -129,33 +129,33 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       status: "passed",
     },
   ],
-  expectedCartridgePackageId: "workflow/dream-memory-fabric",
+  expectedCartridgePackageId: "workflow/memory-fabric",
   generatedAt: "2026-06-09T22:45:00.000Z",
   redacted: true,
   relayCapability: readyRelayCapability,
   remoteRegistry: {
     command: ["pnpm", "exec", "wrangler", "d1", "execute"],
     expectedPackageArtifactRef:
-      "artifact://cloudflare-artifacts/pkg-workflow-dream-memory-fabric/package.json",
+      "artifact://cloudflare-artifacts/pkg-workflow-memory-fabric/package.json",
     expectedPackageArtifactRefMatched: true,
-    expectedPackageId: "workflow/dream-memory-fabric",
+    expectedPackageId: "workflow/memory-fabric",
     expectedPackageManifestHash:
       "b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b",
     expectedPackageManifestHashMatched: true,
     expectedPackageSeeded: true,
     expectedWorkflowNodeTypes: [
-      "joelclaw.dream.capture-run",
-      "joelclaw.dream.capture-artifact",
-      "joelclaw.dream.memory-search",
-      "joelclaw.dream.signals",
-      "joelclaw.dream.hydrate",
-      "joelclaw.dream.correlate",
-      "joelclaw.dream.refinement-proposals",
-      "joelclaw.dream.hitl-report",
-      "joelclaw.dream.hitl-decision-seed",
-      "joelclaw.dream.hitl-follow-up-run-request",
+      "joelclaw.memory.capture-run",
+      "joelclaw.memory.capture-artifact",
+      "joelclaw.memory.search",
+      "joelclaw.memory.signals",
+      "joelclaw.memory.hydrate",
+      "joelclaw.memory.correlate",
+      "joelclaw.memory.refinement-proposals",
+      "joelclaw.memory.hitl-report",
+      "joelclaw.memory.hitl-decision-seed",
+      "joelclaw.memory.hitl-follow-up-run-request",
     ],
-    packageIds: ["workflow/dream-memory-fabric"],
+    packageIds: ["workflow/memory-fabric"],
     packageRows: [],
     redacted: true,
     status: "queried",
@@ -198,7 +198,7 @@ const blockedPreflight = WorkflowLivePreflightReceiptSchema.parse({
     },
   },
   requiredActions: [
-    "Start or provision the trusted Dream memory relay and verify its authenticated /healthz readiness receipt.",
+    "Start or provision the trusted Memory relay and verify its authenticated /healthz readiness receipt.",
   ],
   status: "blocked",
 });
@@ -222,7 +222,7 @@ const PostedResponseSchema = z.object({
 describe("Dream live run request harness", () => {
   it("builds a typed request that asks for generated Cloudflare Dreaming through the cartridge", () => {
     const request = buildDreamLiveRunRequest({
-      runId: "run-live-dream-memory-fabric-test",
+      runId: "run-live-memory-fabric-test",
     });
 
     expect({
@@ -257,8 +257,8 @@ describe("Dream live run request harness", () => {
         ) &&
         request.planProposal.stochasticNotes.some(
           (note) =>
-            note.includes("dream.hitl-decision-workflow-seed.v1") &&
-            note.includes("dream.hitl-follow-up-run-request.v1") &&
+            note.includes("memory.hitl-decision-workflow-seed.v1") &&
+            note.includes("memory.hitl-follow-up-run-request.v1") &&
             note.includes("submitted:false")
         ),
       stochasticNotesRequireSignalMining:
@@ -274,20 +274,20 @@ describe("Dream live run request harness", () => {
       packages: [
         "badass-courses/claw-kernel",
         "joelhooks/configured-familiar-kernel",
-        "workflow/dream-memory-fabric",
+        "workflow/memory-fabric",
       ],
       stochasticNotesAllowGeneratedRuntimeShape: true,
       stochasticNotesDoNotHardcodeNodeOrder: true,
       stochasticNotesMentionWzrrdPrimaryDocument: true,
       stochasticNotesRequireFullHitlRefinementLoop: true,
       stochasticNotesRequireSignalMining: true,
-      workItemId: "work-item:dream-memory-fabric",
+      workItemId: "work-item:memory-fabric",
     });
   });
 
   it("blocks submission when the live preflight is not ready", () => {
     const request = buildDreamLiveRunRequest({
-      runId: "run-live-dream-memory-fabric-blocked",
+      runId: "run-live-memory-fabric-blocked",
     });
     const receipt = buildWorkflowLiveRunRequestReceipt({
       checkedAt: "2026-06-09T22:45:00.000Z",
@@ -330,7 +330,7 @@ describe("Dream live run request harness", () => {
         argv: [
           "--submit",
           "--run-id",
-          "run-live-dream-memory-fabric-blocked",
+          "run-live-memory-fabric-blocked",
           "--preflight-path",
           "preflight.json",
           "--request-path",
@@ -362,7 +362,7 @@ describe("Dream live run request harness", () => {
         writtenStatus: writtenReceipt.status,
       }).toStrictEqual({
         fetchCalled: false,
-        requestRunId: "run-live-dream-memory-fabric-blocked",
+        requestRunId: "run-live-memory-fabric-blocked",
         returnedStatus: "blocked",
         writtenStatus: "blocked",
       });
@@ -384,7 +384,7 @@ describe("Dream live run request harness", () => {
         argv: [
           "--submit",
           "--run-id",
-          "run-live-dream-memory-fabric-ready-no-signoff",
+          "run-live-memory-fabric-ready-no-signoff",
           "--preflight-path",
           "preflight.json",
           "--request-path",
@@ -432,7 +432,7 @@ describe("Dream live run request harness", () => {
         argv: [
           "--submit",
           "--run-id",
-          "run-live-dream-memory-fabric-ready",
+          "run-live-memory-fabric-ready",
           "--preflight-path",
           "preflight.json",
           "--request-path",
@@ -454,7 +454,7 @@ describe("Dream live run request harness", () => {
 
           return Promise.resolve(
             Response.json({
-              runId: "run-live-dream-memory-fabric-ready",
+              runId: "run-live-memory-fabric-ready",
               status: "captured",
             })
           );
@@ -478,7 +478,7 @@ describe("Dream live run request harness", () => {
         submitUrl: receipt.submit.url,
       }).toStrictEqual({
         noRelayTokenLeak: true,
-        postedRunId: "run-live-dream-memory-fabric-ready",
+        postedRunId: "run-live-memory-fabric-ready",
         relayCapability: readyRelayCapability,
         responseStatus: "captured",
         status: "submitted",
@@ -502,7 +502,7 @@ describe("Dream live run request harness", () => {
         argv: [
           "--submit",
           "--run-id",
-          "run-live-dream-memory-fabric-refresh-blocked",
+          "run-live-memory-fabric-refresh-blocked",
           "--preflight-path",
           "preflight.json",
           "--request-path",

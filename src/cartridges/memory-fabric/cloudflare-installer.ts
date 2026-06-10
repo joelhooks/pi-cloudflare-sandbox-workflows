@@ -2,16 +2,17 @@ import { z } from "zod";
 
 import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
+import { createMemoryGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/generated-workflow-proof.ts";
 import {
-  createCloudflareDreamMemoryFabricRelay,
-  createCloudflareDreamMemoryRelayTokenResolver,
+  createCloudflareMemoryFabricRelay,
+  createCloudflareMemoryRelayTokenResolver,
 } from "./cloudflare-relay.ts";
-import { createDreamGeneratedWorkflowProofRecorder } from "./generated-workflow-proof.ts";
-import { dreamMemoryFabricPackageMetadata } from "./package-seed.ts";
+import { buildWorkflowHitlReportAuditProofCheck } from "./hitl-report-audit-proof-check.ts";
+import { memoryFabricPackageMetadata } from "./package-seed.ts";
 import { dreamTranscriptReviewSourceProfile } from "./source-profile.ts";
-import { createDreamMemoryFabricWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
+import { createMemoryFabricWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
 
-export const DreamMemoryFabricCloudflareEnvBindingSchema = z.object({
+export const MemoryFabricCloudflareEnvBindingSchema = z.object({
   MEMORY_RELAY_BASE_URL: z.url().optional(),
   MEMORY_RELAY_SECRET_REF: z.string().min(1).default("secretref:memory-relay"),
   MEMORY_RELAY_TOKEN: z.string().optional(),
@@ -21,16 +22,15 @@ export const DreamMemoryFabricCloudflareEnvBindingSchema = z.object({
     .default("pi-cloudflare-sandbox-workflows/0.0.0"),
 });
 
-export type DreamMemoryFabricCloudflareEnvBindings = z.infer<
-  typeof DreamMemoryFabricCloudflareEnvBindingSchema
+export type MemoryFabricCloudflareEnvBindings = z.infer<
+  typeof MemoryFabricCloudflareEnvBindingSchema
 >;
 
-const dreamMemoryFabricPackageRef =
-  dreamMemoryFabricPackageMetadata.latestArtifactRef;
+const memoryFabricPackageRef = memoryFabricPackageMetadata.latestArtifactRef;
 
-export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartridgeInstaller<DreamMemoryFabricCloudflareEnvBindings> =
+export const memoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartridgeInstaller<MemoryFabricCloudflareEnvBindings> =
   {
-    cartridgeId: "workflow/dream-memory-fabric",
+    cartridgeId: "workflow/memory-fabric",
     resolve({ bindings }) {
       const relayBaseUrl = bindings.MEMORY_RELAY_BASE_URL;
       if (relayBaseUrl === undefined) {
@@ -39,19 +39,25 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
 
       return {
         createPostExecutionArtifactRecorders: ({ artifacts }) => [
-          createDreamGeneratedWorkflowProofRecorder({
+          createMemoryGeneratedWorkflowProofRecorder({
             artifacts,
-            expectedPackageRef: dreamMemoryFabricPackageRef,
+            buildAdditionalProofChecks: async ({ executionProof }) => [
+              await buildWorkflowHitlReportAuditProofCheck({
+                artifacts,
+                executionProof,
+              }),
+            ],
+            expectedPackageRef: memoryFabricPackageRef,
             expectedSourceProfile: dreamTranscriptReviewSourceProfile,
             expectedSourceProfileExportId:
               "dream-transcript-review-source-profile",
           }),
         ],
         createWorkflowNodeAdapter: ({ artifacts }) => {
-          const dreamMemoryRelay = createCloudflareDreamMemoryFabricRelay({
+          const memoryRelay = createCloudflareMemoryFabricRelay({
             relayBaseUrl,
             relaySecretRef: bindings.MEMORY_RELAY_SECRET_REF,
-            secretResolver: createCloudflareDreamMemoryRelayTokenResolver({
+            secretResolver: createCloudflareMemoryRelayTokenResolver({
               secret: bindings.MEMORY_RELAY_TOKEN ?? "",
               secretRef: bindings.MEMORY_RELAY_SECRET_REF,
             }),
@@ -60,12 +66,12 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
 
           return createArtifactBackedWorkflowCartridgeAdapter({
             artifacts,
-            delegate: createDreamMemoryFabricWorkflowNodeAdapter({
+            delegate: createMemoryFabricWorkflowNodeAdapter({
               artifacts,
-              dreamMemoryCapture: dreamMemoryRelay,
-              dreamMemoryCorrelation: dreamMemoryRelay,
-              dreamMemoryRetrieval: dreamMemoryRelay,
-              dreamMemorySignals: dreamMemoryRelay,
+              memoryCapture: memoryRelay,
+              memoryCorrelation: memoryRelay,
+              memoryRetrieval: memoryRelay,
+              memorySignals: memoryRelay,
             }),
           });
         },

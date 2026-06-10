@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { Actor } from "../../src/app/domain/schemas.ts";
-import type { TrustedJoelClawSessionBridgeCommand } from "../../src/cartridges/dream-memory-fabric/trusted-joelclaw-session-source.ts";
-import { createTrustedLocalDreamMemoryRetrievalAdapter } from "../../src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts";
+import type { TrustedJoelClawSessionBridgeCommand } from "../../src/cartridges/memory-fabric/trusted-joelclaw-session-source.ts";
+import { createTrustedLocalMemoryRetrievalAdapter } from "../../src/cartridges/memory-fabric/trusted-local-memory-retrieval.ts";
 
 const timestamp = "2026-06-09T20:00:00.000Z";
 
@@ -68,7 +68,7 @@ const commandWithSearchHits =
 describe("trusted JoelClaw session Dream memory source", () => {
   it("searches joelclaw+ssh authority roots and hydrates cached redacted receipts", async () => {
     const commands: string[][] = [];
-    const adapter = createTrustedLocalDreamMemoryRetrievalAdapter({
+    const adapter = createTrustedLocalMemoryRetrievalAdapter({
       now: () => timestamp,
       sessionBridgeCommand: commandWithSearchHits(commands),
       sourceRoots: [remoteSourceRoot],

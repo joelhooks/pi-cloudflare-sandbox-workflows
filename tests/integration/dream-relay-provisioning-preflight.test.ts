@@ -44,7 +44,7 @@ const localRelayReadinessProof = JSON.stringify({
     httpStatus: 200,
     rawCredentialsReturned: false,
     rawPathsReturned: false,
-    schemaVersion: "trusted.dream-memory-relay.readiness.v1",
+    schemaVersion: "trusted.memory-relay.readiness.v1",
     sourceRootCount: 1,
     status: "passed",
     supportedOperationCount: 10,
@@ -128,7 +128,7 @@ const livePreflightBlocked = JSON.stringify({
   checks: [
     {
       checkId: "relay:local-proof",
-      message: "Trusted local Dream relay proof passed.",
+      message: "Trusted local Memory relay proof passed.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-local-proof"],
@@ -137,7 +137,7 @@ const livePreflightBlocked = JSON.stringify({
     {
       checkId: "relay:healthz",
       message:
-        "Dream memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
+        "Memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
       redacted: true,
       required: true,
       requiredFor: ["dream-memory-relay-readiness"],
@@ -180,7 +180,7 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 };
 
-describe("Dream relay provisioning preflight", () => {
+describe("Memory relay provisioning preflight", () => {
   it("blocks network exposure until owner sign-off is present", () => {
     const receipt = buildDreamRelayProvisioningPreflightReceipt({
       checkedAt: "2026-06-09T10:00:00.000Z",
@@ -205,7 +205,7 @@ describe("Dream relay provisioning preflight", () => {
       noSideEffectsPerformed: receipt.provisioningPlan.noSideEffectsPerformed,
       planSchemaVersion: receipt.provisioningPlan.schemaVersion,
       recommendedSignoff: receipt.recommendedNextActions.includes(
-        "Get explicit owner sign-off for exposing the trusted Dream relay over a new network boundary."
+        "Get explicit owner sign-off for exposing the trusted Memory relay over a new network boundary."
       ),
       signalCount: receipt.localRelayProof.signalCount,
       signoffProvided: receipt.approval.signoffProvided,

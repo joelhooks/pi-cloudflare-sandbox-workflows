@@ -7,10 +7,10 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import {
-  startTrustedLocalDreamMemoryRelayHttpServer,
-  trustedLocalDreamMemoryRelayHttpConfigFromEnv,
-  trustedLocalDreamMemoryRelayReadinessReceipt,
-} from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
+  startTrustedLocalMemoryRelayHttpServer,
+  trustedLocalMemoryRelayHttpConfigFromEnv,
+  trustedLocalMemoryRelayReadinessReceipt,
+} from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultLocalRelayStartupEnvPath =
   ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
@@ -53,12 +53,12 @@ const start = async (): Promise<void> => {
       defaultLocalRelayStartupEnvPath
   );
   const startupEnvArtifact = await readStartupEnvArtifact(startupEnvPath);
-  const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv({
+  const config = trustedLocalMemoryRelayHttpConfigFromEnv({
     ...startupEnvArtifact,
     ...process.env,
   });
-  const relay = await startTrustedLocalDreamMemoryRelayHttpServer(config);
-  const receipt = trustedLocalDreamMemoryRelayReadinessReceipt({ config });
+  const relay = await startTrustedLocalMemoryRelayHttpServer(config);
+  const receipt = trustedLocalMemoryRelayReadinessReceipt({ config });
 
   console.log(
     JSON.stringify(
@@ -88,7 +88,7 @@ if (isMain()) {
             message:
               error instanceof Error
                 ? error.message
-                : "Trusted local Dream relay failed to start.",
+                : "Trusted local Memory relay failed to start.",
             redacted: true,
           },
           redacted: true,

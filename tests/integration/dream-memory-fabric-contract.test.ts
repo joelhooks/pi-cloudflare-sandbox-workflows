@@ -2,26 +2,28 @@ import { describe, expect, it } from "vitest";
 
 import { DynamicWorkflowStepSchema } from "../../src/app/domain/schemas.ts";
 import {
-  dreamMemoryFabricPackageSeedTemplate,
-  dreamMemoryFabricPackageMetadata,
-} from "../../src/cartridges/dream-memory-fabric/package-seed.ts";
+  MemorySourcePackDispositionSchema,
+  MemorySourceProfileSchema,
+} from "../../src/app/domain/source-profile.ts";
 import {
-  DreamCaptureReceiptDocumentSchema,
-  DreamCorrelationGraphDocumentSchema,
-  DreamHitlDecisionDocumentSchema,
-  DreamHitlFollowUpRunRequestDocumentSchema,
-  DreamHitlDecisionWorkflowSeedDocumentSchema,
-  DreamHitlReportDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemoryRelayEndpointCatalogSchema,
-  DreamMemoryRelayRequestEnvelopeSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamRefinementProposalDocumentSchema,
-  DreamSourceProfileSchema,
-  DreamSignalDocumentSchema,
-  DreamSourcePackDispositionSchema,
-} from "../../src/cartridges/dream-memory-fabric/schemas.ts";
-import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
+  memoryFabricPackageSeedTemplate,
+  memoryFabricPackageMetadata,
+} from "../../src/cartridges/memory-fabric/package-seed.ts";
+import {
+  MemoryCaptureReceiptDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHitlDecisionDocumentSchema,
+  MemoryHitlFollowUpRunRequestDocumentSchema,
+  MemoryHitlDecisionWorkflowSeedDocumentSchema,
+  WorkflowHitlReportDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemoryRelayEndpointCatalogSchema,
+  MemoryRelayRequestEnvelopeSchema,
+  MemorySearchDocumentSchema,
+  MemoryRefinementProposalDocumentSchema,
+  MemorySignalDocumentSchema,
+} from "../../src/cartridges/memory-fabric/schemas.ts";
+import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const timestamp = "2026-06-09T18:00:00.000Z";
 const hash = "a".repeat(64);
@@ -58,41 +60,40 @@ const receiptRef = {
 } as const;
 
 describe("Dream memory fabric domain contracts", () => {
-  it("treats the Dream source profile as package data, not the generated runtime machine", () => {
-    const profile = DreamSourceProfileSchema.parse(
+  it("treats the Memory source profile as package data, not the generated runtime machine", () => {
+    const profile = MemorySourceProfileSchema.parse(
       dreamTranscriptReviewSourceProfile
     );
-    const sourceProfileExport =
-      dreamMemoryFabricPackageSeedTemplate.exports.find(
-        (exportRecord) =>
-          exportRecord.exportId === "dream-transcript-review-source-profile"
-      );
+    const sourceProfileExport = memoryFabricPackageSeedTemplate.exports.find(
+      (exportRecord) =>
+        exportRecord.exportId === "dream-transcript-review-source-profile"
+    );
 
     expect({
       exportedKind: sourceProfileExport?.kind,
       packageId: profile.packageId,
       packageMetadataHasHitlDecisionSchema:
-        dreamMemoryFabricPackageMetadata.exports.some(
+        memoryFabricPackageMetadata.exports.some(
           (exportRecord) =>
-            exportRecord.exportId === "dream-hitl-decision-schema" &&
+            exportRecord.exportId === "memory-hitl-decision-schema" &&
             exportRecord.kind === "schema"
         ),
       packageMetadataHasHitlDecisionWorkflowSeedNode:
-        dreamMemoryFabricPackageMetadata.exports.some(
+        memoryFabricPackageMetadata.exports.some(
           (exportRecord) =>
-            exportRecord.exportId === "dream-hitl-decision-workflow-seed" &&
+            exportRecord.exportId === "memory-hitl-decision-workflow-seed" &&
             exportRecord.kind === "workflow-node" &&
-            exportRecord.nodeType === "joelclaw.dream.hitl-decision-seed"
+            exportRecord.nodeType === "joelclaw.memory.hitl-decision-seed"
         ),
       packageMetadataHasHitlFollowUpRunRequestNode:
-        dreamMemoryFabricPackageMetadata.exports.some(
+        memoryFabricPackageMetadata.exports.some(
           (exportRecord) =>
-            exportRecord.exportId === "dream-hitl-follow-up-run-request" &&
+            exportRecord.exportId === "memory-hitl-follow-up-run-request" &&
             exportRecord.kind === "workflow-node" &&
             exportRecord.nodeType ===
-              "joelclaw.dream.hitl-follow-up-run-request"
+              "joelclaw.memory.hitl-follow-up-run-request"
         ),
-      packageMetadataHasProfile: dreamMemoryFabricPackageMetadata.exports.some(
+      packageMetadataHasProfile: memoryFabricPackageMetadata.exports.some(
         (exportRecord) => exportRecord.kind === "source-profile"
       ),
       sourceFamilies: profile.sourceFamiliesExpected,
@@ -103,7 +104,7 @@ describe("Dream memory fabric domain contracts", () => {
       workflowId: profile.workflowId,
     }).toStrictEqual({
       exportedKind: "source-profile",
-      packageId: "workflow/dream-memory-fabric",
+      packageId: "workflow/memory-fabric",
       packageMetadataHasHitlDecisionSchema: true,
       packageMetadataHasHitlDecisionWorkflowSeedNode: true,
       packageMetadataHasHitlFollowUpRunRequestNode: true,
@@ -125,7 +126,7 @@ describe("Dream memory fabric domain contracts", () => {
   });
 
   it("advertises optional leased source packs without expanding required Dream readiness", () => {
-    const profile = DreamSourceProfileSchema.parse(
+    const profile = MemorySourceProfileSchema.parse(
       dreamTranscriptReviewSourceProfile
     );
     const workGraphPack = profile.sourcePacks.find(
@@ -160,15 +161,15 @@ describe("Dream memory fabric domain contracts", () => {
     });
   });
 
-  it("rejects Dream source profiles with duplicate source-pack ids", () => {
-    const profile = DreamSourceProfileSchema.parse(
+  it("rejects Memory source profiles with duplicate source-pack ids", () => {
+    const profile = MemorySourceProfileSchema.parse(
       dreamTranscriptReviewSourceProfile
     );
     const firstPack = profile.sourcePacks.at(0);
     if (firstPack === undefined) {
       throw new Error("Expected Dream transcript-review profile source packs.");
     }
-    const result = DreamSourceProfileSchema.safeParse({
+    const result = MemorySourceProfileSchema.safeParse({
       ...profile,
       sourcePacks: [firstPack, firstPack],
     });
@@ -178,7 +179,7 @@ describe("Dream memory fabric domain contracts", () => {
       success: result.success,
     }).toStrictEqual({
       issueMessage:
-        "Dream source profile sourcePacks packId values must be unique.",
+        "Memory source profile sourcePacks packId values must be unique.",
       success: false,
     });
   });
@@ -202,18 +203,18 @@ describe("Dream memory fabric domain contracts", () => {
       surfaces: ["github", "linear", "slack", "org-project-graph"],
     } as const;
 
-    const selectedWithoutLease = DreamSourcePackDispositionSchema.safeParse({
+    const selectedWithoutLease = MemorySourcePackDispositionSchema.safeParse({
       ...baseDisposition,
       capabilityKinds: [...baseDisposition.requiredCapabilityKinds],
       status: "selected-with-lease",
     });
     const skippedWithoutMissingCapabilities =
-      DreamSourcePackDispositionSchema.safeParse({
+      MemorySourcePackDispositionSchema.safeParse({
         ...baseDisposition,
         status: "skipped-missing-lease",
       });
     const skippedWithMissingCapabilities =
-      DreamSourcePackDispositionSchema.safeParse({
+      MemorySourcePackDispositionSchema.safeParse({
         ...baseDisposition,
         missingCapabilityKinds: [...baseDisposition.requiredCapabilityKinds],
         status: "skipped-missing-lease",
@@ -232,7 +233,7 @@ describe("Dream memory fabric domain contracts", () => {
   });
 
   it("captures the full trusted relay contract for retrieval, correlation, and capture", () => {
-    const relayRequest = DreamMemoryRelayRequestEnvelopeSchema.parse({
+    const relayRequest = MemoryRelayRequestEnvelopeSchema.parse({
       actor,
       allowedSourceFamilies: ["agent-transcripts", "brain"],
       budget: {
@@ -261,7 +262,7 @@ describe("Dream memory fabric domain contracts", () => {
         noRawTranscripts: true,
       },
       runId: "run-dream-preflight",
-      schemaVersion: "dream.memory-relay.request.v1",
+      schemaVersion: "memory.relay.request.v1",
       scope,
       timeWindow: {
         label: "all-time",
@@ -274,7 +275,7 @@ describe("Dream memory fabric domain contracts", () => {
       },
       workItemId: "work-item:dream-preflight",
     });
-    const search = DreamMemorySearchDocumentSchema.parse({
+    const search = MemorySearchDocumentSchema.parse({
       generatedAt: timestamp,
       hits: [
         {
@@ -289,14 +290,14 @@ describe("Dream memory fabric domain contracts", () => {
       query: "dynamic workflow proof",
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.memory-search.v1",
+      schemaVersion: "memory.search.v1",
       workItemId: "work-item:dream-preflight",
     });
-    const signals = DreamSignalDocumentSchema.parse({
+    const signals = MemorySignalDocumentSchema.parse({
       generatedAt: timestamp,
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.signals.v1",
+      schemaVersion: "memory.signals.v1",
       signals: [
         {
           confidence: 0.8,
@@ -311,7 +312,7 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       workItemId: "work-item:dream-preflight",
     });
-    const hydration = DreamHydrationDocumentSchema.parse({
+    const hydration = MemoryHydrationDocumentSchema.parse({
       generatedAt: timestamp,
       hydrated: [
         {
@@ -324,10 +325,10 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.hydration.v1",
+      schemaVersion: "memory.hydration.v1",
       workItemId: "work-item:dream-preflight",
     });
-    const graph = DreamCorrelationGraphDocumentSchema.parse({
+    const graph = MemoryCorrelationGraphDocumentSchema.parse({
       edges: [
         {
           edgeId: "edge:signal-to-memory",
@@ -354,21 +355,21 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.correlation-graph.v1",
+      schemaVersion: "memory.correlation-graph.v1",
       workItemId: "work-item:dream-preflight",
     });
-    const captureReceipt = DreamCaptureReceiptDocumentSchema.parse({
+    const captureReceipt = MemoryCaptureReceiptDocumentSchema.parse({
       captureKind: "artifact",
       capturedAt: timestamp,
       capturedRef: artifactPin("dream/correlation-graph.json"),
       readability: "actor-private",
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.capture-receipt.v1",
+      schemaVersion: "memory.capture-receipt.v1",
       sourceSystem: "cloudflare-artifacts",
       workItemId: "work-item:dream-preflight",
     });
-    const runCaptureReceipt = DreamCaptureReceiptDocumentSchema.parse({
+    const runCaptureReceipt = MemoryCaptureReceiptDocumentSchema.parse({
       captureKind: "run",
       capturedAt: timestamp,
       capturedRef: artifactPin("dream/capture-run.json"),
@@ -376,24 +377,24 @@ describe("Dream memory fabric domain contracts", () => {
       readability: "actor-private",
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.capture-receipt.v1",
+      schemaVersion: "memory.capture-receipt.v1",
       sourceSystem: "cloudflare-workflow-run",
       workItemId: "work-item:dream-preflight",
     });
     expect(() =>
-      DreamCaptureReceiptDocumentSchema.parse({
+      MemoryCaptureReceiptDocumentSchema.parse({
         captureKind: "run",
         capturedAt: timestamp,
         capturedRef: artifactPin("dream/capture-run-missing-id.json"),
         readability: "actor-private",
         redacted: true,
         runId: "run-dream-preflight",
-        schemaVersion: "dream.capture-receipt.v1",
+        schemaVersion: "memory.capture-receipt.v1",
         sourceSystem: "cloudflare-workflow-run",
         workItemId: "work-item:dream-preflight",
       })
     ).toThrow(/capturedRunId/u);
-    const endpointCatalog = DreamMemoryRelayEndpointCatalogSchema.parse({
+    const endpointCatalog = MemoryRelayEndpointCatalogSchema.parse({
       endpoints: [
         {
           operation: "search",
@@ -404,7 +405,7 @@ describe("Dream memory fabric domain contracts", () => {
           path: "/memory/capture/artifact",
         },
       ],
-      schemaVersion: "dream.memory-relay.endpoint-catalog.v1",
+      schemaVersion: "memory.relay.endpoint-catalog.v1",
     });
 
     expect({
@@ -426,14 +427,14 @@ describe("Dream memory fabric domain contracts", () => {
       endpointCount: 2,
       graphEdgeRelationship: "supports_dream",
       hydrationReturnedFullTranscript: false,
-      relayRequestSchema: "dream.memory-relay.request.v1",
-      searchSchema: "dream.memory-search.v1",
+      relayRequestSchema: "memory.relay.request.v1",
+      searchSchema: "memory.search.v1",
       signalKind: "correction",
     });
   });
 
   it("captures Dream refinement proposals as next-workflow seed artifacts", () => {
-    const proposals = DreamRefinementProposalDocumentSchema.parse({
+    const proposals = MemoryRefinementProposalDocumentSchema.parse({
       generatedAt: timestamp,
       nextWorkflowSeed: {
         plannerInstructions: [
@@ -470,7 +471,7 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.refinement-proposals.v1",
+      schemaVersion: "memory.refinement-proposals.v1",
       sourceRefs: [
         "artifact://dream-preflight/run/dream/memory-search.json",
         "artifact://dream-preflight/run/dream/hydration.json",
@@ -491,13 +492,13 @@ describe("Dream memory fabric domain contracts", () => {
       proposalCount: 1,
       rawTranscriptsReturned: false,
       recommendation: "accept",
-      schemaVersion: "dream.refinement-proposals.v1",
+      schemaVersion: "memory.refinement-proposals.v1",
       targetKind: "kernel-memory",
     });
   });
 
   it("captures HITL decisions as receipts that seed the next generated workflow", () => {
-    const decisions = DreamHitlDecisionDocumentSchema.parse({
+    const decisions = MemoryHitlDecisionDocumentSchema.parse({
       decisionCount: 2,
       decisions: [
         {
@@ -585,7 +586,7 @@ describe("Dream memory fabric domain contracts", () => {
         type: "human",
       },
       runId: "run-dream-preflight",
-      schemaVersion: "dream.hitl-decision.v1",
+      schemaVersion: "memory.hitl-decision.v1",
       sourceRefs: [
         "artifact://dream-preflight/run/dream/hitl-report.json",
         "artifact://dream-preflight/run/dream/refinement-proposals.json",
@@ -597,7 +598,7 @@ describe("Dream memory fabric domain contracts", () => {
       throw new Error("Expected accepted decision.");
     }
 
-    const workflowSeed = DreamHitlDecisionWorkflowSeedDocumentSchema.parse({
+    const workflowSeed = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
       acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
       actionableDecisionCount: 1,
       actionableDecisions: [acceptedDecision],
@@ -611,7 +612,7 @@ describe("Dream memory fabric domain contracts", () => {
       rejectedDecisionIds: [],
       reportRef: decisions.reportRef,
       runId: decisions.runId,
-      schemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       sourceRefs: [
         "artifact://dream-preflight/run/dream/hitl-decision.json",
         "artifact://dream-preflight/run/dream/hitl-report.json",
@@ -623,40 +624,42 @@ describe("Dream memory fabric domain contracts", () => {
       workItemDecisionIds: [],
       workItemId: decisions.workItemId,
     });
-    const followUpRunRequest = DreamHitlFollowUpRunRequestDocumentSchema.parse({
-      actionableDecisionCount: workflowSeed.actionableDecisionCount,
-      artifactUpdateTargets:
-        workflowSeed.nextWorkflowSeed.artifactUpdateTargets,
-      decisionWorkflowSeedRef:
-        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
-      generatedAt: timestamp,
-      redacted: true,
-      request: {
-        actor: decisions.reviewer,
-        planProposal: {
-          intent:
-            "Run follow-up Dream refinement work from accepted HITL decisions.",
-          requestedPackageIds: ["workflow/dream-memory-fabric"],
-          stochasticNotes: workflowSeed.nextWorkflowSeed.plannerInstructions,
+    const followUpRunRequest = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
+      {
+        actionableDecisionCount: workflowSeed.actionableDecisionCount,
+        artifactUpdateTargets:
+          workflowSeed.nextWorkflowSeed.artifactUpdateTargets,
+        decisionWorkflowSeedRef:
+          "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+        generatedAt: timestamp,
+        redacted: true,
+        request: {
+          actor: decisions.reviewer,
+          planProposal: {
+            intent:
+              "Run follow-up Dream refinement work from accepted HITL decisions.",
+            requestedPackageIds: ["workflow/memory-fabric"],
+            stochasticNotes: workflowSeed.nextWorkflowSeed.plannerInstructions,
+          },
+          runId: "run-memory-hitl-follow-up",
+          workItemId: "work-item:memory-hitl-follow-up",
         },
-        runId: "run-dream-hitl-follow-up",
-        workItemId: "work-item:dream-hitl-follow-up",
-      },
-      requestedPackageIds: ["workflow/dream-memory-fabric"],
-      requiredCapabilityKinds:
-        workflowSeed.nextWorkflowSeed.requiredCapabilityKinds,
-      runId: workflowSeed.runId,
-      schemaVersion: "dream.hitl-follow-up-run-request.v1",
-      sourceRefs: [
-        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
-        ...workflowSeed.sourceRefs,
-      ],
-      status: "drafted",
-      submitted: false,
-      summary:
-        "Drafted the next generated workflow request from accepted Dream HITL decisions.",
-      workItemId: workflowSeed.workItemId,
-    });
+        requestedPackageIds: ["workflow/memory-fabric"],
+        requiredCapabilityKinds:
+          workflowSeed.nextWorkflowSeed.requiredCapabilityKinds,
+        runId: workflowSeed.runId,
+        schemaVersion: "memory.hitl-follow-up-run-request.v1",
+        sourceRefs: [
+          "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+          ...workflowSeed.sourceRefs,
+        ],
+        status: "drafted",
+        submitted: false,
+        summary:
+          "Drafted the next generated workflow request from accepted Dream HITL decisions.",
+        workItemId: workflowSeed.workItemId,
+      }
+    );
 
     expect({
       actionableSeedIds: decisions.nextWorkflowSeed.decisionIds,
@@ -677,38 +680,38 @@ describe("Dream memory fabric domain contracts", () => {
     }).toStrictEqual({
       actionableSeedIds: ["decision:dream:generated-machine-proof"],
       decisionCount: 2,
-      followUpRequestSchemaVersion: "dream.hitl-follow-up-run-request.v1",
+      followUpRequestSchemaVersion: "memory.hitl-follow-up-run-request.v1",
       followUpRequestStatus: "drafted",
       followUpSubmitted: false,
       rawTranscriptsReturned: false,
       reviewerType: "human",
-      schemaVersion: "dream.hitl-decision.v1",
+      schemaVersion: "memory.hitl-decision.v1",
       updateTargets: ["brain", "workflow"],
       workflowSeedActionableDecisionCount: 1,
-      workflowSeedSchemaVersion: "dream.hitl-decision-workflow-seed.v1",
+      workflowSeedSchemaVersion: "memory.hitl-decision-workflow-seed.v1",
       workflowSeedStatus: "ready",
     });
   });
 
   it("rejects no-action HITL follow-up requests with actionable decisions", () => {
-    const result = DreamHitlFollowUpRunRequestDocumentSchema.safeParse({
+    const result = MemoryHitlFollowUpRunRequestDocumentSchema.safeParse({
       actionableDecisionCount: 1,
       artifactUpdateTargets: [],
       decisionWorkflowSeedRef:
         "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
       generatedAt: timestamp,
       redacted: true,
-      requestedPackageIds: ["workflow/dream-memory-fabric"],
+      requestedPackageIds: ["workflow/memory-fabric"],
       requiredCapabilityKinds: [],
-      runId: "run-dream-hitl-follow-up",
-      schemaVersion: "dream.hitl-follow-up-run-request.v1",
+      runId: "run-memory-hitl-follow-up",
+      schemaVersion: "memory.hitl-follow-up-run-request.v1",
       sourceRefs: [
         "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
       ],
       status: "no-actionable-decisions",
       submitted: false,
       summary: "No follow-up workflow request was drafted.",
-      workItemId: "work-item:dream-hitl-follow-up",
+      workItemId: "work-item:memory-hitl-follow-up",
     });
 
     expect({
@@ -724,7 +727,7 @@ describe("Dream memory fabric domain contracts", () => {
   });
 
   it("rejects accepted HITL decisions that do not feed the next workflow seed", () => {
-    const result = DreamHitlDecisionDocumentSchema.safeParse({
+    const result = MemoryHitlDecisionDocumentSchema.safeParse({
       decisionCount: 1,
       decisions: [
         {
@@ -756,7 +759,7 @@ describe("Dream memory fabric domain contracts", () => {
         type: "human",
       },
       runId: "run-dream-preflight",
-      schemaVersion: "dream.hitl-decision.v1",
+      schemaVersion: "memory.hitl-decision.v1",
       sourceRefs: ["artifact://dream-preflight/run/dream/hitl-report.json"],
       workItemId: "work-item:dream-preflight",
     });
@@ -778,13 +781,13 @@ describe("Dream memory fabric domain contracts", () => {
       generatedAt: timestamp,
       items: [
         {
-          evidenceRefs: ["node:joelclaw.dream.hitl-report"],
+          evidenceRefs: ["node:joelclaw.memory.hitl-report"],
           requirement:
             "Dream report is emitted by the installed Dream workflow cartridge/package.",
           requirementId: "dream-cartridge-package",
           status: "captured",
           summary:
-            "`joelclaw.dream.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
+            "`joelclaw.memory.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
         },
         {
           requirement:
@@ -792,7 +795,7 @@ describe("Dream memory fabric domain contracts", () => {
           requirementId: "worker-facing-relay-capability-lease",
           status: "not-proven",
           summary:
-            "Relay lease sidecars are verified by dream.generated-workflow-proof.v1, not the report schema fixture.",
+            "Relay lease sidecars are verified by memory.generated-workflow-proof.v1, not the report schema fixture.",
         },
         {
           requirement:
@@ -857,7 +860,7 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.hitl-report.definition-of-done-audit.v1",
+      schemaVersion: "workflow.hitl-report.definition-of-done-audit.v1",
       status: "not-proven",
       summary: {
         blockedCount: 0,
@@ -867,7 +870,7 @@ describe("Dream memory fabric domain contracts", () => {
         totalCount: 9,
       },
     } as const;
-    const report = DreamHitlReportDocumentSchema.parse({
+    const report = WorkflowHitlReportDocumentSchema.parse({
       definitionOfDoneAudit: reportDefinitionOfDoneAudit,
       dreamCount: 1,
       dreams: [
@@ -887,9 +890,9 @@ describe("Dream memory fabric domain contracts", () => {
       generatedAt: timestamp,
       hitlDecisionContract: {
         artifactPath: "dream/hitl-decision.json",
-        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
-        decisionSchemaVersion: "dream.hitl-decision.v1",
-        exportId: "dream-hitl-decision-schema",
+        contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
+        decisionSchemaVersion: "memory.hitl-decision.v1",
+        exportId: "memory-hitl-decision-schema",
         nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
         sourceRefs: [
           "artifact://dream-preflight/run/dream/memory-search.json",
@@ -963,7 +966,7 @@ describe("Dream memory fabric domain contracts", () => {
       receiptCount: 1,
       redacted: true,
       runId: "run-dream-preflight",
-      schemaVersion: "dream.hitl-report.v1",
+      schemaVersion: "workflow.hitl-report.v1",
       sectionOrder: [
         "run-context",
         "actual-dreams",
@@ -1026,9 +1029,9 @@ describe("Dream memory fabric domain contracts", () => {
       },
       decisionContract: {
         artifactPath: "dream/hitl-decision.json",
-        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
-        decisionSchemaVersion: "dream.hitl-decision.v1",
-        exportId: "dream-hitl-decision-schema",
+        contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
+        decisionSchemaVersion: "memory.hitl-decision.v1",
+        exportId: "memory-hitl-decision-schema",
         nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
         sourceRefs: [
           "artifact://dream-preflight/run/dream/memory-search.json",
@@ -1066,7 +1069,7 @@ describe("Dream memory fabric domain contracts", () => {
           sourceFamilies: ["agent-transcripts", "brain"],
         },
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.memory-search",
+        nodeType: "joelclaw.memory.search",
         outputPath: "dream/memory-search.json",
         stepId: "search-memory-fabric",
         summary: "Search redacted Dream memory evidence across horizons.",
@@ -1077,7 +1080,7 @@ describe("Dream memory fabric domain contracts", () => {
         },
         dependsOn: ["search-memory-fabric"],
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.hydrate",
+        nodeType: "joelclaw.memory.hydrate",
         outputPath: "dream/hydration.json",
         stepId: "hydrate-receipts",
         summary: "Hydrate redacted receipts without raw transcripts.",
@@ -1089,7 +1092,7 @@ describe("Dream memory fabric domain contracts", () => {
         },
         dependsOn: ["hydrate-receipts"],
         kind: "workflow.node.invoke",
-        nodeType: "joelclaw.dream.correlate",
+        nodeType: "joelclaw.memory.correlate",
         outputPath: "dream/correlation-graph.json",
         stepId: "correlate-evidence",
         summary: "Correlate hydrated evidence into a source-backed graph.",
@@ -1106,9 +1109,9 @@ describe("Dream memory fabric domain contracts", () => {
         step.kind === "workflow.node.invoke" ? step.nodeType : null
       )
     ).toStrictEqual([
-      "joelclaw.dream.memory-search",
-      "joelclaw.dream.hydrate",
-      "joelclaw.dream.correlate",
+      "joelclaw.memory.search",
+      "joelclaw.memory.hydrate",
+      "joelclaw.memory.correlate",
     ]);
   });
 });

@@ -5,20 +5,22 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { sha256Hex } from "../../app/domain/hash.ts";
+import type {
+  MemoryCoverageHorizon,
+  MemorySourceFamily,
+} from "../../app/domain/source-profile.ts";
 import {
-  DreamCorrelationGraphDocumentSchema,
-  DreamHydrationDocumentSchema,
-  DreamMemorySearchDocumentSchema,
-  DreamSignalDocumentSchema,
+  MemoryCorrelationGraphDocumentSchema,
+  MemoryHydrationDocumentSchema,
+  MemorySearchDocumentSchema,
+  MemorySignalDocumentSchema,
 } from "./schemas.ts";
 import type {
-  DreamCorrelationGraphDocument,
-  DreamCoverageHorizon,
-  DreamMemoryRelayCorrelationPayload,
-  DreamMemorySearchHit,
-  DreamReceiptRef,
-  DreamSignalKind,
-  DreamSourceFamily,
+  MemoryCorrelationGraphDocument,
+  MemoryRelayCorrelationPayload,
+  MemorySearchHit,
+  MemoryReceiptRef,
+  MemorySignalKind,
 } from "./schemas.ts";
 import {
   searchTrustedJoelClawSessionSource,
@@ -28,36 +30,38 @@ import type {
   TrustedJoelClawSessionBridgeCommand,
   TrustedJoelClawSessionHydrationRecord,
 } from "./trusted-joelclaw-session-source.ts";
-import type { TrustedLocalDreamSourceRoot } from "./trusted-local-memory-fabric.ts";
+import type { TrustedLocalMemorySourceRoot } from "./trusted-local-memory-fabric.ts";
 import type {
-  DreamMemoryCorrelationPort,
-  DreamMemoryRetrievalPort,
-  DreamMemorySignalPort,
+  MemoryCorrelationPort,
+  MemoryRetrievalPort,
+  MemorySignalPort,
 } from "./workflow-node-adapter.ts";
 
-type DreamCorrelationGraphNode = DreamCorrelationGraphDocument["nodes"][number];
-type DreamCorrelationGraphEdge = DreamCorrelationGraphDocument["edges"][number];
+type MemoryCorrelationGraphNode =
+  MemoryCorrelationGraphDocument["nodes"][number];
+type MemoryCorrelationGraphEdge =
+  MemoryCorrelationGraphDocument["edges"][number];
 
-export interface TrustedDocsApiDreamMemoryRetrievalConfig {
+export interface TrustedDocsApiMemoryRetrievalConfig {
   readonly baseUrl: string;
   readonly fetch?: typeof fetch;
   readonly userAgent?: string;
 }
 
-export interface TrustedLocalDreamMemoryRetrievalConfig {
-  readonly docsApi?: TrustedDocsApiDreamMemoryRetrievalConfig;
+export interface TrustedLocalMemoryRetrievalConfig {
+  readonly docsApi?: TrustedDocsApiMemoryRetrievalConfig;
   readonly maxFileBytes?: number;
   readonly maxFilesPerSource?: number;
   readonly now?: () => string;
   readonly sessionBridgeCommand?: TrustedJoelClawSessionBridgeCommand;
-  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+  readonly sourceRoots: readonly TrustedLocalMemorySourceRoot[];
 }
 
 interface CandidateFile {
   readonly content: string;
   readonly hash: string;
   readonly modifiedAt: string;
-  readonly sourceRoot: TrustedLocalDreamSourceRoot;
+  readonly sourceRoot: TrustedLocalMemorySourceRoot;
 }
 
 interface CandidateSearchHit {
@@ -67,7 +71,7 @@ interface CandidateSearchHit {
 }
 
 interface SignalPattern {
-  readonly kind: DreamSignalKind;
+  readonly kind: MemorySignalKind;
   readonly queryTerms: readonly string[];
   readonly rating: number;
   readonly summary: string;
@@ -166,8 +170,8 @@ const termsForQuery = (query: string): string[] => {
 };
 
 const sourceMatchesFamilies = (input: {
-  readonly families: readonly DreamSourceFamily[] | undefined;
-  readonly sourceRoot: TrustedLocalDreamSourceRoot;
+  readonly families: readonly MemorySourceFamily[] | undefined;
+  readonly sourceRoot: TrustedLocalMemorySourceRoot;
 }): boolean =>
   input.families === undefined ||
   input.families.includes(input.sourceRoot.family);
@@ -192,7 +196,7 @@ const fileMatchesExtensions = (input: {
 const readCandidateFile = async (input: {
   readonly filePath: string;
   readonly maxFileBytes: number;
-  readonly sourceRoot: TrustedLocalDreamSourceRoot;
+  readonly sourceRoot: TrustedLocalMemorySourceRoot;
 }): Promise<CandidateFile | null> => {
   try {
     const fileStats = await stat(input.filePath);
@@ -216,7 +220,7 @@ const readCandidateFile = async (input: {
 const readSourceCandidates = async (input: {
   readonly maxFileBytes: number;
   readonly maxFilesPerSource: number;
-  readonly sourceRoot: TrustedLocalDreamSourceRoot;
+  readonly sourceRoot: TrustedLocalMemorySourceRoot;
 }): Promise<{
   readonly candidates: CandidateFile[];
   readonly skippedSources: string[];
@@ -310,10 +314,10 @@ const readSourceCandidates = async (input: {
 };
 
 const readCandidateFiles = async (input: {
-  readonly families: readonly DreamSourceFamily[] | undefined;
+  readonly families: readonly MemorySourceFamily[] | undefined;
   readonly maxFileBytes: number;
   readonly maxFilesPerSource: number;
-  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+  readonly sourceRoots: readonly TrustedLocalMemorySourceRoot[];
 }): Promise<{
   readonly candidates: CandidateFile[];
   readonly skippedSources: string[];
@@ -395,7 +399,7 @@ const docsApiUrl = (input: {
 };
 
 const docsApiHeaders = (
-  config: TrustedDocsApiDreamMemoryRetrievalConfig
+  config: TrustedDocsApiMemoryRetrievalConfig
 ): HeadersInit =>
   config.userAgent === undefined
     ? {}
@@ -417,7 +421,7 @@ const docsScore = (score: number | string | undefined): number => {
   return 0;
 };
 
-const docsReceiptFor = (hit: DocsApiSearchHit): DreamReceiptRef => ({
+const docsReceiptFor = (hit: DocsApiSearchHit): MemoryReceiptRef => ({
   family: "docs-pdf-brain",
   hash: sha256Hex(JSON.stringify(hit)),
   receiptId: `${DOCS_API_RECEIPT_PREFIX}${encodeURIComponent(hit.id)}`,
@@ -425,7 +429,7 @@ const docsReceiptFor = (hit: DocsApiSearchHit): DreamReceiptRef => ({
   sourceId: DOCS_API_SOURCE_ID,
 });
 
-const docsSearchHitFor = (hit: DocsApiSearchHit): DreamMemorySearchHit => {
+const docsSearchHitFor = (hit: DocsApiSearchHit): MemorySearchHit => {
   const headingPath = hit.headingPath.join(" > ");
   const context = headingPath.length === 0 ? hit.title : headingPath;
 
@@ -444,7 +448,7 @@ const docsSearchHitFor = (hit: DocsApiSearchHit): DreamMemorySearchHit => {
   };
 };
 
-const docsChunkIdFromReceipt = (receipt: DreamReceiptRef): string | null => {
+const docsChunkIdFromReceipt = (receipt: MemoryReceiptRef): string | null => {
   if (
     receipt.sourceId !== DOCS_API_SOURCE_ID ||
     !receipt.receiptId.startsWith(DOCS_API_RECEIPT_PREFIX)
@@ -458,12 +462,12 @@ const docsChunkIdFromReceipt = (receipt: DreamReceiptRef): string | null => {
 };
 
 const docsApiSearch = async (input: {
-  readonly config: TrustedDocsApiDreamMemoryRetrievalConfig | undefined;
+  readonly config: TrustedDocsApiMemoryRetrievalConfig | undefined;
   readonly maxHits: number;
   readonly query: string;
-  readonly sourceFamilies: readonly DreamSourceFamily[] | undefined;
+  readonly sourceFamilies: readonly MemorySourceFamily[] | undefined;
 }): Promise<{
-  readonly hits: DreamMemorySearchHit[];
+  readonly hits: MemorySearchHit[];
   readonly skippedSources: string[];
 }> => {
   if (
@@ -516,11 +520,11 @@ const docsApiSearch = async (input: {
 };
 
 const docsApiHydrate = async (input: {
-  readonly config: TrustedDocsApiDreamMemoryRetrievalConfig | undefined;
-  readonly receipt: DreamReceiptRef;
+  readonly config: TrustedDocsApiMemoryRetrievalConfig | undefined;
+  readonly receipt: MemoryReceiptRef;
 }): Promise<{
   readonly redactedExcerpt: string;
-  readonly receipt: DreamReceiptRef;
+  readonly receipt: MemoryReceiptRef;
   readonly summary: string;
 } | null> => {
   const chunkId = docsChunkIdFromReceipt(input.receipt);
@@ -570,14 +574,14 @@ const joelClawSessionSearch = async (input: {
   readonly maxHits: number;
   readonly now: string;
   readonly query: string;
-  readonly sourceFamilies: readonly DreamSourceFamily[] | undefined;
-  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+  readonly sourceFamilies: readonly MemorySourceFamily[] | undefined;
+  readonly sourceRoots: readonly TrustedLocalMemorySourceRoot[];
 }): Promise<{
-  readonly hits: DreamMemorySearchHit[];
+  readonly hits: MemorySearchHit[];
   readonly hydrations: TrustedJoelClawSessionHydrationRecord[];
   readonly skippedSources: string[];
 }> => {
-  const hits: DreamMemorySearchHit[] = [];
+  const hits: MemorySearchHit[] = [];
   const hydrations: TrustedJoelClawSessionHydrationRecord[] = [];
   const skippedSources: string[] = [];
 
@@ -622,17 +626,16 @@ const joelClawSessionSearch = async (input: {
   };
 };
 
-const primaryFamilyFor = (
-  hit: DreamMemorySearchHit
-): DreamSourceFamily | null => hit.receipts.at(0)?.family ?? null;
+const primaryFamilyFor = (hit: MemorySearchHit): MemorySourceFamily | null =>
+  hit.receipts.at(0)?.family ?? null;
 
 const balancedHitsByFamily = (input: {
-  readonly hits: readonly DreamMemorySearchHit[];
+  readonly hits: readonly MemorySearchHit[];
   readonly maxHits: number;
-  readonly sourceFamilies: readonly DreamSourceFamily[] | undefined;
-}): DreamMemorySearchHit[] => {
-  const buckets = new Map<DreamSourceFamily, DreamMemorySearchHit[]>();
-  const firstSeenFamilies: DreamSourceFamily[] = [];
+  readonly sourceFamilies: readonly MemorySourceFamily[] | undefined;
+}): MemorySearchHit[] => {
+  const buckets = new Map<MemorySourceFamily, MemorySearchHit[]>();
+  const firstSeenFamilies: MemorySourceFamily[] = [];
 
   for (const hit of input.hits) {
     const family = primaryFamilyFor(hit);
@@ -660,8 +663,8 @@ const balancedHitsByFamily = (input: {
       hits.toSorted((left, right) => right.score - left.score),
     ])
   );
-  const indexes = new Map<DreamSourceFamily, number>();
-  const selected: DreamMemorySearchHit[] = [];
+  const indexes = new Map<MemorySourceFamily, number>();
+  const selected: MemorySearchHit[] = [];
   let madeProgress = true;
 
   while (selected.length < input.maxHits && madeProgress) {
@@ -703,7 +706,7 @@ const excerptFor = (input: {
   return redactText(excerpt).trim();
 };
 
-const horizonFor = (modifiedAt: string, now: string): DreamCoverageHorizon => {
+const horizonFor = (modifiedAt: string, now: string): MemoryCoverageHorizon => {
   const modifiedMs = Date.parse(modifiedAt);
   const nowMs = Date.parse(now);
   if (!Number.isFinite(modifiedMs) || !Number.isFinite(nowMs)) {
@@ -730,11 +733,11 @@ const horizonFor = (modifiedAt: string, now: string): DreamCoverageHorizon => {
   return "all-time";
 };
 
-const receiptFor = (candidate: CandidateFile): DreamReceiptRef => ({
+const receiptFor = (candidate: CandidateFile): MemoryReceiptRef => ({
   family: candidate.sourceRoot.family,
   hash: candidate.hash,
   receiptId: `receipt:${candidate.sourceRoot.sourceId}:${candidate.hash.slice(0, 16)}`,
-  redactedLocator: `redacted://dream-source/${encodeURIComponent(candidate.sourceRoot.sourceId)}/receipt/${candidate.hash.slice(0, 12)}`,
+  redactedLocator: `redacted://memory-source/${encodeURIComponent(candidate.sourceRoot.sourceId)}/receipt/${candidate.hash.slice(0, 12)}`,
   ...(candidate.sourceRoot.runtime === undefined
     ? {}
     : { runtime: candidate.sourceRoot.runtime }),
@@ -746,7 +749,7 @@ const searchHitFor = (input: {
   readonly hit: CandidateSearchHit;
   readonly now: string;
   readonly terms: readonly string[];
-}): DreamMemorySearchHit => ({
+}): MemorySearchHit => ({
   horizon: horizonFor(input.hit.candidate.modifiedAt, input.now),
   receipts: [receiptFor(input.hit.candidate)],
   redactedExcerpt: excerptFor({
@@ -765,7 +768,7 @@ const signalSafeId = (value: string): string =>
     .slice(0, 80);
 
 const matchingSignalPatterns = (input: {
-  readonly allowedKinds: readonly DreamSignalKind[] | undefined;
+  readonly allowedKinds: readonly MemorySignalKind[] | undefined;
   readonly candidate: CandidateFile;
   readonly queryTerms: readonly string[];
 }): readonly {
@@ -812,7 +815,7 @@ const matchingSignalPatterns = (input: {
 };
 
 const signalsForCandidates = (input: {
-  readonly allowedKinds: readonly DreamSignalKind[] | undefined;
+  readonly allowedKinds: readonly MemorySignalKind[] | undefined;
   readonly candidates: readonly CandidateFile[];
   readonly generatedAt: string;
   readonly maxSignals: number;
@@ -844,11 +847,11 @@ const signalsForCandidates = (input: {
     }
   }
 
-  return DreamSignalDocumentSchema.parse({
+  return MemorySignalDocumentSchema.parse({
     generatedAt: input.generatedAt,
     redacted: true,
     runId: input.runId,
-    schemaVersion: "dream.signals.v1",
+    schemaVersion: "memory.signals.v1",
     signals: signals
       .toSorted(
         (left, right) =>
@@ -883,11 +886,11 @@ const bestHits = (input: {
 const hydrateReceipt = async (input: {
   readonly maxFileBytes: number;
   readonly maxFilesPerSource: number;
-  readonly receipt: DreamReceiptRef;
-  readonly sourceRoots: readonly TrustedLocalDreamSourceRoot[];
+  readonly receipt: MemoryReceiptRef;
+  readonly sourceRoots: readonly TrustedLocalMemorySourceRoot[];
 }): Promise<{
   readonly content: string;
-  readonly receipt: DreamReceiptRef;
+  readonly receipt: MemoryReceiptRef;
 } | null> => {
   if (input.receipt.hash === undefined) {
     return null;
@@ -926,8 +929,8 @@ const graphSafeId = (value: string): string =>
     .slice(0, 120);
 
 const addGraphNode = (
-  nodes: Map<string, DreamCorrelationGraphNode>,
-  input: Omit<DreamCorrelationGraphNode, "redacted">
+  nodes: Map<string, MemoryCorrelationGraphNode>,
+  input: Omit<MemoryCorrelationGraphNode, "redacted">
 ) => {
   if (nodes.has(input.nodeId)) {
     return;
@@ -941,15 +944,15 @@ const addGraphNode = (
   });
 };
 
-const receiptKey = (receipt: DreamReceiptRef): string =>
+const receiptKey = (receipt: MemoryReceiptRef): string =>
   `${receipt.sourceId}:${receipt.receiptId}:${receipt.hash ?? ""}`;
 
 const correlationGraphFor = (input: {
   readonly generatedAt: string;
-  readonly payload: DreamMemoryRelayCorrelationPayload;
+  readonly payload: MemoryRelayCorrelationPayload;
 }) => {
-  const nodes = new Map<string, DreamCorrelationGraphNode>();
-  const edges: DreamCorrelationGraphEdge[] = [];
+  const nodes = new Map<string, MemoryCorrelationGraphNode>();
+  const edges: MemoryCorrelationGraphEdge[] = [];
   const hydratedReceiptKeys = new Set(
     input.payload.hydration.hydrated.map((hydrated) =>
       receiptKey(hydrated.receipt)
@@ -1027,22 +1030,20 @@ const correlationGraphFor = (input: {
     }
   }
 
-  return DreamCorrelationGraphDocumentSchema.parse({
+  return MemoryCorrelationGraphDocumentSchema.parse({
     edges,
     generatedAt: input.generatedAt,
     nodes: [...nodes.values()],
     redacted: true,
     runId: input.payload.runId,
-    schemaVersion: "dream.correlation-graph.v1",
+    schemaVersion: "memory.correlation-graph.v1",
     workItemId: input.payload.workItemId,
   });
 };
 
-export const createTrustedLocalDreamMemoryRetrievalAdapter = (
-  config: TrustedLocalDreamMemoryRetrievalConfig
-): DreamMemoryCorrelationPort &
-  DreamMemoryRetrievalPort &
-  DreamMemorySignalPort => {
+export const createTrustedLocalMemoryRetrievalAdapter = (
+  config: TrustedLocalMemoryRetrievalConfig
+): MemoryCorrelationPort & MemoryRetrievalPort & MemorySignalPort => {
   const joelClawSessionHydrationCache = new Map<
     string,
     TrustedJoelClawSessionHydrationRecord
@@ -1117,12 +1118,12 @@ export const createTrustedLocalDreamMemoryRetrievalAdapter = (
       }
 
       return {
-        document: DreamHydrationDocumentSchema.parse({
+        document: MemoryHydrationDocumentSchema.parse({
           generatedAt,
           hydrated,
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.hydration.v1",
+          schemaVersion: "memory.hydration.v1",
           workItemId: input.workItemId,
         }),
         status: "ready",
@@ -1190,7 +1191,7 @@ export const createTrustedLocalDreamMemoryRetrievalAdapter = (
       }).map((hit) => searchHitFor({ hit, now: generatedAt, terms }));
 
       return {
-        document: DreamMemorySearchDocumentSchema.parse({
+        document: MemorySearchDocumentSchema.parse({
           generatedAt,
           hits: balancedHitsByFamily({
             hits: [...localHits, ...joelClawSearch.hits, ...docsSearch.hits],
@@ -1200,7 +1201,7 @@ export const createTrustedLocalDreamMemoryRetrievalAdapter = (
           query: input.query,
           redacted: true,
           runId: input.runId,
-          schemaVersion: "dream.memory-search.v1",
+          schemaVersion: "memory.search.v1",
           skippedSources: [
             ...candidates.skippedSources,
             ...joelClawSearch.skippedSources,
