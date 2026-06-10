@@ -43,9 +43,6 @@ import {
   createDryRunGitHubPullRequestAdapter,
   createDryRunLinearCommentAdapter,
   createDryRunWzrrdPublishAdapter,
-  createIntegrationTestDreamMemoryCorrelationAdapter,
-  createIntegrationTestDreamMemoryFabricAdapter,
-  createIntegrationTestDreamMemoryRetrievalAdapter,
   createIntegrationTestDynamicWorkflowPlanner,
   createMemoryArtifactStore,
   createMemoryContextCapsuleActor,
@@ -59,6 +56,11 @@ import {
   createDreamGeneratedWorkflowProofRecorder,
   verifyDreamGeneratedWorkflow,
 } from "../../src/cartridges/dream-memory-fabric/generated-workflow-proof.ts";
+import {
+  createIntegrationTestDreamMemoryCorrelationAdapter,
+  createIntegrationTestDreamMemoryFabricAdapter,
+  createIntegrationTestDreamMemoryRetrievalAdapter,
+} from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,

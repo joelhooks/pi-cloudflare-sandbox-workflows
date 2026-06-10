@@ -2,17 +2,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  createIntegrationTestDreamMemoryCorrelationAdapter,
-  createIntegrationTestDreamMemoryFabricAdapter,
-  createIntegrationTestDreamMemoryRetrievalAdapter,
-} from "../../src/app/infrastructure/memory-adapters.ts";
 import type { DreamMemoryRelayTokenSecretResolver } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 import {
   createCloudflareDreamMemoryFabricRelay,
   createCloudflareDreamMemoryRelayTokenResolver,
   dreamMemoryRelayEndpointCatalog,
 } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+import {
+  createIntegrationTestDreamMemoryCorrelationAdapter,
+  createIntegrationTestDreamMemoryFabricAdapter,
+  createIntegrationTestDreamMemoryRetrievalAdapter,
+} from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import { DreamMemoryRelayRequestEnvelopeSchema } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import type { DreamMemoryRelayOperation } from "../../src/cartridges/dream-memory-fabric/schemas.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";

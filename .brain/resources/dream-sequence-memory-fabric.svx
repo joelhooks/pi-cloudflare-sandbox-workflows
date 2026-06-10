@@ -26,6 +26,17 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:33Z implementation progress: Dream integration fixture adapters moved out of app infrastructure and into the Dream cartridge.
+
+Receipts:
+
+- New file `src/cartridges/dream-memory-fabric/integration-test-adapters.ts` owns `createIntegrationTestDreamMemoryFabricAdapter`, `createIntegrationTestDreamMemoryRetrievalAdapter`, and `createIntegrationTestDreamMemoryCorrelationAdapter`.
+- `src/app/infrastructure/memory-adapters.ts` no longer imports Dream schemas/ports or exports Dream-specific integration adapters.
+- Dream tests now import those fixtures through `src/cartridges/dream-memory-fabric/integration-test-adapters.ts`; generic app test helpers still come from `src/app/infrastructure/memory-adapters.ts`.
+- Focused verification passed: `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-hitl-decision-seed-node.test.ts tests/integration/workflow-app.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts`, `pnpm check`, `pnpm typecheck`, and `pnpm typecheck:tsc`.
+
+This keeps the generic app memory adapters generic and leaves Dream-specific test/runtime fixture behavior with the Dream cartridge. It still does not execute a live Cloudflare Dream.
+
 2026-06-10T10:26Z implementation progress: Dream schemas, workflow-node adapter, and generated-workflow proof moved out of the app workflow-node surface and into the Dream cartridge.
 
 Receipts:

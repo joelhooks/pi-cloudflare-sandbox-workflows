@@ -6,7 +6,7 @@ import {
   createIntegrationTestDreamMemoryCorrelationAdapter,
   createIntegrationTestDreamMemoryFabricAdapter,
   createIntegrationTestDreamMemoryRetrievalAdapter,
-} from "../../src/app/infrastructure/memory-adapters.ts";
+} from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,

@@ -10,10 +10,8 @@ import type {
   DynamicWorkflowMachineDocument,
   DynamicWorkflowPlanDocument,
 } from "../../src/app/domain/schemas.ts";
-import {
-  createIntegrationTestDreamMemoryFabricAdapter,
-  createMemoryArtifactStore,
-} from "../../src/app/infrastructure/memory-adapters.ts";
+import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
+import { createIntegrationTestDreamMemoryFabricAdapter } from "../../src/cartridges/dream-memory-fabric/integration-test-adapters.ts";
 import {
   DreamHitlDecisionDocumentSchema,
   DreamHitlFollowUpRunRequestDocumentSchema,
