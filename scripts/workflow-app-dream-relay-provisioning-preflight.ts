@@ -14,6 +14,8 @@ const defaultLivePreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
   ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+const defaultLocalRelayStartupEnvPath =
+  ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
 const defaultReceiptPath =
   ".wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json";
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
@@ -205,6 +207,10 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     status: z.enum(["failed", "missing", "passed"]),
   }),
   localRelayStartup: z.object({
+    envRef: z.string().min(1).optional(),
+    envSource: z
+      .enum(["artifact", "artifact-and-process", "none", "process"])
+      .optional(),
     host: z.string().min(1).optional(),
     invalidEnv: z.array(LocalRelayStartupEnvNameSchema).default([]),
     missingEnv: z.array(LocalRelayStartupEnvNameSchema).default([]),
@@ -239,6 +245,7 @@ interface ProvisioningPreflightArgs {
   readonly approvalSignoff?: string;
   readonly livePreflightPath: string;
   readonly localRelayProofPath: string;
+  readonly localRelayStartupEnvPath: string;
   readonly receiptPath: string;
 }
 
@@ -257,9 +264,17 @@ export interface BuildDreamRelayProvisioningPreflightInput {
   readonly localRelayProofPath: string;
   readonly localRelayProofText: string;
   readonly localRelayStartupEnv?: Readonly<Record<string, string | undefined>>;
+  readonly localRelayStartupEnvRef?: string;
+  readonly localRelayStartupEnvSource?:
+    | "artifact"
+    | "artifact-and-process"
+    | "none"
+    | "process";
   readonly networkTools: readonly CommandProbe[];
   readonly visionText: string;
 }
+
+const LocalRelayStartupEnvArtifactSchema = z.record(z.string(), z.string());
 
 const isMain = (): boolean =>
   process.argv[1] !== undefined &&
@@ -276,7 +291,7 @@ const argValue = (
   }
 
   const index = argv.indexOf(name);
-  if (index !== -1) {
+  if (index !== -1 && index + 1 < argv.length) {
     return argv[index + 1];
   }
 
@@ -341,6 +356,9 @@ const parseArgs = (argv: readonly string[]): ProvisioningPreflightArgs => {
       argValue(argv, "--live-preflight-path") ?? defaultLivePreflightPath,
     localRelayProofPath:
       argValue(argv, "--local-relay-proof-path") ?? defaultLocalRelayProofPath,
+    localRelayStartupEnvPath:
+      argValue(argv, "--local-relay-startup-env-path") ??
+      defaultLocalRelayStartupEnvPath,
     receiptPath: argValue(argv, "--receipt-path") ?? defaultReceiptPath,
   };
 
@@ -374,6 +392,9 @@ const parseJsonOrNull = (text: string): unknown | null => {
     return null;
   }
 };
+
+const safeLocalArtifactRef = (path: string): string =>
+  path.startsWith(".wrangler/") ? path : "<redacted-local-operator-artifact>";
 
 const probeCommand = (command: string): CommandProbe => {
   const result = spawnSync("which", [command], {
@@ -515,8 +536,22 @@ const livePreflightSummary = (input: {
 };
 
 const localRelayStartupSummary = (
-  env: Readonly<Record<string, string | undefined>> = {}
+  env: Readonly<Record<string, string | undefined>> = {},
+  metadata: {
+    readonly envRef?: string;
+    readonly envSource?:
+      | "artifact"
+      | "artifact-and-process"
+      | "none"
+      | "process";
+  } = {}
 ): DreamRelayProvisioningPreflightReceipt["localRelayStartup"] => {
+  const summaryMetadata = {
+    ...(metadata.envRef === undefined ? {} : { envRef: metadata.envRef }),
+    ...(metadata.envSource === undefined
+      ? {}
+      : { envSource: metadata.envSource }),
+  };
   const missingEnv = localRelayStartupEnvNames.filter((name) => {
     const value = env[name];
 
@@ -525,6 +560,7 @@ const localRelayStartupSummary = (
 
   if (missingEnv.length > 0) {
     return {
+      ...summaryMetadata,
       invalidEnv: [],
       missingEnv,
       redacted: true,
@@ -538,6 +574,7 @@ const localRelayStartupSummary = (
     const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(env);
 
     return {
+      ...summaryMetadata,
       host: config.host,
       invalidEnv: [],
       missingEnv: [],
@@ -549,6 +586,7 @@ const localRelayStartupSummary = (
     };
   } catch {
     return {
+      ...summaryMetadata,
       invalidEnv: ["DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"],
       missingEnv: [],
       redacted: true,
@@ -557,6 +595,25 @@ const localRelayStartupSummary = (
       tokenConfigured: true,
     };
   }
+};
+
+const localRelayStartupEnvSourceFor = (input: {
+  readonly artifactLoaded: boolean;
+  readonly processHasStartupEnv: boolean;
+}): "artifact" | "artifact-and-process" | "none" | "process" => {
+  if (input.artifactLoaded && input.processHasStartupEnv) {
+    return "artifact-and-process";
+  }
+
+  if (input.artifactLoaded) {
+    return "artifact";
+  }
+
+  if (input.processHasStartupEnv) {
+    return "process";
+  }
+
+  return "none";
 };
 
 const recommendedNextActions = (input: {
@@ -898,7 +955,15 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     text: input.localRelayProofText,
   });
   const localRelayStartup = localRelayStartupSummary(
-    input.localRelayStartupEnv
+    input.localRelayStartupEnv,
+    {
+      ...(input.localRelayStartupEnvRef === undefined
+        ? {}
+        : { envRef: input.localRelayStartupEnvRef }),
+      ...(input.localRelayStartupEnvSource === undefined
+        ? {}
+        : { envSource: input.localRelayStartupEnvSource }),
+    }
   );
   const livePreflight = livePreflightSummary({
     path: input.livePreflightPath,
@@ -960,13 +1025,40 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
 export const runDreamRelayProvisioningPreflightCli = async (input: {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
+  readonly networkTools?: readonly CommandProbe[];
   readonly processEnv?: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
 }): Promise<DreamRelayProvisioningPreflightReceipt> => {
   const args = parseArgs(input.argv);
   const livePreflightPath = resolve(input.repoRoot, args.livePreflightPath);
   const localRelayProofPath = resolve(input.repoRoot, args.localRelayProofPath);
+  const localRelayStartupEnvPath = resolve(
+    input.repoRoot,
+    args.localRelayStartupEnvPath
+  );
   const receiptPath = resolve(input.repoRoot, args.receiptPath);
+  const startupEnvText = await readTextOrEmpty(localRelayStartupEnvPath);
+  const startupEnvArtifactResult =
+    startupEnvText.trim().length === 0
+      ? undefined
+      : LocalRelayStartupEnvArtifactSchema.safeParse(
+          parseJsonOrNull(startupEnvText)
+        );
+  const startupEnvFromArtifact =
+    startupEnvArtifactResult?.success === true
+      ? startupEnvArtifactResult.data
+      : {};
+  const processEnv = input.processEnv ?? process.env;
+  const processHasStartupEnv = localRelayStartupEnvNames.some((name) => {
+    const value = processEnv[name];
+
+    return value !== undefined && value.length > 0;
+  });
+  const startupEnvArtifactLoaded = startupEnvArtifactResult?.success === true;
+  const localRelayStartupEnvSource = localRelayStartupEnvSourceFor({
+    artifactLoaded: startupEnvArtifactLoaded,
+    processHasStartupEnv,
+  });
   const receipt = buildDreamRelayProvisioningPreflightReceipt({
     ...(args.approvalRef === undefined
       ? {}
@@ -979,8 +1071,15 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
     livePreflightText: await readTextOrEmpty(livePreflightPath),
     localRelayProofPath: args.localRelayProofPath,
     localRelayProofText: await readTextOrEmpty(localRelayProofPath),
-    localRelayStartupEnv: input.processEnv ?? process.env,
-    networkTools: defaultNetworkToolProbes(),
+    localRelayStartupEnv: {
+      ...startupEnvFromArtifact,
+      ...processEnv,
+    },
+    localRelayStartupEnvRef: safeLocalArtifactRef(
+      args.localRelayStartupEnvPath
+    ),
+    localRelayStartupEnvSource,
+    networkTools: input.networkTools ?? defaultNetworkToolProbes(),
     visionText: await readTextOrEmpty(resolve(input.repoRoot, "VISION.md")),
   });
   const log = input.log ?? console.log;

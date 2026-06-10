@@ -26,6 +26,29 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T09:07Z run attempt: Dreaming was attempted again after adding a local relay startup env bootstrap. The local relay is now runnable from an ignored operator artifact, but live Cloudflare submit still correctly did not happen.
+
+Receipts:
+
+- New bootstrap command: `pnpm app:dream:relay:local-env` writes `.wrangler/workflow-app/dream-relay/local-relay-startup-env.json` with `DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON` and a generated relay token, then writes redacted receipt `.wrangler/workflow-app/dream-relay/latest-local-startup-env-receipt.json`.
+- Startup receipt generated `2026-06-10T09:04:59.668Z`: `sourceRootCount=10`, `tokenConfigured=true`, `host=127.0.0.1`, `port=8789`, `rawCredentialsReturned=false`, `rawPathsReturned=false`. The env artifact is intentionally ignored and private; Brain and public receipts do not carry the raw token or authority paths.
+- `scripts/trusted-local-dream-memory-relay.ts` now loads `.wrangler/workflow-app/dream-relay/local-relay-startup-env.json` by default, with shell env overrides, so `pnpm app:dream:relay` can start from the generated artifact instead of requiring hand-exported env.
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` now reads the same startup env artifact by default and records `localRelayStartup.envSource`. Refreshed provisioning receipt `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T09:07:30.705Z`, has `localRelayStartup.status=ready`, `sourceRootCount=10`, `tokenConfigured=true`, and no `local-relay-startup-config-missing` blocker.
+- Local relay proof refreshed as `run:dream-relay-local-proof:20260610T090710029Z`: 10 source roots, 12 search hits, 12 hydrated redacted receipts, 48 correlation edges, 35 nodes, no missing machine ids, no missing source families, and no raw credential/path leak flags.
+- Live preflight refreshed at `2026-06-10T09:07:38.288Z`, status `blocked`. Remote package registry still has `workflow/dream-memory-fabric` with manifest hash `432d0a7eeed4379c30231d82fda275620f44d859bd3087dfd92b9299af956d45`.
+- Live run request `run-live-dream-memory-fabric-20260610T090736895Z-8cb905e0` wrote `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T090736895Z-8cb905e0-receipt.json` with `status=blocked` and `submit.attempted=false`.
+- Verification passed: `pnpm vitest run tests/integration/dream-relay-local-startup-env.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts`, `pnpm test:integration`, `pnpm check`, `pnpm typecheck`, and `pnpm typecheck:tsc`.
+
+Remaining live gates:
+
+- Exact owner sign-off for exposing the trusted relay over a new network boundary.
+- Approved HTTPS relay endpoint / `DREAM_MEMORY_RELAY_BASE_URL`.
+- Remote Worker `DREAM_MEMORY_RELAY_TOKEN` secret.
+- Worker deploy config or signoff-gated deploy-time injection for `DREAM_MEMORY_RELAY_BASE_URL`.
+- Authenticated relay `/healthz` verified from the Worker-facing endpoint.
+
+This is closer, but still not a live Dream. The system now has the private local startup material ready and proven; it still refuses to fake Cloudflare execution until the network relay boundary is explicitly approved and configured.
+
 2026-06-10T08:57Z implementation progress: Dream relay provisioning preflight now verifies local relay startup configuration before claiming readiness for approved provisioning.
 
 Receipts:

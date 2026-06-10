@@ -1,6 +1,13 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { buildDreamRelayProvisioningPreflightReceipt } from "../../scripts/workflow-app-dream-relay-provisioning-preflight.ts";
+import {
+  buildDreamRelayProvisioningPreflightReceipt,
+  runDreamRelayProvisioningPreflightCli,
+} from "../../scripts/workflow-app-dream-relay-provisioning-preflight.ts";
 
 const visionWithSignoffRule = `
 # Vision
@@ -194,6 +201,11 @@ const livePreflightBlocked = JSON.stringify({
   schemaVersion: "workflow.live-preflight.v1",
   status: "blocked",
 });
+
+const writeJson = async (path: string, value: unknown): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+};
 
 describe("Dream relay provisioning preflight", () => {
   it("blocks network exposure until owner sign-off is present", () => {
@@ -705,5 +717,81 @@ describe("Dream relay provisioning preflight", () => {
       localProofStatus: "missing",
       status: "blocked",
     });
+  });
+
+  it("loads the local relay startup env artifact without leaking its token or raw roots", async () => {
+    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-preflight-"));
+    const localRelayStartupEnvPath =
+      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+    const logs: string[] = [];
+    const rawAuthorityRoot = "/private/tmp/dream-relay-preflight-source";
+    const relayToken = "super-secret-local-relay-token";
+
+    await writeFile(resolve(repoRoot, "VISION.md"), visionWithSignoffRule);
+    await writeFile(
+      resolve(repoRoot, "dream-preflight.json"),
+      livePreflightBlocked
+    );
+    await writeFile(resolve(repoRoot, "local-proof.json"), localRelayProof);
+    await writeJson(resolve(repoRoot, localRelayStartupEnvPath), {
+      DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+        {
+          authorityRoot: rawAuthorityRoot,
+          family: "agent-transcripts",
+          includeExtensions: [".jsonl"],
+          label: "Sensitive local transcripts",
+          privacyTier: "private",
+          runtime: "codex",
+          sourceId: "source:agent-transcripts:codex:test",
+          sourceSystem: "codex",
+        },
+      ]),
+      DREAM_MEMORY_RELAY_TOKEN: relayToken,
+    });
+
+    const receipt = await runDreamRelayProvisioningPreflightCli({
+      argv: [
+        "--approval-ref=approval:joel:2026-06-09:dream-relay-network-boundary",
+        `--approval-signoff=${approvalSignoff}`,
+        "--live-preflight-path=dream-preflight.json",
+        "--local-relay-proof-path=local-proof.json",
+        `--local-relay-startup-env-path=${localRelayStartupEnvPath}`,
+        "--receipt-path=receipt.json",
+      ],
+      log: (message) => {
+        logs.push(message);
+      },
+      networkTools: [
+        {
+          available: true,
+          command: "ngrok",
+          path: "/opt/homebrew/bin/ngrok",
+        },
+      ],
+      processEnv: {},
+      repoRoot,
+    });
+    const serializedReceipt = JSON.stringify(receipt);
+    const serializedLogs = logs.join("\n");
+
+    expect({
+      envRef: receipt.localRelayStartup.envRef,
+      envSource: receipt.localRelayStartup.envSource,
+      sourceRootCount: receipt.localRelayStartup.sourceRootCount,
+      startupStatus: receipt.localRelayStartup.status,
+      status: receipt.status,
+      tokenConfigured: receipt.localRelayStartup.tokenConfigured,
+    }).toStrictEqual({
+      envRef: localRelayStartupEnvPath,
+      envSource: "artifact",
+      sourceRootCount: 1,
+      startupStatus: "ready",
+      status: "ready-for-approved-provisioning",
+      tokenConfigured: true,
+    });
+    expect(serializedReceipt).not.toContain(rawAuthorityRoot);
+    expect(serializedReceipt).not.toContain(relayToken);
+    expect(serializedLogs).not.toContain(rawAuthorityRoot);
+    expect(serializedLogs).not.toContain(relayToken);
   });
 });
