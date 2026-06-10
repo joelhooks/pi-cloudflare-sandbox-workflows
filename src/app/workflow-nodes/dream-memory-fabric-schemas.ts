@@ -122,16 +122,61 @@ export const DreamSourcePackDispositionStatusSchema = z.enum([
   "skipped-missing-lease",
 ]);
 
-export const DreamSourcePackDispositionSchema = z.object({
-  capabilityKinds: z.array(z.string().min(1)).default([]),
-  packId: z.string().min(1),
-  packageId: z.string().min(1),
-  reason: z.string().min(1),
-  selectionPolicy: DreamSourcePackSelectionPolicySchema,
-  sourceFamilies: z.array(DreamSourceFamilySchema).min(1),
-  status: DreamSourcePackDispositionStatusSchema,
-  surfaces: z.array(DreamSourceSurfaceSchema).min(1),
-});
+export const DreamSourcePackDispositionSchema = z
+  .object({
+    capabilityKinds: z.array(z.string().min(1)).default([]),
+    leaseRefs: z.array(ArtifactRefSchema).default([]),
+    missingCapabilityKinds: z.array(z.string().min(1)).default([]),
+    packId: z.string().min(1),
+    packageId: z.string().min(1),
+    reason: z.string().min(1),
+    requiredCapabilityKinds: z.array(z.string().min(1)).min(1),
+    selectionPolicy: DreamSourcePackSelectionPolicySchema,
+    sourceFamilies: z.array(DreamSourceFamilySchema).min(1),
+    status: DreamSourcePackDispositionStatusSchema,
+    surfaces: z.array(DreamSourceSurfaceSchema).min(1),
+  })
+  .superRefine((disposition, context) => {
+    if (disposition.status === "selected-with-lease") {
+      if (disposition.leaseRefs.length === 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Selected source packs require at least one capability lease receipt ref.",
+          path: ["leaseRefs"],
+        });
+      }
+
+      if (disposition.missingCapabilityKinds.length > 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Selected source packs must not declare missing capability kinds.",
+          path: ["missingCapabilityKinds"],
+        });
+      }
+    }
+
+    if (disposition.status === "skipped-missing-lease") {
+      if (disposition.leaseRefs.length > 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Skipped source packs must not carry capability lease receipt refs.",
+          path: ["leaseRefs"],
+        });
+      }
+
+      if (disposition.missingCapabilityKinds.length === 0) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Skipped source packs must declare missing capability kinds.",
+          path: ["missingCapabilityKinds"],
+        });
+      }
+    }
+  });
 
 export const DreamWorkflowEffectSchema = z.enum([
   "backfill-plan",

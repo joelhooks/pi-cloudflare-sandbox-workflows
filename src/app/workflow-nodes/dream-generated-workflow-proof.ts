@@ -276,12 +276,25 @@ const capabilityKindsCoverPack = (input: {
     input.disposition.capabilityKinds.includes(capabilityKind)
   );
 
+const missingCapabilityKindsForPack = (input: {
+  readonly disposition: DreamSourcePackDisposition;
+  readonly pack: DreamSourcePack;
+}): string[] =>
+  input.pack.requiredCapabilityKinds.filter(
+    (capabilityKind) =>
+      !input.disposition.capabilityKinds.includes(capabilityKind)
+  );
+
 const dispositionMatchesPack = (input: {
   readonly disposition: DreamSourcePackDisposition;
   readonly pack: DreamSourcePack;
 }): boolean =>
   input.disposition.packageId === input.pack.packageId &&
   input.disposition.selectionPolicy === input.pack.selectionPolicy &&
+  sameItemsInOrder(
+    input.disposition.requiredCapabilityKinds,
+    input.pack.requiredCapabilityKinds
+  ) &&
   sameItemsInOrder(
     input.disposition.sourceFamilies,
     input.pack.sourceFamilies
@@ -301,10 +314,20 @@ const dispositionStatusMatchesPolicy = (input: {
   }
 
   if (input.pack.selectionPolicy === "optional-lease") {
+    const missingCapabilityKinds = missingCapabilityKindsForPack(input);
+
     return (
-      input.disposition.status === "skipped-missing-lease" ||
+      (input.disposition.status === "skipped-missing-lease" &&
+        input.disposition.leaseRefs.length === 0 &&
+        missingCapabilityKinds.length > 0 &&
+        sameItemsInOrder(
+          input.disposition.missingCapabilityKinds,
+          missingCapabilityKinds
+        )) ||
       (input.disposition.status === "selected-with-lease" &&
-        capabilityKindsCoverPack(input))
+        capabilityKindsCoverPack(input) &&
+        input.disposition.leaseRefs.length > 0 &&
+        input.disposition.missingCapabilityKinds.length === 0)
     );
   }
 

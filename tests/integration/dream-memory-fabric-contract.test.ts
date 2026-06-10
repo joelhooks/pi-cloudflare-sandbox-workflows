@@ -18,6 +18,7 @@ import {
   DreamRuntimeCoverageSchema,
   DreamSourceProfileSchema,
   DreamSignalDocumentSchema,
+  DreamSourcePackDispositionSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
 } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
@@ -338,6 +339,54 @@ describe("Dream memory fabric domain contracts", () => {
       issueMessage:
         "Dream source profile sourcePacks packId values must be unique.",
       success: false,
+    });
+  });
+
+  it("requires source pack dispositions to carry lease or missing-capability proof", () => {
+    const baseDisposition = {
+      capabilityKinds: [],
+      leaseRefs: [],
+      missingCapabilityKinds: [],
+      packId: "source-pack:joelhooks:work-graph",
+      packageId: "source-pack/joelhooks-work-graph",
+      reason: "Generated planner disposition for optional source pack.",
+      requiredCapabilityKinds: [
+        "dream.memory.relay",
+        "github.read",
+        "linear.read",
+        "slack.search",
+      ],
+      selectionPolicy: "optional-lease",
+      sourceFamilies: ["comms", "people-org-memory", "repo-outputs", "support"],
+      surfaces: ["github", "linear", "slack", "org-project-graph"],
+    } as const;
+
+    const selectedWithoutLease = DreamSourcePackDispositionSchema.safeParse({
+      ...baseDisposition,
+      capabilityKinds: [...baseDisposition.requiredCapabilityKinds],
+      status: "selected-with-lease",
+    });
+    const skippedWithoutMissingCapabilities =
+      DreamSourcePackDispositionSchema.safeParse({
+        ...baseDisposition,
+        status: "skipped-missing-lease",
+      });
+    const skippedWithMissingCapabilities =
+      DreamSourcePackDispositionSchema.safeParse({
+        ...baseDisposition,
+        missingCapabilityKinds: [...baseDisposition.requiredCapabilityKinds],
+        status: "skipped-missing-lease",
+      });
+
+    expect({
+      selectedWithoutLease: selectedWithoutLease.success,
+      skippedWithMissingCapabilities: skippedWithMissingCapabilities.success,
+      skippedWithoutMissingCapabilities:
+        skippedWithoutMissingCapabilities.success,
+    }).toStrictEqual({
+      selectedWithoutLease: false,
+      skippedWithMissingCapabilities: true,
+      skippedWithoutMissingCapabilities: false,
     });
   });
 

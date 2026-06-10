@@ -75,6 +75,7 @@ import {
   DreamSignalDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
+  DreamSourcePackDispositionSchema,
 } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/dream-memory-fabric/source-profile.ts";
@@ -293,23 +294,31 @@ const addDreamPreflightToBlueprint = (
   ];
   const dreamSourcePackDispositions =
     dreamTranscriptReviewSourceProfile.sourcePacks.map((pack) => {
+      let capabilityKinds: string[] = [];
+      let missingCapabilityKinds = [...pack.requiredCapabilityKinds];
       let status = "skipped-missing-lease";
       let reason =
         "Skipped until scoped source-pack leases are available for this generated run.";
       if (pack.selectionPolicy === "default") {
+        capabilityKinds = [...pack.requiredCapabilityKinds];
+        missingCapabilityKinds = [];
         status = "selected-by-default";
         reason = "Selected by the installed Dream source profile.";
       } else if (pack.selectionPolicy === "separate-workflow") {
+        missingCapabilityKinds = [];
         status = "separate-workflow-candidate";
         reason =
           "Saved as a separate workflow candidate so support/comms surfaces do not alter transcript-review Dream readiness.";
       }
 
       return {
-        capabilityKinds: [],
+        capabilityKinds,
+        leaseRefs: [],
+        missingCapabilityKinds,
         packId: pack.packId,
         packageId: pack.packageId,
         reason,
+        requiredCapabilityKinds: [...pack.requiredCapabilityKinds],
         selectionPolicy: pack.selectionPolicy,
         sourceFamilies: [...pack.sourceFamilies],
         status,
@@ -3445,6 +3454,69 @@ describe("workflow app integration contract", () => {
         hash: hashJson(planWithoutSourcePackDispositions),
       },
     });
+    const planWithUnleasedSourcePackSelected =
+      DynamicWorkflowPlanDocumentSchema.parse({
+        ...plan,
+        steps: plan.steps.map((step) => {
+          if (
+            step.kind !== "workflow.node.invoke" ||
+            !Array.isArray(step.config["dreamSourcePackDispositions"])
+          ) {
+            return step;
+          }
+
+          const dispositions = DreamSourcePackDispositionSchema.array().parse(
+            step.config["dreamSourcePackDispositions"]
+          );
+
+          return {
+            ...step,
+            config: {
+              ...step.config,
+              dreamSourcePackDispositions: dispositions.map((disposition) => {
+                if (disposition.packId !== "source-pack:joelhooks:work-graph") {
+                  return disposition;
+                }
+
+                return {
+                  ...disposition,
+                  capabilityKinds: [
+                    "dream.memory.relay",
+                    "github.read",
+                    "linear.read",
+                    "slack.search",
+                  ],
+                  leaseRefs: [],
+                  missingCapabilityKinds: [],
+                  status: "selected-with-lease",
+                };
+              }),
+            },
+          };
+        }),
+      });
+    const proofWithUnleasedSourcePackSelected = verifyDreamGeneratedWorkflow({
+      executionProof,
+      executionProofRef: result.executionProofArtifact.artifactRef,
+      expectedPackageRef: dreamWorkflowPackageRef,
+      expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+      expectedSourceProfileExportId: "dream-transcript-review-source-profile",
+      generatedAt: "2026-06-09T21:46:50.000Z",
+      harnessArtifact: result.harnessArtifact,
+      harnessSource: await artifacts.readText({
+        artifactRef: result.harnessArtifact.artifactRef,
+      }),
+      machine,
+      machineArtifact: result.machineArtifact,
+      machineSource: await artifacts.readText({
+        artifactRef: result.machineArtifact.sourceArtifactRef,
+      }),
+      plan: planWithUnleasedSourcePackSelected,
+      planArtifact: {
+        ...result.planArtifact,
+        hash: hashJson(planWithUnleasedSourcePackSelected),
+      },
+    });
     const planWithoutRuntimeSourceCoverage =
       DynamicWorkflowPlanDocumentSchema.parse({
         ...plan,
@@ -3698,6 +3770,12 @@ describe("workflow app integration contract", () => {
           .map((check) => check.checkId),
       missingBackfillRunEffectProofStatus: missingBackfillRunEffectProof.status,
       plannedBackfillActions: backfill.actions.map((action) => action.actionId),
+      proofWithUnleasedSourcePackSelectedFailedChecks:
+        proofWithUnleasedSourcePackSelected.checks
+          .filter((check) => check.status === "failed")
+          .map((check) => check.checkId),
+      proofWithUnleasedSourcePackSelectedStatus:
+        proofWithUnleasedSourcePackSelected.status,
       proofWithoutHorizonCoverageFailedChecks:
         proofWithoutHorizonCoverage.checks
           .filter((check) => check.status === "failed")
@@ -4126,10 +4204,23 @@ describe("workflow app integration contract", () => {
         dispositions: [
           {
             capabilityKinds: [],
+            leaseRefs: [],
+            missingCapabilityKinds: [
+              "dream.memory.relay",
+              "github.read",
+              "linear.read",
+              "slack.search",
+            ],
             packId: "source-pack:joelhooks:work-graph",
             packageId: "source-pack/joelhooks-work-graph",
             reason:
               "Skipped until scoped source-pack leases are available for this generated run.",
+            requiredCapabilityKinds: [
+              "dream.memory.relay",
+              "github.read",
+              "linear.read",
+              "slack.search",
+            ],
             selectionPolicy: "optional-lease",
             sourceFamilies: [
               "comms",
@@ -4142,10 +4233,18 @@ describe("workflow app integration contract", () => {
           },
           {
             capabilityKinds: [],
+            leaseRefs: [],
+            missingCapabilityKinds: [],
             packId: "source-pack:badass-courses:aihero-support-sweep",
             packageId: "workflow/aihero-support-sweep",
             reason:
               "Saved as a separate workflow candidate so support/comms surfaces do not alter transcript-review Dream readiness.",
+            requiredCapabilityKinds: [
+              "dream.memory.relay",
+              "front.read",
+              "slack.search",
+              "support.review",
+            ],
             selectionPolicy: "separate-workflow",
             sourceFamilies: ["brain", "comms", "people-org-memory", "support"],
             status: "separate-workflow-candidate",
@@ -4237,6 +4336,10 @@ describe("workflow app integration contract", () => {
       ],
       missingBackfillRunEffectProofStatus: "failed",
       plannedBackfillActions: ["backfill:claude:native-capture"],
+      proofWithUnleasedSourcePackSelectedFailedChecks: [
+        "plan:source-pack-disposition",
+      ],
+      proofWithUnleasedSourcePackSelectedStatus: "failed",
       proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
       proofWithoutHorizonCoverageStatus: "failed",
       proofWithoutRuntimeSourceCoverageFailedChecks: [

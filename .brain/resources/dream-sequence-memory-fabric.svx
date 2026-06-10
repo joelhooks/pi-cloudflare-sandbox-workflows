@@ -26,6 +26,19 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:07Z run attempt: Dreaming was run through the local relay proof and live submit gate again. Local memory proof passed; live Cloudflare submit correctly did not happen.
+
+Receipts:
+
+- `pnpm app:dream:relay:local-env` refreshed `.wrangler/workflow-app/dream-relay/latest-local-startup-env-receipt.json` at `2026-06-10T10:06:53.332Z`: `sourceRootCount=10`, `tokenConfigured=true`, `tokenPreserved=true`, `docsApiConfigured=true`, `rawCredentialsReturned=false`, `rawPathsReturned=false`.
+- `pnpm app:dream:relay:readiness` refreshed `.wrangler/workflow-app/dream-relay/latest-local-readiness.json` at `2026-06-10T10:06:56.282Z`: authenticated local `/healthz`, `status=passed`, 10 source roots, 10 supported operations, no raw credential/path return.
+- `pnpm app:dream:relay:proof` completed local proof `run:dream-relay-local-proof:20260610T100701482Z`: 10 source roots, 12 search hits, 12 hydrated redacted receipts, 48 correlation edges, 35 correlation nodes, machines `blaine`, `panda`, `flagg`, and `cloudflare` captured, missing machine/source-family lists empty, and no raw credential/path leak flags.
+- `pnpm app:dream:relay:provisioning-preflight` refreshed `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json` at `2026-06-10T10:07:17.742Z`: local startup/readiness/proof are good, but status remains `blocked` because owner sign-off and Worker-facing relay config are missing.
+- `pnpm app:dream:run --refresh-preflight --submit` wrote run request `run-live-dream-memory-fabric-20260610T100722967Z-8b3686ab` with receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T100722967Z-8b3686ab-receipt.json`: `status=blocked`, `submit.attempted=false`.
+- In-progress contract hardening now requires `dreamSourcePackDispositions` to carry `requiredCapabilityKinds`, granted `capabilityKinds`, `missingCapabilityKinds`, and `leaseRefs`. Optional source packs such as `source-pack:joelhooks:work-graph` can only be `selected-with-lease` when lease refs exist and all required capabilities are covered; otherwise they must be `skipped-missing-lease` with explicit missing capability kinds. `source-pack:badass-courses:aihero-support-sweep` remains a separate workflow candidate.
+
+This is still not a live Dream. The current honest blocker is Worker-facing `DREAM_MEMORY_RELAY_BASE_URL`, remote `DREAM_MEMORY_RELAY_TOKEN`, Worker relay URL config, authenticated remote `/healthz`, and exact network-boundary sign-off.
+
 2026-06-10T10:02Z implementation progress: Dream HITL report proof now carries a hash-level binding from the D2 figure back to the generated workflow machine artifact.
 
 Receipts:
