@@ -101,13 +101,13 @@ const signalPatterns: readonly SignalPattern[] = [
     kind: "decision",
     queryTerms: ["accepted", "canon", "canonical", "decision", "required"],
     rating: 4,
-    summary: "Decision language appeared in Dream memory.",
+    summary: "Decision language appeared in memory.",
   },
   {
     kind: "friction",
     queryTerms: ["blocked", "stuck", "unavailable", "degraded", "skipped"],
     rating: 4,
-    summary: "Operational friction appeared in Dream memory.",
+    summary: "Operational friction appeared in memory.",
   },
   {
     kind: "preference",
@@ -119,7 +119,7 @@ const signalPatterns: readonly SignalPattern[] = [
     kind: "workflow-pattern",
     queryTerms: ["workflow", "dynamic", "xstate", "generated", "state machine"],
     rating: 5,
-    summary: "Workflow-pattern language appeared in Dream memory.",
+    summary: "Workflow-pattern language appeared in memory.",
   },
 ];
 
@@ -967,8 +967,8 @@ const correlationGraphFor = (input: {
   );
 
   addGraphNode(nodes, {
-    label: "Dream human review",
-    nodeId: "dream:hitl-review",
+    label: "HITL human review",
+    nodeId: "report:hitl-review",
     nodeType: "project",
   });
 
@@ -989,11 +989,11 @@ const correlationGraphFor = (input: {
     const firstReceipt = hit.receipts.at(0);
     if (firstReceipt !== undefined) {
       edges.push({
-        edgeId: `edge:${hitNodeId}:supports-dream`,
+        edgeId: `edge:${hitNodeId}:supports-finding`,
         evidence: [firstReceipt],
         fromNodeId: hitNodeId,
-        relationship: "supports_dream",
-        toNodeId: "dream:hitl-review",
+        relationship: "supports_finding",
+        toNodeId: "report:hitl-review",
       });
       edges.push({
         edgeId: `edge:${hitNodeId}:horizon`,

@@ -124,7 +124,7 @@ export const dreamTranscriptReviewSourceProfile =
       stochasticNotes: [
         "Use only generated workflow.node.invoke states for Dream cartridge work; do not use static Dream branches in the runner.",
         `Dream cartridge node palette: ${memoryFabricWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
-        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
+        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"report/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
         "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
         "Accepted dreams must be reviewable as memory.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce memory.hitl-decision-workflow-seed.v1 and draft memory.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
       ],
@@ -140,7 +140,7 @@ export const dreamTranscriptReviewSourceProfile =
     sourcePacks: [...dreamTranscriptReviewSourcePacks],
     timeHorizons: [...dreamTranscriptReviewTimeHorizons],
     title: "Dream Transcript Review",
-    workflowId: "dream.memory-fabric",
+    workflowId: "dream.transcript-review",
   });
 
 export const memoryFabricSourceProfiles = [

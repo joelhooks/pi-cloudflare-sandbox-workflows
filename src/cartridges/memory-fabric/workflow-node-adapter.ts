@@ -221,7 +221,7 @@ const WorkflowHitlReportNodeConfigSchema = z.object({
   refinementProposalStepId: z.string().min(1).optional(),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
-  title: z.string().min(1).default("Dream review"),
+  title: z.string().min(1).default("HITL review"),
 });
 
 const MemoryHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
@@ -966,9 +966,9 @@ const reportCardForHit = (input: {
       : "The search hit has receipt metadata but no matching hydration yet, so treat this as a lead instead of a claim.",
     receipts: input.hit.receipts,
     recommendation:
-      "Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal Dream behavior.",
+      "Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.",
     summary: input.hit.summary,
-    title: `Dream ${input.index + 1}: ${familyLabel} needs human review`,
+    title: `Finding ${input.index + 1}: ${familyLabel} needs human review`,
   };
 };
 
@@ -1215,9 +1215,9 @@ const refinementProposalDocumentFor = (input: {
     generatedAt: new Date().toISOString(),
     nextWorkflowSeed: {
       plannerInstructions: [
-        "Use accepted Dream refinement proposals as constraints for the next generated workflow.",
+        "Use accepted refinement proposals as constraints for the next generated workflow.",
         "Do not treat proposal text as proof; follow sourceRefs and receipts before updating Brain or packages.",
-        "Route capture or ingest gaps to the separate memory-fabric repair workflow instead of folding them into the Dream.",
+        "Route capture or ingest gaps to the separate memory-fabric repair workflow instead of folding them into this workflow.",
       ],
       proposalIds: proposals.map((proposal) => proposal.proposalId),
       requiredCapabilityKinds: [
@@ -1294,7 +1294,7 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
   const summary =
     status === "ready"
       ? `HITL accepted ${acceptedDecisionIds.length} decision(s) and turned ${workItemDecisionIds.length} decision(s) into work; the next generated workflow must consume ${input.decision.nextWorkflowSeed.plannerInstructions.length} planner instruction(s).`
-      : "HITL review did not accept or turn any Dream decision into work; the next generated workflow seed is intentionally empty.";
+      : "HITL review did not accept or turn any decision into work; the next generated workflow seed is intentionally empty.";
 
   return MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
     acceptedDecisionIds,
@@ -1323,7 +1323,7 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
 const followUpRunRequestIntentFor = (
   seed: MemoryHitlDecisionWorkflowSeedDocument
 ): string =>
-  `Run the next generated workflow from accepted Dream HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
+  `Run the next generated workflow from accepted HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
 
 const followUpRunRequestNotesFor = (input: {
   readonly seed: MemoryHitlDecisionWorkflowSeedDocument;
@@ -1341,7 +1341,7 @@ const followUpRunRequestNotesFor = (input: {
         ];
 
   return [
-    `Consume Dream HITL decision workflow seed ${input.seedRef}.`,
+    `Consume HITL decision workflow seed ${input.seedRef}.`,
     `Actionable decision ids: ${input.seed.nextWorkflowSeed.decisionIds.join(", ")}.`,
     ...input.seed.nextWorkflowSeed.plannerInstructions,
     ...capabilityKinds,
@@ -1388,7 +1388,7 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
       : undefined;
   const summary =
     status === "drafted"
-      ? `Drafted follow-up workflow request ${followUpRunId} from ${input.seed.actionableDecisionCount} actionable Dream HITL decision(s).`
+      ? `Drafted follow-up workflow request ${followUpRunId} from ${input.seed.actionableDecisionCount} actionable HITL decision(s).`
       : "No follow-up workflow request was drafted because the HITL decision seed had no actionable decisions.";
 
   return MemoryHitlFollowUpRunRequestDocumentSchema.parse({
@@ -1411,19 +1411,19 @@ const hitlFollowUpRunRequestDocumentFor = (input: {
   });
 };
 
-const reportCardMdsvxFor = (dream: WorkflowHitlReportCard): string =>
+const reportCardMdsvxFor = (finding: WorkflowHitlReportCard): string =>
   [
-    `### ${dream.title}`,
-    dream.summary,
-    `**Reasoning.** ${dream.reasoning}`,
-    `**Rating.** ${dream.rating}/10`,
-    `**Recommendation.** ${dream.recommendation}`,
+    `### ${finding.title}`,
+    finding.summary,
+    `**Reasoning.** ${finding.reasoning}`,
+    `**Rating.** ${finding.rating}/10`,
+    `**Recommendation.** ${finding.recommendation}`,
     "**Receipts.**",
-    dream.receipts.map(receiptLineFor).join("\n"),
+    finding.receipts.map(receiptLineFor).join("\n"),
   ].join("\n\n");
 
-const reportActionLineFor = (dream: WorkflowHitlReportCard): string =>
-  `- **${dream.title}** Rating ${dream.rating}/10. ${dream.recommendation}`;
+const reportActionLineFor = (finding: WorkflowHitlReportCard): string =>
+  `- **${finding.title}** Rating ${finding.rating}/10. ${finding.recommendation}`;
 
 const refinementProposalActionLineFor = (
   proposal: MemoryRefinementProposal
@@ -1434,13 +1434,13 @@ const hitlDecisionContractFor = (
   sourceRefs: readonly ArtifactRef[]
 ): MemoryHitlDecisionContract =>
   MemoryHitlDecisionContractSchema.parse({
-    artifactPath: "dream/hitl-decision.json",
+    artifactPath: "report/hitl-decision.json",
     contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
     decisionSchemaVersion: "memory.hitl-decision.v1",
     exportId: "memory-hitl-decision-schema",
     nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
     sourceRefs,
-    targetKinds: ["dream-card", "refinement-proposal"],
+    targetKinds: ["finding-card", "refinement-proposal"],
   });
 
 type WorkflowHitlReportDefinitionOfDoneAuditItemInput = Omit<
@@ -1478,7 +1478,7 @@ const reportAuditStatusFor = (
 
 const reportDefinitionOfDoneAuditFor = (input: {
   readonly correlation: MemoryCorrelationGraphDocument;
-  readonly dreamCount: number;
+  readonly findingCount: number;
   readonly generatedAt: string;
   readonly hydration: MemoryHydrationDocument;
   readonly plan: DynamicWorkflowPlanDocument;
@@ -1502,8 +1502,8 @@ const reportDefinitionOfDoneAuditFor = (input: {
   const unsafeHydrationCount = input.hydration.hydrated.filter(
     (hydrated) => hydrated.fullTranscriptReturned
   ).length;
-  const dreamsAndRefinementsCaptured =
-    input.dreamCount > 0 && input.refinementProposalCount > 0;
+  const findingsAndRefinementsCaptured =
+    input.findingCount > 0 && input.refinementProposalCount > 0;
   const tShapedGapSummary = input.search.skippedSources.map(
     (skippedSource) => `${skippedSource}:skipped-source`
   );
@@ -1512,8 +1512,8 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: ["node:joelclaw.memory.hitl-report", ...input.sourceRefs],
       requirement:
-        "Dream report is emitted by the installed Dream workflow cartridge/package.",
-      requirementId: "dream-cartridge-package",
+        "The HITL report is emitted by the installed workflow cartridge/package.",
+      requirementId: "workflow-cartridge-package",
       status: "captured",
       summary:
         "`joelclaw.memory.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
@@ -1525,12 +1525,12 @@ const reportDefinitionOfDoneAuditFor = (input: {
       requirementId: "worker-facing-relay-capability-lease",
       status: "not-proven",
       summary:
-        "This report consumes Dream artifacts but does not prove relay lease sidecars; `memory.generated-workflow-proof.v1` must verify them.",
+        "This report consumes run artifacts but does not prove relay lease sidecars; `memory.generated-workflow-proof.v1` must verify them.",
     }),
     reportAuditItem({
       evidenceRefs: generatedArtifactRefs,
       requirement:
-        "Dream is submitted to and executed by the deployed Cloudflare workflow app.",
+        "The run is submitted to and executed by the deployed Cloudflare workflow app.",
       requirementId: "live-cloudflare-execution",
       status: "not-proven",
       summary:
@@ -1555,7 +1555,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "Dream reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never hidden.",
+        "The run reads T-shaped across time horizons with hydration and correlation; coverage gaps are reported as caveats, never hidden.",
       requirementId: "t-shaped-memory-coverage",
       status: tShapedCoverageCaptured ? "captured" : "not-proven",
       summary: tShapedCoverageCaptured
@@ -1565,17 +1565,17 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "Dream emits actionable dreams and refinement proposals for kernel/package/workflow/schema/access/report changes.",
-      requirementId: "dreams-and-refinement-proposals",
-      status: dreamsAndRefinementsCaptured ? "captured" : "not-proven",
-      summary: dreamsAndRefinementsCaptured
-        ? `Report contains ${input.dreamCount} dream card(s) and ${input.refinementProposalCount} refinement proposal(s).`
-        : `Report contains ${input.dreamCount} dream card(s) and ${input.refinementProposalCount} refinement proposal(s); this is diagnostic, not a complete refinement loop.`,
+        "The run emits actionable findings and refinement proposals for kernel/package/workflow/schema/access/report changes.",
+      requirementId: "findings-and-refinement-proposals",
+      status: findingsAndRefinementsCaptured ? "captured" : "not-proven",
+      summary: findingsAndRefinementsCaptured
+        ? `Report contains ${input.findingCount} finding card(s) and ${input.refinementProposalCount} refinement proposal(s).`
+        : `Report contains ${input.findingCount} finding card(s) and ${input.refinementProposalCount} refinement proposal(s); this is diagnostic, not a complete refinement loop.`,
     }),
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "Accepted dreams produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
+        "Accepted findings produce HITL decision, workflow seed, and follow-up run request artifacts that feed the next generated workflow.",
       requirementId: "hitl-refinement-loop",
       status: "not-proven",
       summary:
@@ -1584,7 +1584,7 @@ const reportDefinitionOfDoneAuditFor = (input: {
     reportAuditItem({
       evidenceRefs: input.sourceRefs,
       requirement:
-        "The Cloudflare Dream workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
+        "The Cloudflare workflow publishes the canonical Tufte/MDSvX Wzrrd HITL report through a leased side effect.",
       requirementId: "workflow-owned-wzrrd-output",
       status: "not-proven",
       summary:
@@ -1636,8 +1636,8 @@ const reportMdsvxFor = (input: {
   readonly correlation: MemoryCorrelationGraphDocument;
   readonly definitionOfDoneAudit: WorkflowHitlReportDefinitionOfDoneAudit;
   readonly hitlDecisionContract: MemoryHitlDecisionContract;
-  readonly dreamCount: number;
-  readonly dreams: readonly WorkflowHitlReportCard[];
+  readonly findingCount: number;
+  readonly findings: readonly WorkflowHitlReportCard[];
   readonly hydration: MemoryHydrationDocument;
   readonly plan: DynamicWorkflowPlanDocument;
   readonly proofLevel: WorkflowHitlReportProofLevel;
@@ -1647,17 +1647,17 @@ const reportMdsvxFor = (input: {
   readonly stateMachineFigure: WorkflowHitlReportDocument["proof"]["stateMachineFigure"];
   readonly title: string;
 }): string => {
-  const dreamSection =
-    input.dreams.length === 0
-      ? "No dreams cleared the receipt threshold in this run."
-      : input.dreams.map(reportCardMdsvxFor).join("\n\n");
+  const findingSection =
+    input.findings.length === 0
+      ? "No findings cleared the receipt threshold in this run."
+      : input.findings.map(reportCardMdsvxFor).join("\n\n");
   let actionSection = "- Treat this run as a retrieval/capture diagnostic.";
   if (input.refinementProposals.length > 0) {
     actionSection = input.refinementProposals
       .map(refinementProposalActionLineFor)
       .join("\n");
-  } else if (input.dreams.length > 0) {
-    actionSection = input.dreams.map(reportActionLineFor).join("\n");
+  } else if (input.findings.length > 0) {
+    actionSection = input.findings.map(reportActionLineFor).join("\n");
   }
   const skippedSourceSummary =
     input.search.skippedSources.length === 0
@@ -1674,21 +1674,21 @@ const reportMdsvxFor = (input: {
     "",
     `# ${input.title}`,
     "",
-    "This is a human review surface, not an autopatcher. The report puts dreams first, then proof, so the human can decide what to accept, hold, reject, or turn into work.",
+    "This is a human review surface, not an autopatcher. The report puts findings first, then proof, so the human can decide what to accept, hold, reject, or turn into work.",
     "",
     "## Run context",
     "",
-    `Run ${input.search.runId} searched ${input.search.hits.length} memory hits, hydrated ${input.hydration.hydrated.length} redacted receipts, and produced ${input.dreamCount} dreams for human review.`,
+    `Run ${input.search.runId} searched ${input.search.hits.length} memory hits, hydrated ${input.hydration.hydrated.length} redacted receipts, and produced ${input.findingCount} findings for human review.`,
     "",
-    `Dreams: ${input.dreamCount}. Unique receipts: ${input.receiptCount}. Expiry: 24h, noindex.`,
+    `Findings: ${input.findingCount}. Unique receipts: ${input.receiptCount}. Expiry: 24h, noindex.`,
     "",
-    "## The actual dreams",
+    "## The actual findings",
     "",
-    dreamSection,
+    findingSection,
     "",
-    "## What to do with these dreams",
+    "## What to do with these findings",
     "",
-    "Use this as HITL input, not autopilot. Accept a dream only when the receipt trail is good enough to update .brain, create a capture fix, or refine a workflow/package decision.",
+    "Use this as HITL input, not autopilot. Accept a finding only when the receipt trail is good enough to update .brain, create a capture fix, or refine a workflow/package decision.",
     "",
     `Refinement proposals emitted: ${input.refinementProposals.length}. Accepted proposals should become Brain/package changes or constraints for the next generated workflow.`,
     "",
@@ -1706,11 +1706,11 @@ const reportMdsvxFor = (input: {
     "",
     "## Report node",
     "",
-    "`joelclaw.memory.hitl-report` rendered this artifact as an installed Dream workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.",
+    "`joelclaw.memory.hitl-report` rendered this artifact as an installed workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.",
     "",
     "## Workflow state machine",
     "",
-    "The D2 figure below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static Dream node list. It belongs below the dreams so proof does not bury the human decision.",
+    "The D2 figure below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static node list. It belongs below the findings so proof does not bury the human decision.",
     "",
     `<D2Fig aspectRatio="${mdsvxAttributeString(input.stateMachineFigure.aspectRatio)}" machineId="${mdsvxAttributeString(input.stateMachineFigure.machineId)}" sourceKind="${mdsvxAttributeString(input.stateMachineFigure.sourceKind)}" stateCount={${input.stateMachineFigure.stateCount}} title="Generated workflow state machine" transitionCount={${input.stateMachineFigure.transitionCount}}>`,
     "",
@@ -1750,7 +1750,7 @@ const reportMdsvxFor = (input: {
     "",
     "## Access adapter shape",
     "",
-    "Dream memory access goes through the trusted Memory relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.",
+    "Memory access goes through the trusted Memory relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.",
     "",
     "## Report standard",
     "",
@@ -2084,7 +2084,7 @@ const executeHitlReportNode = async (
     return refinementProposals;
   }
 
-  const dreams = reportCardsFor({
+  const findings = reportCardsFor({
     hydration: reportInputs.hydration,
     search: reportInputs.search,
   });
@@ -2105,7 +2105,7 @@ const executeHitlReportNode = async (
   const generatedAt = new Date().toISOString();
   const definitionOfDoneAudit = reportDefinitionOfDoneAuditFor({
     correlation: reportInputs.correlation,
-    dreamCount: dreams.length,
+    findingCount: findings.length,
     generatedAt,
     hydration: reportInputs.hydration,
     plan: input.plan,
@@ -2119,8 +2119,8 @@ const executeHitlReportNode = async (
   const mdsvx = reportMdsvxFor({
     correlation: reportInputs.correlation,
     definitionOfDoneAudit,
-    dreamCount: dreams.length,
-    dreams,
+    findingCount: findings.length,
+    findings,
     hitlDecisionContract,
     hydration: reportInputs.hydration,
     plan: input.plan,
@@ -2133,9 +2133,9 @@ const executeHitlReportNode = async (
   });
   const document = WorkflowHitlReportDocumentSchema.parse({
     definitionOfDoneAudit,
-    dreamCount: dreams.length,
-    dreams,
     expiresIn: "24h",
+    findingCount: findings.length,
+    findings,
     generatedAt,
     hitlDecisionContract,
     mdsvx,

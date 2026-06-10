@@ -264,7 +264,7 @@ describe("trusted local Memory relay HTTP server", () => {
             actor,
             capturedRef: {
               artifactRef:
-                "artifact://trusted-local-relay-http/dream/hitl-report.json",
+                "artifact://trusted-local-relay-http/report/hitl-report.json",
               hash: "b".repeat(64),
               mediaType: "application/json",
             },

@@ -130,7 +130,7 @@ const livePreflightBlocked = JSON.stringify({
       message: "Trusted local Memory relay proof passed.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-local-proof"],
+      requiredFor: ["memory-relay-local-proof"],
       status: "passed",
     },
     {
@@ -139,7 +139,7 @@ const livePreflightBlocked = JSON.stringify({
         "Memory relay readiness was not checked because MEMORY_RELAY_BASE_URL is missing.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-readiness"],
+      requiredFor: ["memory-relay-readiness"],
       status: "missing",
     },
     {
@@ -147,7 +147,7 @@ const livePreflightBlocked = JSON.stringify({
       message: "MEMORY_RELAY_BASE_URL is not configured.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-binding"],
+      requiredFor: ["memory-relay-binding"],
       status: "missing",
     },
     {
@@ -155,7 +155,7 @@ const livePreflightBlocked = JSON.stringify({
       message: "MEMORY_RELAY_TOKEN is not configured.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-lease"],
+      requiredFor: ["memory-relay-lease"],
       status: "missing",
     },
     {
@@ -163,7 +163,7 @@ const livePreflightBlocked = JSON.stringify({
       message: "Worker deploy config does not define MEMORY_RELAY_BASE_URL.",
       redacted: true,
       required: true,
-      requiredFor: ["dream-memory-relay-binding"],
+      requiredFor: ["memory-relay-binding"],
       status: "missing",
     },
   ],

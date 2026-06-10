@@ -51,7 +51,7 @@ const step = {
   inputRefs: [],
   kind: "workflow.node.invoke",
   nodeType: "joelclaw.memory.hitl-decision-seed",
-  outputPath: "dream/hitl-decision-workflow-seed.json",
+  outputPath: "report/hitl-decision-workflow-seed.json",
   packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "seed-next-workflow-from-hitl",
   summary: "Turn accepted Dream HITL decisions into next workflow input.",
@@ -70,7 +70,7 @@ const followUpStep = {
   inputRefs: [],
   kind: "workflow.node.invoke",
   nodeType: "joelclaw.memory.hitl-follow-up-run-request",
-  outputPath: "dream/hitl-follow-up-run-request.json",
+  outputPath: "report/hitl-follow-up-run-request.json",
   packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
   stepId: "draft-follow-up-run-request-from-hitl",
   summary: "Draft the next generated workflow request from Dream HITL seed.",
@@ -179,7 +179,7 @@ const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
         "Update Brain/package constraints and feed this into the next generated workflow.",
       reviewedAt: at,
       sourceRefs: [
-        "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+        "artifact://dream-hitl-seed-test/report/hitl-report.json",
         "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
       ],
       summary: "Generated-machine proof should be a durable Dream constraint.",
@@ -207,7 +207,7 @@ const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
   nextWorkflowSeed: {
     artifactUpdateTargets: [
       {
-        sourceRefs: ["artifact://dream-hitl-seed-test/dream/hitl-report.json"],
+        sourceRefs: ["artifact://dream-hitl-seed-test/report/hitl-report.json"],
         summary: "Update Brain with the accepted generated-machine proof rule.",
         targetKind: "brain",
       },
@@ -228,14 +228,14 @@ const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
     ],
     requiredCapabilityKinds: ["brain.update.review"],
     sourceRefs: [
-      "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+      "artifact://dream-hitl-seed-test/report/hitl-report.json",
       "artifact://dream-hitl-seed-test/dream/backfill-run.json",
     ],
   },
   redacted: true,
   refinementProposalRef:
     "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
-  reportRef: "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+  reportRef: "artifact://dream-hitl-seed-test/report/hitl-report.json",
   reviewer: {
     id: "actor:joel",
     organizationId: "org:joelhooks",
@@ -247,7 +247,7 @@ const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
   runId: machine.runId,
   schemaVersion: "memory.hitl-decision.v1",
   sourceRefs: [
-    "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+    "artifact://dream-hitl-seed-test/report/hitl-report.json",
     "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
   ],
   workItemId: machine.workItemId,
@@ -257,7 +257,7 @@ describe("Dream HITL decision workflow-seed node", () => {
   it("turns accepted HITL decisions into a next-workflow seed artifact", async () => {
     const artifacts = createMemoryArtifactStore("dream-hitl-seed-node");
     const decisionWrite = await artifacts.writeJson({
-      path: "dream/hitl-decision.json",
+      path: "report/hitl-decision.json",
       redacted: true,
       runId: machine.runId,
       value: decisionDocument,
@@ -320,7 +320,7 @@ describe("Dream HITL decision workflow-seed node", () => {
       acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
       actionableDecisionCount: 2,
       actionableDecisions: decisionDocument.decisions,
-      decisionRef: "artifact://dream-hitl-seed-test/dream/hitl-decision.json",
+      decisionRef: "artifact://dream-hitl-seed-test/report/hitl-decision.json",
       generatedAt: at,
       heldDecisionIds: [],
       nextWorkflowSeed: decisionDocument.nextWorkflowSeed,
@@ -332,8 +332,8 @@ describe("Dream HITL decision workflow-seed node", () => {
       runId: machine.runId,
       schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       sourceRefs: [
-        "artifact://dream-hitl-seed-test/dream/hitl-decision.json",
-        "artifact://dream-hitl-seed-test/dream/hitl-report.json",
+        "artifact://dream-hitl-seed-test/report/hitl-decision.json",
+        "artifact://dream-hitl-seed-test/report/hitl-report.json",
         "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
         "artifact://dream-hitl-seed-test/dream/backfill-run.json",
       ],
@@ -344,7 +344,7 @@ describe("Dream HITL decision workflow-seed node", () => {
       workItemId: machine.workItemId,
     });
     const seedWrite = await artifacts.writeJson({
-      path: "dream/hitl-decision-workflow-seed.json",
+      path: "report/hitl-decision-workflow-seed.json",
       redacted: true,
       runId: machine.runId,
       value: seedDocument,

@@ -182,7 +182,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
   schemaVersion: "workflow.live-preflight.v1",
   status: "ready",
   workerUrl: "https://worker.example.test",
-  workflowId: "dream.memory-fabric",
+  workflowId: "dream.transcript-review",
 });
 
 const blockedPreflight = WorkflowLivePreflightReceiptSchema.parse({
@@ -254,7 +254,7 @@ describe("Dream live run request harness", () => {
         ),
       stochasticNotesMentionWzrrdPrimaryDocument:
         request.planProposal.stochasticNotes.some((note) =>
-          note.includes("dream/hitl-report.mdsvx")
+          note.includes("report/hitl-report.mdsvx")
         ),
       stochasticNotesRequireFullHitlRefinementLoop:
         request.planProposal.stochasticNotes.some(

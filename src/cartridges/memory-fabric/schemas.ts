@@ -323,7 +323,7 @@ export const MemoryRefinementProposalDocumentSchema = z.object({
 });
 
 export const MemoryHitlDecisionTargetKindSchema = z.enum([
-  "dream-card",
+  "finding-card",
   "refinement-proposal",
 ]);
 
@@ -625,7 +625,7 @@ export const MemoryHitlFollowUpRunRequestDocumentSchema = z
 
 export const WORKFLOW_HITL_REPORT_SECTION_ORDER = [
   "run-context",
-  "actual-dreams",
+  "actual-findings",
   "what-to-do",
   "actionable-line-items",
   "proof",
@@ -644,7 +644,7 @@ export const WorkflowHitlReportSectionIdSchema = z.enum(
 
 export const WorkflowHitlReportSectionOrderSchema = z.tuple([
   z.literal("run-context"),
-  z.literal("actual-dreams"),
+  z.literal("actual-findings"),
   z.literal("what-to-do"),
   z.literal("actionable-line-items"),
   z.literal("proof"),
@@ -728,7 +728,7 @@ export const WorkflowHitlReportCardSchema = z.object({
 });
 
 export const MemoryHitlDecisionContractSchema = z.object({
-  artifactPath: z.literal("dream/hitl-decision.json"),
+  artifactPath: z.literal("report/hitl-decision.json"),
   contractRef: z.literal("contract://workflow/memory-fabric/hitl-decision.v1"),
   decisionSchemaVersion: z.literal("memory.hitl-decision.v1"),
   exportId: z.literal("memory-hitl-decision-schema"),
@@ -738,16 +738,16 @@ export const MemoryHitlDecisionContractSchema = z.object({
   ]),
   sourceRefs: z.array(ArtifactRefSchema).min(1),
   targetKinds: z.tuple([
-    z.literal("dream-card"),
+    z.literal("finding-card"),
     z.literal("refinement-proposal"),
   ]),
 });
 
 export const WorkflowHitlReportDocumentSchema = z.object({
   definitionOfDoneAudit: WorkflowHitlReportDefinitionOfDoneAuditSchema,
-  dreamCount: z.number().int().min(0),
-  dreams: z.array(WorkflowHitlReportCardSchema).default([]),
   expiresIn: z.literal("24h"),
+  findingCount: z.number().int().min(0),
+  findings: z.array(WorkflowHitlReportCardSchema).default([]),
   generatedAt: IsoDateTimeSchema,
   hitlDecisionContract: MemoryHitlDecisionContractSchema,
   mdsvx: z.string().min(1),
@@ -790,7 +790,7 @@ export const MemoryCorrelationGraphDocumentSchema = z.object({
           "reported_by",
           "repeats_pattern",
           "requires_hydration",
-          "supports_dream",
+          "supports_finding",
         ]),
         toNodeId: z.string().min(1),
       })

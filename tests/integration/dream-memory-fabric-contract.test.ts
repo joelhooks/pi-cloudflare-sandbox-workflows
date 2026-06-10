@@ -121,7 +121,7 @@ describe("Dream memory fabric domain contracts", () => {
         "source-pack:badass-courses:aihero-support-sweep",
       ],
       sourcePackPolicies: ["optional-lease", "separate-workflow"],
-      workflowId: "dream.memory-fabric",
+      workflowId: "dream.transcript-review",
     });
   });
 
@@ -334,7 +334,7 @@ describe("Dream memory fabric domain contracts", () => {
           edgeId: "edge:signal-to-memory",
           evidence: [receiptRef],
           fromNodeId: "signal:dynamic-workflow-proof",
-          relationship: "supports_dream",
+          relationship: "supports_finding",
           toNodeId: "memory:generated-machine-proof",
         },
       ],
@@ -425,7 +425,7 @@ describe("Dream memory fabric domain contracts", () => {
       captureReceiptReadability: "actor-private",
       capturedRunId: "run-dream-preflight",
       endpointCount: 2,
-      graphEdgeRelationship: "supports_dream",
+      graphEdgeRelationship: "supports_finding",
       hydrationReturnedFullTranscript: false,
       relayRequestSchema: "memory.relay.request.v1",
       searchSchema: "memory.search.v1",
@@ -512,7 +512,7 @@ describe("Dream memory fabric domain contracts", () => {
             "Update the Brain/kernel package contract and require this constraint in the next generated Dream workflow.",
           reviewedAt: timestamp,
           sourceRefs: [
-            "artifact://dream-preflight/run/dream/hitl-report.json",
+            "artifact://dream-preflight/run/report/hitl-report.json",
             "artifact://dream-preflight/run/dream/refinement-proposals.json",
           ],
           summary:
@@ -536,8 +536,8 @@ describe("Dream memory fabric domain contracts", () => {
           ],
           summary:
             "Optional Slack work-graph coverage is not ready for the transcript-review Dream.",
-          targetId: "dream-card:optional-source-packs",
-          targetKind: "dream-card",
+          targetId: "finding-card:optional-source-packs",
+          targetKind: "finding-card",
           targetTitle: "Optional source packs need leases",
         },
       ],
@@ -546,7 +546,7 @@ describe("Dream memory fabric domain contracts", () => {
         artifactUpdateTargets: [
           {
             sourceRefs: [
-              "artifact://dream-preflight/run/dream/hitl-report.json",
+              "artifact://dream-preflight/run/report/hitl-report.json",
               "artifact://dream-preflight/run/dream/refinement-proposals.json",
             ],
             summary:
@@ -569,14 +569,14 @@ describe("Dream memory fabric domain contracts", () => {
         ],
         requiredCapabilityKinds: ["brain.update.review"],
         sourceRefs: [
-          "artifact://dream-preflight/run/dream/hitl-report.json",
+          "artifact://dream-preflight/run/report/hitl-report.json",
           "artifact://dream-preflight/run/dream/refinement-proposals.json",
         ],
       },
       redacted: true,
       refinementProposalRef:
         "artifact://dream-preflight/run/dream/refinement-proposals.json",
-      reportRef: "artifact://dream-preflight/run/dream/hitl-report.json",
+      reportRef: "artifact://dream-preflight/run/report/hitl-report.json",
       reviewer: {
         id: "actor:joel",
         organizationId: "org:joelhooks",
@@ -588,7 +588,7 @@ describe("Dream memory fabric domain contracts", () => {
       runId: "run-dream-preflight",
       schemaVersion: "memory.hitl-decision.v1",
       sourceRefs: [
-        "artifact://dream-preflight/run/dream/hitl-report.json",
+        "artifact://dream-preflight/run/report/hitl-report.json",
         "artifact://dream-preflight/run/dream/refinement-proposals.json",
       ],
       workItemId: "work-item:dream-preflight",
@@ -602,7 +602,7 @@ describe("Dream memory fabric domain contracts", () => {
       acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
       actionableDecisionCount: 1,
       actionableDecisions: [acceptedDecision],
-      decisionRef: "artifact://dream-preflight/run/dream/hitl-decision.json",
+      decisionRef: "artifact://dream-preflight/run/report/hitl-decision.json",
       generatedAt: timestamp,
       heldDecisionIds: ["decision:dream:optional-slack-pack"],
       nextWorkflowSeed: decisions.nextWorkflowSeed,
@@ -614,8 +614,8 @@ describe("Dream memory fabric domain contracts", () => {
       runId: decisions.runId,
       schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       sourceRefs: [
-        "artifact://dream-preflight/run/dream/hitl-decision.json",
-        "artifact://dream-preflight/run/dream/hitl-report.json",
+        "artifact://dream-preflight/run/report/hitl-decision.json",
+        "artifact://dream-preflight/run/report/hitl-report.json",
         "artifact://dream-preflight/run/dream/refinement-proposals.json",
       ],
       status: "ready",
@@ -630,7 +630,7 @@ describe("Dream memory fabric domain contracts", () => {
         artifactUpdateTargets:
           workflowSeed.nextWorkflowSeed.artifactUpdateTargets,
         decisionWorkflowSeedRef:
-          "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+          "artifact://dream-preflight/run/report/hitl-decision-workflow-seed.json",
         generatedAt: timestamp,
         redacted: true,
         request: {
@@ -650,7 +650,7 @@ describe("Dream memory fabric domain contracts", () => {
         runId: workflowSeed.runId,
         schemaVersion: "memory.hitl-follow-up-run-request.v1",
         sourceRefs: [
-          "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+          "artifact://dream-preflight/run/report/hitl-decision-workflow-seed.json",
           ...workflowSeed.sourceRefs,
         ],
         status: "drafted",
@@ -698,7 +698,7 @@ describe("Dream memory fabric domain contracts", () => {
       actionableDecisionCount: 1,
       artifactUpdateTargets: [],
       decisionWorkflowSeedRef:
-        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+        "artifact://dream-preflight/run/report/hitl-decision-workflow-seed.json",
       generatedAt: timestamp,
       redacted: true,
       requestedPackageIds: ["workflow/memory-fabric"],
@@ -706,7 +706,7 @@ describe("Dream memory fabric domain contracts", () => {
       runId: "run-memory-hitl-follow-up",
       schemaVersion: "memory.hitl-follow-up-run-request.v1",
       sourceRefs: [
-        "artifact://dream-preflight/run/dream/hitl-decision-workflow-seed.json",
+        "artifact://dream-preflight/run/report/hitl-decision-workflow-seed.json",
       ],
       status: "no-actionable-decisions",
       submitted: false,
@@ -739,7 +739,9 @@ describe("Dream memory fabric domain contracts", () => {
           recommendation:
             "This should fail because acceptance without a seed becomes a dead-end report.",
           reviewedAt: timestamp,
-          sourceRefs: ["artifact://dream-preflight/run/dream/hitl-report.json"],
+          sourceRefs: [
+            "artifact://dream-preflight/run/report/hitl-report.json",
+          ],
           summary: "Accepted Dream decision with no seed.",
           targetId: "proposal:workflow:1",
           targetKind: "refinement-proposal",
@@ -749,7 +751,7 @@ describe("Dream memory fabric domain contracts", () => {
       generatedAt: timestamp,
       nextWorkflowSeed: {},
       redacted: true,
-      reportRef: "artifact://dream-preflight/run/dream/hitl-report.json",
+      reportRef: "artifact://dream-preflight/run/report/hitl-report.json",
       reviewer: {
         id: "actor:joel",
         organizationId: "org:joelhooks",
@@ -760,7 +762,7 @@ describe("Dream memory fabric domain contracts", () => {
       },
       runId: "run-dream-preflight",
       schemaVersion: "memory.hitl-decision.v1",
-      sourceRefs: ["artifact://dream-preflight/run/dream/hitl-report.json"],
+      sourceRefs: ["artifact://dream-preflight/run/report/hitl-report.json"],
       workItemId: "work-item:dream-preflight",
     });
 
@@ -784,7 +786,7 @@ describe("Dream memory fabric domain contracts", () => {
           evidenceRefs: ["node:joelclaw.memory.hitl-report"],
           requirement:
             "Dream report is emitted by the installed Dream workflow cartridge/package.",
-          requirementId: "dream-cartridge-package",
+          requirementId: "workflow-cartridge-package",
           status: "captured",
           summary:
             "`joelclaw.memory.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.",
@@ -829,7 +831,7 @@ describe("Dream memory fabric domain contracts", () => {
         {
           requirement:
             "Dream emits actionable dreams and refinement proposals for kernel/package/workflow/schema/access/report changes.",
-          requirementId: "dreams-and-refinement-proposals",
+          requirementId: "findings-and-refinement-proposals",
           status: "not-proven",
           summary:
             "The schema fixture has a dream card but no refinement proposal artifact.",
@@ -872,8 +874,9 @@ describe("Dream memory fabric domain contracts", () => {
     } as const;
     const report = WorkflowHitlReportDocumentSchema.parse({
       definitionOfDoneAudit: reportDefinitionOfDoneAudit,
-      dreamCount: 1,
-      dreams: [
+      expiresIn: "24h",
+      findingCount: 1,
+      findings: [
         {
           rating: 9,
           reasoning:
@@ -886,10 +889,9 @@ describe("Dream memory fabric domain contracts", () => {
           title: "Generated workflow proof needs human review",
         },
       ],
-      expiresIn: "24h",
       generatedAt: timestamp,
       hitlDecisionContract: {
-        artifactPath: "dream/hitl-decision.json",
+        artifactPath: "report/hitl-decision.json",
         contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
         decisionSchemaVersion: "memory.hitl-decision.v1",
         exportId: "memory-hitl-decision-schema",
@@ -899,10 +901,10 @@ describe("Dream memory fabric domain contracts", () => {
           "artifact://dream-preflight/run/dream/hydration.json",
           "artifact://dream-preflight/run/dream/correlation-graph.json",
         ],
-        targetKinds: ["dream-card", "refinement-proposal"],
+        targetKinds: ["finding-card", "refinement-proposal"],
       },
       mdsvx:
-        "# Dream review\n\n## Run context\n\n## The actual dreams\n\n## What to do with these dreams\n\n## Actionable line items\n\n## Proof\n\n```d2\nsource -> report\n```\n\n## Technical appendix",
+        "# Dream review\n\n## Run context\n\n## The actual findings\n\n## What to do with these findings\n\n## Actionable line items\n\n## Proof\n\n```d2\nsource -> report\n```\n\n## Technical appendix",
       noindex: true,
       proof: {
         dynamicGenerationProofLevel: "generated-machine",
@@ -969,7 +971,7 @@ describe("Dream memory fabric domain contracts", () => {
       schemaVersion: "workflow.hitl-report.v1",
       sectionOrder: [
         "run-context",
-        "actual-dreams",
+        "actual-findings",
         "what-to-do",
         "actionable-line-items",
         "proof",
@@ -998,7 +1000,7 @@ describe("Dream memory fabric domain contracts", () => {
       auditStatus: report.definitionOfDoneAudit.status,
       auditSummary: report.definitionOfDoneAudit.summary,
       decisionContract: report.hitlDecisionContract,
-      dreamCount: report.dreamCount,
+      findingCount: report.findingCount,
       machineRef: report.proof.generatedArtifacts.machine.artifactRef,
       mdsvxHasD2: report.mdsvx.includes("```d2"),
       proofLevel: report.proof.dynamicGenerationProofLevel,
@@ -1009,12 +1011,12 @@ describe("Dream memory fabric domain contracts", () => {
       template: `${report.template.templateId}@${report.template.version}`,
     }).toStrictEqual({
       auditRequirementIds: [
-        "dream-cartridge-package",
+        "workflow-cartridge-package",
         "worker-facing-relay-capability-lease",
         "live-cloudflare-execution",
         "generated-machine-and-harness",
         "t-shaped-memory-coverage",
-        "dreams-and-refinement-proposals",
+        "findings-and-refinement-proposals",
         "hitl-refinement-loop",
         "workflow-owned-wzrrd-output",
         "public-private-redaction-boundary",
@@ -1028,7 +1030,7 @@ describe("Dream memory fabric domain contracts", () => {
         totalCount: 9,
       },
       decisionContract: {
-        artifactPath: "dream/hitl-decision.json",
+        artifactPath: "report/hitl-decision.json",
         contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
         decisionSchemaVersion: "memory.hitl-decision.v1",
         exportId: "memory-hitl-decision-schema",
@@ -1038,9 +1040,9 @@ describe("Dream memory fabric domain contracts", () => {
           "artifact://dream-preflight/run/dream/hydration.json",
           "artifact://dream-preflight/run/dream/correlation-graph.json",
         ],
-        targetKinds: ["dream-card", "refinement-proposal"],
+        targetKinds: ["finding-card", "refinement-proposal"],
       },
-      dreamCount: 1,
+      findingCount: 1,
       machineRef:
         "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",
       mdsvxHasD2: true,
@@ -1048,7 +1050,7 @@ describe("Dream memory fabric domain contracts", () => {
       rawTranscriptsReturned: false,
       sectionOrder: [
         "run-context",
-        "actual-dreams",
+        "actual-findings",
         "what-to-do",
         "actionable-line-items",
         "proof",

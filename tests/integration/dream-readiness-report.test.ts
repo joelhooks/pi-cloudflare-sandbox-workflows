@@ -197,7 +197,7 @@ const preflight = () =>
     schemaVersion: "workflow.live-preflight.v1",
     status: "blocked",
     workerUrl: "https://pi-cloudflare-sandbox-workflows.example.test",
-    workflowId: "dream.memory-fabric",
+    workflowId: "dream.transcript-review",
   });
 
 const runReceipt = (input: { readonly submitAttempted: boolean }) =>

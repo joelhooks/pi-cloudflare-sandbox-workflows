@@ -357,7 +357,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       "",
       "# This dream found work to do.",
       "",
-      "## The actual dreams",
+      "## The actual findings",
       "",
       "Concise, actionable, and source-backed.",
       "",
@@ -372,7 +372,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     ].join("\n");
     const mdsvxWrite = await fixture.artifacts.writeText({
       mediaType: "text/mdsvx",
-      path: "dream/hitl-report.mdsvx",
+      path: "report/hitl-report.mdsvx",
       redacted: true,
       runId: fixture.request.runId,
       value: mdsvx,
@@ -441,8 +441,8 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       ),
       indexContainsD2FigMetadata: indexHtml.includes('data-component="D2Fig"'),
       indexContainsD2Figure: indexHtml.includes('class="flow-chart"'),
-      indexContainsDreams: indexHtml.includes(
-        '<h2 id="the-actual-dreams">The actual dreams</h2>'
+      indexContainsFindings: indexHtml.includes(
+        '<h2 id="the-actual-findings">The actual findings</h2>'
       ),
       indexContainsTemplate: indexHtml.includes("joel/tufte-mdsvx@0.1.0"),
       indexOmitsD2FigTag: !indexHtml.includes("&lt;D2Fig"),
@@ -478,7 +478,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       indexContainsAspectRatio: true,
       indexContainsD2FigMetadata: true,
       indexContainsD2Figure: true,
-      indexContainsDreams: true,
+      indexContainsFindings: true,
       indexContainsTemplate: true,
       indexOmitsD2FigTag: true,
       indexUsesStaticRenderer: true,
@@ -511,7 +511,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     ].join("\n");
     const mdsvxWrite = await fixture.artifacts.writeText({
       mediaType: "text/mdsvx",
-      path: "dream/hitl-report.mdsvx",
+      path: "report/hitl-report.mdsvx",
       redacted: true,
       runId: fixture.request.runId,
       value: mdsvx,
@@ -578,7 +578,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     ].join("\n");
     const mdsvxWrite = await fixture.artifacts.writeText({
       mediaType: "text/mdsvx",
-      path: "dream/hitl-report.mdsvx",
+      path: "report/hitl-report.mdsvx",
       redacted: true,
       runId: fixture.request.runId,
       value: mdsvx,

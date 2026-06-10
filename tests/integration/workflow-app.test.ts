@@ -442,7 +442,7 @@ const addDreamPreflightToBlueprint = (
     ],
     kind: "workflow.node.invoke",
     nodeType: "joelclaw.memory.hitl-report",
-    outputPath: "dream/hitl-report.json",
+    outputPath: "report/hitl-report.json",
     packageRefs: [memoryWorkflowPackageRef],
     stepId: "render-memory-hitl-report",
     summary: "Render the canonical Dream HITL report artifact.",
@@ -456,7 +456,7 @@ const addDreamPreflightToBlueprint = (
         : [options.hitlDecisionInputRef],
     kind: "workflow.node.invoke",
     nodeType: "joelclaw.memory.hitl-decision-seed",
-    outputPath: "dream/hitl-decision-workflow-seed.json",
+    outputPath: "report/hitl-decision-workflow-seed.json",
     packageRefs: [memoryWorkflowPackageRef],
     stepId: "seed-next-workflow-from-hitl",
     summary:
@@ -474,7 +474,7 @@ const addDreamPreflightToBlueprint = (
     dependsOn: [hitlDecisionSeedStep.stepId],
     kind: "workflow.node.invoke",
     nodeType: "joelclaw.memory.hitl-follow-up-run-request",
-    outputPath: "dream/hitl-follow-up-run-request.json",
+    outputPath: "report/hitl-follow-up-run-request.json",
     packageRefs: [memoryWorkflowPackageRef],
     stepId: "draft-follow-up-run-request-from-hitl",
     summary:
@@ -525,7 +525,7 @@ const addDreamPreflightToBlueprint = (
       outputTarget: {
         kind: "wzrrd",
         primaryDocument: {
-          artifactPath: "dream/hitl-report.mdsvx",
+          artifactPath: "report/hitl-report.mdsvx",
           mediaType: "text/mdsvx",
           publishPath: "report.mdsvx",
           template: {
@@ -3068,11 +3068,11 @@ describe("workflow app integration contract", () => {
     const planner = createIntegrationTestDynamicWorkflowPlanner();
     const request = buildIntegrationTestDreamRunRequest();
     const hitlDecisionInputRef = artifacts.artifactRef({
-      path: "dream/hitl-decision.json",
+      path: "report/hitl-decision.json",
       runId: request.runId,
     });
     await artifacts.writeJson({
-      path: "dream/hitl-decision.json",
+      path: "report/hitl-decision.json",
       redacted: true,
       runId: request.runId,
       value: integrationTestMemoryHitlDecisionDocument({
@@ -3085,7 +3085,7 @@ describe("workflow app integration contract", () => {
           runId: request.runId,
         }),
         reportRef: artifacts.artifactRef({
-          path: "dream/hitl-report.json",
+          path: "report/hitl-report.json",
           runId: request.runId,
         }),
         runId: request.runId,
@@ -3192,16 +3192,16 @@ describe("workflow app integration contract", () => {
       artifactRef.endsWith("/dream/refinement-proposals.json")
     );
     const reportRef = result.artifactRefs.find((artifactRef) =>
-      artifactRef.endsWith("/dream/hitl-report.json")
+      artifactRef.endsWith("/report/hitl-report.json")
     );
     const reportMdsvxRef = result.artifactRefs.find((artifactRef) =>
-      artifactRef.endsWith("/dream/hitl-report.mdsvx")
+      artifactRef.endsWith("/report/hitl-report.mdsvx")
     );
     const hitlDecisionSeedRef = result.artifactRefs.find((artifactRef) =>
-      artifactRef.endsWith("/dream/hitl-decision-workflow-seed.json")
+      artifactRef.endsWith("/report/hitl-decision-workflow-seed.json")
     );
     const hitlFollowUpRef = result.artifactRefs.find((artifactRef) =>
-      artifactRef.endsWith("/dream/hitl-follow-up-run-request.json")
+      artifactRef.endsWith("/report/hitl-follow-up-run-request.json")
     );
     const captureArtifactRef = result.artifactRefs.find((artifactRef) =>
       artifactRef.endsWith("/dream/capture-artifact.json")
@@ -3750,7 +3750,7 @@ describe("workflow app integration contract", () => {
       ),
       reportDefinitionOfDoneAuditStatus: report.definitionOfDoneAudit.status,
       reportDefinitionOfDoneAuditSummary: report.definitionOfDoneAudit.summary,
-      reportDreamCount: report.dreamCount,
+      reportFindingCount: report.findingCount,
       reportHitlDecisionContract: report.hitlDecisionContract,
       reportMdsvxIncludesAccessAdapter: report.mdsvx.includes(
         "## Access adapter shape"
@@ -3763,11 +3763,11 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesDefinitionAudit: report.mdsvx.includes(
         "## Definition of done audit"
       ),
-      reportMdsvxIncludesDreamsFirst: report.mdsvx.includes(
-        "## The actual dreams"
-      ),
       reportMdsvxIncludesDynamicProof: report.mdsvx.includes(
         "## Dynamic generation proof"
+      ),
+      reportMdsvxIncludesFindingsFirst: report.mdsvx.includes(
+        "## The actual findings"
       ),
       reportMdsvxIncludesGeneratedHarnessRef: report.mdsvx.includes(
         result.harnessArtifact.artifactRef
@@ -3792,8 +3792,8 @@ describe("workflow app integration contract", () => {
         "## What did not happen"
       ),
       reportMdsvxNoCandidateReview: !report.mdsvx.includes("Candidate review"),
-      reportMdsvxPutsDreamsBeforeProof:
-        report.mdsvx.indexOf("## The actual dreams") <
+      reportMdsvxPutsFindingsBeforeProof:
+        report.mdsvx.indexOf("## The actual findings") <
         report.mdsvx.indexOf("## Dynamic generation proof"),
       reportMdsvxRefPublished: wzrrdPayload.primaryDocument?.artifactRef,
       reportMdsvxSourceMatchesJson: reportMdsvx === report.mdsvx,
@@ -4179,7 +4179,7 @@ describe("workflow app integration contract", () => {
         ],
         sourcePacks: dreamTranscriptReviewSourceProfile.sourcePacks,
         timeHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
-        workflowId: "dream.memory-fabric",
+        workflowId: "dream.transcript-review",
       },
       memoryGeneratedProofStatus: "verified",
       memoryGeneratedProofStepCount: 10,
@@ -4199,9 +4199,9 @@ describe("workflow app integration contract", () => {
       proofWithoutSourceProfileStatus: "failed",
       refinementNextWorkflowProposalIds: [
         "proposal:dynamic-workflow-pattern:signal:1:signal-integration-workflow-pattern",
-        "proposal:dynamic-workflow-pattern:1:integration-dream-search-found-agent-tra",
-        "proposal:kernel-memory:2:integration-dream-search-found-brain-evi",
-        "proposal:dynamic-workflow-pattern:3:integration-dream-search-found-cloudflar",
+        "proposal:dynamic-workflow-pattern:1:integration-memory-search-found-agent-tr",
+        "proposal:kernel-memory:2:integration-memory-search-found-brain-ev",
+        "proposal:dynamic-workflow-pattern:3:integration-memory-search-found-cloudfla",
       ],
       refinementProposalCount: 4,
       refinementRecommendationKinds: [
@@ -4217,12 +4217,12 @@ describe("workflow app integration contract", () => {
         dreamRefs.correlationRef,
       ],
       reportDefinitionOfDoneAuditItems: [
-        "dream-cartridge-package:captured",
+        "workflow-cartridge-package:captured",
         "worker-facing-relay-capability-lease:not-proven",
         "live-cloudflare-execution:not-proven",
         "generated-machine-and-harness:captured",
         "t-shaped-memory-coverage:captured",
-        "dreams-and-refinement-proposals:captured",
+        "findings-and-refinement-proposals:captured",
         "hitl-refinement-loop:not-proven",
         "workflow-owned-wzrrd-output:not-proven",
         "public-private-redaction-boundary:captured",
@@ -4235,9 +4235,9 @@ describe("workflow app integration contract", () => {
         notProvenCount: 4,
         totalCount: 9,
       },
-      reportDreamCount: 3,
+      reportFindingCount: 3,
       reportHitlDecisionContract: {
-        artifactPath: "dream/hitl-decision.json",
+        artifactPath: "report/hitl-decision.json",
         contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
         decisionSchemaVersion: "memory.hitl-decision.v1",
         exportId: "memory-hitl-decision-schema",
@@ -4248,15 +4248,15 @@ describe("workflow app integration contract", () => {
           dreamRefs.correlationRef,
           dreamRefs.refinementRef,
         ],
-        targetKinds: ["dream-card", "refinement-proposal"],
+        targetKinds: ["finding-card", "refinement-proposal"],
       },
       reportMdsvxIncludesAccessAdapter: true,
       reportMdsvxIncludesD2: true,
       reportMdsvxIncludesD2Fig: true,
       reportMdsvxIncludesD2FigAspectRatio: true,
       reportMdsvxIncludesDefinitionAudit: true,
-      reportMdsvxIncludesDreamsFirst: true,
       reportMdsvxIncludesDynamicProof: true,
+      reportMdsvxIncludesFindingsFirst: true,
       reportMdsvxIncludesGeneratedHarnessRef: true,
       reportMdsvxIncludesGeneratedMachineRef: true,
       reportMdsvxIncludesGeneratedMachineSourceRef: true,
@@ -4267,7 +4267,7 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesRunCoverage: true,
       reportMdsvxIncludesWhatDidNotHappen: true,
       reportMdsvxNoCandidateReview: true,
-      reportMdsvxPutsDreamsBeforeProof: true,
+      reportMdsvxPutsFindingsBeforeProof: true,
       reportMdsvxRefPublished: dreamRefs.reportMdsvxRef,
       reportMdsvxSourceMatchesJson: true,
       reportProofGeneratedArtifacts: {
@@ -4286,7 +4286,7 @@ describe("workflow app integration contract", () => {
       reportRefinementProposalRef: dreamRefs.refinementRef,
       reportSectionOrder: [
         "run-context",
-        "actual-dreams",
+        "actual-findings",
         "what-to-do",
         "actionable-line-items",
         "proof",
@@ -4346,11 +4346,11 @@ describe("workflow app integration contract", () => {
     const planner = createIntegrationTestDynamicWorkflowPlanner();
     const request = buildIntegrationTestDreamRunRequest();
     const hitlDecisionInputRef = artifacts.artifactRef({
-      path: "dream/hitl-decision.json",
+      path: "report/hitl-decision.json",
       runId: request.runId,
     });
     await artifacts.writeJson({
-      path: "dream/hitl-decision.json",
+      path: "report/hitl-decision.json",
       redacted: true,
       runId: request.runId,
       value: integrationTestMemoryHitlDecisionDocument({
@@ -4363,7 +4363,7 @@ describe("workflow app integration contract", () => {
           runId: request.runId,
         }),
         reportRef: artifacts.artifactRef({
-          path: "dream/hitl-report.json",
+          path: "report/hitl-report.json",
           runId: request.runId,
         }),
         runId: request.runId,

@@ -7,12 +7,12 @@ import type { MemoryGeneratedWorkflowAdditionalProofCheck } from "../../app/work
 import { WorkflowHitlReportDocumentSchema } from "./schemas.ts";
 
 const requiredReportAuditRequirementIds = [
-  "dream-cartridge-package",
+  "workflow-cartridge-package",
   "worker-facing-relay-capability-lease",
   "live-cloudflare-execution",
   "generated-machine-and-harness",
   "t-shaped-memory-coverage",
-  "dreams-and-refinement-proposals",
+  "findings-and-refinement-proposals",
   "hitl-refinement-loop",
   "workflow-owned-wzrrd-output",
   "public-private-redaction-boundary",
@@ -76,7 +76,7 @@ export const buildWorkflowHitlReportAuditProofCheck = async (input: {
   readonly executionProof: WorkflowExecutionProofDocument;
 }): Promise<MemoryGeneratedWorkflowAdditionalProofCheck> => {
   const reportRef = input.executionProof.workflowNodeOutputRefs.find(
-    (artifactRef) => artifactRef.endsWith("/dream/hitl-report.json")
+    (artifactRef) => artifactRef.endsWith("/report/hitl-report.json")
   );
   if (reportRef === undefined) {
     return {

@@ -112,7 +112,7 @@ export const createIntegrationTestMemoryRetrievalAdapter =
             fullTranscriptReturned: false,
             receipt,
             redactedExcerpt: `Redacted integration evidence for ${receipt.sourceId}; no raw transcript body returned.`,
-            summary: `Hydrated redacted Dream evidence for ${receipt.sourceId}.`,
+            summary: `Hydrated redacted memory evidence for ${receipt.sourceId}.`,
           })),
           redacted: true,
           runId: input.runId,
@@ -140,11 +140,11 @@ export const createIntegrationTestMemoryRetrievalAdapter =
               kind: signalKind,
               rating: 5,
               reasoning:
-                "Integration Dream signal proves the generated workflow can mine redacted correction/workflow evidence before search and proposals.",
+                "Integration signal proves the generated workflow can mine redacted correction/workflow evidence before search and proposals.",
               receipts: [receipt],
               signalId: `signal:integration:${signalKind}`,
               summary:
-                "Dream found workflow-proof pressure: dynamic generation needs verifier-backed signal evidence.",
+                "Signal mining found workflow-proof pressure: dynamic generation needs verifier-backed signal evidence.",
             },
           ].slice(0, input.maxSignals),
           workItemId: input.workItemId,
@@ -163,7 +163,7 @@ export const createIntegrationTestMemoryRetrievalAdapter =
             receipts: [memorySearchReceiptFor({ family, runId: input.runId })],
             redactedExcerpt: `Redacted integration search hit for ${input.query} in ${family}.`,
             score: 1 - index / 10,
-            summary: `Integration Dream search found ${family} evidence for ${input.query}.`,
+            summary: `Integration memory search found ${family} evidence for ${input.query}.`,
           })),
           query: input.query,
           redacted: true,
@@ -190,8 +190,8 @@ const integrationCorrelationGraphFor = (
   );
   const nodes: MemoryCorrelationGraphNode[] = [
     {
-      label: "Integration Dream review",
-      nodeId: "dream:integration-review",
+      label: "Integration HITL review",
+      nodeId: "report:integration-review",
       nodeType: "project",
       redacted: true,
     },
@@ -225,11 +225,11 @@ const integrationCorrelationGraphFor = (
 
       if (hydratedReceiptKeys.has(integrationCorrelationReceiptKey(receipt))) {
         edges.push({
-          edgeId: `edge:${hitNodeId}:${receipt.receiptId}:supports-dream`,
+          edgeId: `edge:${hitNodeId}:${receipt.receiptId}:supports-finding`,
           evidence: [receipt],
           fromNodeId: hitNodeId,
-          relationship: "supports_dream",
-          toNodeId: "dream:integration-review",
+          relationship: "supports_finding",
+          toNodeId: "report:integration-review",
         });
       }
     }

@@ -122,7 +122,7 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       captureKind: "artifact" as const,
       capturedAt: "2026-06-09T18:00:00.000Z",
       capturedRef: {
-        artifactRef: `artifact://relay-test/runs/${request.runId}/dream/hitl-report.json`,
+        artifactRef: `artifact://relay-test/runs/${request.runId}/report/hitl-report.json`,
         hash: "d".repeat(64),
         mediaType: "application/json",
       },

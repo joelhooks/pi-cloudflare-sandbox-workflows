@@ -194,7 +194,7 @@ describe("trusted Memory relay server", () => {
         payload: {
           actor: run.actor,
           capturedRef: {
-            artifactRef: `artifact://relay-test/run/${run.runId}/dream/hitl-report.json`,
+            artifactRef: `artifact://relay-test/run/${run.runId}/report/hitl-report.json`,
             hash: "a".repeat(64),
             mediaType: "application/json",
           },
