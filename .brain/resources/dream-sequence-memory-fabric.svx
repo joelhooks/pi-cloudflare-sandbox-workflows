@@ -1955,6 +1955,26 @@ Validation receipts after the dynamic runtime boundary correction:
 - `pi-notes brain check` passed: `17` Brain pages.
 - `git diff --check` passed.
 
+## Live Dream Run Attempt 2026-06-10T07:02:45Z
+
+Command: `pnpm app:dream:run -- --submit`.
+
+Receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T070245760Z-4f4ec9af-receipt.json`.
+
+Result: blocked before submission. `submit.attempted=false`.
+
+Preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, regenerated at `2026-06-10T07:02:47.704Z`.
+
+Why it did not run:
+
+- `DREAM_MEMORY_RELAY_BASE_URL` is not configured.
+- `DREAM_MEMORY_RELAY_TOKEN` is not provisioned for the Worker.
+- Worker deploy config does not define `DREAM_MEMORY_RELAY_BASE_URL`.
+- Authenticated relay `/healthz` has not produced a readiness receipt.
+- Exact owner sign-off for the new relay boundary has not been provided.
+
+This is the correct failure. A real Cloudflare Dream cannot execute until the trusted memory relay is reachable through a leased, signed-off capability. Running from local-only receipts would be fake Dreaming, not the definition of done.
+
 ## Open Questions
 
 - Should QMD be installed and dogfooded as the first local Brain/transcript index, or should we implement the same collection/query shape against JoelClaw/Typesense first?
