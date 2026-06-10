@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:20Z implementation progress: Dream relay client/server adapters now live under the Dream cartridge boundary instead of app infrastructure.
+
+Receipts:
+
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` moved to `src/cartridges/dream-memory-fabric/cloudflare-relay.ts`.
+- `src/app/infrastructure/trusted-dream-memory-relay-server.ts` moved to `src/cartridges/dream-memory-fabric/trusted-relay-server.ts`.
+- `src/cartridges/dream-memory-fabric/cloudflare-installer.ts`, local relay HTTP adapter, relay proof script, and relay/preflight tests now import these adapters through the cartridge path.
+- `src/app/index.ts` no longer re-exports Dream relay client/server helpers as core app infrastructure.
+- Focused verification passed: `pnpm vitest run tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-local-readiness.test.ts`, `pnpm check`, `pnpm typecheck`, and `pnpm typecheck:tsc`.
+
+This does not make Dream live in Cloudflare. It tightens the package boundary: the app installs Dream behavior through the Dream cartridge installer, while the relay mechanics are no longer exported as generic core app infrastructure.
+
 2026-06-10T10:07Z run attempt: Dreaming was run through the local relay proof and live submit gate again. Local memory proof passed; live Cloudflare submit correctly did not happen.
 
 Receipts:

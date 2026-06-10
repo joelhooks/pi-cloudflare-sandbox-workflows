@@ -6,8 +6,8 @@ import type {
   Actor,
   ArtifactRef,
   CapabilityBlocker,
-} from "../domain/schemas.ts";
-import { workflowTraceContextForCapability } from "../domain/trace-context.ts";
+} from "../../app/domain/schemas.ts";
+import { workflowTraceContextForCapability } from "../../app/domain/trace-context.ts";
 import {
   DreamCorrelationGraphDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
@@ -28,7 +28,7 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
@@ -49,7 +49,7 @@ import type {
   DreamSourceHealthDocument,
   DreamSourceFamily,
   DreamSourceInventoryDocument,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
   DreamMemoryCapturePort,
@@ -58,7 +58,7 @@ import type {
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
   DreamMemorySignalPort,
-} from "../workflow-nodes/dream-memory-fabric.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric.ts";
 
 export interface DreamMemoryRelayTokenSecretResolver {
   resolve(input: {

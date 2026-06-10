@@ -2,12 +2,6 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { DreamMemoryRelayTokenSecretResolver } from "../../src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts";
-import {
-  createCloudflareDreamMemoryFabricRelay,
-  createCloudflareDreamMemoryRelayTokenResolver,
-  dreamMemoryRelayEndpointCatalog,
-} from "../../src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts";
 import {
   createIntegrationTestDreamMemoryCorrelationAdapter,
   createIntegrationTestDreamMemoryFabricAdapter,
@@ -15,6 +9,12 @@ import {
 } from "../../src/app/infrastructure/memory-adapters.ts";
 import { DreamMemoryRelayRequestEnvelopeSchema } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type { DreamMemoryRelayOperation } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
+import type { DreamMemoryRelayTokenSecretResolver } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
+import {
+  createCloudflareDreamMemoryFabricRelay,
+  createCloudflareDreamMemoryRelayTokenResolver,
+  dreamMemoryRelayEndpointCatalog,
+} from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
 interface FetchCall {

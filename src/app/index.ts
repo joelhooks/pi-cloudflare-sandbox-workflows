@@ -240,23 +240,6 @@ export {
   createCloudflareDiscordBotTokenResolver,
   createCloudflareDiscordMessageAdapter,
 } from "./infrastructure/cloudflare-discord-message-adapter.ts";
-export type {
-  CloudflareDreamMemoryFabricRelayConfig,
-  CloudflareDreamMemoryRelaySecretStringBinding,
-  CloudflareDreamMemoryRelayTokenBinding,
-  CloudflareDreamMemoryRelayTokenResolverConfig,
-  DreamMemoryRelayTokenSecretResolver,
-} from "./infrastructure/cloudflare-dream-memory-fabric-relay.ts";
-export {
-  createCloudflareDreamMemoryFabricRelay,
-  createCloudflareDreamMemoryRelayTokenResolver,
-  dreamMemoryRelayEndpointCatalog,
-} from "./infrastructure/cloudflare-dream-memory-fabric-relay.ts";
-export type {
-  TrustedDreamMemoryRelayRequestInput,
-  TrustedDreamMemoryRelayServerConfig,
-} from "./infrastructure/trusted-dream-memory-relay-server.ts";
-export { handleTrustedDreamMemoryRelayRequest } from "./infrastructure/trusted-dream-memory-relay-server.ts";
 export type { CloudflareGitHubBranchCommitAdapterConfig } from "./infrastructure/cloudflare-github-branch-commit-adapter.ts";
 export {
   createCloudflareGitHubBranchCommitAdapter,

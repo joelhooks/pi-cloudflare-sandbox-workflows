@@ -7,7 +7,6 @@ import {
   createIntegrationTestDreamMemoryFabricAdapter,
   createIntegrationTestDreamMemoryRetrievalAdapter,
 } from "../../src/app/infrastructure/memory-adapters.ts";
-import { handleTrustedDreamMemoryRelayRequest } from "../../src/app/infrastructure/trusted-dream-memory-relay-server.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
@@ -28,6 +27,7 @@ import type {
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
 } from "../../src/app/workflow-nodes/dream-memory-fabric.ts";
+import { handleTrustedDreamMemoryRelayRequest } from "../../src/cartridges/dream-memory-fabric/trusted-relay-server.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
 const relayToken = "trusted-relay-token-never-in-response";

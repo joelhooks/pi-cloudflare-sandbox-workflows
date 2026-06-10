@@ -19,7 +19,7 @@ import type {
   WorkflowLivePreflightRemoteRegistry,
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../../src/app/domain/schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "../../src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts";
+import { dreamMemoryRelayEndpointCatalog } from "../../src/cartridges/dream-memory-fabric/cloudflare-relay.ts";
 
 const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   command: ["pnpm", "exec", "wrangler", "d1", "execute"],

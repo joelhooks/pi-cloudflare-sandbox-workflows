@@ -5,8 +5,6 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { IsoDateTimeSchema } from "../../app/domain/schemas.ts";
-import { dreamMemoryRelayEndpointCatalog } from "../../app/infrastructure/cloudflare-dream-memory-fabric-relay.ts";
-import { handleTrustedDreamMemoryRelayRequest } from "../../app/infrastructure/trusted-dream-memory-relay-server.ts";
 import {
   DreamDerivedIndexStatusSchema,
   DreamMemoryRelayEndpointCatalogSchema,
@@ -15,6 +13,7 @@ import {
   DreamSourceFamilySchema,
   DreamSourceScopeSchema,
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
+import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import { createTrustedLocalDreamMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
 import type {
   TrustedLocalDreamDerivedIndexConfig,
@@ -23,6 +22,7 @@ import type {
 } from "./trusted-local-memory-fabric.ts";
 import { createTrustedLocalDreamMemoryRetrievalAdapter } from "./trusted-local-memory-retrieval.ts";
 import type { TrustedDocsApiDreamMemoryRetrievalConfig } from "./trusted-local-memory-retrieval.ts";
+import { handleTrustedDreamMemoryRelayRequest } from "./trusted-relay-server.ts";
 
 export interface TrustedLocalDreamMemoryRelayHttpConfig {
   readonly docsApi?: TrustedDocsApiDreamMemoryRetrievalConfig;

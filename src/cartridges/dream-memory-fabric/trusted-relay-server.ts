@@ -24,7 +24,7 @@ import {
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
@@ -37,7 +37,7 @@ import type {
   DreamSignalDocument,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
-} from "../workflow-nodes/dream-memory-fabric-schemas.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
   DreamMemoryCapturePort,
@@ -46,8 +46,8 @@ import type {
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
   DreamMemorySignalPort,
-} from "../workflow-nodes/dream-memory-fabric.ts";
-import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-dream-memory-fabric-relay.ts";
+} from "../../app/workflow-nodes/dream-memory-fabric.ts";
+import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 
 export interface TrustedDreamMemoryRelayServerConfig {
   readonly dreamMemoryBackfill?: DreamMemoryBackfillPort;

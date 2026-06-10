@@ -1,13 +1,13 @@
 import { z } from "zod";
 
-import {
-  createCloudflareDreamMemoryFabricRelay,
-  createCloudflareDreamMemoryRelayTokenResolver,
-} from "../../app/infrastructure/cloudflare-dream-memory-fabric-relay.ts";
 import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
 import { createDreamGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/dream-generated-workflow-proof.ts";
 import { createDreamMemoryFabricWorkflowNodeAdapter } from "../../app/workflow-nodes/dream-memory-fabric.ts";
+import {
+  createCloudflareDreamMemoryFabricRelay,
+  createCloudflareDreamMemoryRelayTokenResolver,
+} from "./cloudflare-relay.ts";
 import { dreamMemoryFabricPackageMetadata } from "./package-seed.ts";
 import { dreamTranscriptReviewSourceProfile } from "./source-profile.ts";
 
