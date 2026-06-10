@@ -14,11 +14,13 @@ import type {
   WorkflowExecutionProofDocument,
 } from "../domain/schemas.ts";
 import {
+  DreamCoverageHorizonSchema,
   DreamGeneratedWorkflowProofDocumentSchema,
   DreamMemoryFabricNodeTypeSchema,
   DreamWorkflowEffectSchema,
 } from "./dream-memory-fabric-schemas.ts";
 import type {
+  DreamCoverageHorizon,
   DreamGeneratedWorkflowProofDocument,
   DreamMemoryFabricNodeType,
   DreamSourceProfile,
@@ -186,6 +188,38 @@ const declaredDreamEffectsFor = (
   );
 };
 
+const dreamCoverageHorizonOrder = (horizon: DreamCoverageHorizon): number =>
+  DreamCoverageHorizonSchema.options.indexOf(horizon);
+
+const uniqueDreamCoverageHorizons = (
+  horizons: readonly DreamCoverageHorizon[]
+): DreamCoverageHorizon[] =>
+  [...new Set(horizons)].toSorted(
+    (left, right) =>
+      dreamCoverageHorizonOrder(left) - dreamCoverageHorizonOrder(right)
+  );
+
+const dreamCoverageHorizonsFor = (
+  step: DynamicWorkflowStep
+): DreamCoverageHorizon[] => {
+  if (step.kind !== "workflow.node.invoke") {
+    return [];
+  }
+
+  const declaredHorizons = step.config["dreamCoverageHorizons"];
+  if (!Array.isArray(declaredHorizons)) {
+    return [];
+  }
+
+  return uniqueDreamCoverageHorizons(
+    declaredHorizons.flatMap((declaredHorizon) => {
+      const parsed = DreamCoverageHorizonSchema.safeParse(declaredHorizon);
+
+      return parsed.success ? [parsed.data] : [];
+    })
+  );
+};
+
 const dreamEffectsFor = (step: DynamicWorkflowStep): DreamWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
@@ -231,6 +265,14 @@ const generatedPlanCoversDreamEffects = (input: {
   );
 };
 
+const generatedPlanCoversHorizons = (input: {
+  readonly coveredHorizons: readonly DreamCoverageHorizon[];
+  readonly requiredHorizons: readonly DreamCoverageHorizon[];
+}): boolean =>
+  input.requiredHorizons.every((horizon) =>
+    input.coveredHorizons.includes(horizon)
+  );
+
 const pinnedPackageExportsSourceProfile = (input: {
   readonly exportId: string;
   readonly packageRef: ArtifactRef;
@@ -260,6 +302,10 @@ export const verifyDreamGeneratedWorkflow = (
     input.plan.steps.flatMap(dreamEffectsFor)
   );
   const requiredEffects = requiredDreamEffectsFor(input.expectedSourceProfile);
+  const coveredHorizons = uniqueDreamCoverageHorizons(
+    input.plan.steps.flatMap(dreamCoverageHorizonsFor)
+  );
+  const requiredHorizons = input.expectedSourceProfile.timeHorizons;
   const nodeTypes = input.plan.steps.flatMap((step) => {
     if (step.kind !== "workflow.node.invoke") {
       return [];
@@ -328,6 +374,16 @@ export const verifyDreamGeneratedWorkflow = (
       }),
       summary:
         "Dream plan uses artifact-backed package invocations and covers the installed source profile's required effects.",
+    },
+    {
+      checkId: "plan:horizon-coverage",
+      evidenceRefs: [input.planArtifact.artifactRef],
+      passed: generatedPlanCoversHorizons({
+        coveredHorizons,
+        requiredHorizons,
+      }),
+      summary:
+        "Dream generated plan declares coverage for every source-profile horizon so the run cannot collapse into recent-only retrieval.",
     },
     {
       checkId: "plan:source-profile-bound",
@@ -409,6 +465,10 @@ export const verifyDreamGeneratedWorkflow = (
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     generatedStateSequence: input.executionProof.generatedStateSequence,
     harnessArtifact: input.harnessArtifact,
+    horizonCoverage: {
+      coveredHorizons,
+      requiredHorizons,
+    },
     machineArtifact: input.machineArtifact,
     nodeTypes,
     packageRef: input.expectedPackageRef,

@@ -217,6 +217,7 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
       stochasticNotes: [
         ...request.planProposal.stochasticNotes,
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
+        `Generated Dream retrieval steps must declare dreamCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
       ],
     },
     workItemId: "work-item:integration-test-dream",

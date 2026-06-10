@@ -828,6 +828,10 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
     hash: Sha256HexSchema,
     language: z.literal("typescript"),
   }),
+  horizonCoverage: z.object({
+    coveredHorizons: z.array(DreamCoverageHorizonSchema),
+    requiredHorizons: z.array(DreamCoverageHorizonSchema).min(1),
+  }),
   machineArtifact: z.object({
     artifactRef: ArtifactRefSchema,
     hash: Sha256HexSchema,

@@ -282,6 +282,9 @@ const machineStatesFor = (steps: readonly DynamicWorkflowStep[]) => {
 const addDreamPreflightToBlueprint = (
   blueprint: DynamicWorkflowBlueprint
 ): DynamicWorkflowBlueprint => {
+  const dreamCoverageHorizons = [
+    ...dreamTranscriptReviewSourceProfile.timeHorizons,
+  ];
   const inventoryStep = DynamicWorkflowStepSchema.parse({
     config: {
       requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
@@ -355,6 +358,7 @@ const addDreamPreflightToBlueprint = (
   });
   const signalsStep = DynamicWorkflowStepSchema.parse({
     config: {
+      dreamCoverageHorizons,
       maxSignals: 3,
       query: "dynamic workflow proof across Codex Cloudflare Brain",
       sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
@@ -370,6 +374,7 @@ const addDreamPreflightToBlueprint = (
   });
   const searchStep = DynamicWorkflowStepSchema.parse({
     config: {
+      dreamCoverageHorizons,
       maxHits: 3,
       query: "dynamic workflow proof across Codex Cloudflare Brain",
       sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
@@ -702,6 +707,7 @@ describe("workflow app integration contract", () => {
     }).toStrictEqual({
       failedCheckIds: [
         "plan:profile-effect-coverage",
+        "plan:horizon-coverage",
         "plan:source-profile-bound",
       ],
       status: "failed",
@@ -3133,6 +3139,45 @@ describe("workflow app integration contract", () => {
         hash: hashJson(planWithoutSourceProfile),
       },
     });
+    const planWithoutHorizonCoverage = DynamicWorkflowPlanDocumentSchema.parse({
+      ...plan,
+      steps: plan.steps.map((step) => {
+        if (step.kind !== "workflow.node.invoke") {
+          return step;
+        }
+
+        return {
+          ...step,
+          config: Object.fromEntries(
+            Object.entries(step.config).filter(
+              ([key]) => key !== "dreamCoverageHorizons"
+            )
+          ),
+        };
+      }),
+    });
+    const proofWithoutHorizonCoverage = verifyDreamGeneratedWorkflow({
+      executionProof,
+      executionProofRef: result.executionProofArtifact.artifactRef,
+      expectedPackageRef: dreamWorkflowPackageRef,
+      expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+      expectedSourceProfileExportId: "dream-transcript-review-source-profile",
+      generatedAt: "2026-06-09T21:46:30.000Z",
+      harnessArtifact: result.harnessArtifact,
+      harnessSource: await artifacts.readText({
+        artifactRef: result.harnessArtifact.artifactRef,
+      }),
+      machine,
+      machineArtifact: result.machineArtifact,
+      machineSource: await artifacts.readText({
+        artifactRef: result.machineArtifact.sourceArtifactRef,
+      }),
+      plan: planWithoutHorizonCoverage,
+      planArtifact: {
+        ...result.planArtifact,
+        hash: hashJson(planWithoutHorizonCoverage),
+      },
+    });
     const combinedBackfillPlan = DynamicWorkflowPlanDocumentSchema.parse({
       ...plan,
       steps: plan.steps.flatMap((step) => {
@@ -3288,6 +3333,8 @@ describe("workflow app integration contract", () => {
       ),
       dreamGeneratedProofEffectCoverage: generatedWorkflowProof.effectCoverage,
       dreamGeneratedProofFailures: generatedWorkflowProof.failures,
+      dreamGeneratedProofHorizonCoverage:
+        generatedWorkflowProof.horizonCoverage,
       dreamGeneratedProofNodeTypes: generatedWorkflowProof.nodeTypes,
       dreamGeneratedProofRawTranscriptsReturned:
         generatedWorkflowProof.rawTranscriptsReturned,
@@ -3313,6 +3360,11 @@ describe("workflow app integration contract", () => {
           .map((check) => check.checkId),
       missingBackfillRunEffectProofStatus: missingBackfillRunEffectProof.status,
       plannedBackfillActions: backfill.actions.map((action) => action.actionId),
+      proofWithoutHorizonCoverageFailedChecks:
+        proofWithoutHorizonCoverage.checks
+          .filter((check) => check.status === "failed")
+          .map((check) => check.checkId),
+      proofWithoutHorizonCoverageStatus: proofWithoutHorizonCoverage.status,
       proofWithoutSourceProfileFailedChecks: proofWithoutSourceProfile.checks
         .filter((check) => check.status === "failed")
         .map((check) => check.checkId),
@@ -3569,6 +3621,7 @@ describe("workflow app integration contract", () => {
         "machine:hash-pinned",
         "harness:hash-pinned",
         "plan:profile-effect-coverage",
+        "plan:horizon-coverage",
         "plan:source-profile-bound",
         "machine:step-order-bound",
         "execution:generated-machine-sequence",
@@ -3606,6 +3659,10 @@ describe("workflow app integration contract", () => {
         ],
       },
       dreamGeneratedProofFailures: [],
+      dreamGeneratedProofHorizonCoverage: {
+        coveredHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
+        requiredHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
+      },
       dreamGeneratedProofNodeTypes: [
         "joelclaw.dream.source-inventory",
         "joelclaw.dream.source-health",
@@ -3670,6 +3727,8 @@ describe("workflow app integration contract", () => {
       ],
       missingBackfillRunEffectProofStatus: "failed",
       plannedBackfillActions: ["backfill:claude:native-capture"],
+      proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
+      proofWithoutHorizonCoverageStatus: "failed",
       proofWithoutSourceProfileFailedChecks: ["plan:source-profile-bound"],
       proofWithoutSourceProfileStatus: "failed",
       refinementNextWorkflowProposalIds: [
