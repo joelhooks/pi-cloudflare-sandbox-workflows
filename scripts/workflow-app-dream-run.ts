@@ -259,6 +259,7 @@ export const buildDreamLiveRunRequest = (
         "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
         `Generated Dream retrieval and signal-mining steps must declare dreamCoverageHorizons covering: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
         "Generated Dream source inventory or planning steps must declare dreamSourcePackDispositions for every advertised source pack: optional-lease packs are selected-with-lease only when scoped leases cover their requiredCapabilityKinds, otherwise skipped-missing-lease; separate-workflow packs are separate-workflow-candidate and must not clear transcript-review Dream readiness.",
+        `Generated Dream source-inventory steps must declare requiredRuntimes, sourceFamiliesExpected, and requiredMachineIds matching the source profile, including machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}.`,
         "Require native runtime coverage for Pi, Codex, Claude, and Cloudflare or state the missing/false-positive coverage explicitly in the report.",
         "Search across horizons: 24h, 7d, 30d, current quarter, and all-time. Do not collapse the dream into a recent-only summary.",
         'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do."}}.',

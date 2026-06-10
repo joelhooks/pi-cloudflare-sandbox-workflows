@@ -313,6 +313,9 @@ const addDreamPreflightToBlueprint = (
   const inventoryStep = DynamicWorkflowStepSchema.parse({
     config: {
       dreamSourcePackDispositions,
+      requiredMachineIds: [
+        ...dreamTranscriptReviewSourceProfile.requiredMachineIds,
+      ],
       requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
       sourceFamiliesExpected: [
         "agent-transcripts",
@@ -736,6 +739,7 @@ describe("workflow app integration contract", () => {
         "plan:horizon-coverage",
         "plan:source-profile-bound",
         "plan:source-pack-disposition",
+        "plan:runtime-source-coverage",
       ],
       status: "failed",
       stepKinds: [
@@ -3245,6 +3249,49 @@ describe("workflow app integration contract", () => {
         hash: hashJson(planWithoutSourcePackDispositions),
       },
     });
+    const planWithoutRuntimeSourceCoverage =
+      DynamicWorkflowPlanDocumentSchema.parse({
+        ...plan,
+        steps: plan.steps.map((step) => {
+          if (
+            step.kind !== "workflow.node.invoke" ||
+            step.nodeType !== "joelclaw.dream.source-inventory"
+          ) {
+            return step;
+          }
+
+          return {
+            ...step,
+            config: Object.fromEntries(
+              Object.entries(step.config).filter(
+                ([key]) => key !== "requiredMachineIds"
+              )
+            ),
+          };
+        }),
+      });
+    const proofWithoutRuntimeSourceCoverage = verifyDreamGeneratedWorkflow({
+      executionProof,
+      executionProofRef: result.executionProofArtifact.artifactRef,
+      expectedPackageRef: dreamWorkflowPackageRef,
+      expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+      expectedSourceProfileExportId: "dream-transcript-review-source-profile",
+      generatedAt: "2026-06-09T21:46:55.000Z",
+      harnessArtifact: result.harnessArtifact,
+      harnessSource: await artifacts.readText({
+        artifactRef: result.harnessArtifact.artifactRef,
+      }),
+      machine,
+      machineArtifact: result.machineArtifact,
+      machineSource: await artifacts.readText({
+        artifactRef: result.machineArtifact.sourceArtifactRef,
+      }),
+      plan: planWithoutRuntimeSourceCoverage,
+      planArtifact: {
+        ...result.planArtifact,
+        hash: hashJson(planWithoutRuntimeSourceCoverage),
+      },
+    });
     const combinedBackfillPlan = DynamicWorkflowPlanDocumentSchema.parse({
       ...plan,
       steps: plan.steps.flatMap((step) => {
@@ -3407,6 +3454,8 @@ describe("workflow app integration contract", () => {
         generatedWorkflowProof.rawTranscriptsReturned,
       dreamGeneratedProofRelayLeaseRefs:
         generatedWorkflowProof.relayLeaseReceiptRefs,
+      dreamGeneratedProofRuntimeSourceCoverage:
+        generatedWorkflowProof.runtimeSourceCoverage,
       dreamGeneratedProofSourcePackDisposition:
         generatedWorkflowProof.sourcePackDisposition,
       dreamGeneratedProofSourceProfile: generatedWorkflowProof.sourceProfile,
@@ -3434,6 +3483,12 @@ describe("workflow app integration contract", () => {
           .filter((check) => check.status === "failed")
           .map((check) => check.checkId),
       proofWithoutHorizonCoverageStatus: proofWithoutHorizonCoverage.status,
+      proofWithoutRuntimeSourceCoverageFailedChecks:
+        proofWithoutRuntimeSourceCoverage.checks
+          .filter((check) => check.status === "failed")
+          .map((check) => check.checkId),
+      proofWithoutRuntimeSourceCoverageStatus:
+        proofWithoutRuntimeSourceCoverage.status,
       proofWithoutSourcePackDispositionsFailedChecks:
         proofWithoutSourcePackDispositions.checks
           .filter((check) => check.status === "failed")
@@ -3722,6 +3777,7 @@ describe("workflow app integration contract", () => {
         "plan:horizon-coverage",
         "plan:source-profile-bound",
         "plan:source-pack-disposition",
+        "plan:runtime-source-coverage",
         "machine:step-order-bound",
         "execution:generated-machine-sequence",
         "execution:relay-lease-sidecars",
@@ -3778,6 +3834,27 @@ describe("workflow app integration contract", () => {
       ],
       dreamGeneratedProofRawTranscriptsReturned: false,
       dreamGeneratedProofRelayLeaseRefs: [],
+      dreamGeneratedProofRuntimeSourceCoverage: {
+        declaredMachineIds: ["blaine", "panda", "flagg", "cloudflare"],
+        declaredRuntimes: ["pi", "codex", "claude", "cloudflare"],
+        declaredSourceFamilies: [
+          "agent-transcripts",
+          "brain",
+          "cloudflare-runs",
+          "docs-pdf-brain",
+          "repo-outputs",
+        ],
+        inventoryStepIds: ["inventory-memory-fabric"],
+        requiredMachineIds: ["blaine", "panda", "flagg", "cloudflare"],
+        requiredRuntimes: ["pi", "codex", "claude", "cloudflare"],
+        requiredSourceFamilies: [
+          "agent-transcripts",
+          "brain",
+          "cloudflare-runs",
+          "docs-pdf-brain",
+          "repo-outputs",
+        ],
+      },
       dreamGeneratedProofSourcePackDisposition: {
         dispositionCount: 2,
         dispositions: [
@@ -3866,6 +3943,10 @@ describe("workflow app integration contract", () => {
       plannedBackfillActions: ["backfill:claude:native-capture"],
       proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
       proofWithoutHorizonCoverageStatus: "failed",
+      proofWithoutRuntimeSourceCoverageFailedChecks: [
+        "plan:runtime-source-coverage",
+      ],
+      proofWithoutRuntimeSourceCoverageStatus: "failed",
       proofWithoutSourcePackDispositionsFailedChecks: [
         "plan:source-pack-disposition",
       ],

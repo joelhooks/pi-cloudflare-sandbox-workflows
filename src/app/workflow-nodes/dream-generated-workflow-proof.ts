@@ -17,13 +17,17 @@ import {
   DreamCoverageHorizonSchema,
   DreamGeneratedWorkflowProofDocumentSchema,
   DreamMemoryFabricNodeTypeSchema,
+  DreamRuntimeSchema,
   DreamSourcePackDispositionSchema,
+  DreamSourceFamilySchema,
   DreamWorkflowEffectSchema,
 } from "./dream-memory-fabric-schemas.ts";
 import type {
   DreamCoverageHorizon,
   DreamGeneratedWorkflowProofDocument,
   DreamMemoryFabricNodeType,
+  DreamRuntime,
+  DreamSourceFamily,
   DreamSourcePack,
   DreamSourcePackDisposition,
   DreamSourceProfile,
@@ -346,6 +350,102 @@ const generatedPlanDisposesSourcePacks = (input: {
   );
 };
 
+const uniqueItemsInOrder = <TItem extends string>(
+  values: readonly TItem[]
+): TItem[] => [...new Set(values)];
+
+const parsedStringArrayFor = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? uniqueItemsInOrder(
+        value.flatMap((item) => (typeof item === "string" ? [item] : []))
+      )
+    : [];
+
+const parsedDreamRuntimesFor = (value: unknown): DreamRuntime[] =>
+  Array.isArray(value)
+    ? uniqueItemsInOrder(
+        value.flatMap((item) => {
+          const parsed = DreamRuntimeSchema.safeParse(item);
+
+          return parsed.success ? [parsed.data] : [];
+        })
+      )
+    : [];
+
+const parsedDreamSourceFamiliesFor = (value: unknown): DreamSourceFamily[] =>
+  Array.isArray(value)
+    ? uniqueItemsInOrder(
+        value.flatMap((item) => {
+          const parsed = DreamSourceFamilySchema.safeParse(item);
+
+          return parsed.success ? [parsed.data] : [];
+        })
+      )
+    : [];
+
+const isDreamSourceInventoryStep = (input: {
+  readonly expectedPackageRef: ArtifactRef;
+  readonly step: DynamicWorkflowStep;
+}): boolean =>
+  input.step.kind === "workflow.node.invoke" &&
+  input.step.nodeType === "joelclaw.dream.source-inventory" &&
+  input.step.packageRefs.includes(input.expectedPackageRef);
+
+const runtimeSourceCoverageFor = (input: {
+  readonly expectedPackageRef: ArtifactRef;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly profile: DreamSourceProfile;
+}) => {
+  const inventorySteps = input.plan.steps.filter((step) =>
+    isDreamSourceInventoryStep({
+      expectedPackageRef: input.expectedPackageRef,
+      step,
+    })
+  );
+
+  return {
+    declaredMachineIds: uniqueItemsInOrder(
+      inventorySteps.flatMap((step) =>
+        step.kind === "workflow.node.invoke"
+          ? parsedStringArrayFor(step.config["requiredMachineIds"])
+          : []
+      )
+    ),
+    declaredRuntimes: uniqueItemsInOrder(
+      inventorySteps.flatMap((step) =>
+        step.kind === "workflow.node.invoke"
+          ? parsedDreamRuntimesFor(step.config["requiredRuntimes"])
+          : []
+      )
+    ),
+    declaredSourceFamilies: uniqueItemsInOrder(
+      inventorySteps.flatMap((step) =>
+        step.kind === "workflow.node.invoke"
+          ? parsedDreamSourceFamiliesFor(step.config["sourceFamiliesExpected"])
+          : []
+      )
+    ),
+    inventoryStepIds: inventorySteps.map((step) => step.stepId),
+    requiredMachineIds: input.profile.requiredMachineIds,
+    requiredRuntimes: input.profile.requiredRuntimes,
+    requiredSourceFamilies: input.profile.sourceFamiliesExpected,
+  };
+};
+
+const generatedPlanDeclaresRuntimeSourceCoverage = (input: {
+  readonly runtimeSourceCoverage: ReturnType<typeof runtimeSourceCoverageFor>;
+}): boolean =>
+  input.runtimeSourceCoverage.inventoryStepIds.length > 0 &&
+  input.runtimeSourceCoverage.requiredMachineIds.every((machineId) =>
+    input.runtimeSourceCoverage.declaredMachineIds.includes(machineId)
+  ) &&
+  input.runtimeSourceCoverage.requiredRuntimes.every((runtime) =>
+    input.runtimeSourceCoverage.declaredRuntimes.includes(runtime)
+  ) &&
+  input.runtimeSourceCoverage.requiredSourceFamilies.every((family) =>
+    input.runtimeSourceCoverage.declaredSourceFamilies.includes(family)
+  );
+
 const dreamEffectsFor = (step: DynamicWorkflowStep): DreamWorkflowEffect[] => {
   if (step.kind !== "workflow.node.invoke") {
     return [];
@@ -435,6 +535,11 @@ export const verifyDreamGeneratedWorkflow = (
   const sourcePackDisposition = sourcePackDispositionSummaryFor({
     dispositions: sourcePackDispositionsFor(input.plan),
     sourcePacks: input.expectedSourceProfile.sourcePacks,
+  });
+  const runtimeSourceCoverage = runtimeSourceCoverageFor({
+    expectedPackageRef: input.expectedPackageRef,
+    plan: input.plan,
+    profile: input.expectedSourceProfile,
   });
   const nodeTypes = input.plan.steps.flatMap((step) => {
     if (step.kind !== "workflow.node.invoke") {
@@ -546,6 +651,15 @@ export const verifyDreamGeneratedWorkflow = (
         "Dream generated plan explicitly declares whether each advertised source pack was selected under leases, skipped for missing leases, or saved as a separate workflow candidate.",
     },
     {
+      checkId: "plan:runtime-source-coverage",
+      evidenceRefs: [input.planArtifact.artifactRef],
+      passed: generatedPlanDeclaresRuntimeSourceCoverage({
+        runtimeSourceCoverage,
+      }),
+      summary:
+        "Dream generated plan binds source inventory to the source profile's required runtimes, source families, and machine ids.",
+    },
+    {
       checkId: "machine:step-order-bound",
       evidenceRefs: [
         input.planArtifact.artifactRef,
@@ -620,6 +734,7 @@ export const verifyDreamGeneratedWorkflow = (
     redacted: true,
     relayLeaseReceiptRefs,
     runId: input.plan.runId,
+    runtimeSourceCoverage,
     schemaVersion: "dream.generated-workflow-proof.v1",
     sourcePackDisposition,
     sourceProfile: sourceProfileFingerprint({

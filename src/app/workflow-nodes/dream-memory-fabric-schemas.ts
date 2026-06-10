@@ -895,6 +895,15 @@ export const DreamGeneratedWorkflowProofDocumentSchema = z.object({
   redacted: z.literal(true),
   relayLeaseReceiptRefs: z.array(ArtifactRefSchema).default([]),
   runId: z.string().min(1),
+  runtimeSourceCoverage: z.object({
+    declaredMachineIds: z.array(z.string().min(1)).default([]),
+    declaredRuntimes: z.array(DreamRuntimeSchema).default([]),
+    declaredSourceFamilies: z.array(DreamSourceFamilySchema).default([]),
+    inventoryStepIds: z.array(z.string().min(1)).default([]),
+    requiredMachineIds: z.array(z.string().min(1)).min(1),
+    requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
+    requiredSourceFamilies: z.array(DreamSourceFamilySchema).min(1),
+  }),
   schemaVersion: z.literal("dream.generated-workflow-proof.v1"),
   sourcePackDisposition: z.object({
     dispositionCount: z.number().int().min(0),

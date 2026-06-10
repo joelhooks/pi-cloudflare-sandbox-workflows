@@ -170,6 +170,7 @@ type DreamWorkflowNodeExecutionInput = Parameters<
 >[0];
 
 const DreamSourceInventoryNodeConfigSchema = z.object({
+  requiredMachineIds: z.array(z.string().min(1)).min(1).optional(),
   requiredRuntimes: z.array(DreamRuntimeSchema).min(1),
   sourceFamiliesExpected: z.array(DreamSourceFamilySchema).min(1),
 });
