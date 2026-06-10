@@ -390,7 +390,7 @@ Important limitation:
 - This proof is a trusted local relay/memory-fabric proof. It is useful evidence that the Dream cartridge adapters can inventory, search, hydrate, and correlate T-shaped memory sources without leaking raw local authority.
 - It is not a valid full Dream run by the project definition of done. It did not execute a generated XState Dream workflow in Cloudflare and did not publish a Dream HITL Wzrrd report.
 
-Live Cloudflare Dream attempt:
+Initial live Cloudflare Dream attempt:
 
 - `pnpm app:dream:run --submit` prepared run `run-live-dream-memory-fabric-20260610T033720460Z-6bda3e72`.
 - Receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T033720460Z-6bda3e72-receipt.json`.
@@ -406,7 +406,32 @@ Blocking gates:
 - Start or provision the trusted Dream memory relay and verify authenticated `/healthz`.
 - Re-seed `workflow/dream-memory-fabric` so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including `joelclaw.dream.backfill-run`, `joelclaw.dream.correlate`, `joelclaw.dream.refinement-proposals`, and `joelclaw.dream.hitl-report`.
 
-Do not phrase the 2026-06-10 receipt as "the Dreamer ran" unless the context explicitly means the local relay proof. The honest status is: local Dream memory proof completed; live generated Cloudflare Dream remains blocked on relay exposure/config and package re-seed.
+Package seed unblock:
+
+- `WORKFLOW_APP_ADMIN_TOKEN` was rotated to a fresh generated remote Worker secret for this setup operation. The token was not printed and was not written to `.env.local`.
+- `pnpm app:deploy:seed --worker-url=https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev` completed at `2026-06-10T03:43:10.612Z`.
+- Receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`.
+- `workflow/dream-memory-fabric` remote D1 hash now matches the current local Dream cartridge manifest hash `d6f2ca3f72c659f1d6c4e5b17ea6180432d50baec43a5220cf97986eb2f281d1`.
+- Dream package seed commit: `5df473e02208988007142930a3bcfbec24b8f043`.
+
+Latest live Cloudflare Dream attempt after package seed:
+
+- `pnpm app:dream:preflight` refreshed `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json` at `2026-06-10T03:43:30.260Z`.
+- The refreshed preflight proves `expectedPackageSeeded=true`, `expectedPackageManifestHashMatched=true`, and `expectedPackageArtifactRefMatched=true`.
+- `pnpm app:dream:run --submit` prepared run `run-live-dream-memory-fabric-20260610T034328863Z-45869758`.
+- Receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T034328863Z-45869758-receipt.json`.
+- Status: `blocked`.
+- `submit.attempted=false`; the live Worker was not called.
+
+Remaining blocking gates:
+
+- Set `DREAM_MEMORY_RELAY_BASE_URL` for the trusted memory relay endpoint.
+- Provision `DREAM_MEMORY_RELAY_TOKEN` as a Worker secret for the trusted memory relay.
+- Add `DREAM_MEMORY_RELAY_BASE_URL` to Worker deploy configuration or deploy-time vars.
+- Start or provision the trusted Dream memory relay and verify authenticated `/healthz`.
+- Exact owner sign-off phrase is still required before any new relay exposure: `exposing JoelClaw/Typesense over a new network boundary`.
+
+Do not phrase the 2026-06-10 receipt as "the Dreamer ran" unless the context explicitly means the local relay proof. The honest status is: local Dream memory proof completed; package seed unblocked; live generated Cloudflare Dream remains blocked on relay exposure/config.
 
 ## Wzrrd Report Receipt
 
@@ -877,7 +902,7 @@ Validation receipts:
 - `pnpm typecheck:tsc` passed.
 - `pnpm check` passed.
 
-This still does not prove the full Dream definition of done. It closes the next expression gap: generated Cloudflare workflows can now ask an installed Dream cartridge to search, hydrate, and correlate redacted evidence through a trusted relay. The remaining proof is a live Worker run with the Dream package re-seeded remotely, reachable relay capabilities, generated machine artifacts, and Wzrrd/Tufte report output.
+This still does not prove the full Dream definition of done. It closes the next expression gap: generated Cloudflare workflows can now ask an installed Dream cartridge to search, hydrate, and correlate redacted evidence through a trusted relay. The remaining proof is a live Worker run with reachable relay capabilities, generated machine artifacts, and Wzrrd/Tufte report output. The remote Dream package was re-seeded on 2026-06-10.
 
 ## Dream Correlation Cartridge Node Receipt
 
@@ -1812,13 +1837,13 @@ Implementation receipt:
 
 Latest corrected receipts:
 
-- Local proof: `run:dream-relay-local-proof:20260610T031052440Z`, `10` source roots, `10` backfill action receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `missingSourceFamilies=[]`.
+- Local proof: `run:dream-relay-local-proof:20260610T033720376Z`, `10` source roots, `10` backfill action receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes, `missingSourceFamilies=[]`.
 - Captured Dreamer source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`.
-- Worker deploy-only receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T03:13:05.546Z`, Worker version `18fd4bf9-99d4-43b2-b7d3-b88e384f2d58`, package seed intentionally skipped.
-- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T03:13:22.721Z`, blocked on relay URL/token/config/healthz and stale remote Dream package manifest hash.
-- Dream cartridge hash after adding the source-profile export: expected `d6f2ca3f72c659f1d6c4e5b17ea6180432d50baec43a5220cf97986eb2f281d1`; remote D1 still reports `96d1539b18ddcb37ab238e612a823d39c4717a0bca89b901b8f7a7f3d8b07d4a`. Admin package seed could not be run because no local `WORKFLOW_APP_ADMIN_TOKEN` lease was available.
-- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T03:13:21.214Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, approval still required.
-- Latest blocked run request: `run-live-dream-memory-fabric-20260610T031321339Z-e42f731e`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
+- Package seed receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T03:43:10.612Z`, package seed `status=seeded`, Dream package commit `5df473e02208988007142930a3bcfbec24b8f043`.
+- Dream cartridge hash after adding the source-profile export: expected `d6f2ca3f72c659f1d6c4e5b17ea6180432d50baec43a5220cf97986eb2f281d1`; remote D1 now reports the same hash.
+- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T03:43:30.260Z`, blocked on relay URL/token/config/healthz only.
+- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T03:43:39.973Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, approval still required.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T034328863Z-45869758`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
 
 Validation receipts after the dynamic runtime boundary correction:
 
