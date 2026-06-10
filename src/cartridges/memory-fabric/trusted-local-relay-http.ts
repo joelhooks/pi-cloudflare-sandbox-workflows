@@ -13,6 +13,7 @@ import {
 } from "../../app/domain/source-profile.ts";
 import { memoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import { MemoryRelayEndpointCatalogSchema } from "./schemas.ts";
+import { trustedJoelClawSessionSourceForAuthorityRoot } from "./trusted-joelclaw-session-source.ts";
 import { createTrustedLocalMemoryFabricAdapter } from "./trusted-local-memory-fabric.ts";
 import type {
   TrustedLocalMemoryFabricConfig,
@@ -57,17 +58,34 @@ const SupportedRelayOperationSchema = z.enum([
   "signals",
 ]);
 
-const TrustedLocalMemorySourceRootConfigSchema = z.object({
-  authorityRoot: z.string().min(1),
-  family: MemorySourceFamilySchema,
-  includeExtensions: z.array(z.string().min(1)).optional(),
-  label: z.string().min(1),
-  privacyTier: MemoryPrivacyTierSchema,
-  runtime: MemoryRuntimeSchema.optional(),
-  scope: MemorySourceScopeSchema.optional(),
-  sourceId: z.string().min(1),
-  sourceSystem: z.string().min(1),
-});
+const TrustedLocalMemorySourceRootConfigSchema = z
+  .object({
+    authorityRoot: z.string().min(1),
+    family: MemorySourceFamilySchema,
+    includeExtensions: z.array(z.string().min(1)).optional(),
+    label: z.string().min(1),
+    privacyTier: MemoryPrivacyTierSchema,
+    runtime: MemoryRuntimeSchema.optional(),
+    scope: MemorySourceScopeSchema.optional(),
+    sourceId: z.string().min(1),
+    sourceSystem: z.string().min(1),
+  })
+  .superRefine((sourceRoot, context) => {
+    if (
+      sourceRoot.family === "agent-transcripts" &&
+      trustedJoelClawSessionSourceForAuthorityRoot(
+        sourceRoot.authorityRoot,
+        sourceRoot.runtime
+      ) === null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "agent-transcripts source roots must use a joelclaw+index:// authority root; per-machine filesystem transcript roots were removed.",
+        path: ["authorityRoot"],
+      });
+    }
+  });
 
 const TrustedLocalMemorySourceRootsConfigSchema = z
   .array(TrustedLocalMemorySourceRootConfigSchema)
@@ -309,6 +327,9 @@ export const createTrustedLocalMemoryRelayFetchHandler = (
       ? {}
       : { maxFilesPerSource: config.memoryFabric.maxFilesPerSource }),
     ...(adapterNow === undefined ? {} : { now: adapterNow }),
+    ...(config.memoryFabric.sessionBridgeCommand === undefined
+      ? {}
+      : { sessionBridgeCommand: config.memoryFabric.sessionBridgeCommand }),
     sourceRoots: config.memoryFabric.sourceRoots,
   });
   const memoryCapture = createTrustedLocalMemoryFabricAdapter({

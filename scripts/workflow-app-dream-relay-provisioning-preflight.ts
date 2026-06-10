@@ -13,13 +13,13 @@ import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memo
 const defaultLivePreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const defaultLocalRelayReadinessPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
 const defaultLocalRelayStartupEnvPath =
-  ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+  ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
 const defaultReceiptPath =
-  ".wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json";
+  ".wrangler/workflow-app/memory-relay/latest-provisioning-preflight.json";
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
 const exactSignoffAction =
   "Get explicit owner sign-off for exposing the trusted Memory relay over a new network boundary.";
@@ -901,7 +901,7 @@ const buildProvisioningPlan = (input: {
         description:
           "Refresh the redacted local relay proof before any network exposure.",
         expectedReceipt:
-          ".wrangler/workflow-app/dream-relay/latest-local-proof.json",
+          ".wrangler/workflow-app/memory-relay/latest-local-proof.json",
         requiresSignoff: false,
         sideEffectClass: "none",
         stepId: "refresh-local-relay-proof",
@@ -922,7 +922,7 @@ const buildProvisioningPlan = (input: {
         description:
           "Start the trusted local relay transiently and prove authenticated /healthz from the generated startup env.",
         expectedReceipt:
-          ".wrangler/workflow-app/dream-relay/latest-local-readiness.json",
+          ".wrangler/workflow-app/memory-relay/latest-local-readiness.json",
         requiresSignoff: false,
         sideEffectClass: "local-process",
         stepId: "verify-local-relay-readiness",

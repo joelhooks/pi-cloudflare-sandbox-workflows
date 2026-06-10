@@ -126,7 +126,7 @@ const localRelayProofPassed: WorkflowLivePreflightCheck = {
 const localRelayProofMissing: WorkflowLivePreflightCheck = {
   checkId: "relay:local-proof",
   message:
-    "Trusted local Memory relay proof receipt is missing at .wrangler/workflow-app/dream-relay/latest-local-proof.json.",
+    "Trusted local Memory relay proof receipt is missing at .wrangler/workflow-app/memory-relay/latest-local-proof.json.",
   redacted: true,
   required: true,
   requiredFor: [
@@ -144,10 +144,9 @@ const relayReadinessReceipt = (input: {
     sourceRoots: [
       {
         family: "agent-transcripts",
-        includeExtensionCount: 1,
+        includeExtensionCount: 0,
         privacyTier: "private",
-        runtime: "codex",
-        sourceId: "source:codex-transcripts",
+        sourceId: "source:agent-transcripts:joelclaw-index",
       },
     ],
   },

@@ -18,7 +18,7 @@ import type {
 } from "../src/app/domain/schemas.ts";
 
 const defaultLocalProofPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const defaultPreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultRunReceiptDir = ".wrangler/workflow-app/dream-runs";

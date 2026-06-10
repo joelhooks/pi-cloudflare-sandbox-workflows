@@ -12,13 +12,13 @@ import { DreamRelayLocalReadinessProofReceiptSchema } from "./workflow-app-dream
 import { DreamRelayProvisioningPreflightReceiptSchema } from "./workflow-app-dream-relay-provisioning-preflight.ts";
 
 const defaultLocalRelayReadinessPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
 const defaultLocalRelayStartupEnvPath =
-  ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+  ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
 const defaultProvisioningPreflightPath =
-  ".wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json";
+  ".wrangler/workflow-app/memory-relay/latest-provisioning-preflight.json";
 const defaultReceiptPath =
-  ".wrangler/workflow-app/dream-relay/latest-approved-provisioning-request.json";
+  ".wrangler/workflow-app/memory-relay/latest-approved-provisioning-request.json";
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());

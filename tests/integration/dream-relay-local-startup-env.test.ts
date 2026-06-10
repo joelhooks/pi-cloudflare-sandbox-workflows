@@ -23,24 +23,31 @@ describe("Memory relay local startup env", () => {
   it("writes a private startup env artifact and redacted receipt", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-env-"));
     const sourceRootsPath =
-      ".wrangler/workflow-app/dream-relay/source-roots.json";
+      ".wrangler/workflow-app/memory-relay/source-roots.json";
     const startupEnvPath =
-      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+      ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
     const receiptPath =
-      ".wrangler/workflow-app/dream-relay/latest-local-startup-env-receipt.json";
+      ".wrangler/workflow-app/memory-relay/latest-local-startup-env-receipt.json";
     const rawAuthorityRoot = "/private/tmp/dream-relay-sensitive-source";
     const logs: string[] = [];
 
     await writeJson(resolve(repoRoot, sourceRootsPath), [
       {
-        authorityRoot: rawAuthorityRoot,
+        authorityRoot: "joelclaw+index://sessions?machine=all&runtime=all",
         family: "agent-transcripts",
-        includeExtensions: [".jsonl"],
-        label: "Sensitive local transcripts",
+        label: "JoelClaw session index",
         privacyTier: "private",
-        runtime: "codex",
-        sourceId: "source:agent-transcripts:codex:test",
-        sourceSystem: "codex",
+        sourceId: "source:agent-transcripts:joelclaw-index:test",
+        sourceSystem: "joelclaw:session-index",
+      },
+      {
+        authorityRoot: rawAuthorityRoot,
+        family: "brain",
+        includeExtensions: [".svx"],
+        label: "Sensitive local brain notes",
+        privacyTier: "private",
+        sourceId: "source:brain:test",
+        sourceSystem: "local:brain",
       },
     ]);
 
@@ -83,7 +90,7 @@ describe("Memory relay local startup env", () => {
       envContainsRawRoot: true,
       receiptContainsRawRoot: false,
       receiptContainsToken: false,
-      sourceRootCount: 1,
+      sourceRootCount: 2,
       startupEnvMode: 0o600,
       tokenGenerated: true,
       tokenLength: 64,
@@ -96,21 +103,20 @@ describe("Memory relay local startup env", () => {
   it("preserves the existing token unless rotation is requested", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-env-"));
     const sourceRootsPath =
-      ".wrangler/workflow-app/dream-relay/source-roots.json";
+      ".wrangler/workflow-app/memory-relay/source-roots.json";
     const startupEnvPath =
-      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+      ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
     const existingToken = "existing-dream-relay-token";
 
     await writeJson(resolve(repoRoot, sourceRootsPath), [
       {
         authorityRoot: "/private/tmp/dream-relay-source",
-        family: "agent-transcripts",
-        includeExtensions: [".jsonl"],
-        label: "Sensitive local transcripts",
+        family: "brain",
+        includeExtensions: [".svx"],
+        label: "Sensitive local brain notes",
         privacyTier: "private",
-        runtime: "codex",
-        sourceId: "source:agent-transcripts:codex:test",
-        sourceSystem: "codex",
+        sourceId: "source:brain:test",
+        sourceSystem: "local:brain",
       },
     ]);
     await writeJson(resolve(repoRoot, startupEnvPath), {

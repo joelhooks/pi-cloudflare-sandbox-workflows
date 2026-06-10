@@ -140,6 +140,7 @@ export const MemoryReceiptRefSchema = z.object({
   artifactRef: ArtifactRefSchema.optional(),
   family: MemorySourceFamilySchema,
   hash: Sha256HexSchema.optional(),
+  machineId: z.string().min(1).optional(),
   receiptId: z.string().min(1),
   redactedLocator: z.string().min(1).optional(),
   runtime: MemoryRuntimeSchema.optional(),

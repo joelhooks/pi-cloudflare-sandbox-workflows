@@ -19,14 +19,21 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 const localStartupEnv = () => ({
   MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
     {
-      authorityRoot: rawAuthorityRoot,
+      authorityRoot: "joelclaw+index://sessions?machine=all&runtime=all",
       family: "agent-transcripts",
-      includeExtensions: [".jsonl"],
-      label: "Sensitive local transcripts",
+      label: "JoelClaw session index",
       privacyTier: "private",
-      runtime: "codex",
-      sourceId: "source:agent-transcripts:codex:approved-provisioning",
-      sourceSystem: "codex",
+      sourceId: "source:agent-transcripts:joelclaw-index:approved-provisioning",
+      sourceSystem: "joelclaw:session-index",
+    },
+    {
+      authorityRoot: rawAuthorityRoot,
+      family: "brain",
+      includeExtensions: [".svx"],
+      label: "Sensitive local brain notes",
+      privacyTier: "private",
+      sourceId: "source:brain:approved-provisioning",
+      sourceSystem: "local:brain",
     },
   ]),
   MEMORY_RELAY_TOKEN: relayToken,
@@ -54,7 +61,7 @@ const localReadiness = () => ({
   schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
   sourceRootCount: 1,
   startupEnvRef:
-    ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json",
+    ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json",
   status: "passed",
   tokenConfigured: true,
   usedConfiguredPort: false,
@@ -82,7 +89,7 @@ const provisioningPreflight = () => ({
   },
   localRelayProof: {
     missingSourceFamilies: [],
-    path: ".wrangler/workflow-app/dream-relay/latest-local-proof.json",
+    path: ".wrangler/workflow-app/memory-relay/latest-local-proof.json",
     rawCredentialsReturned: false,
     rawPathLeaked: false,
     rawPathsReturned: false,
@@ -93,7 +100,7 @@ const provisioningPreflight = () => ({
   localRelayReadiness: {
     checkedAt: "2026-06-10T10:45:00.000Z",
     healthzStatus: "passed",
-    path: ".wrangler/workflow-app/dream-relay/latest-local-readiness.json",
+    path: ".wrangler/workflow-app/memory-relay/latest-local-readiness.json",
     rawCredentialsReturned: false,
     rawPathsReturned: false,
     sourceRootCount: 1,
@@ -102,7 +109,7 @@ const provisioningPreflight = () => ({
     tokenConfigured: true,
   },
   localRelayStartup: {
-    envRef: ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json",
+    envRef: ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json",
     envSource: "artifact",
     host: "127.0.0.1",
     invalidEnv: [],
@@ -141,21 +148,21 @@ const writeFixtureFiles = async (repoRoot: string): Promise<void> => {
   await writeJson(
     resolve(
       repoRoot,
-      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json"
+      ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json"
     ),
     localStartupEnv()
   );
   await writeJson(
     resolve(
       repoRoot,
-      ".wrangler/workflow-app/dream-relay/latest-local-readiness.json"
+      ".wrangler/workflow-app/memory-relay/latest-local-readiness.json"
     ),
     localReadiness()
   );
   await writeJson(
     resolve(
       repoRoot,
-      ".wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json"
+      ".wrangler/workflow-app/memory-relay/latest-provisioning-preflight.json"
     ),
     provisioningPreflight()
   );

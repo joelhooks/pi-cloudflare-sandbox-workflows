@@ -13,9 +13,9 @@ import {
 } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultLocalRelayStartupEnvPath =
-  ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+  ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
 const defaultReceiptPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());
 

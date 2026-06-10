@@ -32,6 +32,7 @@ import type {
   MemorySignalDocument,
 } from "../src/cartridges/memory-fabric/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/memory-fabric/source-profile.ts";
+import { trustedJoelClawSessionMachineCoverageFor } from "../src/cartridges/memory-fabric/trusted-joelclaw-session-source.ts";
 import {
   startTrustedLocalMemoryRelayHttpServer,
   trustedLocalMemoryRelayHttpConfigFromEnv,
@@ -39,9 +40,9 @@ import {
 } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const DEFAULT_SOURCE_ROOTS_PATH =
-  ".wrangler/workflow-app/dream-relay/source-roots.json";
+  ".wrangler/workflow-app/memory-relay/source-roots.json";
 const DEFAULT_RECEIPT_PATH =
-  ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const DEFAULT_DOCS_API_BASE_URL = "https://joelclaw.com/api/docs";
 const DEFAULT_QUERY = dreamTranscriptReviewSourceProfile.defaultQuery;
 const runId = `run:dream-relay-local-proof:${new Date()
@@ -75,6 +76,21 @@ const SourceFamilyCoverageSchema = z.object({
   status: z.enum(["captured", "missing"]),
 });
 
+const MACHINE_COVERAGE_CAVEAT =
+  "Machine coverage is reported from index-returned agent-transcripts receipts only. Gaps are JoelClaw ingest work and surface as report caveats; coverage never gates the run.";
+
+const MachineCoverageSchema = z.object({
+  caveat: z.literal(MACHINE_COVERAGE_CAVEAT),
+  machines: z
+    .array(
+      z.object({
+        machineId: z.string().min(1),
+        receiptCount: z.number().int().min(0),
+      })
+    )
+    .default([]),
+});
+
 const LocalRelayProofReceiptSchema = z.object({
   capture: z.object({
     artifactCaptureKind: z.literal("artifact"),
@@ -87,6 +103,7 @@ const LocalRelayProofReceiptSchema = z.object({
     edgeCount: z.number().int().min(0),
     nodeCount: z.number().int().min(0),
   }),
+  machineCoverage: MachineCoverageSchema,
   query: z.string().min(1),
   rawCredentialsReturned: z.literal(false),
   rawPathLeaked: z.literal(false),
@@ -516,9 +533,8 @@ const run = async (): Promise<void> => {
       );
     }
 
-    const searchReceiptCounts = receiptCountsFor(
-      search.hits.flatMap((hit) => hit.receipts)
-    );
+    const searchReceipts = search.hits.flatMap((hit) => hit.receipts);
+    const searchReceiptCounts = receiptCountsFor(searchReceipts);
     const hydrationReceiptCounts = receiptCountsFor(
       hydration.hydrated.map((item) => item.receipt)
     );
@@ -536,6 +552,10 @@ const run = async (): Promise<void> => {
       correlation: {
         edgeCount: correlation.edges.length,
         nodeCount: correlation.nodes.length,
+      },
+      machineCoverage: {
+        caveat: MACHINE_COVERAGE_CAVEAT,
+        machines: trustedJoelClawSessionMachineCoverageFor(searchReceipts),
       },
       query,
       rawCredentialsReturned: readiness.rawCredentialsReturned,
@@ -566,7 +586,7 @@ const run = async (): Promise<void> => {
       },
       sourceFamilyCoverage: sourceFamilyCoverageFor({
         evidenceReceipts: [
-          ...search.hits.flatMap((hit) => hit.receipts),
+          ...searchReceipts,
           ...hydration.hydrated.map((item) => item.receipt),
         ],
         expectedSourceFamilies: dreamTranscriptReviewSourceFamilies,

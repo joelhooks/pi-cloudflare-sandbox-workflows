@@ -137,24 +137,13 @@ describe("trusted docs API Dream memory retrieval", () => {
   it("keeps docs/pdf-brain from monopolizing mixed Dream retrieval", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "dream-docs-balance-"));
     try {
-      const agentRoot = join(tempRoot, "agent");
       const brainRoot = join(tempRoot, "brain");
-      await Promise.all([
-        mkdir(agentRoot, { recursive: true }),
-        mkdir(brainRoot, { recursive: true }),
-      ]);
-      await Promise.all([
-        writeFile(
-          join(agentRoot, "codex.md"),
-          "codex transcript: agent memory retrieval dream workflow relay.",
-          "utf-8"
-        ),
-        writeFile(
-          join(brainRoot, "decision.md"),
-          "brain note: memory retrieval for dynamic dream workflow design.",
-          "utf-8"
-        ),
-      ]);
+      await mkdir(brainRoot, { recursive: true });
+      await writeFile(
+        join(brainRoot, "decision.md"),
+        "brain note: memory retrieval for dynamic dream workflow design.",
+        "utf-8"
+      );
 
       const fetcher: typeof fetch = (input) => {
         const url = urlForFetchInput(input);
@@ -184,16 +173,36 @@ describe("trusted docs API Dream memory retrieval", () => {
           fetch: fetcher,
         },
         now: () => "2026-06-09T10:00:00.000Z",
+        sessionBridgeCommand: () =>
+          Promise.resolve({
+            stdout: JSON.stringify({
+              ok: true,
+              result: {
+                hits: [
+                  {
+                    id: "chunk-1",
+                    machineId: "blaine",
+                    role: "assistant",
+                    sessionId: "session-1",
+                    snippets: [
+                      "codex transcript: agent memory retrieval dream workflow relay.",
+                    ],
+                    source: "typesense",
+                    startedAt: "2026-06-09T09:00:00.000Z",
+                  },
+                ],
+                typesense: { found: 1, returned: 1 },
+              },
+            }),
+          }),
         sourceRoots: [
           {
-            authorityRoot: agentRoot,
+            authorityRoot: "joelclaw+index://sessions?machine=all",
             family: "agent-transcripts",
-            includeExtensions: [".md"],
-            label: "Codex transcripts",
+            label: "JoelClaw session index",
             privacyTier: "private",
-            runtime: "codex",
             sourceId: "source:test-agent-transcripts",
-            sourceSystem: "codex",
+            sourceSystem: "joelclaw:session-index",
           },
           {
             authorityRoot: brainRoot,

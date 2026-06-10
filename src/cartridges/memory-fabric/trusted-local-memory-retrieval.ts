@@ -243,6 +243,15 @@ const readSourceCandidates = async (input: {
     };
   }
 
+  if (input.sourceRoot.family === "agent-transcripts") {
+    return {
+      candidates,
+      skippedSources: [
+        `${input.sourceRoot.sourceId}:transcript-file-roots-removed`,
+      ],
+    };
+  }
+
   try {
     const rootStats = await stat(input.sourceRoot.authorityRoot);
     if (!rootStats.isDirectory()) {
@@ -570,7 +579,6 @@ const docsApiHydrate = async (input: {
 
 const joelClawSessionSearch = async (input: {
   readonly command: TrustedJoelClawSessionBridgeCommand | undefined;
-  readonly maxFilesPerSource: number;
   readonly maxHits: number;
   readonly now: string;
   readonly query: string;
@@ -604,7 +612,6 @@ const joelClawSessionSearch = async (input: {
       ...(input.command === undefined ? {} : { command: input.command }),
       family: sourceRoot.family,
       label: sourceRoot.label,
-      maxFiles: input.maxFilesPerSource,
       maxHits: input.maxHits,
       now: input.now,
       query: input.query,
@@ -1170,8 +1177,6 @@ export const createTrustedLocalMemoryRetrievalAdapter = (
       });
       const joelClawSearch = await joelClawSessionSearch({
         command: config.sessionBridgeCommand,
-        maxFilesPerSource:
-          config.maxFilesPerSource ?? DEFAULT_MAX_FILES_PER_SOURCE,
         maxHits: input.maxHits,
         now: generatedAt,
         query: input.query,

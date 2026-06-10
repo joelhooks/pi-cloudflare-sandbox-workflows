@@ -10,11 +10,11 @@ import { z } from "zod";
 import { trustedLocalMemoryRelayHttpConfigFromEnv } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
 
 const defaultSourceRootsPath =
-  ".wrangler/workflow-app/dream-relay/source-roots.json";
+  ".wrangler/workflow-app/memory-relay/source-roots.json";
 const defaultStartupEnvPath =
-  ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+  ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
 const defaultReceiptPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-startup-env-receipt.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-startup-env-receipt.json";
 const defaultDocsApiBaseUrl = "https://joelclaw.com/api/docs";
 const defaultDocsApiUserAgent =
   "pi-cloudflare-sandbox-workflows-dream-relay/0.0.0";

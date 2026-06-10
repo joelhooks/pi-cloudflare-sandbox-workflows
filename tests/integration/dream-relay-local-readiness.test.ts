@@ -15,9 +15,9 @@ describe("Memory relay local readiness", () => {
   it("boots from the local startup env and writes a redacted healthz proof", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-ready-"));
     const startupEnvPath =
-      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+      ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
     const receiptPath =
-      ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
+      ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
     const rawAuthorityRoot = "/private/tmp/dream-relay-readiness-source";
     const relayToken = "local-readiness-relay-token";
     const logs: string[] = [];
@@ -25,14 +25,21 @@ describe("Memory relay local readiness", () => {
     await writeJson(resolve(repoRoot, startupEnvPath), {
       MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
         {
-          authorityRoot: rawAuthorityRoot,
+          authorityRoot: "joelclaw+index://sessions?machine=all&runtime=all",
           family: "agent-transcripts",
-          includeExtensions: [".jsonl"],
-          label: "Sensitive local transcripts",
+          label: "JoelClaw session index",
           privacyTier: "private",
-          runtime: "codex",
-          sourceId: "source:agent-transcripts:codex:readiness",
-          sourceSystem: "codex",
+          sourceId: "source:agent-transcripts:joelclaw-index:readiness",
+          sourceSystem: "joelclaw:session-index",
+        },
+        {
+          authorityRoot: rawAuthorityRoot,
+          family: "brain",
+          includeExtensions: [".svx"],
+          label: "Sensitive local brain notes",
+          privacyTier: "private",
+          sourceId: "source:brain:readiness",
+          sourceSystem: "local:brain",
         },
       ]),
       MEMORY_RELAY_TOKEN: relayToken,
@@ -69,7 +76,7 @@ describe("Memory relay local readiness", () => {
       healthzStatus: "passed",
       rawCredentialsReturned: false,
       rawPathsReturned: false,
-      sourceRootCount: 1,
+      sourceRootCount: 2,
       status: "passed",
       supportedOperationCount: 6,
       tokenConfigured: true,

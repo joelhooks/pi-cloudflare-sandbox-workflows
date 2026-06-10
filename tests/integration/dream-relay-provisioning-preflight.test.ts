@@ -21,14 +21,12 @@ const approvalSignoff =
 const localRelayStartupEnv = {
   MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
     {
-      authorityRoot: "/tmp/dream-relay-test",
+      authorityRoot: "joelclaw+index://sessions?machine=all&runtime=all",
       family: "agent-transcripts",
-      includeExtensions: [".jsonl"],
-      label: "Pi transcripts",
+      label: "JoelClaw session index",
       privacyTier: "private",
-      runtime: "pi",
-      sourceId: "source:agent-transcripts:pi:blaine",
-      sourceSystem: "pi",
+      sourceId: "source:agent-transcripts:joelclaw-index",
+      sourceSystem: "joelclaw:session-index",
     },
   ]),
   MEMORY_RELAY_TOKEN: "relay-secret",
@@ -55,7 +53,7 @@ const localRelayReadinessProof = JSON.stringify({
   schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
   sourceRootCount: 1,
   startupEnvRef:
-    ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json",
+    ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json",
   status: "passed",
   tokenConfigured: true,
   usedConfiguredPort: false,
@@ -703,9 +701,9 @@ describe("Memory relay provisioning preflight", () => {
   it("loads the local relay startup env artifact without leaking its token or raw roots", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-preflight-"));
     const localRelayReadinessPath =
-      ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
+      ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
     const localRelayStartupEnvPath =
-      ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
+      ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
     const logs: string[] = [];
     const rawAuthorityRoot = "/private/tmp/dream-relay-preflight-source";
     const relayToken = "super-secret-local-relay-token";
@@ -723,14 +721,21 @@ describe("Memory relay provisioning preflight", () => {
     await writeJson(resolve(repoRoot, localRelayStartupEnvPath), {
       MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
         {
-          authorityRoot: rawAuthorityRoot,
+          authorityRoot: "joelclaw+index://sessions?machine=all&runtime=all",
           family: "agent-transcripts",
-          includeExtensions: [".jsonl"],
-          label: "Sensitive local transcripts",
+          label: "JoelClaw session index",
           privacyTier: "private",
-          runtime: "codex",
-          sourceId: "source:agent-transcripts:codex:test",
-          sourceSystem: "codex",
+          sourceId: "source:agent-transcripts:joelclaw-index:test",
+          sourceSystem: "joelclaw:session-index",
+        },
+        {
+          authorityRoot: rawAuthorityRoot,
+          family: "brain",
+          includeExtensions: [".svx"],
+          label: "Sensitive local brain notes",
+          privacyTier: "private",
+          sourceId: "source:brain:test",
+          sourceSystem: "local:brain",
         },
       ]),
       MEMORY_RELAY_TOKEN: relayToken,
@@ -774,7 +779,7 @@ describe("Memory relay provisioning preflight", () => {
       envRef: localRelayStartupEnvPath,
       envSource: "artifact",
       readinessStatus: "passed",
-      sourceRootCount: 1,
+      sourceRootCount: 2,
       startupStatus: "ready",
       status: "ready-for-approved-provisioning",
       tokenConfigured: true,

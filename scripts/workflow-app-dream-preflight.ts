@@ -27,7 +27,7 @@ import { TrustedLocalMemoryRelayReadinessReceiptSchema } from "../src/cartridges
 const defaultReceiptPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
-  ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+  ".wrangler/workflow-app/memory-relay/latest-local-proof.json";
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
 const expectedCartridgePackageId = "workflow/memory-fabric";

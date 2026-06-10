@@ -139,27 +139,13 @@ describe("trusted local Memory relay HTTP server", () => {
     try {
       const brainRoot = join(root, "brain");
       const cloudflareRoot = join(root, "cloudflare");
-      const codexRoot = join(root, "codex");
-      const piRoot = join(root, "pi");
       const repoOutputsRoot = join(root, "repo-outputs");
-      const rawRoots = [
-        brainRoot,
-        cloudflareRoot,
-        codexRoot,
-        piRoot,
-        repoOutputsRoot,
-        root,
-      ];
+      const rawRoots = [brainRoot, cloudflareRoot, repoOutputsRoot, root];
+      const rawTranscriptPath = "/Users/joel/.pi/agent/sessions/session.jsonl";
 
       await mkdir(brainRoot, { recursive: true });
       await mkdir(cloudflareRoot, { recursive: true });
-      await mkdir(codexRoot, { recursive: true });
-      await mkdir(piRoot, { recursive: true });
       await mkdir(repoOutputsRoot, { recursive: true });
-      await writeTextFile({
-        content: "codex session transcript",
-        path: join(codexRoot, "codex-session.jsonl"),
-      });
       await writeTextFile({
         content: "cloudflare run artifact",
         path: join(cloudflareRoot, "cloudflare-run.json"),
@@ -167,14 +153,6 @@ describe("trusted local Memory relay HTTP server", () => {
       await writeTextFile({
         content: "project brain update",
         path: join(brainRoot, "dream-memory.svx"),
-      });
-      await writeTextFile({
-        content: "pi session transcript 1",
-        path: join(piRoot, "pi-session-1.jsonl"),
-      });
-      await writeTextFile({
-        content: "pi session transcript 2",
-        path: join(piRoot, "pi-session-2.jsonl"),
       });
       await writeTextFile({
         content: "dream workflow report canon",
@@ -185,26 +163,37 @@ describe("trusted local Memory relay HTTP server", () => {
         host: "127.0.0.1",
         memoryFabric: {
           maxFilesPerSource: 100,
+          sessionBridgeCommand: () =>
+            Promise.resolve({
+              stdout: JSON.stringify({
+                ok: true,
+                result: {
+                  hits: [
+                    {
+                      id: "chunk-1",
+                      machineId: "flagg",
+                      role: "assistant",
+                      runId: "run-1",
+                      sessionId: "session-1",
+                      snippets: [
+                        `codex transcript from ${rawTranscriptPath} indexed by JoelClaw`,
+                      ],
+                      source: "typesense",
+                      startedAt: timestamp,
+                    },
+                  ],
+                  typesense: { found: 1, returned: 1 },
+                },
+              }),
+            }),
           sourceRoots: [
             {
-              authorityRoot: piRoot,
+              authorityRoot: "joelclaw+index://sessions?machine=all",
               family: "agent-transcripts",
-              includeExtensions: [".jsonl"],
-              label: "Pi transcripts",
+              label: "JoelClaw session index",
               privacyTier: "private",
-              runtime: "pi",
-              sourceId: "source:pi-transcripts",
-              sourceSystem: "local:pi-transcripts",
-            },
-            {
-              authorityRoot: codexRoot,
-              family: "agent-transcripts",
-              includeExtensions: [".jsonl"],
-              label: "Codex transcripts",
-              privacyTier: "private",
-              runtime: "codex",
-              sourceId: "source:codex-transcripts",
-              sourceSystem: "local:codex-transcripts",
+              sourceId: "source:agent-transcripts:joelclaw-index",
+              sourceSystem: "joelclaw:session-index",
             },
             {
               authorityRoot: brainRoot,
@@ -367,9 +356,11 @@ describe("trusted local Memory relay HTTP server", () => {
           rawPathLeaked: rawRoots.some((rawRoot) =>
             serialized.includes(rawRoot)
           ),
+          rawTranscriptPathLeaked: serialized.includes(rawTranscriptPath),
           readinessSchema: readiness.schemaVersion,
           responseLeaksToken: serialized.includes(relayToken),
           searchHitCount: searchEnvelope.document.hits.length,
+          searchReceiptMachineId: receipt.machineId,
           searchReceiptSourceId: receipt.sourceId,
           sourceRootCount: readiness.adapter.sourceRoots.length,
           supportedOperations: readiness.supportedOperations,
@@ -383,11 +374,13 @@ describe("trusted local Memory relay HTTP server", () => {
           hydratedFullTranscriptReturned: false,
           operationCatalogCount: 6,
           rawPathLeaked: false,
+          rawTranscriptPathLeaked: false,
           readinessSchema: "trusted.memory-relay.readiness.v1",
           responseLeaksToken: false,
           searchHitCount: 1,
-          searchReceiptSourceId: "source:codex-transcripts",
-          sourceRootCount: 5,
+          searchReceiptMachineId: "flagg",
+          searchReceiptSourceId: "source:agent-transcripts:joelclaw-index",
+          sourceRootCount: 4,
           supportedOperations: [
             "capture-run",
             "capture-artifact",

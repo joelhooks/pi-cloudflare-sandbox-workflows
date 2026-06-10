@@ -11,10 +11,8 @@ import type {
 import type { MemorySearchHit, MemoryReceiptRef } from "./schemas.ts";
 
 export interface TrustedJoelClawSessionSourceConfig {
-  readonly machineId: string;
-  readonly maxFiles?: number;
+  readonly machine: string;
   readonly runtime: JoelClawSessionRuntime;
-  readonly sshTarget: string;
 }
 
 export interface TrustedJoelClawSessionBridgeCommandInput {
@@ -40,10 +38,17 @@ export interface TrustedJoelClawSessionSearchResult {
   readonly skippedSources: string[];
 }
 
-const JOELCLAW_SSH_PROTOCOL = "joelclaw+ssh:";
+export interface TrustedJoelClawSessionMachineCoverage {
+  readonly machineId: string;
+  readonly receiptCount: number;
+}
+
+const JOELCLAW_INDEX_PROTOCOL = "joelclaw+index:";
+const DEFAULT_MACHINE_FILTER = "all";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER_BYTES = 4_000_000;
 const REDACTED_TOKEN = "[redacted-token]";
+const UNKNOWN_MACHINE_ID = "unknown";
 
 const JoelClawSessionRuntimeSchema = z.enum([
   "all",
@@ -66,6 +71,7 @@ const JoelClawSessionSearchOutputSchema = z.object({
           id: z.string().min(1).optional(),
           machineId: z.string().min(1).optional(),
           role: z.string().min(1).optional(),
+          runId: z.string().min(1).optional(),
           sessionId: z.string().min(1).optional(),
           snippets: z.array(z.string()).default([]),
           source: z.string().min(1).optional(),
@@ -73,14 +79,13 @@ const JoelClawSessionSearchOutputSchema = z.object({
         })
       )
       .default([]),
-    ssh: z
+    typesense: z
       .object({
-        emittedHits: z.number().int().min(0).optional(),
         found: z.number().int().min(0).optional(),
-        rawReturned: z.number().int().min(0).optional(),
-        searchedFiles: z.number().int().min(0).optional(),
+        returned: z.number().int().min(0).optional(),
       })
       .optional(),
+    typesenseUnavailable: z.string().min(1).optional(),
   }),
 });
 
@@ -116,15 +121,6 @@ const stripAnsi = (input: string): string => {
   return output;
 };
 
-const parsePositiveInt = (input: string | null): number | undefined => {
-  if (input === null || input.length === 0 || !/^\d+$/u.test(input)) {
-    return undefined;
-  }
-
-  const parsed = Number.parseInt(input, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-};
-
 const runtimeFor = (
   runtime: MemoryRuntime | undefined
 ): JoelClawSessionRuntime => {
@@ -135,6 +131,12 @@ const runtimeFor = (
   return "all";
 };
 
+/**
+ * Parses a JoelClaw index authority root of the form
+ * `joelclaw+index://sessions?machine=all&runtime=all`. The index is the only
+ * transcript substrate: cross-machine coverage comes from what the index
+ * returns, never from walking per-machine filesystems.
+ */
 export const trustedJoelClawSessionSourceForAuthorityRoot = (
   authorityRoot: string,
   runtime?: MemoryRuntime
@@ -146,26 +148,22 @@ export const trustedJoelClawSessionSourceForAuthorityRoot = (
     return null;
   }
 
-  if (url.protocol !== JOELCLAW_SSH_PROTOCOL) {
+  if (url.protocol !== JOELCLAW_INDEX_PROTOCOL) {
     return null;
   }
 
   const parsedRuntime = JoelClawSessionRuntimeSchema.safeParse(
     url.searchParams.get("runtime") ?? runtimeFor(runtime)
   );
-  const sshTarget = url.searchParams.get("sshTarget") ?? url.hostname;
-  const machineId = url.searchParams.get("machine") ?? url.hostname;
-  const maxFiles = parsePositiveInt(url.searchParams.get("maxFiles"));
+  const machine = url.searchParams.get("machine") ?? DEFAULT_MACHINE_FILTER;
 
-  if (sshTarget.length === 0 || machineId.length === 0) {
+  if (machine.length === 0) {
     return null;
   }
 
   return {
-    machineId,
-    ...(maxFiles === undefined ? {} : { maxFiles }),
+    machine,
     runtime: parsedRuntime.success ? parsedRuntime.data : runtimeFor(runtime),
-    sshTarget,
   };
 };
 
@@ -181,7 +179,6 @@ const defaultCommand: TrustedJoelClawSessionBridgeCommand = (input) =>
 
 const searchArgs = (input: {
   readonly limit: number;
-  readonly maxFiles: number;
   readonly query: string;
   readonly source: TrustedJoelClawSessionSourceConfig;
 }): string[] => [
@@ -189,23 +186,18 @@ const searchArgs = (input: {
   "search",
   input.query,
   "--source",
-  "ssh",
+  "typesense",
   "--machine",
-  input.source.machineId,
-  "--ssh-target",
-  input.source.sshTarget,
+  input.source.machine,
   "--runtime",
   input.source.runtime,
   "--limit",
   String(input.limit),
-  "--max-files",
-  String(input.maxFiles),
 ];
 
 const runSearch = async (input: {
   readonly command?: TrustedJoelClawSessionBridgeCommand;
   readonly limit: number;
-  readonly maxFiles: number;
   readonly query: string;
   readonly source: TrustedJoelClawSessionSourceConfig;
 }) => {
@@ -282,7 +274,8 @@ const receiptFor = (input: {
   return {
     family: input.family,
     hash: input.hash,
-    receiptId: `receipt:${input.sourceId}:joelclaw-ssh:${encodeURIComponent(stableId)}`,
+    machineId: input.sourceMachineId,
+    receiptId: `receipt:${input.sourceId}:joelclaw-index:${encodeURIComponent(stableId)}`,
     redactedLocator: `redacted://joelclaw-sessions/${encodeURIComponent(input.sourceMachineId)}/${encodeURIComponent(stableId)}`,
     ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
     sourceId: input.sourceId,
@@ -295,11 +288,33 @@ const receiptFor = (input: {
 const scoreFor = (hit: JoelClawSessionSearchHit, index: number): number =>
   Math.max(1, hit.snippets.length) + 1 / (index + 1);
 
+/**
+ * Derives per-machine receipt counts from what the index returned. This is a
+ * reported coverage caveat for readiness/coverage receipts — never a gate.
+ */
+export const trustedJoelClawSessionMachineCoverageFor = (
+  receipts: readonly MemoryReceiptRef[]
+): TrustedJoelClawSessionMachineCoverage[] => {
+  const counts = new Map<string, number>();
+
+  for (const receipt of receipts) {
+    if (receipt.family !== "agent-transcripts") {
+      continue;
+    }
+
+    const machineId = receipt.machineId ?? UNKNOWN_MACHINE_ID;
+    counts.set(machineId, (counts.get(machineId) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([machineId, receiptCount]) => ({ machineId, receiptCount }))
+    .toSorted((left, right) => left.machineId.localeCompare(right.machineId));
+};
+
 export const searchTrustedJoelClawSessionSource = async (input: {
   readonly command?: TrustedJoelClawSessionBridgeCommand;
   readonly family: MemorySourceFamily;
   readonly label: string;
-  readonly maxFiles: number;
   readonly maxHits: number;
   readonly now: string;
   readonly query: string;
@@ -311,10 +326,17 @@ export const searchTrustedJoelClawSessionSource = async (input: {
     const result = await runSearch({
       ...(input.command === undefined ? {} : { command: input.command }),
       limit: input.maxHits,
-      maxFiles: input.source.maxFiles ?? input.maxFiles,
       query: input.query,
       source: input.source,
     });
+    if (result.result.typesenseUnavailable !== undefined) {
+      return {
+        hits: [],
+        hydrations: [],
+        skippedSources: [`${input.sourceId}:joelclaw-index-unavailable`],
+      };
+    }
+
     const hits: MemorySearchHit[] = [];
     const hydrations: TrustedJoelClawSessionHydrationRecord[] = [];
 
@@ -322,10 +344,11 @@ export const searchTrustedJoelClawSessionSource = async (input: {
       const redactedExcerpt = redactJoelClawSessionText(
         hit.snippets.join(" ")
       ).slice(0, 240);
+      const sourceMachineId = hit.machineId ?? UNKNOWN_MACHINE_ID;
       const hash = sha256Hex(
         JSON.stringify({
           excerpt: redactedExcerpt,
-          machineId: hit.machineId ?? input.source.machineId,
+          machineId: sourceMachineId,
           role: hit.role,
           sessionId: hitStableId(hit, index),
           sourceId: input.sourceId,
@@ -338,9 +361,9 @@ export const searchTrustedJoelClawSessionSource = async (input: {
         index,
         runtime: input.runtime,
         sourceId: input.sourceId,
-        sourceMachineId: hit.machineId ?? input.source.machineId,
+        sourceMachineId,
       });
-      const summary = `Matched remote JoelClaw session memory in ${input.label}.`;
+      const summary = `Matched indexed JoelClaw session memory in ${input.label}.`;
 
       hits.push({
         horizon: horizonFor(hit.startedAt, input.now) as MemoryCoverageHorizon,
@@ -353,9 +376,9 @@ export const searchTrustedJoelClawSessionSource = async (input: {
         receipt,
         redactedExcerpt:
           redactedExcerpt.length === 0
-            ? "Remote JoelClaw session hit returned metadata without a redacted excerpt."
+            ? "Indexed JoelClaw session hit returned metadata without a redacted excerpt."
             : redactedExcerpt,
-        summary: `Hydrated redacted remote JoelClaw session evidence for ${input.sourceId}.`,
+        summary: `Hydrated redacted indexed JoelClaw session evidence for ${input.sourceId}.`,
       });
     }
 
@@ -368,7 +391,7 @@ export const searchTrustedJoelClawSessionSource = async (input: {
     return {
       hits: [],
       hydrations: [],
-      skippedSources: [`${input.sourceId}:joelclaw-ssh-unavailable`],
+      skippedSources: [`${input.sourceId}:joelclaw-index-unavailable`],
     };
   }
 };
