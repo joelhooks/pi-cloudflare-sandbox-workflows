@@ -15,6 +15,7 @@
     "app:dream:preflight": "tsx scripts/workflow-app-dream-preflight.ts",
     "app:dream:relay": "tsx scripts/trusted-local-dream-memory-relay.ts",
     "app:dream:relay:local-env": "tsx scripts/workflow-app-dream-relay-local-startup-env.ts",
+    "app:dream:relay:readiness": "tsx scripts/workflow-app-dream-relay-local-readiness.ts",
     "app:dream:relay:proof": "tsx scripts/trusted-local-dream-memory-relay-proof.ts",
     "app:dream:relay:provisioning-preflight": "tsx scripts/workflow-app-dream-relay-provisioning-preflight.ts",
     "app:dream:run": "tsx scripts/workflow-app-dream-run.ts",

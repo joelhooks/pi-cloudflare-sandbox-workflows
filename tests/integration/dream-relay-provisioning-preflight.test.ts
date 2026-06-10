@@ -33,6 +33,33 @@ const localRelayStartupEnv = {
   ]),
   DREAM_MEMORY_RELAY_TOKEN: "relay-secret",
 };
+const localRelayReadinessProof = JSON.stringify({
+  boundHost: "127.0.0.1",
+  boundPort: 49_001,
+  checkedAt: "2026-06-09T10:00:00.000Z",
+  configuredHost: "127.0.0.1",
+  configuredPort: 8789,
+  healthz: {
+    authRequired: true,
+    httpStatus: 200,
+    rawCredentialsReturned: false,
+    rawPathsReturned: false,
+    schemaVersion: "trusted.dream-memory-relay.readiness.v1",
+    sourceRootCount: 1,
+    status: "passed",
+    supportedOperationCount: 10,
+  },
+  rawCredentialsReturned: false,
+  rawPathsReturned: false,
+  redacted: true,
+  schemaVersion: "trusted.dream-memory-relay.local-readiness-proof.v1",
+  sourceRootCount: 1,
+  startupEnvRef:
+    ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json",
+  status: "passed",
+  tokenConfigured: true,
+  usedConfiguredPort: false,
+});
 
 const machineCoverage = [
   {
@@ -442,6 +469,8 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightText: livePreflightBlocked,
       localRelayProofPath: "local-proof.json",
       localRelayProofText: localRelayProof,
+      localRelayReadinessPath: "local-readiness.json",
+      localRelayReadinessText: localRelayReadinessProof,
       localRelayStartupEnv,
       networkTools: [
         {
@@ -459,6 +488,7 @@ describe("Dream relay provisioning preflight", () => {
       healthzAction: receipt.recommendedNextActions.includes(
         "Provision an approved HTTPS relay endpoint and verify authenticated /healthz."
       ),
+      localReadinessStatus: receipt.localRelayReadiness.status,
       localRelayStartup: {
         sourceRootCount: receipt.localRelayStartup.sourceRootCount,
         status: receipt.localRelayStartup.status,
@@ -470,6 +500,7 @@ describe("Dream relay provisioning preflight", () => {
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalStatus: "approved",
       healthzAction: true,
+      localReadinessStatus: "passed",
       localRelayStartup: {
         sourceRootCount: 1,
         status: "ready",
@@ -477,6 +508,45 @@ describe("Dream relay provisioning preflight", () => {
       },
       signoffProvided: true,
       status: "ready-for-approved-provisioning",
+    });
+  });
+
+  it("keeps approved provisioning blocked until local relay readiness is proven", () => {
+    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+      approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
+      approvalSignoff,
+      checkedAt: "2026-06-09T10:00:00.000Z",
+      livePreflightPath: "dream-preflight.json",
+      livePreflightText: livePreflightBlocked,
+      localRelayProofPath: "local-proof.json",
+      localRelayProofText: localRelayProof,
+      localRelayStartupEnv,
+      networkTools: [
+        {
+          available: true,
+          command: "ngrok",
+          path: "/opt/homebrew/bin/ngrok",
+        },
+      ],
+      visionText: visionWithSignoffRule,
+    });
+    const stepsById = new Map(
+      receipt.provisioningPlan.steps.map((step) => [step.stepId, step])
+    );
+
+    expect({
+      readinessAction: receipt.recommendedNextActions.includes(
+        "Run pnpm app:dream:relay:readiness to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz."
+      ),
+      readinessStatus: receipt.localRelayReadiness.status,
+      status: receipt.status,
+      verifyReadinessBlockers: stepsById.get("verify-local-relay-readiness")
+        ?.blockedBy,
+    }).toStrictEqual({
+      readinessAction: true,
+      readinessStatus: "missing",
+      status: "blocked",
+      verifyReadinessBlockers: ["local-relay-readiness-not-passed"],
     });
   });
 
@@ -540,6 +610,8 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightText: livePreflightBlocked,
       localRelayProofPath: "local-proof.json",
       localRelayProofText: localRelayProof,
+      localRelayReadinessPath: "local-readiness.json",
+      localRelayReadinessText: localRelayReadinessProof,
       localRelayStartupEnv,
       networkTools: [
         {
@@ -721,6 +793,8 @@ describe("Dream relay provisioning preflight", () => {
 
   it("loads the local relay startup env artifact without leaking its token or raw roots", async () => {
     const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-preflight-"));
+    const localRelayReadinessPath =
+      ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
     const localRelayStartupEnvPath =
       ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
     const logs: string[] = [];
@@ -733,6 +807,10 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightBlocked
     );
     await writeFile(resolve(repoRoot, "local-proof.json"), localRelayProof);
+    await writeJson(
+      resolve(repoRoot, localRelayReadinessPath),
+      JSON.parse(localRelayReadinessProof)
+    );
     await writeJson(resolve(repoRoot, localRelayStartupEnvPath), {
       DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
         {
@@ -755,6 +833,7 @@ describe("Dream relay provisioning preflight", () => {
         `--approval-signoff=${approvalSignoff}`,
         "--live-preflight-path=dream-preflight.json",
         "--local-relay-proof-path=local-proof.json",
+        `--local-relay-readiness-path=${localRelayReadinessPath}`,
         `--local-relay-startup-env-path=${localRelayStartupEnvPath}`,
         "--receipt-path=receipt.json",
       ],
@@ -777,6 +856,7 @@ describe("Dream relay provisioning preflight", () => {
     expect({
       envRef: receipt.localRelayStartup.envRef,
       envSource: receipt.localRelayStartup.envSource,
+      readinessStatus: receipt.localRelayReadiness.status,
       sourceRootCount: receipt.localRelayStartup.sourceRootCount,
       startupStatus: receipt.localRelayStartup.status,
       status: receipt.status,
@@ -784,6 +864,7 @@ describe("Dream relay provisioning preflight", () => {
     }).toStrictEqual({
       envRef: localRelayStartupEnvPath,
       envSource: "artifact",
+      readinessStatus: "passed",
       sourceRootCount: 1,
       startupStatus: "ready",
       status: "ready-for-approved-provisioning",

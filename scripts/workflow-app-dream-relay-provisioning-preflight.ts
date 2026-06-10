@@ -14,6 +14,8 @@ const defaultLivePreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
 const defaultLocalRelayProofPath =
   ".wrangler/workflow-app/dream-relay/latest-local-proof.json";
+const defaultLocalRelayReadinessPath =
+  ".wrangler/workflow-app/dream-relay/latest-local-readiness.json";
 const defaultLocalRelayStartupEnvPath =
   ".wrangler/workflow-app/dream-relay/local-relay-startup-env.json";
 const defaultReceiptPath =
@@ -206,6 +208,23 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     sourceRootCount: z.number().int().min(0).optional(),
     status: z.enum(["failed", "missing", "passed"]),
   }),
+  localRelayReadiness: z.object({
+    boundHost: z.string().min(1).optional(),
+    boundPort: z.number().int().min(1).optional(),
+    checkedAt: z.string().min(1).optional(),
+    configuredHost: z.string().min(1).optional(),
+    configuredPort: z.number().int().min(1).optional(),
+    healthzStatus: z.enum(["failed", "missing", "passed"]),
+    path: z.string().min(1),
+    rawCredentialsReturned: z.literal(false).optional(),
+    rawPathsReturned: z.literal(false).optional(),
+    sourceRootCount: z.number().int().min(0).optional(),
+    startupEnvRef: z.string().min(1).optional(),
+    status: z.enum(["failed", "missing", "passed"]),
+    supportedOperationCount: z.number().int().min(0).optional(),
+    tokenConfigured: z.boolean().optional(),
+    usedConfiguredPort: z.boolean().optional(),
+  }),
   localRelayStartup: z.object({
     envRef: z.string().min(1).optional(),
     envSource: z
@@ -245,6 +264,7 @@ interface ProvisioningPreflightArgs {
   readonly approvalSignoff?: string;
   readonly livePreflightPath: string;
   readonly localRelayProofPath: string;
+  readonly localRelayReadinessPath: string;
   readonly localRelayStartupEnvPath: string;
   readonly receiptPath: string;
 }
@@ -263,6 +283,8 @@ export interface BuildDreamRelayProvisioningPreflightInput {
   readonly livePreflightText: string;
   readonly localRelayProofPath: string;
   readonly localRelayProofText: string;
+  readonly localRelayReadinessPath?: string;
+  readonly localRelayReadinessText?: string;
   readonly localRelayStartupEnv?: Readonly<Record<string, string | undefined>>;
   readonly localRelayStartupEnvRef?: string;
   readonly localRelayStartupEnvSource?:
@@ -275,6 +297,35 @@ export interface BuildDreamRelayProvisioningPreflightInput {
 }
 
 const LocalRelayStartupEnvArtifactSchema = z.record(z.string(), z.string());
+
+const LocalRelayReadinessProofSchema = z.object({
+  boundHost: z.string().min(1),
+  boundPort: z.number().int().min(1),
+  checkedAt: z.string().min(1),
+  configuredHost: z.string().min(1),
+  configuredPort: z.number().int().min(1),
+  healthz: z.object({
+    authRequired: z.literal(true),
+    httpStatus: z.literal(200),
+    rawCredentialsReturned: z.literal(false),
+    rawPathsReturned: z.literal(false),
+    schemaVersion: z.literal("trusted.dream-memory-relay.readiness.v1"),
+    sourceRootCount: z.number().int().min(1),
+    status: z.literal("passed"),
+    supportedOperationCount: z.number().int().min(1),
+  }),
+  rawCredentialsReturned: z.literal(false),
+  rawPathsReturned: z.literal(false),
+  redacted: z.literal(true),
+  schemaVersion: z.literal(
+    "trusted.dream-memory-relay.local-readiness-proof.v1"
+  ),
+  sourceRootCount: z.number().int().min(1),
+  startupEnvRef: z.string().min(1),
+  status: z.literal("passed"),
+  tokenConfigured: z.literal(true),
+  usedConfiguredPort: z.boolean(),
+});
 
 const isMain = (): boolean =>
   process.argv[1] !== undefined &&
@@ -356,6 +407,9 @@ const parseArgs = (argv: readonly string[]): ProvisioningPreflightArgs => {
       argValue(argv, "--live-preflight-path") ?? defaultLivePreflightPath,
     localRelayProofPath:
       argValue(argv, "--local-relay-proof-path") ?? defaultLocalRelayProofPath,
+    localRelayReadinessPath:
+      argValue(argv, "--local-relay-readiness-path") ??
+      defaultLocalRelayReadinessPath,
     localRelayStartupEnvPath:
       argValue(argv, "--local-relay-startup-env-path") ??
       defaultLocalRelayStartupEnvPath,
@@ -486,6 +540,49 @@ const localRelayProofSummary = (input: {
       missingMachineIds.length === 0 && unreportedSourceFamilies.length === 0
         ? "passed"
         : "failed",
+  };
+};
+
+const localRelayReadinessSummary = (input: {
+  readonly path: string;
+  readonly text: string;
+}): DreamRelayProvisioningPreflightReceipt["localRelayReadiness"] => {
+  const parsed = parseJsonOrNull(input.text);
+  if (parsed === null) {
+    return {
+      healthzStatus: "missing",
+      path: input.path,
+      status: input.text.trim().length === 0 ? "missing" : "failed",
+    };
+  }
+
+  const readinessResult = LocalRelayReadinessProofSchema.safeParse(parsed);
+  if (!readinessResult.success) {
+    return {
+      healthzStatus: "failed",
+      path: input.path,
+      status: "failed",
+    };
+  }
+
+  const { data: readiness } = readinessResult;
+
+  return {
+    boundHost: readiness.boundHost,
+    boundPort: readiness.boundPort,
+    checkedAt: readiness.checkedAt,
+    configuredHost: readiness.configuredHost,
+    configuredPort: readiness.configuredPort,
+    healthzStatus: readiness.healthz.status,
+    path: input.path,
+    rawCredentialsReturned: readiness.rawCredentialsReturned,
+    rawPathsReturned: readiness.rawPathsReturned,
+    sourceRootCount: readiness.sourceRootCount,
+    startupEnvRef: readiness.startupEnvRef,
+    status: readiness.status,
+    supportedOperationCount: readiness.healthz.supportedOperationCount,
+    tokenConfigured: readiness.tokenConfigured,
+    usedConfiguredPort: readiness.usedConfiguredPort,
   };
 };
 
@@ -620,6 +717,7 @@ const recommendedNextActions = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
   readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
@@ -677,6 +775,15 @@ const recommendedNextActions = (input: {
 
   if (input.localRelayStartup.missingEnv.includes("DREAM_MEMORY_RELAY_TOKEN")) {
     actions.push(localRelayTokenAction);
+  }
+
+  if (
+    input.localRelayStartup.status === "ready" &&
+    input.localRelayReadiness.status !== "passed"
+  ) {
+    actions.push(
+      "Run pnpm app:dream:relay:readiness to prove the local trusted relay can boot from the generated startup env and pass authenticated /healthz."
+    );
   }
 
   if (!input.networkTools.some((tool) => tool.available)) {
@@ -740,6 +847,7 @@ const provisioningPlanBlockedBy = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
   readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
@@ -818,17 +926,38 @@ const buildProvisioningStep = (input: {
   });
 };
 
+const localRelayReadinessStepBlockers = (input: {
+  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
+  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
+}): readonly string[] => {
+  if (input.localRelayStartup.status !== "ready") {
+    return ["local-relay-startup-config-missing"];
+  }
+
+  if (input.localRelayReadiness.status !== "passed") {
+    return ["local-relay-readiness-not-passed"];
+  }
+
+  return [];
+};
+
 const buildProvisioningPlan = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayReadiness: DreamRelayProvisioningPreflightReceipt["localRelayReadiness"];
   readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
 }): DreamRelayProvisioningPlan => {
   const baseBlockers = provisioningPlanBlockedBy(input);
+  const localReadinessBlockers =
+    input.localRelayReadiness.status === "passed"
+      ? []
+      : ["local-relay-readiness-not-passed"];
+  const relayExposureBlockers = [...baseBlockers, ...localReadinessBlockers];
   const relayConfigBlockers = [
-    ...baseBlockers,
+    ...relayExposureBlockers,
     ...(input.livePreflight.missingCheckIds.includes(
       "env:DREAM_MEMORY_RELAY_BASE_URL"
     )
@@ -884,7 +1013,18 @@ const buildProvisioningPlan = (input: {
         stepId: "start-local-trusted-relay",
       }),
       buildProvisioningStep({
-        blockedBy: baseBlockers,
+        blockedBy: localRelayReadinessStepBlockers(input),
+        commandTemplate: "pnpm app:dream:relay:readiness",
+        description:
+          "Start the trusted local relay transiently and prove authenticated /healthz from the generated startup env.",
+        expectedReceipt:
+          ".wrangler/workflow-app/dream-relay/latest-local-readiness.json",
+        requiresSignoff: false,
+        sideEffectClass: "local-process",
+        stepId: "verify-local-relay-readiness",
+      }),
+      buildProvisioningStep({
+        blockedBy: relayExposureBlockers,
         commandTemplate:
           "<approved-transport> expose http://127.0.0.1:<relay-port> as HTTPS",
         description:
@@ -895,7 +1035,7 @@ const buildProvisioningPlan = (input: {
         stepId: "expose-approved-https-relay",
       }),
       buildProvisioningStep({
-        blockedBy: baseBlockers,
+        blockedBy: relayExposureBlockers,
         commandTemplate:
           "printf '%s' \"$DREAM_MEMORY_RELAY_TOKEN\" | pnpm exec wrangler secret put DREAM_MEMORY_RELAY_TOKEN --config wrangler.jsonc",
         description:
@@ -907,7 +1047,7 @@ const buildProvisioningPlan = (input: {
         stepId: "provision-worker-relay-token",
       }),
       buildProvisioningStep({
-        blockedBy: baseBlockers,
+        blockedBy: relayExposureBlockers,
         commandTemplate:
           "deploy Worker with DREAM_MEMORY_RELAY_BASE_URL set to the approved HTTPS relay URL",
         description:
@@ -954,6 +1094,10 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     path: input.localRelayProofPath,
     text: input.localRelayProofText,
   });
+  const localRelayReadiness = localRelayReadinessSummary({
+    path: input.localRelayReadinessPath ?? defaultLocalRelayReadinessPath,
+    text: input.localRelayReadinessText ?? "",
+  });
   const localRelayStartup = localRelayStartupSummary(
     input.localRelayStartupEnv,
     {
@@ -974,6 +1118,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus,
     livePreflight,
     localRelayProof,
+    localRelayReadiness,
     localRelayStartup,
     networkTools: input.networkTools,
     visionHasSignoffRule,
@@ -982,6 +1127,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus,
     livePreflight,
     localRelayProof,
+    localRelayReadiness,
     localRelayStartup,
     networkTools: input.networkTools,
     visionHasSignoffRule,
@@ -990,6 +1136,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus === "approved" &&
     visionHasSignoffRule &&
     localRelayProof.status === "passed" &&
+    localRelayReadiness.status === "passed" &&
     localRelayStartup.status === "ready" &&
     input.networkTools.some((tool) => tool.available);
 
@@ -1006,6 +1153,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     checkedAt: input.checkedAt,
     livePreflight,
     localRelayProof,
+    localRelayReadiness,
     localRelayStartup,
     networkTools: input.networkTools.map((tool) => ({
       available: tool.available,
@@ -1032,6 +1180,10 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
   const args = parseArgs(input.argv);
   const livePreflightPath = resolve(input.repoRoot, args.livePreflightPath);
   const localRelayProofPath = resolve(input.repoRoot, args.localRelayProofPath);
+  const localRelayReadinessPath = resolve(
+    input.repoRoot,
+    args.localRelayReadinessPath
+  );
   const localRelayStartupEnvPath = resolve(
     input.repoRoot,
     args.localRelayStartupEnvPath
@@ -1071,6 +1223,8 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
     livePreflightText: await readTextOrEmpty(livePreflightPath),
     localRelayProofPath: args.localRelayProofPath,
     localRelayProofText: await readTextOrEmpty(localRelayProofPath),
+    localRelayReadinessPath: args.localRelayReadinessPath,
+    localRelayReadinessText: await readTextOrEmpty(localRelayReadinessPath),
     localRelayStartupEnv: {
       ...startupEnvFromArtifact,
       ...processEnv,

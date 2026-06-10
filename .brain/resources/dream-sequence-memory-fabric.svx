@@ -26,6 +26,19 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T09:26Z run attempt: local relay readiness is now proven separately from Worker-facing relay readiness. Live Dream submit still correctly did not happen.
+
+Receipts:
+
+- New command: `pnpm app:dream:relay:readiness` starts the trusted local relay transiently from `.wrangler/workflow-app/dream-relay/local-relay-startup-env.json`, calls authenticated `/healthz`, writes `.wrangler/workflow-app/dream-relay/latest-local-readiness.json`, and closes the local server.
+- Local readiness receipt checked `2026-06-10T09:26:29.250Z`: `status=passed`, `sourceRootCount=10`, `supportedOperationCount=10`, `tokenConfigured=true`, `healthz.httpStatus=200`, `rawCredentialsReturned=false`, `rawPathsReturned=false`, `configuredPort=8789`, transient `boundHost=127.0.0.1`. The proof used an ephemeral local port, not a network exposure.
+- Provisioning preflight checked `2026-06-10T09:28:00.996Z`: `localRelayStartup.status=ready`, `localRelayReadiness.status=passed`, local proof still passed, and `verify-local-relay-readiness` is now its own non-executed plan step with `sideEffectClass=local-process`.
+- The provisioning plan still blocks `start-local-trusted-relay`, `expose-approved-https-relay`, Worker token provisioning, Worker relay URL config, remote healthz verification, and live submit on `missing-exact-owner-signoff` plus the Worker-facing relay gates.
+- Live run request `run-live-dream-memory-fabric-20260610T092639666Z-8e364bf2` wrote `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T092639666Z-8e364bf2-receipt.json` with `status=blocked` and `submit.attempted=false`.
+- Verification passed: `pnpm vitest run tests/integration/dream-relay-local-readiness.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts`, `pnpm test:integration`, `pnpm check`, `pnpm typecheck`, and `pnpm typecheck:tsc`.
+
+Important distinction: local readiness proves the private relay can boot from the generated startup artifact and answer authenticated health locally. It does not prove Cloudflare can reach the relay. Worker-facing `DREAM_MEMORY_RELAY_BASE_URL`, remote `DREAM_MEMORY_RELAY_TOKEN`, deploy config, authenticated remote `/healthz`, and exact network-boundary sign-off remain required before a live Cloudflare Dream can execute.
+
 2026-06-10T09:07Z run attempt: Dreaming was attempted again after adding a local relay startup env bootstrap. The local relay is now runnable from an ignored operator artifact, but live Cloudflare submit still correctly did not happen.
 
 Receipts:
