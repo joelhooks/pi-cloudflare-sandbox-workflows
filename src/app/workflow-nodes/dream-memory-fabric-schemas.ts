@@ -97,6 +97,8 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.backfill-plan",
   "joelclaw.dream.backfill-run",
   "joelclaw.dream.correlate",
+  "joelclaw.dream.capture-artifact",
+  "joelclaw.dream.capture-run",
   "joelclaw.dream.hitl-report",
   "joelclaw.dream.hydrate",
   "joelclaw.dream.memory-search",
@@ -528,6 +530,28 @@ export const DreamMemoryRelaySearchPayloadSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+const DreamMemoryRelayCaptureBasePayloadSchema = z.object({
+  actor: ActorSchema,
+  readability: z
+    .enum(["actor-private", "org-private", "public"])
+    .default("actor-private"),
+  runId: z.string().min(1),
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceSystem: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const DreamMemoryRelayCaptureArtifactPayloadSchema =
+  DreamMemoryRelayCaptureBasePayloadSchema.extend({
+    capturedRef: ArtifactPinSchema,
+  });
+
+export const DreamMemoryRelayCaptureRunPayloadSchema =
+  DreamMemoryRelayCaptureBasePayloadSchema.extend({
+    capturedRef: ArtifactPinSchema.optional(),
+    targetRunId: z.string().min(1).optional(),
+  });
+
 export const DreamSignalKindSchema = z.enum([
   "agent-failure",
   "correction",
@@ -878,7 +902,7 @@ export const DreamBackfillRunReceiptDocumentSchema = z.object({
   workItemId: z.string().min(1),
 });
 
-export const DreamCaptureReceiptDocumentSchema = z.object({
+const DreamCaptureReceiptBaseDocumentSchema = z.object({
   captureKind: z.enum(["artifact", "run"]),
   capturedAt: IsoDateTimeSchema,
   capturedRef: ArtifactPinSchema,
@@ -889,6 +913,19 @@ export const DreamCaptureReceiptDocumentSchema = z.object({
   sourceSystem: z.string().min(1),
   workItemId: z.string().min(1),
 });
+
+export const DreamCaptureReceiptDocumentSchema = z.discriminatedUnion(
+  "captureKind",
+  [
+    DreamCaptureReceiptBaseDocumentSchema.extend({
+      captureKind: z.literal("artifact"),
+    }),
+    DreamCaptureReceiptBaseDocumentSchema.extend({
+      captureKind: z.literal("run"),
+      capturedRunId: z.string().min(1),
+    }),
+  ]
+);
 
 export type DreamAdapterHealthStatus = z.infer<
   typeof DreamAdapterHealthStatusSchema
@@ -972,6 +1009,12 @@ export type DreamMemoryRelayBackfillPlanPayload = z.infer<
 >;
 export type DreamMemoryRelayBackfillRunPayload = z.infer<
   typeof DreamMemoryRelayBackfillRunPayloadSchema
+>;
+export type DreamMemoryRelayCaptureArtifactPayload = z.infer<
+  typeof DreamMemoryRelayCaptureArtifactPayloadSchema
+>;
+export type DreamMemoryRelayCaptureRunPayload = z.infer<
+  typeof DreamMemoryRelayCaptureRunPayloadSchema
 >;
 export type DreamMemoryRelayHydrationPayload = z.infer<
   typeof DreamMemoryRelayHydrationPayloadSchema

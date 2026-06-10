@@ -3,9 +3,11 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
+import { ArtifactPinSchema } from "../../app/domain/schemas.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
@@ -14,8 +16,11 @@ import type {
   DreamBackfillPlanAction,
   DreamBackfillRunReceiptDocument,
   DreamCaptureFix,
+  DreamCaptureReceiptDocument,
   DreamDerivedIndex,
   DreamDerivedIndexStatus,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
   DreamPrivacyTier,
   DreamRuntime,
   DreamRuntimeCoverage,
@@ -27,6 +32,7 @@ import type {
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
   DreamMemoryFabricPort,
 } from "../../app/workflow-nodes/dream-memory-fabric.ts";
 import {
@@ -78,6 +84,9 @@ interface LocalSourceInventory {
 
 const DEFAULT_MAX_FILES_PER_SOURCE = 10_000;
 const TRUSTED_LOCAL_PORT = "TrustedLocalDreamMemoryFabricPort";
+
+const captureArtifactRefSegment = (value: string): string =>
+  encodeURIComponent(value);
 
 const containsExtension = (input: {
   readonly fileName: string;
@@ -940,9 +949,99 @@ const captureFixResultFor = (input: {
   };
 };
 
+const capturedRunPinFor = (input: {
+  readonly capturedAt: string;
+  readonly payload: DreamMemoryRelayCaptureRunPayload;
+}) =>
+  ArtifactPinSchema.parse({
+    artifactRef: `artifact://trusted-dream-memory-relay/captures/${captureArtifactRefSegment(
+      input.payload.sourceSystem
+    )}/runs/${captureArtifactRefSegment(
+      input.payload.targetRunId ?? input.payload.runId
+    )}.json`,
+    hash: hashJson({
+      capturedAt: input.capturedAt,
+      redacted: true,
+      runId: input.payload.runId,
+      schemaVersion: "dream.capture-target.run.v1",
+      sourceSystem: input.payload.sourceSystem,
+      targetRunId: input.payload.targetRunId ?? input.payload.runId,
+      workItemId: input.payload.workItemId,
+    }),
+    mediaType: "application/json",
+  });
+
+const captureReceiptFor = (input: {
+  readonly captureKind: DreamCaptureReceiptDocument["captureKind"];
+  readonly capturedAt: string;
+  readonly capturedRef: DreamCaptureReceiptDocument["capturedRef"];
+  readonly payload:
+    | DreamMemoryRelayCaptureArtifactPayload
+    | DreamMemoryRelayCaptureRunPayload;
+}): DreamCaptureReceiptDocument => {
+  const baseReceipt = {
+    capturedAt: input.capturedAt,
+    capturedRef: input.capturedRef,
+    readability: input.payload.readability,
+    redacted: true,
+    runId: input.payload.runId,
+    schemaVersion: "dream.capture-receipt.v1",
+    sourceSystem: input.payload.sourceSystem,
+    workItemId: input.payload.workItemId,
+  } as const;
+
+  if (input.captureKind === "run") {
+    const capturedRunId =
+      "targetRunId" in input.payload && input.payload.targetRunId !== undefined
+        ? input.payload.targetRunId
+        : input.payload.runId;
+
+    return DreamCaptureReceiptDocumentSchema.parse({
+      ...baseReceipt,
+      captureKind: "run",
+      capturedRunId,
+    });
+  }
+
+  return DreamCaptureReceiptDocumentSchema.parse({
+    ...baseReceipt,
+    captureKind: input.captureKind,
+  });
+};
+
 export const createTrustedLocalDreamMemoryFabricAdapter = (
   config: TrustedLocalDreamMemoryFabricConfig
-): DreamMemoryBackfillPort & DreamMemoryFabricPort => ({
+): DreamMemoryBackfillPort &
+  DreamMemoryCapturePort &
+  DreamMemoryFabricPort => ({
+  captureArtifact(input) {
+    const capturedAt = config.now?.() ?? new Date().toISOString();
+
+    return Promise.resolve({
+      document: captureReceiptFor({
+        captureKind: "artifact",
+        capturedAt,
+        capturedRef: input.capturedRef,
+        payload: input,
+      }),
+      status: "ready",
+    });
+  },
+  captureRun(input) {
+    const capturedAt = config.now?.() ?? new Date().toISOString();
+
+    return Promise.resolve({
+      document: captureReceiptFor({
+        captureKind: "run",
+        capturedAt,
+        capturedRef:
+          input.capturedRef ??
+          capturedRunPinFor({ capturedAt, payload: input }),
+        payload: input,
+      }),
+      status: "ready",
+    });
+  },
   checkSourceHealth(input) {
     const checkedAt = config.now?.() ?? new Date().toISOString();
     const failures = failureMessagesFor(input.inventory);

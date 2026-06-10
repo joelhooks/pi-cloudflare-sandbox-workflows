@@ -10,8 +10,11 @@ import type {
 import { workflowTraceContextForCapability } from "../domain/trace-context.ts";
 import {
   DreamCorrelationGraphDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayCorrelationPayloadSchema,
+  DreamMemoryRelayCaptureArtifactPayloadSchema,
+  DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemorySearchDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamBackfillPlanDocumentSchema,
@@ -29,8 +32,11 @@ import {
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
+  DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHydrationDocument,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
   DreamMemoryRelayCorrelationPayload,
   DreamMemoryRelayOperation,
   DreamMemoryRelayHydrationPayload,
@@ -46,6 +52,7 @@ import type {
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
   DreamMemoryCorrelationPort,
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
@@ -114,6 +121,8 @@ interface DreamRelayBackfillPlanPayload extends DreamRelayPayloadBase {
 type DreamRelayPayload =
   | DreamRelayBackfillPlanPayload
   | DreamMemoryRelayBackfillRunPayload
+  | DreamMemoryRelayCaptureArtifactPayload
+  | DreamMemoryRelayCaptureRunPayload
   | DreamMemoryRelayCorrelationPayload
   | DreamMemoryRelayHydrationPayload
   | DreamMemoryRelaySearchPayload
@@ -208,6 +217,10 @@ const payloadSourceFamilies = (
     return uniqueReceiptFamilies(payload.receipts);
   }
 
+  if ("sourceFamilies" in payload && payload.sourceFamilies !== undefined) {
+    return payload.sourceFamilies;
+  }
+
   if ("hydration" in payload) {
     return uniqueReceiptFamilies(
       payload.hydration.hydrated.map((hydrated) => hydrated.receipt)
@@ -224,7 +237,11 @@ const payloadSourceFamilies = (
       : [...new Set(plannedFamilies)];
   }
 
-  return payload.inventory.sourceFamiliesExpected;
+  if ("inventory" in payload) {
+    return payload.inventory.sourceFamiliesExpected;
+  }
+
+  return allDreamSourceFamilies;
 };
 
 const payloadScope = (payload: DreamRelayPayload) => {
@@ -304,6 +321,7 @@ export const createCloudflareDreamMemoryFabricRelay = (
   config: CloudflareDreamMemoryFabricRelayConfig
 ): DreamMemoryCorrelationPort &
   DreamMemoryBackfillPort &
+  DreamMemoryCapturePort &
   DreamMemoryFabricPort &
   DreamMemoryRetrievalPort &
   DreamMemorySignalPort => {
@@ -380,6 +398,24 @@ export const createCloudflareDreamMemoryFabricRelay = (
   };
 
   return {
+    captureArtifact(input) {
+      return postRelay<DreamCaptureReceiptDocument>({
+        body: DreamMemoryRelayCaptureArtifactPayloadSchema.parse(input),
+        documentSchema: DreamCaptureReceiptDocumentSchema,
+        operation: "capture-artifact",
+        runId: input.runId,
+        workItemId: input.workItemId,
+      });
+    },
+    captureRun(input) {
+      return postRelay<DreamCaptureReceiptDocument>({
+        body: DreamMemoryRelayCaptureRunPayloadSchema.parse(input),
+        documentSchema: DreamCaptureReceiptDocumentSchema,
+        operation: "capture-run",
+        runId: input.runId,
+        workItemId: input.workItemId,
+      });
+    },
     checkSourceHealth(input) {
       return postRelay<DreamSourceHealthDocument>({
         body: input,

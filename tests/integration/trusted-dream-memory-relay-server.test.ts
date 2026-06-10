@@ -11,6 +11,7 @@ import { handleTrustedDreamMemoryRelayRequest } from "../../src/app/infrastructu
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
@@ -47,6 +48,14 @@ const operationPath = (operation: DreamMemoryRelayOperation): string => {
 
   if (operation === "backfill-run") {
     return "/memory/backfill/run";
+  }
+
+  if (operation === "capture-run") {
+    return "/memory/capture/run";
+  }
+
+  if (operation === "capture-artifact") {
+    return "/memory/capture/artifact";
   }
 
   return `/memory/${operation}`;
@@ -180,6 +189,7 @@ describe("trusted Dream memory relay server", () => {
     const dreamMemoryFabric = createIntegrationTestDreamMemoryFabricAdapter();
     const config = {
       dreamMemoryBackfill: dreamMemoryFabric,
+      dreamMemoryCapture: dreamMemoryFabric,
       dreamMemoryFabric,
       expectedBearerToken: relayToken,
       now: () => timestamp,
@@ -266,6 +276,50 @@ describe("trusted Dream memory relay server", () => {
       DreamBackfillRunReceiptDocumentSchema
     ).parse(await parseJson(backfillRunResponse));
 
+    const captureRunResponse = await handleTrustedDreamMemoryRelayRequest({
+      config,
+      request: relayRequest({
+        operation: "capture-run",
+        payload: {
+          actor: run.actor,
+          readability: "actor-private",
+          runId: run.runId,
+          sourceFamilies: ["agent-transcripts", "cloudflare-runs"],
+          sourceSystem: "cloudflare-workflow-run",
+          targetRunId: run.runId,
+          workItemId: run.workItemId,
+        },
+        token: relayToken,
+      }),
+    });
+    const captureRunEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
+      DreamCaptureReceiptDocumentSchema
+    ).parse(await parseJson(captureRunResponse));
+
+    const captureArtifactResponse = await handleTrustedDreamMemoryRelayRequest({
+      config,
+      request: relayRequest({
+        operation: "capture-artifact",
+        payload: {
+          actor: run.actor,
+          capturedRef: {
+            artifactRef: `artifact://relay-test/run/${run.runId}/dream/hitl-report.json`,
+            hash: "a".repeat(64),
+            mediaType: "application/json",
+          },
+          readability: "actor-private",
+          runId: run.runId,
+          sourceFamilies: ["repo-outputs", "cloudflare-runs"],
+          sourceSystem: "cloudflare-artifacts",
+          workItemId: run.workItemId,
+        },
+        token: relayToken,
+      }),
+    });
+    const captureArtifactEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
+      DreamCaptureReceiptDocumentSchema
+    ).parse(await parseJson(captureArtifactResponse));
+
     expect({
       backfillOperation: backfillEnvelope.operation,
       backfillRunCaptureFixStatuses:
@@ -278,6 +332,15 @@ describe("trusted Dream memory relay server", () => {
         (action) => action.status
       ),
       backfillStatus: backfillEnvelope.document.status,
+      captureArtifactKind: captureArtifactEnvelope.document.captureKind,
+      captureArtifactOperation: captureArtifactEnvelope.operation,
+      captureArtifactSourceRefs: captureArtifactEnvelope.sourceInventoryRefs,
+      captureRunCapturedRunId:
+        captureRunEnvelope.document.captureKind === "run"
+          ? captureRunEnvelope.document.capturedRunId
+          : null,
+      captureRunKind: captureRunEnvelope.document.captureKind,
+      captureRunOperation: captureRunEnvelope.operation,
       healthOperation: healthEnvelope.operation,
       healthStatus: healthEnvelope.document.status,
       inventoryOperation: inventoryEnvelope.operation,
@@ -293,6 +356,8 @@ describe("trusted Dream memory relay server", () => {
         healthEnvelope,
         backfillEnvelope,
         backfillRunEnvelope,
+        captureRunEnvelope,
+        captureArtifactEnvelope,
       ]).includes(relayToken),
       sourceInventoryRefs: backfillEnvelope.sourceInventoryRefs,
       usedAt: backfillEnvelope.leaseReceipt.usedAt,
@@ -303,6 +368,14 @@ describe("trusted Dream memory relay server", () => {
       backfillRunSourceRefs: [planRef],
       backfillRunStatuses: ["skipped"],
       backfillStatus: "backfill-required",
+      captureArtifactKind: "artifact",
+      captureArtifactOperation: "capture-artifact",
+      captureArtifactSourceRefs: [
+        `artifact://relay-test/run/${run.runId}/dream/hitl-report.json`,
+      ],
+      captureRunCapturedRunId: run.runId,
+      captureRunKind: "run",
+      captureRunOperation: "capture-run",
       healthOperation: "source-health",
       healthStatus: "degraded",
       inventoryOperation: "inventory",

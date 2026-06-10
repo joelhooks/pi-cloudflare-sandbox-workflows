@@ -1869,7 +1869,7 @@ Decision: the Dream cartridge is deterministic at the package contract level, bu
 The Dream cartridge may export typed, deterministic pieces:
 
 - source profile contract: `dream.source-profile.v1`
-- workflow-node exports: inventory, health, backfill plan/run, search, hydrate, correlate, refinement proposals, HITL report
+- workflow-node exports: inventory, health, backfill plan/run, run capture, artifact capture, signals, search, hydrate, correlate, refinement proposals, HITL report
 - relay endpoint contracts and redaction rules
 - package manifest metadata and trust policy
 
@@ -1882,29 +1882,29 @@ Implementation receipt:
 - `src/cartridges/dream-memory-fabric/source-profile.ts` now owns the Dream transcript-review source profile.
 - `scripts/workflow-app-dream-preflight.ts`, `scripts/workflow-app-dream-relay-provisioning-preflight.ts`, and `scripts/trusted-local-dream-memory-relay-proof.ts` read the Dreamer source-family/machine/runtime policy from that profile instead of duplicating constants.
 - `scripts/workflow-app-dream-run.ts` no longer says "Required Dream node order." It passes the source profile and node palette to the planner and explicitly allows generated order, branching, loops, parallelism, and Think lanes while keeping verifier-required outcomes.
-- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `dream-transcript-review-source-profile` as package metadata so agents discover the profile from the cartridge, not from core runner lore.
-- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` now verifies `plan:profile-effect-coverage` instead of the older `plan:all-dream-nodes` check. The proof records `effectCoverage.requiredEffects` from the installed source profile plus Dream output effects, and `effectCoverage.coveredEffects` from generated step declarations or known cartridge node mappings.
-- `tests/integration/workflow-app.test.ts` proves this is not a fixed phase list by removing the generated backfill-run step and letting the generated backfill-plan step declare both `backfill-plan` and `backfill-run` effects. That combined-effect plan verifies with `8` steps; the same shortened plan without the declared effect fails `plan:profile-effect-coverage`.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `dream-transcript-review-source-profile` plus capture-capable workflow nodes as package metadata so agents discover the profile and toolbox from the cartridge, not from core runner lore.
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` now verifies `plan:profile-effect-coverage` instead of the older `plan:all-dream-nodes` check. The proof records `effectCoverage.requiredEffects` from the installed source profile plus Dream output/capture effects, and `effectCoverage.coveredEffects` from generated step declarations or known cartridge node mappings.
+- `tests/integration/workflow-app.test.ts` proves this is not a fixed phase list by removing the generated backfill-run step and letting the generated backfill-plan step declare both `backfill-plan` and `backfill-run` effects. The full generated Dream plan now verifies with `12` cartridge nodes, and the combined-effect plan verifies with `11` nodes; the same shortened plan without the declared effect fails `plan:profile-effect-coverage`.
 
 Latest corrected receipts:
 
-- Local proof: `run:dream-relay-local-proof:20260610T033720376Z`, `10` source roots, `10` backfill action receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes, `missingSourceFamilies=[]`.
+- Local proof: `run:dream-relay-local-proof:20260610T054444751Z`, `10` source roots, supported operations `inventory/source-health/backfill-plan/backfill-run/capture-run/capture-artifact/signals/search/hydrate/correlate`, `10` backfill action receipts, `8` mined signal receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `35` correlation nodes, run/artifact capture receipts, and `missingSourceFamilies=[]`.
 - Captured Dreamer source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`.
-- Package seed receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T03:43:10.612Z`, package seed `status=seeded`, Dream package commit `5df473e02208988007142930a3bcfbec24b8f043`.
-- Dream cartridge hash after adding the source-profile export: expected `d6f2ca3f72c659f1d6c4e5b17ea6180432d50baec43a5220cf97986eb2f281d1`; remote D1 now reports the same hash.
-- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T03:43:30.260Z`, blocked on relay URL/token/config/healthz only.
+- Capture proof: artifact capture returned `artifact://local-dream-relay-proof/hitl-report.json`; run capture returned `artifact://trusted-dream-memory-relay/captures/cloudflare-workflow-run/runs/run%3Adream-relay-local-proof%3A20260610T054444751Z.json`. Both are redacted receipt refs, not raw transcript/body return channels.
+- Package seed receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json` now shows the latest seed attempt skipped package mutation because local `WORKFLOW_APP_ADMIN_TOKEN` is unavailable.
+- Dream cartridge hash after adding capture exports: expected `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`; remote D1 still reports stale hash `48c7f7bcb971747ed1425d90f1c8d6471b7612af0e18214398b2f777ada71e73`.
+- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T05:45:30.735Z`, blocked on stale package hash, relay URL/token/config/healthz, and live owner sign-off.
 - Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T03:43:39.973Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, approval still required.
-- Latest blocked run request: `run-live-dream-memory-fabric-20260610T034328863Z-45869758`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T054529350Z-cb234e0f`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input, requires run/artifact capture receipts, and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
 
 Validation receipts after the dynamic runtime boundary correction:
 
-- `pnpm exec vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `4` files, `31` tests.
+- CodeRabbit uncommitted review raised `3` issues and all were fixed: collision-free capture ref encoding, required `capturedRunId` for run capture receipts, and capture-artifact media-type whitelisting so binary artifacts cannot flow through the text hash path.
+- `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/workflow-app.test.ts` passed: `7` files, `59` tests.
 - `pnpm check` passed.
 - `pnpm typecheck` passed.
 - `pnpm typecheck:tsc` passed.
-- `pnpm test:integration` passed: `32` files, `157` tests.
-- `pnpm verify:workspace` passed.
-- `pi-notes brain check` passed: `16` Brain pages.
+- `pi-notes brain check` passed: `17` Brain pages.
 - `git diff --check` passed.
 
 ## Open Questions

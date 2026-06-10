@@ -150,6 +150,37 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
     if (backfillRun.status === "blocked") {
       throw new Error(backfillRun.blocker.message);
     }
+    const captureRunDocument = {
+      captureKind: "run" as const,
+      capturedAt: "2026-06-09T18:00:00.000Z",
+      capturedRef: {
+        artifactRef: `artifact://relay-test/runs/${request.runId}/dream/capture-run.json`,
+        hash: "c".repeat(64),
+        mediaType: "application/json",
+      },
+      capturedRunId: request.runId,
+      readability: "actor-private" as const,
+      redacted: true as const,
+      runId: request.runId,
+      schemaVersion: "dream.capture-receipt.v1" as const,
+      sourceSystem: "cloudflare-workflow-run",
+      workItemId: request.workItemId,
+    };
+    const captureArtifactDocument = {
+      captureKind: "artifact" as const,
+      capturedAt: "2026-06-09T18:00:00.000Z",
+      capturedRef: {
+        artifactRef: `artifact://relay-test/runs/${request.runId}/dream/hitl-report.json`,
+        hash: "d".repeat(64),
+        mediaType: "application/json",
+      },
+      readability: "actor-private" as const,
+      redacted: true as const,
+      runId: request.runId,
+      schemaVersion: "dream.capture-receipt.v1" as const,
+      sourceSystem: "cloudflare-artifacts",
+      workItemId: request.workItemId,
+    };
 
     const search = await retrievalFixture.searchMemories({
       actor: request.actor,
@@ -209,6 +240,18 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       relayResponseFrom({
         document: backfillRun.document,
         operation: "backfill-run",
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      relayResponseFrom({
+        document: captureRunDocument,
+        operation: "capture-run",
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      relayResponseFrom({
+        document: captureArtifactDocument,
+        operation: "capture-artifact",
         runId: request.runId,
         workItemId: request.workItemId,
       }),
@@ -286,6 +329,30 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
     if (backfillRunResult.status === "blocked") {
       throw new Error(backfillRunResult.blocker.message);
     }
+    const captureRunResult = await adapter.captureRun({
+      actor: request.actor,
+      readability: "actor-private",
+      runId: request.runId,
+      sourceFamilies: ["agent-transcripts", "cloudflare-runs"],
+      sourceSystem: "cloudflare-workflow-run",
+      targetRunId: request.runId,
+      workItemId: request.workItemId,
+    });
+    if (captureRunResult.status === "blocked") {
+      throw new Error(captureRunResult.blocker.message);
+    }
+    const captureArtifactResult = await adapter.captureArtifact({
+      actor: request.actor,
+      capturedRef: captureArtifactDocument.capturedRef,
+      readability: "actor-private",
+      runId: request.runId,
+      sourceFamilies: ["repo-outputs", "cloudflare-runs"],
+      sourceSystem: "cloudflare-artifacts",
+      workItemId: request.workItemId,
+    });
+    if (captureArtifactResult.status === "blocked") {
+      throw new Error(captureArtifactResult.blocker.message);
+    }
     const searchResult = await adapter.searchMemories({
       actor: request.actor,
       maxHits: 2,
@@ -334,6 +401,12 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         (action) => action.status
       ),
       backfillStatus: backfillResult.document.status,
+      captureArtifactKind: captureArtifactResult.document.captureKind,
+      captureRunCapturedRunId:
+        captureRunResult.document.captureKind === "run"
+          ? captureRunResult.document.capturedRunId
+          : null,
+      captureRunKind: captureRunResult.document.captureKind,
       correlationEdgeCount: correlationResult.document.edges.length,
       correlationNodeCount: correlationResult.document.nodes.length,
       healthStatus: healthResult.document.status,
@@ -347,6 +420,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         healthResult.relayLeaseReceipt,
         backfillResult.relayLeaseReceipt,
         backfillRunResult.relayLeaseReceipt,
+        captureRunResult.relayLeaseReceipt,
+        captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
         hydrationResult.relayLeaseReceipt,
         correlationResult.relayLeaseReceipt,
@@ -356,6 +431,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         healthResult.relayLeaseReceipt,
         backfillResult.relayLeaseReceipt,
         backfillRunResult.relayLeaseReceipt,
+        captureRunResult.relayLeaseReceipt,
+        captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
         hydrationResult.relayLeaseReceipt,
         correlationResult.relayLeaseReceipt,
@@ -365,6 +442,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         healthResult.relayLeaseReceipt,
         backfillResult.relayLeaseReceipt,
         backfillRunResult.relayLeaseReceipt,
+        captureRunResult.relayLeaseReceipt,
+        captureArtifactResult.relayLeaseReceipt,
         searchResult.relayLeaseReceipt,
         hydrationResult.relayLeaseReceipt,
         correlationResult.relayLeaseReceipt,
@@ -378,6 +457,8 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         healthResult.document,
         backfillResult.document,
         backfillRunResult.document,
+        captureRunResult.document,
+        captureArtifactResult.document,
         searchResult.document,
         hydrationResult.document,
         correlationResult.document,
@@ -394,10 +475,15 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `Bearer ${relayToken}`,
         `Bearer ${relayToken}`,
         `Bearer ${relayToken}`,
+        `Bearer ${relayToken}`,
+        `Bearer ${relayToken}`,
       ],
       backfillRunCaptureFixStatuses: ["skipped"],
       backfillRunStatuses: ["skipped"],
       backfillStatus: "backfill-required",
+      captureArtifactKind: "artifact",
+      captureRunCapturedRunId: request.runId,
+      captureRunKind: "run",
       correlationEdgeCount: 4,
       correlationNodeCount: 5,
       healthStatus: "degraded",
@@ -407,17 +493,31 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `dream-memory-relay:${request.runId}:${request.workItemId}:source-health`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:backfill-plan`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:backfill-run`,
+        `dream-memory-relay:${request.runId}:${request.workItemId}:capture-run`,
+        `dream-memory-relay:${request.runId}:${request.workItemId}:capture-artifact`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:search`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:hydrate`,
         `dream-memory-relay:${request.runId}:${request.workItemId}:correlate`,
       ],
       inventorySchemaVersion: "dream.source-inventory.v1",
-      methods: ["POST", "POST", "POST", "POST", "POST", "POST", "POST"],
+      methods: [
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+        "POST",
+      ],
       operations: [
         "inventory",
         "source-health",
         "backfill-plan",
         "backfill-run",
+        "capture-run",
+        "capture-artifact",
         "search",
         "hydrate",
         "correlate",
@@ -427,11 +527,15 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:source-health`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:backfill-plan`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:backfill-run`,
+        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:capture-run`,
+        `lease:dream-memory-relay:${request.runId}:${request.workItemId}:capture-artifact`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:search`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:hydrate`,
         `lease:dream-memory-relay:${request.runId}:${request.workItemId}:correlate`,
       ],
       relayLeaseSecretRefs: [
+        "secretref:dream-memory-relay",
+        "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
         "secretref:dream-memory-relay",
@@ -448,9 +552,13 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         "used",
         "used",
         "used",
+        "used",
+        "used",
       ],
       requestBodiesLeakToken: false,
       requestSchemas: [
+        "dream.memory-relay.request.v1",
+        "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
         "dream.memory-relay.request.v1",
@@ -469,12 +577,16 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
         `trace:${request.runId}`,
         `trace:${request.runId}`,
         `trace:${request.runId}`,
+        `trace:${request.runId}`,
+        `trace:${request.runId}`,
       ],
       urls: [
         "https://memory-relay.joelclaw.local/memory/inventory",
         "https://memory-relay.joelclaw.local/memory/source-health",
         "https://memory-relay.joelclaw.local/memory/backfill/plan",
         "https://memory-relay.joelclaw.local/memory/backfill/run",
+        "https://memory-relay.joelclaw.local/memory/capture/run",
+        "https://memory-relay.joelclaw.local/memory/capture/artifact",
         "https://memory-relay.joelclaw.local/memory/search",
         "https://memory-relay.joelclaw.local/memory/hydrate",
         "https://memory-relay.joelclaw.local/memory/correlate",

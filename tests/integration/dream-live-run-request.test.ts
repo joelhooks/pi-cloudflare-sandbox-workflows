@@ -139,7 +139,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
     expectedPackageArtifactRefMatched: true,
     expectedPackageId: "workflow/dream-memory-fabric",
     expectedPackageManifestHash:
-      "e12dbc6b47f1908f310aa0056e892c14137fec3dd38538f66ed7164e8d871022",
+      "b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b",
     expectedPackageManifestHashMatched: true,
     expectedPackageSeeded: true,
     expectedWorkflowNodeTypes: [
@@ -147,8 +147,10 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "joelclaw.dream.source-health",
       "joelclaw.dream.backfill-plan",
       "joelclaw.dream.backfill-run",
-      "joelclaw.dream.signals",
+      "joelclaw.dream.capture-run",
+      "joelclaw.dream.capture-artifact",
       "joelclaw.dream.memory-search",
+      "joelclaw.dream.signals",
       "joelclaw.dream.hydrate",
       "joelclaw.dream.correlate",
       "joelclaw.dream.refinement-proposals",

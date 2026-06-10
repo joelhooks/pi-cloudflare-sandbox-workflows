@@ -33,6 +33,8 @@ export const dreamTranscriptReviewRelayOperations = [
   "source-health",
   "backfill-plan",
   "backfill-run",
+  "capture-run",
+  "capture-artifact",
   "signals",
   "search",
   "hydrate",

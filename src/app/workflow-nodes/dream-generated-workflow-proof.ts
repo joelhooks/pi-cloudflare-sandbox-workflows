@@ -65,6 +65,8 @@ const isRelayBackedDreamNodeType = (
 const dreamNodeTypeEffects = {
   "joelclaw.dream.backfill-plan": ["backfill-plan"],
   "joelclaw.dream.backfill-run": ["backfill-run"],
+  "joelclaw.dream.capture-artifact": ["capture-artifact"],
+  "joelclaw.dream.capture-run": ["capture-run"],
   "joelclaw.dream.correlate": ["correlate"],
   "joelclaw.dream.hitl-report": ["hitl-report"],
   "joelclaw.dream.hydrate": ["hydrate"],

@@ -529,6 +529,31 @@ describe("Dream memory fabric domain contracts", () => {
       sourceSystem: "cloudflare-artifacts",
       workItemId: "work-item:dream-preflight",
     });
+    const runCaptureReceipt = DreamCaptureReceiptDocumentSchema.parse({
+      captureKind: "run",
+      capturedAt: timestamp,
+      capturedRef: artifactPin("dream/capture-run.json"),
+      capturedRunId: "run-dream-preflight",
+      readability: "actor-private",
+      redacted: true,
+      runId: "run-dream-preflight",
+      schemaVersion: "dream.capture-receipt.v1",
+      sourceSystem: "cloudflare-workflow-run",
+      workItemId: "work-item:dream-preflight",
+    });
+    expect(() =>
+      DreamCaptureReceiptDocumentSchema.parse({
+        captureKind: "run",
+        capturedAt: timestamp,
+        capturedRef: artifactPin("dream/capture-run-missing-id.json"),
+        readability: "actor-private",
+        redacted: true,
+        runId: "run-dream-preflight",
+        schemaVersion: "dream.capture-receipt.v1",
+        sourceSystem: "cloudflare-workflow-run",
+        workItemId: "work-item:dream-preflight",
+      })
+    ).toThrow(/capturedRunId/u);
     const endpointCatalog = DreamMemoryRelayEndpointCatalogSchema.parse({
       endpoints: [
         {
@@ -550,6 +575,10 @@ describe("Dream memory fabric domain contracts", () => {
     expect({
       backfillReceiptSchema: backfillReceipt.schemaVersion,
       captureReceiptReadability: captureReceipt.readability,
+      capturedRunId:
+        runCaptureReceipt.captureKind === "run"
+          ? runCaptureReceipt.capturedRunId
+          : null,
       endpointCount: endpointCatalog.endpoints.length,
       graphEdgeRelationship: graph.edges.at(0)?.relationship,
       hydrationReturnedFullTranscript:
@@ -560,6 +589,7 @@ describe("Dream memory fabric domain contracts", () => {
     }).toStrictEqual({
       backfillReceiptSchema: "dream.backfill-run-receipt.v1",
       captureReceiptReadability: "actor-private",
+      capturedRunId: "run-dream-preflight",
       endpointCount: 3,
       graphEdgeRelationship: "supports_dream",
       hydrationReturnedFullTranscript: false,

@@ -12,6 +12,7 @@ import { dreamMemoryRelayEndpointCatalog } from "../src/app/infrastructure/cloud
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
@@ -25,6 +26,7 @@ import {
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
+  DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHydrationDocument,
   DreamMemoryRelayOperation,
@@ -118,6 +120,12 @@ const LocalRelayProofReceiptSchema = z.object({
     completedCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
     skippedCount: z.number().int().min(0),
+  }),
+  capture: z.object({
+    artifactCaptureKind: z.literal("artifact"),
+    artifactCapturedRef: ArtifactRefSchema,
+    runCaptureKind: z.literal("run"),
+    runCapturedRef: ArtifactRefSchema,
   }),
   checkedAt: z.string().min(1),
   correlation: z.object({
@@ -609,6 +617,40 @@ const run = async (): Promise<void> => {
       },
       token,
     });
+    const captureRun = await postOperation<DreamCaptureReceiptDocument>({
+      baseUrl: relay.url,
+      documentSchema: DreamCaptureReceiptDocumentSchema,
+      operation: "capture-run",
+      payload: {
+        actor,
+        readability: "actor-private",
+        runId,
+        sourceFamilies: dreamTranscriptReviewSourceFamilies,
+        sourceSystem: "cloudflare-workflow-run",
+        targetRunId: runId,
+        workItemId,
+      },
+      token,
+    });
+    const captureArtifact = await postOperation<DreamCaptureReceiptDocument>({
+      baseUrl: relay.url,
+      documentSchema: DreamCaptureReceiptDocumentSchema,
+      operation: "capture-artifact",
+      payload: {
+        actor,
+        capturedRef: {
+          artifactRef: artifactRef("hitl-report"),
+          hash: "f".repeat(64),
+          mediaType: "application/json",
+        },
+        readability: "actor-private",
+        runId,
+        sourceFamilies: ["repo-outputs", "cloudflare-runs"],
+        sourceSystem: "cloudflare-artifacts",
+        workItemId,
+      },
+      token,
+    });
     const signals = await postOperation<DreamSignalDocument>({
       baseUrl: relay.url,
       documentSchema: DreamSignalDocumentSchema,
@@ -677,6 +719,8 @@ const run = async (): Promise<void> => {
     const serialized = JSON.stringify({
       backfill,
       backfillRun,
+      captureArtifact,
+      captureRun,
       correlation,
       health,
       hydration,
@@ -737,6 +781,12 @@ const run = async (): Promise<void> => {
         skippedCount: backfillRun.actionResults.filter(
           (action) => action.status === "skipped"
         ).length,
+      },
+      capture: {
+        artifactCaptureKind: captureArtifact.captureKind,
+        artifactCapturedRef: captureArtifact.capturedRef.artifactRef,
+        runCaptureKind: captureRun.captureKind,
+        runCapturedRef: captureRun.capturedRef.artifactRef,
       },
       checkedAt: new Date().toISOString(),
       correlation: {

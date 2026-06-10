@@ -5,10 +5,13 @@ import type { z } from "zod";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayBackfillPlanPayloadSchema,
   DreamMemoryRelayBackfillRunPayloadSchema,
+  DreamMemoryRelayCaptureArtifactPayloadSchema,
+  DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemoryRelayCorrelationPayloadSchema,
   DreamMemoryRelayHydrationPayloadSchema,
   DreamMemoryRelayInventoryPayloadSchema,
@@ -25,6 +28,7 @@ import {
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
+  DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHydrationDocument,
   DreamMemoryRelayOperation,
@@ -36,6 +40,7 @@ import type {
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
   DreamMemoryCorrelationPort,
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
@@ -46,6 +51,7 @@ import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-dream-memory-fabri
 
 export interface TrustedDreamMemoryRelayServerConfig {
   readonly dreamMemoryBackfill?: DreamMemoryBackfillPort;
+  readonly dreamMemoryCapture?: DreamMemoryCapturePort;
   readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
   readonly dreamMemoryFabric: DreamMemoryFabricPort;
   readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
@@ -62,6 +68,8 @@ export interface TrustedDreamMemoryRelayRequestInput {
 type SupportedDreamRelayOperation =
   | "backfill-plan"
   | "backfill-run"
+  | "capture-artifact"
+  | "capture-run"
   | "correlate"
   | "hydrate"
   | "inventory"
@@ -72,6 +80,7 @@ type SupportedDreamRelayOperation =
 type SupportedDreamRelayDocument =
   | DreamBackfillPlanDocument
   | DreamBackfillRunReceiptDocument
+  | DreamCaptureReceiptDocument
   | DreamCorrelationGraphDocument
   | DreamHydrationDocument
   | DreamMemorySearchDocument
@@ -130,6 +139,8 @@ const isSupportedOperation = (
 ): operation is SupportedDreamRelayOperation =>
   operation === "backfill-plan" ||
   operation === "backfill-run" ||
+  operation === "capture-artifact" ||
+  operation === "capture-run" ||
   operation === "correlate" ||
   operation === "hydrate" ||
   operation === "inventory" ||
@@ -160,6 +171,10 @@ const sourceInventoryRefsFor = (document: SupportedDreamRelayDocument) => {
 
   if (document.schemaVersion === "dream.backfill-run-receipt.v1") {
     return [document.planRef.artifactRef];
+  }
+
+  if (document.schemaVersion === "dream.capture-receipt.v1") {
+    return [document.capturedRef.artifactRef];
   }
 
   return [];
@@ -347,6 +362,51 @@ const dispatchSupportedOperation = async (input: {
     });
   }
 
+  if (input.operation === "capture-artifact") {
+    if (input.config.dreamMemoryCapture === undefined) {
+      return jsonError(
+        501,
+        "adapter_unavailable",
+        "Dream memory relay operation capture-artifact is not wired to a trusted capture adapter yet."
+      );
+    }
+
+    const payload = DreamMemoryRelayCaptureArtifactPayloadSchema.parse(
+      input.envelope.payload
+    );
+    const result =
+      await input.config.dreamMemoryCapture.captureArtifact(payload);
+
+    return resultResponse({
+      documentSchema: DreamCaptureReceiptDocumentSchema,
+      envelope: input.envelope,
+      now,
+      result,
+    });
+  }
+
+  if (input.operation === "capture-run") {
+    if (input.config.dreamMemoryCapture === undefined) {
+      return jsonError(
+        501,
+        "adapter_unavailable",
+        "Dream memory relay operation capture-run is not wired to a trusted capture adapter yet."
+      );
+    }
+
+    const payload = DreamMemoryRelayCaptureRunPayloadSchema.parse(
+      input.envelope.payload
+    );
+    const result = await input.config.dreamMemoryCapture.captureRun(payload);
+
+    return resultResponse({
+      documentSchema: DreamCaptureReceiptDocumentSchema,
+      envelope: input.envelope,
+      now,
+      result,
+    });
+  }
+
   if (input.operation === "backfill-run") {
     if (input.config.dreamMemoryBackfill === undefined) {
       return jsonError(
@@ -436,7 +496,7 @@ export const handleTrustedDreamMemoryRelayRequest = async (
     return jsonError(
       501,
       "adapter_unavailable",
-      `Dream memory relay operation ${operation} is not wired to a trusted adapter yet.`
+      `Dream memory relay operation ${String(operation)} is not wired to a trusted adapter yet.`
     );
   }
 

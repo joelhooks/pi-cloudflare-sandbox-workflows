@@ -8,6 +8,7 @@ import type { Actor } from "../../src/app/domain/schemas.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
@@ -52,6 +53,14 @@ const operationPath = (operation: DreamMemoryRelayOperation): string => {
 
   if (operation === "backfill-run") {
     return "/memory/backfill/run";
+  }
+
+  if (operation === "capture-run") {
+    return "/memory/capture/run";
+  }
+
+  if (operation === "capture-artifact") {
+    return "/memory/capture/artifact";
   }
 
   return `/memory/${operation}`;
@@ -410,6 +419,45 @@ describe("trusted local Dream memory relay HTTP server", () => {
         const runEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
           DreamBackfillRunReceiptDocumentSchema
         ).parse(runJson);
+        const captureRunJson = await postRelay({
+          allowedSourceFamilies: ["agent-transcripts", "cloudflare-runs"],
+          operation: "capture-run",
+          payload: {
+            actor,
+            readability: "actor-private",
+            runId: "run:trusted-local-relay-http",
+            sourceFamilies: ["agent-transcripts", "cloudflare-runs"],
+            sourceSystem: "cloudflare-workflow-run",
+            targetRunId: "run:trusted-local-relay-http",
+            workItemId: "work:trusted-local-relay-http",
+          },
+          url: relay.url,
+        });
+        const captureRunEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
+          DreamCaptureReceiptDocumentSchema
+        ).parse(captureRunJson);
+        const captureArtifactJson = await postRelay({
+          allowedSourceFamilies: ["repo-outputs", "cloudflare-runs"],
+          operation: "capture-artifact",
+          payload: {
+            actor,
+            capturedRef: {
+              artifactRef:
+                "artifact://trusted-local-relay-http/dream/hitl-report.json",
+              hash: "b".repeat(64),
+              mediaType: "application/json",
+            },
+            readability: "actor-private",
+            runId: "run:trusted-local-relay-http",
+            sourceFamilies: ["repo-outputs", "cloudflare-runs"],
+            sourceSystem: "cloudflare-artifacts",
+            workItemId: "work:trusted-local-relay-http",
+          },
+          url: relay.url,
+        });
+        const captureArtifactEnvelope = dreamMemoryRelayResponseEnvelopeSchema(
+          DreamCaptureReceiptDocumentSchema
+        ).parse(captureArtifactJson);
         const searchJson = await postRelay({
           allowedSourceFamilies: ["agent-transcripts"],
           operation: "search",
@@ -463,6 +511,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
           DreamCorrelationGraphDocumentSchema
         ).parse(correlationJson);
         const serialized = JSON.stringify({
+          captureArtifact: captureArtifactJson,
+          captureRun: captureRunJson,
           correlation: correlationJson,
           health: healthJson,
           healthz: readiness,
@@ -474,6 +524,12 @@ describe("trusted local Dream memory relay HTTP server", () => {
         });
 
         expect({
+          captureArtifactKind: captureArtifactEnvelope.document.captureKind,
+          captureRunCapturedRunId:
+            captureRunEnvelope.document.captureKind === "run"
+              ? captureRunEnvelope.document.capturedRunId
+              : null,
+          captureRunKind: captureRunEnvelope.document.captureKind,
           correlationEdgeCount: correlationEnvelope.document.edges.length,
           correlationSchema: correlationEnvelope.document.schemaVersion,
           deniedHealthStatus: deniedHealth.status,
@@ -503,6 +559,9 @@ describe("trusted local Dream memory relay HTTP server", () => {
           sourceRootCount: readiness.adapter.sourceRoots.length,
           supportedOperations: readiness.supportedOperations,
         }).toStrictEqual({
+          captureArtifactKind: "artifact",
+          captureRunCapturedRunId: "run:trusted-local-relay-http",
+          captureRunKind: "run",
           correlationEdgeCount: 4,
           correlationSchema: "dream.correlation-graph.v1",
           deniedHealthStatus: 401,
@@ -532,6 +591,8 @@ describe("trusted local Dream memory relay HTTP server", () => {
             "source-health",
             "backfill-plan",
             "backfill-run",
+            "capture-run",
+            "capture-artifact",
             "signals",
             "search",
             "hydrate",

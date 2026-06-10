@@ -83,7 +83,7 @@ export const integrationTestPackageMetadata = [
 
 export const integrationTestDreamWorkflowPackageMetadata = {
   description:
-    "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, memory search, redacted hydration, and HITL reports.",
+    "Dream memory fabric workflow nodes for source inventory, source health, recovery-only backfill planning and receipts, run/artifact capture receipts, memory search, redacted hydration, and HITL reports.",
   exports: [
     {
       contractRef:
@@ -115,6 +115,19 @@ export const integrationTestDreamWorkflowPackageMetadata = {
       exportId: "dream-backfill-run",
       kind: "workflow-node",
       nodeType: "joelclaw.dream.backfill-run",
+    },
+    {
+      contractRef: "contract://workflow/dream-memory-fabric/capture-run.v1",
+      exportId: "dream-capture-run",
+      kind: "workflow-node",
+      nodeType: "joelclaw.dream.capture-run",
+    },
+    {
+      contractRef:
+        "contract://workflow/dream-memory-fabric/capture-artifact.v1",
+      exportId: "dream-capture-artifact",
+      kind: "workflow-node",
+      nodeType: "joelclaw.dream.capture-artifact",
     },
     {
       contractRef: "contract://workflow/dream-memory-fabric/memory-search.v1",

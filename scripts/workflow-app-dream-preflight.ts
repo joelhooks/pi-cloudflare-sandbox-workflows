@@ -1006,7 +1006,7 @@ const requiredActionsForRemoteRegistry = (
     remoteRegistry.expectedPackageManifestHashMatched !== true
   ) {
     return [
-      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.`,
+      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.capture-run, joelclaw.dream.capture-artifact, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.`,
     ];
   }
 

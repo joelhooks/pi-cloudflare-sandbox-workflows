@@ -63,6 +63,7 @@ import { workflowTraceContextForLane } from "../domain/trace-context.ts";
 import {
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
@@ -73,6 +74,8 @@ import {
 import type {
   DreamCorrelationGraphDocument,
   DreamMemoryRelayBackfillRunPayload,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
   DreamMemoryRelayCorrelationPayload,
   DreamReceiptRef,
   DreamRuntime,
@@ -81,6 +84,7 @@ import type {
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
   DreamMemoryCorrelationPort,
   DreamMemoryFabricPort,
   DreamMemoryRetrievalPort,
@@ -436,7 +440,58 @@ const runtimeCoverageSourceId = (runtime: DreamRuntime): string =>
     : dreamSourceIdFor("agent-transcripts");
 
 export const createIntegrationTestDreamMemoryFabricAdapter =
-  (): DreamMemoryBackfillPort & DreamMemoryFabricPort => ({
+  (): DreamMemoryBackfillPort &
+    DreamMemoryCapturePort &
+    DreamMemoryFabricPort => ({
+    captureArtifact(input: DreamMemoryRelayCaptureArtifactPayload) {
+      return Promise.resolve({
+        document: DreamCaptureReceiptDocumentSchema.parse({
+          captureKind: "artifact",
+          capturedAt: nowIso(),
+          capturedRef: input.capturedRef,
+          readability: input.readability,
+          redacted: true,
+          runId: input.runId,
+          schemaVersion: "dream.capture-receipt.v1",
+          sourceSystem: input.sourceSystem,
+          workItemId: input.workItemId,
+        }),
+        status: "ready",
+      });
+    },
+    captureRun(input: DreamMemoryRelayCaptureRunPayload) {
+      const capturedAt = nowIso();
+
+      return Promise.resolve({
+        document: DreamCaptureReceiptDocumentSchema.parse({
+          captureKind: "run",
+          capturedAt,
+          capturedRef: input.capturedRef ?? {
+            artifactRef: `artifact://integration-dream/runs/${
+              input.targetRunId ?? input.runId
+            }/capture/run.json`,
+            hash: hashJson({
+              capturedAt,
+              redacted: true,
+              runId: input.runId,
+              schemaVersion: "integration.dream.capture-run.v1",
+              sourceSystem: input.sourceSystem,
+              targetRunId: input.targetRunId ?? input.runId,
+              workItemId: input.workItemId,
+            }),
+            mediaType: "application/json",
+          },
+          capturedRunId: input.targetRunId ?? input.runId,
+          readability: input.readability,
+          redacted: true,
+          runId: input.runId,
+          schemaVersion: "dream.capture-receipt.v1",
+          sourceSystem: input.sourceSystem,
+          workItemId: input.workItemId,
+        }),
+        status: "ready",
+      });
+    },
     checkSourceHealth(input) {
       const staleRuntimeCoverage = input.inventory.runtimeCoverage.filter(
         (coverage) => coverage.status !== "captured"

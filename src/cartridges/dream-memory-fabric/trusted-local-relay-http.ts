@@ -53,6 +53,8 @@ const TRUSTED_LOCAL_PORT = "TrustedLocalDreamMemoryFabricPort";
 const SupportedRelayOperationSchema = z.enum([
   "backfill-plan",
   "backfill-run",
+  "capture-artifact",
+  "capture-run",
   "correlate",
   "hydrate",
   "inventory",
@@ -306,6 +308,8 @@ export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
       "source-health",
       "backfill-plan",
       "backfill-run",
+      "capture-run",
+      "capture-artifact",
       "signals",
       "search",
       "hydrate",
@@ -351,6 +355,7 @@ export const createTrustedLocalDreamMemoryRelayFetchHandler = (
   });
   const relayConfig = {
     dreamMemoryBackfill: dreamMemoryFabric,
+    dreamMemoryCapture: dreamMemoryFabric,
     dreamMemoryCorrelation: dreamMemoryRetrieval,
     dreamMemoryFabric,
     dreamMemoryRetrieval,

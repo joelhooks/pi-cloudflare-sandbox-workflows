@@ -6,9 +6,11 @@ import type {
   WorkflowNodeExecutionResult,
   WorkflowNodeInvocationStep,
 } from "../application/ports.ts";
-import { ArtifactRefSchema } from "../domain/schemas.ts";
+import { hashJson, sha256Hex } from "../domain/hash.ts";
+import { ArtifactPinSchema, ArtifactRefSchema } from "../domain/schemas.ts";
 import type {
   Actor,
+  ArtifactPin,
   ArtifactRef,
   CapabilityBlocker,
 } from "../domain/schemas.ts";
@@ -16,12 +18,15 @@ import {
   DREAM_HITL_REPORT_SECTION_ORDER,
   DreamBackfillPlanDocumentSchema,
   DreamBackfillRunReceiptDocumentSchema,
+  DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
   DreamHitlReportDocumentSchema,
   DreamHitlReportProofLevelSchema,
   DreamHydrationDocumentSchema,
-  DreamMemoryRelayBackfillRunPayloadSchema,
   DreamMemoryFabricNodeTypeSchema,
+  DreamMemoryRelayBackfillRunPayloadSchema,
+  DreamMemoryRelayCaptureArtifactPayloadSchema,
+  DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemoryRelayCorrelationPayloadSchema,
   DreamMemoryRelayHydrationPayloadSchema,
   DreamMemoryRelayLeaseReceiptSchema,
@@ -39,12 +44,15 @@ import {
 import type {
   DreamBackfillPlanDocument,
   DreamBackfillRunReceiptDocument,
+  DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
   DreamHitlDreamCard,
   DreamHitlReportDocument,
   DreamHitlReportProofLevel,
   DreamHydrationDocument,
   DreamMemoryRelayBackfillRunPayload,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
   DreamMemoryRelayCorrelationPayload,
   DreamMemoryRelayHydrationPayload,
   DreamMemoryRelayLeaseReceipt,
@@ -131,9 +139,20 @@ export interface DreamMemoryBackfillPort {
   ): Promise<DreamMemoryFabricResult<DreamBackfillRunReceiptDocument>>;
 }
 
+export interface DreamMemoryCapturePort {
+  captureArtifact(
+    input: DreamMemoryRelayCaptureArtifactPayload
+  ): Promise<DreamMemoryFabricResult<DreamCaptureReceiptDocument>>;
+
+  captureRun(
+    input: DreamMemoryRelayCaptureRunPayload
+  ): Promise<DreamMemoryFabricResult<DreamCaptureReceiptDocument>>;
+}
+
 export interface DreamMemoryFabricWorkflowNodeAdapterConfig {
   readonly artifacts: ArtifactStoreContract;
   readonly dreamMemoryBackfill?: DreamMemoryBackfillPort;
+  readonly dreamMemoryCapture?: DreamMemoryCapturePort;
   readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
   readonly dreamMemoryFabric: DreamMemoryFabricPort;
   readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
@@ -168,6 +187,44 @@ const DreamBackfillPlanNodeConfigSchema = z.object({
 const DreamBackfillRunNodeConfigSchema = z.object({
   planRef: ArtifactRefSchema.optional(),
   planStepId: z.string().min(1).optional(),
+});
+
+const CAPTURABLE_ARTIFACT_MEDIA_TYPES = [
+  "application/json",
+  "text/html",
+  "text/markdown",
+  "text/mdsvx",
+  "text/plain",
+  "text/typescript",
+] as const;
+
+const DreamCapturableArtifactMediaTypeSchema = z.enum(
+  CAPTURABLE_ARTIFACT_MEDIA_TYPES,
+  {
+    error:
+      "Dream capture artifact mediaType must be application/json or a supported text media type.",
+  }
+);
+
+const DreamCaptureRunNodeConfigSchema = z.object({
+  capturedRef: ArtifactPinSchema.optional(),
+  readability: z
+    .enum(["actor-private", "org-private", "public"])
+    .default("actor-private"),
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceSystem: z.string().min(1).default("cloudflare-workflow-run"),
+  targetRunId: z.string().min(1).optional(),
+});
+
+const DreamCaptureArtifactNodeConfigSchema = z.object({
+  artifactRef: ArtifactRefSchema.optional(),
+  artifactStepId: z.string().min(1).optional(),
+  mediaType: DreamCapturableArtifactMediaTypeSchema.default("application/json"),
+  readability: z
+    .enum(["actor-private", "org-private", "public"])
+    .default("actor-private"),
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  sourceSystem: z.string().min(1).default("cloudflare-artifacts"),
 });
 
 const DreamMemorySearchNodeConfigSchema = z.object({
@@ -269,6 +326,7 @@ const writeDocument = async (input: {
   readonly document:
     | DreamBackfillPlanDocument
     | DreamBackfillRunReceiptDocument
+    | DreamCaptureReceiptDocument
     | DreamCorrelationGraphDocument
     | DreamHitlReportDocument
     | DreamHydrationDocument
@@ -612,6 +670,63 @@ const backfillRunPlanRefFor = (input: {
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.planStepId,
   });
+
+const captureArtifactRefFor = (input: {
+  readonly config: z.infer<typeof DreamCaptureArtifactNodeConfigSchema>;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+}): ArtifactRef | null =>
+  input.config.artifactRef ??
+  dependencyRefFor({
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    stepId: input.config.artifactStepId,
+  });
+
+const captureArtifactPinFor = async (input: {
+  readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+  readonly mediaType: string;
+}): Promise<
+  | {
+      readonly pin: ArtifactPin;
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  try {
+    if (input.mediaType === "application/json") {
+      const value = await input.artifacts.readJson({
+        artifactRef: input.artifactRef,
+      });
+
+      return {
+        pin: ArtifactPinSchema.parse({
+          artifactRef: input.artifactRef,
+          hash: hashJson(value),
+          mediaType: input.mediaType,
+        }),
+        status: "loaded",
+      };
+    }
+
+    const value = await input.artifacts.readText({
+      artifactRef: input.artifactRef,
+    });
+
+    return {
+      pin: ArtifactPinSchema.parse({
+        artifactRef: input.artifactRef,
+        hash: sha256Hex(value),
+        mediaType: input.mediaType,
+      }),
+      status: "loaded",
+    };
+  } catch {
+    return blocker(
+      "stale_package",
+      "Dream capture artifact node requires a readable generated artifact ref."
+    );
+  }
+};
 
 const searchRefFor = (input: {
   readonly config: z.infer<typeof DreamHydrationNodeConfigSchema>;
@@ -2060,6 +2175,105 @@ const executeHitlReportNode = async (
   });
 };
 
+const executeCaptureRunNode = async (
+  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
+  input: DreamWorkflowNodeExecutionInput
+): Promise<WorkflowNodeExecutionResult> => {
+  if (config.dreamMemoryCapture === undefined) {
+    return blocker(
+      "adapter_unavailable",
+      "Dream capture run node requires a Dream memory capture adapter."
+    );
+  }
+
+  const nodeConfig = DreamCaptureRunNodeConfigSchema.parse(input.step.config);
+  const result = await config.dreamMemoryCapture.captureRun(
+    DreamMemoryRelayCaptureRunPayloadSchema.parse({
+      actor: input.actor,
+      ...(nodeConfig.capturedRef === undefined
+        ? {}
+        : { capturedRef: nodeConfig.capturedRef }),
+      readability: nodeConfig.readability,
+      runId: input.plan.runId,
+      ...(nodeConfig.sourceFamilies === undefined
+        ? {}
+        : { sourceFamilies: nodeConfig.sourceFamilies }),
+      sourceSystem: nodeConfig.sourceSystem,
+      targetRunId: nodeConfig.targetRunId ?? input.plan.runId,
+      workItemId: input.plan.workItemId,
+    })
+  );
+  if (result.status === "blocked") {
+    return result;
+  }
+
+  return await writeDocument({
+    artifacts: config.artifacts,
+    document: DreamCaptureReceiptDocumentSchema.parse(result.document),
+    relayLeaseReceipt: result.relayLeaseReceipt,
+    step: input.step,
+  });
+};
+
+const executeCaptureArtifactNode = async (
+  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
+  input: DreamWorkflowNodeExecutionInput
+): Promise<WorkflowNodeExecutionResult> => {
+  if (config.dreamMemoryCapture === undefined) {
+    return blocker(
+      "adapter_unavailable",
+      "Dream capture artifact node requires a Dream memory capture adapter."
+    );
+  }
+
+  const nodeConfig = DreamCaptureArtifactNodeConfigSchema.parse(
+    input.step.config
+  );
+  const artifactRef = captureArtifactRefFor({
+    config: nodeConfig,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+  });
+  if (artifactRef === null) {
+    return blocker(
+      "stale_package",
+      "Dream capture artifact node requires a generated artifact ref."
+    );
+  }
+
+  const capturedRef = await captureArtifactPinFor({
+    artifactRef,
+    artifacts: config.artifacts,
+    mediaType: nodeConfig.mediaType,
+  });
+  if (capturedRef.status === "blocked") {
+    return capturedRef;
+  }
+
+  const result = await config.dreamMemoryCapture.captureArtifact(
+    DreamMemoryRelayCaptureArtifactPayloadSchema.parse({
+      actor: input.actor,
+      capturedRef: capturedRef.pin,
+      readability: nodeConfig.readability,
+      runId: input.plan.runId,
+      ...(nodeConfig.sourceFamilies === undefined
+        ? {}
+        : { sourceFamilies: nodeConfig.sourceFamilies }),
+      sourceSystem: nodeConfig.sourceSystem,
+      workItemId: input.plan.workItemId,
+    })
+  );
+  if (result.status === "blocked") {
+    return result;
+  }
+
+  return await writeDocument({
+    artifacts: config.artifacts,
+    document: DreamCaptureReceiptDocumentSchema.parse(result.document),
+    relayLeaseReceipt: result.relayLeaseReceipt,
+    step: input.step,
+  });
+};
+
 const executeBackfillRunNode = async (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig,
   input: DreamWorkflowNodeExecutionInput
@@ -2197,6 +2411,14 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
 
     if (nodeTypeResult.data === "joelclaw.dream.backfill-run") {
       return await executeBackfillRunNode(config, input);
+    }
+
+    if (nodeTypeResult.data === "joelclaw.dream.capture-run") {
+      return await executeCaptureRunNode(config, input);
+    }
+
+    if (nodeTypeResult.data === "joelclaw.dream.capture-artifact") {
+      return await executeCaptureArtifactNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.correlate") {

@@ -36,6 +36,7 @@ export type {
 } from "./application/ports.ts";
 export type {
   DreamMemoryBackfillPort,
+  DreamMemoryCapturePort,
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
@@ -79,6 +80,8 @@ export {
   DreamMemoryRelayBudgetSchema,
   DreamMemoryRelayBackfillPlanPayloadSchema,
   DreamMemoryRelayBackfillRunPayloadSchema,
+  DreamMemoryRelayCaptureArtifactPayloadSchema,
+  DreamMemoryRelayCaptureRunPayloadSchema,
   DreamMemoryRelayEndpointCatalogSchema,
   DreamMemoryRelayEndpointSchema,
   DreamMemoryRelayFollowUpLinkSchema,
@@ -139,6 +142,8 @@ export type {
   DreamMemoryRelayBudget,
   DreamMemoryRelayBackfillPlanPayload,
   DreamMemoryRelayBackfillRunPayload,
+  DreamMemoryRelayCaptureArtifactPayload,
+  DreamMemoryRelayCaptureRunPayload,
   DreamMemoryRelayEndpoint,
   DreamMemoryRelayEndpointCatalog,
   DreamMemoryRelayFollowUpLink,
