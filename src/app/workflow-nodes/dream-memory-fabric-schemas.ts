@@ -1091,8 +1091,17 @@ export const DreamHitlReportTemplateSchema = z.object({
 export const DreamHitlReportStateMachineFigureSchema = z.object({
   aspectRatio: z.string().min(1),
   component: z.literal("D2"),
+  machineBinding: z.object({
+    machineArtifactHash: Sha256HexSchema,
+    machineArtifactRef: ArtifactRefSchema,
+    machineId: z.string().min(1),
+    machineSourceArtifactRef: ArtifactRefSchema,
+    machineSourceHash: Sha256HexSchema,
+    status: z.literal("bound-to-generated-machine"),
+  }),
   machineId: z.string().min(1),
   source: z.string().min(1),
+  sourceHash: Sha256HexSchema,
   sourceKind: z.literal("generated-xstate-machine"),
   stateCount: z.number().int().min(1),
   transitionCount: z.number().int().min(0),

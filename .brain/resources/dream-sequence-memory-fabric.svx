@@ -26,6 +26,17 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T10:02Z implementation progress: Dream HITL report proof now carries a hash-level binding from the D2 figure back to the generated workflow machine artifact.
+
+Receipts:
+
+- `dream.hitl-report.v1.proof.stateMachineFigure` now includes `sourceHash` for the exact D2 figure source rendered in the report.
+- The same figure proof now includes `machineBinding` with generated machine artifact ref/hash, generated machine source ref/hash, machine id, and `status=bound-to-generated-machine`.
+- `joelclaw.dream.hitl-report` refuses to build the report if the loaded generated machine id does not match the pinned machine artifact id from the dynamic plan.
+- `docs/dream-report-canon.md` now states that a `generated-machine` Dream report must carry this D2 figure-to-machine binding.
+
+This is still report/proof hardening, not live Cloudflare Dream execution. The trusted relay network-boundary gates remain the live blocker.
+
 2026-06-10T09:54Z implementation progress: Dream HITL report MDSvX now treats the generated state machine as a first-class D2 figure contract instead of a loose code fence.
 
 Receipts:

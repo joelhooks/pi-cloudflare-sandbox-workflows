@@ -3779,6 +3779,7 @@ describe("workflow app integration contract", () => {
       reportSourceRefs: report.sourceRefs,
       reportStateMachineFigure: {
         aspectRatio: report.proof.stateMachineFigure.aspectRatio,
+        machineBinding: report.proof.stateMachineFigure.machineBinding,
         machineId: report.proof.stateMachineFigure.machineId,
         sourceHasFirstDreamStep:
           report.proof.stateMachineFigure.source.includes(
@@ -3786,6 +3787,9 @@ describe("workflow app integration contract", () => {
           ),
         sourceHasStaticDreamLabel:
           report.proof.stateMachineFigure.source.includes("Source inventory"),
+        sourceHashMatches:
+          report.proof.stateMachineFigure.sourceHash ===
+          sha256Hex(report.proof.stateMachineFigure.source),
         sourceKind: report.proof.stateMachineFigure.sourceKind,
         stateCount: report.proof.stateMachineFigure.stateCount,
         transitionCount: report.proof.stateMachineFigure.transitionCount,
@@ -4345,9 +4349,18 @@ describe("workflow app integration contract", () => {
       ],
       reportStateMachineFigure: {
         aspectRatio: "3:5",
+        machineBinding: {
+          machineArtifactHash: result.machineArtifact.hash,
+          machineArtifactRef: result.machineArtifact.artifactRef,
+          machineId: result.machineArtifact.machineId,
+          machineSourceArtifactRef: result.machineArtifact.sourceArtifactRef,
+          machineSourceHash: result.machineArtifact.sourceHash,
+          status: "bound-to-generated-machine",
+        },
         machineId: machine.machineId,
         sourceHasFirstDreamStep: true,
         sourceHasStaticDreamLabel: false,
+        sourceHashMatches: true,
         sourceKind: "generated-xstate-machine",
         stateCount: 17,
         transitionCount: 29,

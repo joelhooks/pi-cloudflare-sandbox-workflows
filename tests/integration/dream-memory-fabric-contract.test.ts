@@ -1114,8 +1114,19 @@ describe("Dream memory fabric domain contracts", () => {
         stateMachineFigure: {
           aspectRatio: "3:5",
           component: "D2",
+          machineBinding: {
+            machineArtifactHash: "a".repeat(64),
+            machineArtifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",
+            machineId: "machine:run-dream-preflight",
+            machineSourceArtifactRef:
+              "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.ts",
+            machineSourceHash: "c".repeat(64),
+            status: "bound-to-generated-machine",
+          },
           machineId: "machine:run-dream-preflight",
           source: "s0 -> s1: NEXT",
+          sourceHash: "e".repeat(64),
           sourceKind: "generated-xstate-machine",
           stateCount: 8,
           transitionCount: 9,
@@ -1161,6 +1172,7 @@ describe("Dream memory fabric domain contracts", () => {
       proofLevel: report.proof.dynamicGenerationProofLevel,
       rawTranscriptsReturned: report.proof.rawTranscriptsReturned,
       sectionOrder: report.sectionOrder,
+      stateMachineSourceHash: report.proof.stateMachineFigure.sourceHash,
       stateMachineSourceKind: report.proof.stateMachineFigure.sourceKind,
       template: `${report.template.templateId}@${report.template.version}`,
     }).toStrictEqual({
@@ -1195,6 +1207,7 @@ describe("Dream memory fabric domain contracts", () => {
         "proof",
         "technical-appendix",
       ],
+      stateMachineSourceHash: "e".repeat(64),
       stateMachineSourceKind: "generated-xstate-machine",
       template: "joel/tufte-mdsvx@0.1.0",
     });

@@ -1189,10 +1189,17 @@ const d2Label = (value: string): string => JSON.stringify(value);
 const mdsvxAttributeString = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 
-const dreamReportStateMachineFigureFor = (
-  machine: DynamicWorkflowMachineDocument
-): DreamHitlReportDocument["proof"]["stateMachineFigure"] => {
-  const stateEntries = Object.entries(machine.xstate.states);
+const dreamReportStateMachineFigureFor = (input: {
+  readonly machine: DynamicWorkflowMachineDocument;
+  readonly machineArtifact: DynamicWorkflowPlanDocument["machine"];
+}): DreamHitlReportDocument["proof"]["stateMachineFigure"] => {
+  if (input.machine.machineId !== input.machineArtifact.machineId) {
+    throw new Error(
+      `Generated Dream report machine id mismatch: ${input.machine.machineId} != ${input.machineArtifact.machineId}.`
+    );
+  }
+
+  const stateEntries = Object.entries(input.machine.xstate.states);
   const stateIds = new Map(
     stateEntries.map(([stateName], index) => [stateName, `s${index}`])
   );
@@ -1236,18 +1243,28 @@ const dreamReportStateMachineFigureFor = (
 
     return `${fromId} -> ${toId}: ${d2Label(transition.eventName)}`;
   });
+  const source = [
+    "direction: down",
+    ...nodeLines,
+    ...edgeLines,
+    `initial: ${d2Label(input.machine.xstate.initial)}`,
+    `machine: ${d2Label(input.machine.machineId)}`,
+  ].join("\n");
 
   return {
     aspectRatio,
     component: "D2",
-    machineId: machine.machineId,
-    source: [
-      "direction: down",
-      ...nodeLines,
-      ...edgeLines,
-      `initial: ${d2Label(machine.xstate.initial)}`,
-      `machine: ${d2Label(machine.machineId)}`,
-    ].join("\n"),
+    machineBinding: {
+      machineArtifactHash: input.machineArtifact.hash,
+      machineArtifactRef: input.machineArtifact.artifactRef,
+      machineId: input.machineArtifact.machineId,
+      machineSourceArtifactRef: input.machineArtifact.sourceArtifactRef,
+      machineSourceHash: input.machineArtifact.sourceHash,
+      status: "bound-to-generated-machine",
+    },
+    machineId: input.machine.machineId,
+    source,
+    sourceHash: sha256Hex(source),
     sourceKind: "generated-xstate-machine",
     stateCount: stateEntries.length,
     transitionCount: transitions.length,
@@ -2016,6 +2033,8 @@ const reportMdsvxFor = (input: {
     "",
     `Verification contract: ${input.plan.verificationContract.artifactRef} hash ${input.plan.verificationContract.hash}.`,
     "",
+    `D2 figure source hash: ${input.stateMachineFigure.sourceHash}. Binding: ${input.stateMachineFigure.machineBinding.status} to ${input.stateMachineFigure.machineBinding.machineArtifactRef} hash ${input.stateMachineFigure.machineBinding.machineArtifactHash}.`,
+    "",
     `Planner lane: ${input.plan.planner.source}, nonce ${input.plan.planner.nonce}. Plan ${input.plan.planId} has ${input.plan.steps.length} step(s).`,
     "",
     "The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `dream.generated-workflow-proof.v1`, and verifier result.",
@@ -2471,7 +2490,10 @@ const executeHitlReportNode = async (
     search: reportInputs.search,
   });
   const receiptCount = uniqueReceiptCountFor(reportInputs.search);
-  const stateMachineFigure = dreamReportStateMachineFigureFor(input.machine);
+  const stateMachineFigure = dreamReportStateMachineFigureFor({
+    machine: input.machine,
+    machineArtifact: input.plan.machine,
+  });
   const sourceRefs = [
     requiredRefs.inventoryRef,
     requiredRefs.healthRef,
