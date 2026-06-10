@@ -30,6 +30,7 @@ const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
     "joelclaw.dream.source-health",
     "joelclaw.dream.backfill-plan",
     "joelclaw.dream.backfill-run",
+    "joelclaw.dream.signals",
     "joelclaw.dream.memory-search",
     "joelclaw.dream.hydrate",
     "joelclaw.dream.correlate",
@@ -106,7 +107,7 @@ const relayReadinessMissing: WorkflowLivePreflightCheck = {
 const localRelayProofPassed: WorkflowLivePreflightCheck = {
   checkId: "relay:local-proof",
   message:
-    "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+    "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
   redacted: true,
   required: true,
   requiredFor: [
@@ -161,6 +162,7 @@ const relayReadinessReceipt = (input: {
     "source-health",
     "backfill-plan",
     "backfill-run",
+    "signals",
     "search",
     "hydrate",
     "correlate",
@@ -259,7 +261,7 @@ Wrangler 4.97.0
         leaseSecretRef: "secretref:dream-memory-relay",
         localProofStatus: "missing",
         noRawTranscripts: true,
-        operationCount: 7,
+        operationCount: 8,
         tokenConfigured: false,
       },
       remoteSeeded: false,
@@ -309,6 +311,7 @@ Wrangler 4.97.0
           "source-health",
           "backfill-plan",
           "backfill-run",
+          "signals",
           "search",
           "hydrate",
           "correlate",
@@ -353,7 +356,7 @@ Wrangler 4.97.0
       status: receipt.status,
     }).toStrictEqual({
       requiredAction:
-        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.",
+        "Re-seed workflow/dream-memory-fabric so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.",
       status: "blocked",
     });
   });
@@ -505,6 +508,11 @@ Wrangler 4.97.0
         hydratedCount: 12,
         skippedSourceCount: 0,
       },
+      signals: {
+        receiptFamilyCounts: [{ family: "agent-transcripts", receiptCount: 3 }],
+        signalCount: 3,
+        signalKinds: ["workflow-pattern"],
+      },
       sourceRootCount: 8,
     };
 
@@ -609,10 +617,10 @@ Wrangler 4.97.0
           "Trusted local Dream relay proof is missing explicit source-family coverage for: docs-pdf-brain.",
         missingSourceFamilyCoverageStatus: "failed",
         passedMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 0 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
         passedStatus: "passed",
         passedWithCaptureFixMessage:
-          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 1 capture-fix receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
+          "Trusted local Dream relay proof passed with 8 source roots, 9 backfill action receipt(s), 1 capture-fix receipt(s), 3 signal receipt(s), 12 search hits, 12 hydrated redacted receipts, and 24 correlation edges.",
         passedWithCaptureFixStatus: "passed",
       });
     } finally {

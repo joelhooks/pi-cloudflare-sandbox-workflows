@@ -16,6 +16,7 @@ import {
   DreamHydrationDocumentSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamMemorySearchDocumentSchema,
+  DreamSignalDocumentSchema,
   DreamSourceFamilySchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
@@ -29,6 +30,7 @@ import type {
   DreamMemoryRelayOperation,
   DreamMemorySearchDocument,
   DreamReceiptRef,
+  DreamSignalDocument,
   DreamSourceFamily,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
@@ -166,6 +168,11 @@ const LocalRelayProofReceiptSchema = z.object({
     receiptFamilyCounts: z.array(ReceiptFamilyCountSchema),
     receiptSourceCounts: z.array(ReceiptSourceCountSchema),
     skippedSourceCount: z.number().int().min(0),
+  }),
+  signals: z.object({
+    receiptFamilyCounts: z.array(ReceiptFamilyCountSchema),
+    signalCount: z.number().int().min(0),
+    signalKinds: z.array(z.string().min(1)),
   }),
   sourceRootCount: z.number().int().min(1),
   workItemId: z.string().min(1),
@@ -602,6 +609,20 @@ const run = async (): Promise<void> => {
       },
       token,
     });
+    const signals = await postOperation<DreamSignalDocument>({
+      baseUrl: relay.url,
+      documentSchema: DreamSignalDocumentSchema,
+      operation: "signals",
+      payload: {
+        actor,
+        maxSignals: 8,
+        query,
+        runId,
+        sourceFamilies: dreamTranscriptReviewSourceFamilies,
+        workItemId,
+      },
+      token,
+    });
     const search = await postOperation<DreamMemorySearchDocument>({
       baseUrl: relay.url,
       documentSchema: DreamMemorySearchDocumentSchema,
@@ -662,6 +683,7 @@ const run = async (): Promise<void> => {
       inventory,
       readiness,
       search,
+      signals,
     });
     const rawPathLeaked = rawRootsFromConfig(sourceRootsJson).some((rawRoot) =>
       serialized.includes(rawRoot)
@@ -680,6 +702,9 @@ const run = async (): Promise<void> => {
     );
     const hydrationReceiptCounts = receiptCountsFor(
       hydration.hydrated.map((item) => item.receipt)
+    );
+    const signalReceiptCounts = receiptCountsFor(
+      signals.signals.flatMap((signal) => signal.receipts)
     );
     const receipt = LocalRelayProofReceiptSchema.parse({
       backfill: {
@@ -767,6 +792,13 @@ const run = async (): Promise<void> => {
         receiptFamilyCounts: searchReceiptCounts.familyCounts,
         receiptSourceCounts: searchReceiptCounts.sourceCounts,
         skippedSourceCount: search.skippedSources.length,
+      },
+      signals: {
+        receiptFamilyCounts: signalReceiptCounts.familyCounts,
+        signalCount: signals.signals.length,
+        signalKinds: [
+          ...new Set(signals.signals.map((signal) => signal.kind)),
+        ].toSorted(),
       },
       sourceRootCount: readiness.adapter.sourceRoots.length,
       workItemId,

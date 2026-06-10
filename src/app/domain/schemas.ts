@@ -440,6 +440,7 @@ export const WorkflowLivePreflightRelayOperationSchema = z.enum([
   "hydrate",
   "inventory",
   "search",
+  "signals",
   "source-health",
 ]);
 

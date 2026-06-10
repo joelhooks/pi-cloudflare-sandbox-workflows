@@ -66,6 +66,7 @@ import {
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
+  DreamSignalDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
@@ -75,6 +76,7 @@ import type {
   DreamMemoryRelayCorrelationPayload,
   DreamReceiptRef,
   DreamRuntime,
+  DreamSignalKind,
   DreamSourceFamily,
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
@@ -82,6 +84,7 @@ import type {
   DreamMemoryCorrelationPort,
   DreamMemoryFabricPort,
   DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
 } from "../workflow-nodes/dream-memory-fabric.ts";
 
 type DreamCorrelationGraphNode = DreamCorrelationGraphDocument["nodes"][number];
@@ -710,7 +713,7 @@ const dreamSearchReceiptFor = (input: {
 });
 
 export const createIntegrationTestDreamMemoryRetrievalAdapter =
-  (): DreamMemoryRetrievalPort => ({
+  (): DreamMemoryRetrievalPort & DreamMemorySignalPort => ({
     hydrateMemories(input) {
       return Promise.resolve({
         document: DreamHydrationDocumentSchema.parse({
@@ -725,6 +728,36 @@ export const createIntegrationTestDreamMemoryRetrievalAdapter =
           redacted: true,
           runId: input.runId,
           schemaVersion: "dream.hydration.v1",
+          workItemId: input.workItemId,
+        }),
+        status: "ready",
+      });
+    },
+    mineSignals(input) {
+      const signalKind: DreamSignalKind =
+        input.signalKinds?.at(0) ?? "workflow-pattern";
+      const family = input.sourceFamilies?.at(0) ?? "agent-transcripts";
+      const receipt = dreamSearchReceiptFor({ family, runId: input.runId });
+
+      return Promise.resolve({
+        document: DreamSignalDocumentSchema.parse({
+          generatedAt: nowIso(),
+          redacted: true,
+          runId: input.runId,
+          schemaVersion: "dream.signals.v1",
+          signals: [
+            {
+              confidence: 0.94,
+              kind: signalKind,
+              rating: 5,
+              reasoning:
+                "Integration Dream signal proves the generated workflow can mine redacted correction/workflow evidence before search and proposals.",
+              receipts: [receipt],
+              signalId: `signal:integration:${signalKind}`,
+              summary:
+                "Dream found workflow-proof pressure: dynamic generation needs verifier-backed signal evidence.",
+            },
+          ].slice(0, input.maxSignals),
           workItemId: input.workItemId,
         }),
         status: "ready",

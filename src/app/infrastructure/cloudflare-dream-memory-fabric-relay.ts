@@ -19,6 +19,8 @@ import {
   DreamMemoryRelayBackfillRunPayloadSchema,
   DreamMemoryRelayEndpointCatalogSchema,
   DreamMemoryRelayOperationSchema,
+  DreamMemoryRelaySignalsPayloadSchema,
+  DreamSignalDocumentSchema,
   DreamSourceFamilySchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
@@ -34,8 +36,10 @@ import type {
   DreamMemoryRelayHydrationPayload,
   DreamMemoryRelaySearchPayload,
   DreamMemoryRelayBackfillRunPayload,
+  DreamMemoryRelaySignalsPayload,
   DreamMemorySearchDocument,
   DreamReceiptRef,
+  DreamSignalDocument,
   DreamSourceHealthDocument,
   DreamSourceFamily,
   DreamSourceInventoryDocument,
@@ -46,6 +50,7 @@ import type {
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
 } from "../workflow-nodes/dream-memory-fabric.ts";
 
 export interface DreamMemoryRelayTokenSecretResolver {
@@ -112,6 +117,7 @@ type DreamRelayPayload =
   | DreamMemoryRelayCorrelationPayload
   | DreamMemoryRelayHydrationPayload
   | DreamMemoryRelaySearchPayload
+  | DreamMemoryRelaySignalsPayload
   | DreamRelayInventoryPayload
   | DreamRelaySourceHealthPayload;
 
@@ -299,7 +305,8 @@ export const createCloudflareDreamMemoryFabricRelay = (
 ): DreamMemoryCorrelationPort &
   DreamMemoryBackfillPort &
   DreamMemoryFabricPort &
-  DreamMemoryRetrievalPort => {
+  DreamMemoryRetrievalPort &
+  DreamMemorySignalPort => {
   const fetcher = config.fetch ?? fetch;
 
   const postRelay = async <TDocument>(input: {
@@ -405,6 +412,15 @@ export const createCloudflareDreamMemoryFabricRelay = (
         body: input,
         documentSchema: DreamSourceInventoryDocumentSchema,
         operation: "inventory",
+        runId: input.runId,
+        workItemId: input.workItemId,
+      });
+    },
+    mineSignals(input) {
+      return postRelay<DreamSignalDocument>({
+        body: DreamMemoryRelaySignalsPayloadSchema.parse(input),
+        documentSchema: DreamSignalDocumentSchema,
+        operation: "signals",
         runId: input.runId,
         workItemId: input.workItemId,
       });

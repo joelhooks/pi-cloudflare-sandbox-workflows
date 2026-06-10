@@ -9,6 +9,7 @@ import {
   DreamCorrelationGraphDocumentSchema,
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
+  DreamSignalDocumentSchema,
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamCorrelationGraphDocument,
@@ -16,11 +17,13 @@ import type {
   DreamMemoryRelayCorrelationPayload,
   DreamMemorySearchHit,
   DreamReceiptRef,
+  DreamSignalKind,
   DreamSourceFamily,
 } from "../../app/workflow-nodes/dream-memory-fabric-schemas.ts";
 import type {
   DreamMemoryCorrelationPort,
   DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
 } from "../../app/workflow-nodes/dream-memory-fabric.ts";
 import {
   searchTrustedJoelClawSessionSource,
@@ -63,12 +66,58 @@ interface CandidateSearchHit {
   readonly termCount: number;
 }
 
+interface SignalPattern {
+  readonly kind: DreamSignalKind;
+  readonly queryTerms: readonly string[];
+  readonly rating: number;
+  readonly summary: string;
+}
+
 const DEFAULT_MAX_FILE_BYTES = 256_000;
 const DEFAULT_MAX_FILES_PER_SOURCE = 5000;
 const EXCERPT_RADIUS = 80;
 const REDACTED_TOKEN = "[redacted-token]";
 const DOCS_API_SOURCE_ID = "source:docs-pdf-brain:joelclaw-api";
 const DOCS_API_RECEIPT_PREFIX = "docs-api:";
+
+const signalPatterns: readonly SignalPattern[] = [
+  {
+    kind: "agent-failure",
+    queryTerms: ["failed", "fake", "hardcoded", "lying", "missing"],
+    rating: 5,
+    summary: "Agent failure or fake-proof language repeated in memory.",
+  },
+  {
+    kind: "correction",
+    queryTerms: ["should", "shouldn't", "wrong", "not", "bullshit"],
+    rating: 5,
+    summary: "Correction language repeated in memory.",
+  },
+  {
+    kind: "decision",
+    queryTerms: ["accepted", "canon", "canonical", "decision", "required"],
+    rating: 4,
+    summary: "Decision language appeared in Dream memory.",
+  },
+  {
+    kind: "friction",
+    queryTerms: ["blocked", "stuck", "unavailable", "degraded", "skipped"],
+    rating: 4,
+    summary: "Operational friction appeared in Dream memory.",
+  },
+  {
+    kind: "preference",
+    queryTerms: ["i want", "we should", "must", "need", "don't"],
+    rating: 4,
+    summary: "Preference or constraint language appeared in memory.",
+  },
+  {
+    kind: "workflow-pattern",
+    queryTerms: ["workflow", "dynamic", "xstate", "generated", "state machine"],
+    rating: 5,
+    summary: "Workflow-pattern language appeared in Dream memory.",
+  },
+];
 
 const DocsApiSearchHitSchema = z.object({
   docId: z.string().min(1),
@@ -708,6 +757,108 @@ const searchHitFor = (input: {
   summary: `Matched ${input.hit.termCount} term(s) in ${input.hit.candidate.sourceRoot.label}.`,
 });
 
+const signalSafeId = (value: string): string =>
+  value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_.:-]+/gu, "-")
+    .replaceAll(/^-|-$/gu, "")
+    .slice(0, 80);
+
+const matchingSignalPatterns = (input: {
+  readonly allowedKinds: readonly DreamSignalKind[] | undefined;
+  readonly candidate: CandidateFile;
+  readonly queryTerms: readonly string[];
+}): readonly {
+  readonly confidence: number;
+  readonly matchingTermCount: number;
+  readonly pattern: SignalPattern;
+}[] => {
+  const haystack = input.candidate.content.toLowerCase();
+  const queryTermCount = input.queryTerms.filter((term) =>
+    haystack.includes(term)
+  ).length;
+  const matches = [];
+
+  for (const pattern of signalPatterns) {
+    if (
+      input.allowedKinds !== undefined &&
+      !input.allowedKinds.includes(pattern.kind)
+    ) {
+      continue;
+    }
+
+    const matchingTermCount = pattern.queryTerms.filter((term) =>
+      haystack.includes(term)
+    ).length;
+    if (matchingTermCount === 0 && queryTermCount === 0) {
+      continue;
+    }
+
+    matches.push({
+      confidence: Math.min(
+        1,
+        0.45 + matchingTermCount * 0.15 + queryTermCount * 0.05
+      ),
+      matchingTermCount,
+      pattern,
+    });
+  }
+
+  return matches.toSorted(
+    (left, right) =>
+      right.pattern.rating - left.pattern.rating ||
+      right.confidence - left.confidence
+  );
+};
+
+const signalsForCandidates = (input: {
+  readonly allowedKinds: readonly DreamSignalKind[] | undefined;
+  readonly candidates: readonly CandidateFile[];
+  readonly generatedAt: string;
+  readonly maxSignals: number;
+  readonly query: string;
+  readonly runId: string;
+  readonly workItemId: string;
+}) => {
+  const queryTerms = termsForQuery(input.query);
+  const signals = [];
+
+  for (const candidate of input.candidates) {
+    const receipt = receiptFor(candidate);
+    const matches = matchingSignalPatterns({
+      allowedKinds: input.allowedKinds,
+      candidate,
+      queryTerms,
+    });
+
+    for (const match of matches) {
+      signals.push({
+        confidence: match.confidence,
+        kind: match.pattern.kind,
+        rating: match.pattern.rating,
+        reasoning: `${match.pattern.summary} Matched ${match.matchingTermCount} signal term(s) with redacted receipt metadata only.`,
+        receipts: [receipt],
+        signalId: `signal:${match.pattern.kind}:${signalSafeId(candidate.sourceRoot.sourceId)}:${candidate.hash.slice(0, 10)}`,
+        summary: `${match.pattern.summary} Source: ${candidate.sourceRoot.label}.`,
+      });
+    }
+  }
+
+  return DreamSignalDocumentSchema.parse({
+    generatedAt: input.generatedAt,
+    redacted: true,
+    runId: input.runId,
+    schemaVersion: "dream.signals.v1",
+    signals: signals
+      .toSorted(
+        (left, right) =>
+          right.rating - left.rating || right.confidence - left.confidence
+      )
+      .slice(0, input.maxSignals),
+    workItemId: input.workItemId,
+  });
+};
+
 const bestHits = (input: {
   readonly candidates: readonly CandidateFile[];
   readonly maxHits: number;
@@ -889,7 +1040,9 @@ const correlationGraphFor = (input: {
 
 export const createTrustedLocalDreamMemoryRetrievalAdapter = (
   config: TrustedLocalDreamMemoryRetrievalConfig
-): DreamMemoryCorrelationPort & DreamMemoryRetrievalPort => {
+): DreamMemoryCorrelationPort &
+  DreamMemoryRetrievalPort &
+  DreamMemorySignalPort => {
   const joelClawSessionHydrationCache = new Map<
     string,
     TrustedJoelClawSessionHydrationRecord
@@ -970,6 +1123,29 @@ export const createTrustedLocalDreamMemoryRetrievalAdapter = (
           redacted: true,
           runId: input.runId,
           schemaVersion: "dream.hydration.v1",
+          workItemId: input.workItemId,
+        }),
+        status: "ready",
+      };
+    },
+    async mineSignals(input) {
+      const generatedAt = config.now?.() ?? new Date().toISOString();
+      const candidates = await readCandidateFiles({
+        families: input.sourceFamilies,
+        maxFileBytes: config.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
+        maxFilesPerSource:
+          config.maxFilesPerSource ?? DEFAULT_MAX_FILES_PER_SOURCE,
+        sourceRoots: config.sourceRoots,
+      });
+
+      return {
+        document: signalsForCandidates({
+          allowedKinds: input.signalKinds,
+          candidates: candidates.candidates,
+          generatedAt,
+          maxSignals: input.maxSignals,
+          query: input.query,
+          runId: input.runId,
           workItemId: input.workItemId,
         }),
         status: "ready",

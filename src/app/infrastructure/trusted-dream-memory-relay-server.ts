@@ -14,8 +14,10 @@ import {
   DreamMemoryRelayInventoryPayloadSchema,
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamMemoryRelaySearchPayloadSchema,
+  DreamMemoryRelaySignalsPayloadSchema,
   DreamMemoryRelaySourceHealthPayloadSchema,
   DreamMemorySearchDocumentSchema,
+  DreamSignalDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
   dreamMemoryRelayResponseEnvelopeSchema,
@@ -28,6 +30,7 @@ import type {
   DreamMemoryRelayOperation,
   DreamMemoryRelayRequestEnvelope,
   DreamMemorySearchDocument,
+  DreamSignalDocument,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
 } from "../workflow-nodes/dream-memory-fabric-schemas.ts";
@@ -37,6 +40,7 @@ import type {
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
 } from "../workflow-nodes/dream-memory-fabric.ts";
 import { dreamMemoryRelayEndpointCatalog } from "./cloudflare-dream-memory-fabric-relay.ts";
 
@@ -45,6 +49,7 @@ export interface TrustedDreamMemoryRelayServerConfig {
   readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
   readonly dreamMemoryFabric: DreamMemoryFabricPort;
   readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
+  readonly dreamMemorySignals?: DreamMemorySignalPort;
   readonly expectedBearerToken: string;
   readonly now?: () => string;
 }
@@ -61,6 +66,7 @@ type SupportedDreamRelayOperation =
   | "hydrate"
   | "inventory"
   | "search"
+  | "signals"
   | "source-health";
 
 type SupportedDreamRelayDocument =
@@ -69,6 +75,7 @@ type SupportedDreamRelayDocument =
   | DreamCorrelationGraphDocument
   | DreamHydrationDocument
   | DreamMemorySearchDocument
+  | DreamSignalDocument
   | DreamSourceHealthDocument
   | DreamSourceInventoryDocument;
 
@@ -127,6 +134,7 @@ const isSupportedOperation = (
   operation === "hydrate" ||
   operation === "inventory" ||
   operation === "search" ||
+  operation === "signals" ||
   operation === "source-health";
 
 const sourceFreshnessFor = (document: SupportedDreamRelayDocument) => {
@@ -158,7 +166,7 @@ const sourceInventoryRefsFor = (document: SupportedDreamRelayDocument) => {
 };
 
 const unsupportedRetrievalResponse = (
-  operation: "correlate" | "hydrate" | "search"
+  operation: "correlate" | "hydrate" | "search" | "signals"
 ): Response =>
   jsonError(
     501,
@@ -257,6 +265,24 @@ const dispatchSupportedOperation = async (input: {
 
     return resultResponse({
       documentSchema: DreamMemorySearchDocumentSchema,
+      envelope: input.envelope,
+      now,
+      result,
+    });
+  }
+
+  if (input.operation === "signals") {
+    if (input.config.dreamMemorySignals === undefined) {
+      return unsupportedRetrievalResponse("signals");
+    }
+
+    const payload = DreamMemoryRelaySignalsPayloadSchema.parse(
+      input.envelope.payload
+    );
+    const result = await input.config.dreamMemorySignals.mineSignals(payload);
+
+    return resultResponse({
+      documentSchema: DreamSignalDocumentSchema,
       envelope: input.envelope,
       now,
       result,

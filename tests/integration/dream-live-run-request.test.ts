@@ -23,6 +23,7 @@ const readyRelayCapability = {
     "source-health",
     "backfill-plan",
     "backfill-run",
+    "signals",
     "search",
     "hydrate",
     "correlate",
@@ -143,6 +144,7 @@ const readyPreflight = WorkflowLivePreflightReceiptSchema.parse({
       "joelclaw.dream.source-health",
       "joelclaw.dream.backfill-plan",
       "joelclaw.dream.backfill-run",
+      "joelclaw.dream.signals",
       "joelclaw.dream.memory-search",
       "joelclaw.dream.hydrate",
       "joelclaw.dream.correlate",
@@ -224,6 +226,9 @@ describe("Dream live run request harness", () => {
       intentMentionsCloudflare: request.planProposal.intent.includes(
         "Cloudflare-generated dynamic workflow"
       ),
+      intentMentionsSignalMining: request.planProposal.intent.includes(
+        "mine redacted correction/friction/decision/workflow signals"
+      ),
       noRelayTokenLeak: !JSON.stringify(request).includes("relay-secret"),
       packages: request.planProposal.requestedPackageIds,
       stochasticNotesAllowGeneratedRuntimeShape:
@@ -240,10 +245,15 @@ describe("Dream live run request harness", () => {
         request.planProposal.stochasticNotes.some((note) =>
           note.includes("dream/hitl-report.mdsvx")
         ),
+      stochasticNotesRequireSignalMining:
+        request.planProposal.stochasticNotes.some((note) =>
+          note.includes("signal mining")
+        ),
       workItemId: request.workItemId,
     }).toStrictEqual({
       actorRoles: ["workflow.operator", "wzrrd.publish"],
       intentMentionsCloudflare: true,
+      intentMentionsSignalMining: true,
       noRelayTokenLeak: true,
       packages: [
         "badass-courses/claw-kernel",
@@ -253,6 +263,7 @@ describe("Dream live run request harness", () => {
       stochasticNotesAllowGeneratedRuntimeShape: true,
       stochasticNotesDoNotHardcodeNodeOrder: true,
       stochasticNotesMentionWzrrdPrimaryDocument: true,
+      stochasticNotesRequireSignalMining: true,
       workItemId: "work-item:dream-memory-fabric",
     });
   });

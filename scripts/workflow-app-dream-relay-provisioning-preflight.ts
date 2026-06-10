@@ -122,6 +122,17 @@ const LocalRelayProofSchema = z.object({
     hydratedCount: z.number().int().min(1),
     hydratedFamilyCounts: z.array(RelayReceiptFamilyCountSchema).default([]),
   }),
+  signals: z
+    .object({
+      receiptFamilyCounts: z.array(RelayReceiptFamilyCountSchema).default([]),
+      signalCount: z.number().int().min(0),
+      signalKinds: z.array(z.string().min(1)).default([]),
+    })
+    .default({
+      receiptFamilyCounts: [],
+      signalCount: 0,
+      signalKinds: [],
+    }),
   sourceRootCount: z.number().int().min(1),
 });
 
@@ -178,6 +189,8 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     rawPathsReturned: z.literal(false).optional(),
     runId: z.string().min(1).optional(),
     searchHitCount: z.number().int().min(0).optional(),
+    signalCount: z.number().int().min(0).optional(),
+    signalKinds: z.array(z.string().min(1)).optional(),
     sourceRootCount: z.number().int().min(0).optional(),
     status: z.enum(["failed", "missing", "passed"]),
   }),
@@ -424,6 +437,8 @@ const localRelayProofSummary = (input: {
     rawPathsReturned: proof.rawPathsReturned,
     runId: proof.runId,
     searchHitCount: proof.search.hitCount,
+    signalCount: proof.signals.signalCount,
+    signalKinds: proof.signals.signalKinds,
     sourceRootCount: proof.sourceRootCount,
     status:
       missingMachineIds.length === 0 && unreportedSourceFamilies.length === 0

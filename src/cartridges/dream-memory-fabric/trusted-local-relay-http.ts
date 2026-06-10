@@ -57,6 +57,7 @@ const SupportedRelayOperationSchema = z.enum([
   "hydrate",
   "inventory",
   "search",
+  "signals",
   "source-health",
 ]);
 
@@ -305,6 +306,7 @@ export const trustedLocalDreamMemoryRelayReadinessReceipt = (input: {
       "source-health",
       "backfill-plan",
       "backfill-run",
+      "signals",
       "search",
       "hydrate",
       "correlate",
@@ -352,6 +354,7 @@ export const createTrustedLocalDreamMemoryRelayFetchHandler = (
     dreamMemoryCorrelation: dreamMemoryRetrieval,
     dreamMemoryFabric,
     dreamMemoryRetrieval,
+    dreamMemorySignals: dreamMemoryRetrieval,
     expectedBearerToken: config.expectedBearerToken,
     ...(config.now === undefined ? {} : { now: config.now }),
   };

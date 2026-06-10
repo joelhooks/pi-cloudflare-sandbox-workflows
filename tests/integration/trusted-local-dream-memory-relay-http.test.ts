@@ -532,6 +532,7 @@ describe("trusted local Dream memory relay HTTP server", () => {
             "source-health",
             "backfill-plan",
             "backfill-run",
+            "signals",
             "search",
             "hydrate",
             "correlate",

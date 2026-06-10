@@ -101,6 +101,7 @@ export const DreamMemoryFabricNodeTypeSchema = z.enum([
   "joelclaw.dream.hydrate",
   "joelclaw.dream.memory-search",
   "joelclaw.dream.refinement-proposals",
+  "joelclaw.dream.signals",
   "joelclaw.dream.source-health",
   "joelclaw.dream.source-inventory",
 ]);
@@ -557,6 +558,16 @@ export const DreamSignalDocumentSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+export const DreamMemoryRelaySignalsPayloadSchema = z.object({
+  actor: ActorSchema,
+  maxSignals: z.number().int().min(1).max(100).default(10),
+  query: z.string().min(1),
+  runId: z.string().min(1),
+  signalKinds: z.array(DreamSignalKindSchema).min(1).optional(),
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+  workItemId: z.string().min(1),
+});
+
 export const DreamHydrationDocumentSchema = z.object({
   generatedAt: IsoDateTimeSchema,
   hydrated: z
@@ -977,6 +988,9 @@ export type DreamMemoryRelayRequestEnvelope = z.infer<
 >;
 export type DreamMemoryRelaySearchPayload = z.infer<
   typeof DreamMemoryRelaySearchPayloadSchema
+>;
+export type DreamMemoryRelaySignalsPayload = z.infer<
+  typeof DreamMemoryRelaySignalsPayloadSchema
 >;
 export type DreamMemoryRelaySourceHealthPayload = z.infer<
   typeof DreamMemoryRelaySourceHealthPayloadSchema

@@ -39,6 +39,7 @@ export type {
   DreamMemoryFabricPort,
   DreamMemoryFabricResult,
   DreamMemoryRetrievalPort,
+  DreamMemorySignalPort,
   DreamMemoryFabricWorkflowNodeAdapterConfig,
 } from "./workflow-nodes/dream-memory-fabric.ts";
 export type { ArtifactBackedWorkflowCartridgeAdapterConfig } from "./workflow-nodes/artifact-backed-cartridge-adapter.ts";
@@ -90,6 +91,7 @@ export {
   DreamMemoryRelayRedactionPolicySchema,
   DreamMemoryRelayRequestEnvelopeSchema,
   DreamMemoryRelaySearchPayloadSchema,
+  DreamMemoryRelaySignalsPayloadSchema,
   DreamMemoryRelaySourceHealthPayloadSchema,
   DreamMemoryRelayTimeWindowSchema,
   DreamMemorySearchDocumentSchema,
@@ -149,6 +151,7 @@ export type {
   DreamMemoryRelayRedactionPolicy,
   DreamMemoryRelayRequestEnvelope,
   DreamMemoryRelaySearchPayload,
+  DreamMemoryRelaySignalsPayload,
   DreamMemoryRelaySourceHealthPayload,
   DreamMemoryRelayTimeWindow,
   DreamMemorySearchDocument,

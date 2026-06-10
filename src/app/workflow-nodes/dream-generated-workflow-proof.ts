@@ -70,6 +70,7 @@ const dreamNodeTypeEffects = {
   "joelclaw.dream.hydrate": ["hydrate"],
   "joelclaw.dream.memory-search": ["search"],
   "joelclaw.dream.refinement-proposals": ["refinement-proposals"],
+  "joelclaw.dream.signals": ["signals"],
   "joelclaw.dream.source-health": ["source-health"],
   "joelclaw.dream.source-inventory": ["inventory"],
 } as const satisfies Record<

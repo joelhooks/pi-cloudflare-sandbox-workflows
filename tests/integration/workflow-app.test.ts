@@ -66,6 +66,7 @@ import {
   DreamHydrationDocumentSchema,
   DreamMemorySearchDocumentSchema,
   DreamRefinementProposalDocumentSchema,
+  DreamSignalDocumentSchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
 } from "../../src/app/workflow-nodes/dream-memory-fabric-schemas.ts";
@@ -316,13 +317,28 @@ const addDreamPreflightToBlueprint = (
     summary:
       "Execute recovery backfill through the trusted relay and emit an honest receipt.",
   });
+  const signalsStep = DynamicWorkflowStepSchema.parse({
+    config: {
+      maxSignals: 3,
+      query: "dynamic workflow proof across Codex Cloudflare Brain",
+      sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
+    },
+    dependsOn: [backfillRunStep.stepId],
+    kind: "workflow.node.invoke",
+    nodeType: "joelclaw.dream.signals",
+    outputPath: "dream/signals.json",
+    packageRefs: [dreamWorkflowPackageRef],
+    stepId: "mine-dream-signals",
+    summary:
+      "Mine redacted Dream signals before search and proposal synthesis.",
+  });
   const searchStep = DynamicWorkflowStepSchema.parse({
     config: {
       maxHits: 3,
       query: "dynamic workflow proof across Codex Cloudflare Brain",
       sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
     },
-    dependsOn: [backfillRunStep.stepId],
+    dependsOn: [backfillRunStep.stepId, signalsStep.stepId],
     kind: "workflow.node.invoke",
     nodeType: "joelclaw.dream.memory-search",
     outputPath: "dream/memory-search.json",
@@ -365,13 +381,15 @@ const addDreamPreflightToBlueprint = (
       healthStepId: healthStep.stepId,
       hydrationStepId: hydrateStep.stepId,
       inventoryStepId: inventoryStep.stepId,
-      maxProposals: 6,
+      maxProposals: 7,
       searchStepId: searchStep.stepId,
+      signalsStepId: signalsStep.stepId,
     },
     dependsOn: [
       inventoryStep.stepId,
       healthStep.stepId,
       backfillRunStep.stepId,
+      signalsStep.stepId,
       searchStep.stepId,
       hydrateStep.stepId,
       correlationStep.stepId,
@@ -419,6 +437,7 @@ const addDreamPreflightToBlueprint = (
     healthStep,
     backfillStep,
     backfillRunStep,
+    signalsStep,
     searchStep,
     hydrateStep,
     correlationStep,
@@ -2819,6 +2838,8 @@ describe("workflow app integration contract", () => {
           dreamMemoryFabric: createIntegrationTestDreamMemoryFabricAdapter(),
           dreamMemoryRetrieval:
             createIntegrationTestDreamMemoryRetrievalAdapter(),
+          dreamMemorySignals:
+            createIntegrationTestDreamMemoryRetrievalAdapter(),
         }),
         now: () => "2026-06-09T21:00:00.000Z",
       }),
@@ -2847,6 +2868,9 @@ describe("workflow app integration contract", () => {
     const backfillRunRef = result.artifactRefs.find((artifactRef) =>
       artifactRef.endsWith("/dream/backfill-run-receipt.json")
     );
+    const signalsRef = result.artifactRefs.find((artifactRef) =>
+      artifactRef.endsWith("/dream/signals.json")
+    );
     const searchRef = result.artifactRefs.find((artifactRef) =>
       artifactRef.endsWith("/dream/memory-search.json")
     );
@@ -2873,6 +2897,7 @@ describe("workflow app integration contract", () => {
       "check-source-health",
       "plan-recovery-backfills",
       "run-recovery-backfills",
+      "mine-dream-signals",
       "search-dream-memory",
       "hydrate-dream-evidence",
       "correlate-dream-evidence",
@@ -2888,6 +2913,7 @@ describe("workflow app integration contract", () => {
       healthRef === undefined ||
       backfillRef === undefined ||
       backfillRunRef === undefined ||
+      signalsRef === undefined ||
       searchRef === undefined ||
       hydrationRef === undefined ||
       correlationRef === undefined ||
@@ -2913,6 +2939,9 @@ describe("workflow app integration contract", () => {
     );
     const backfillRun = DreamBackfillRunReceiptDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: backfillRunRef })
+    );
+    const signals = DreamSignalDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: signalsRef })
     );
     const search = DreamMemorySearchDocumentSchema.parse(
       await artifacts.readJson({ artifactRef: searchRef })
@@ -3227,7 +3256,7 @@ describe("workflow app integration contract", () => {
         "## Dynamic generation proof"
       ),
       reportMdsvxIncludesRefinement: report.mdsvx.includes(
-        "Refinement proposals emitted: 6."
+        "Refinement proposals emitted: 7."
       ),
       reportMdsvxIncludesReportNode: report.mdsvx.includes("## Report node"),
       reportMdsvxIncludesReportStandard:
@@ -3252,6 +3281,10 @@ describe("workflow app integration contract", () => {
       searchHitCount: search.hits.length,
       searchReceiptFamilies: search.hits.flatMap((hit) =>
         hit.receipts.map((receipt) => receipt.family)
+      ),
+      signalKinds: signals.signals.map((signal) => signal.kind),
+      signalReceiptFamilies: signals.signals.flatMap((signal) =>
+        signal.receipts.map((receipt) => receipt.family)
       ),
       wzrrdPrimaryDocument: wzrrdPayload.primaryDocument,
     }).toStrictEqual({
@@ -3299,6 +3332,18 @@ describe("workflow app integration contract", () => {
         },
         {
           nodeType: "joelclaw.dream.backfill-run",
+          packageId: "workflow/dream-memory-fabric",
+          packageRef: dreamWorkflowPackageRef,
+          status: "verified",
+          verification: {
+            exportMatched: true,
+            nodeTypeMatched: true,
+            packagePinned: true,
+            sideEffectsRequireLeases: true,
+          },
+        },
+        {
+          nodeType: "joelclaw.dream.signals",
           packageId: "workflow/dream-memory-fabric",
           packageRef: dreamWorkflowPackageRef,
           status: "verified",
@@ -3383,15 +3428,17 @@ describe("workflow app integration contract", () => {
         "inventory",
         "refinement-proposals",
         "search",
+        "signals",
         "source-health",
       ],
       combinedEffectProofStatus: "verified",
-      combinedEffectProofStepCount: 8,
+      combinedEffectProofStepCount: 9,
       completedStepIds: [
         "inventory-memory-fabric",
         "check-source-health",
         "plan-recovery-backfills",
         "run-recovery-backfills",
+        "mine-dream-signals",
         "search-dream-memory",
         "hydrate-dream-evidence",
         "correlate-dream-evidence",
@@ -3423,6 +3470,7 @@ describe("workflow app integration contract", () => {
           "inventory",
           "refinement-proposals",
           "search",
+          "signals",
           "source-health",
         ],
         requiredEffects: [
@@ -3434,6 +3482,7 @@ describe("workflow app integration contract", () => {
           "inventory",
           "refinement-proposals",
           "search",
+          "signals",
           "source-health",
         ],
       },
@@ -3443,6 +3492,7 @@ describe("workflow app integration contract", () => {
         "joelclaw.dream.source-health",
         "joelclaw.dream.backfill-plan",
         "joelclaw.dream.backfill-run",
+        "joelclaw.dream.signals",
         "joelclaw.dream.memory-search",
         "joelclaw.dream.hydrate",
         "joelclaw.dream.correlate",
@@ -3457,6 +3507,7 @@ describe("workflow app integration contract", () => {
           "source-health",
           "backfill-plan",
           "backfill-run",
+          "signals",
           "search",
           "hydrate",
           "correlate",
@@ -3478,7 +3529,7 @@ describe("workflow app integration contract", () => {
         workflowId: "dream.memory-fabric",
       },
       dreamGeneratedProofStatus: "verified",
-      dreamGeneratedProofStepCount: 9,
+      dreamGeneratedProofStepCount: 10,
       executionProofRelayLeaseRefs: [],
       executionProofStatus: "not-proven-local-integration",
       healthInventoryRef: inventoryRef,
@@ -3499,15 +3550,17 @@ describe("workflow app integration contract", () => {
       proofWithoutSourceProfileStatus: "failed",
       refinementNextWorkflowProposalIds: [
         "proposal:capture-ingest-fix:runtime:claude",
+        "proposal:dynamic-workflow-pattern:signal:1:signal-integration-workflow-pattern",
         "proposal:dynamic-workflow-pattern:1:integration-dream-search-found-agent-tra",
         "proposal:kernel-memory:2:integration-dream-search-found-brain-evi",
         "proposal:capture-ingest-fix:capture:1:capture-claude-relay",
         "proposal:dynamic-workflow-pattern:3:integration-dream-search-found-cloudflar",
         "proposal:capture-ingest-fix:backfill:1:backfill-claude-native-capture",
       ],
-      refinementProposalCount: 6,
+      refinementProposalCount: 7,
       refinementRecommendationKinds: [
         "capture-ingest-fix:turn-into-work",
+        "dynamic-workflow-pattern:turn-into-work",
         "dynamic-workflow-pattern:accept",
         "kernel-memory:accept",
         "capture-ingest-fix:turn-into-work",
@@ -3518,6 +3571,7 @@ describe("workflow app integration contract", () => {
         inventoryRef,
         healthRef,
         backfillRunRef,
+        signalsRef,
         searchRef,
         hydrationRef,
         correlationRef,
@@ -3538,7 +3592,7 @@ describe("workflow app integration contract", () => {
       reportMdsvxSourceMatchesJson: true,
       reportProofLevel: "generated-machine",
       reportRawTranscriptsReturned: false,
-      reportRefinementProposalCount: 6,
+      reportRefinementProposalCount: 7,
       reportRefinementProposalRef: refinementRef,
       reportSectionOrder: [
         "run-context",
@@ -3561,6 +3615,8 @@ describe("workflow app integration contract", () => {
       reportTemplate: "joel/tufte-mdsvx@0.1.0",
       searchHitCount: 3,
       searchReceiptFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
+      signalKinds: ["workflow-pattern"],
+      signalReceiptFamilies: ["agent-transcripts"],
       wzrrdPrimaryDocument: {
         artifactRef: reportMdsvxRef,
         hash: sha256Hex(reportMdsvx),

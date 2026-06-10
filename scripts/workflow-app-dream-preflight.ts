@@ -247,6 +247,17 @@ const LocalRelayProofReceiptSchema = z.object({
     hydratedFamilyCounts: z.array(RelayReceiptFamilyCountSchema).default([]),
     skippedSourceCount: z.number().int().min(0),
   }),
+  signals: z
+    .object({
+      receiptFamilyCounts: z.array(RelayReceiptFamilyCountSchema).default([]),
+      signalCount: z.number().int().min(0),
+      signalKinds: z.array(z.string().min(1)).default([]),
+    })
+    .default({
+      receiptFamilyCounts: [],
+      signalCount: 0,
+      signalKinds: [],
+    }),
   sourceRootCount: z.number().int().min(1),
 });
 
@@ -753,7 +764,7 @@ export const checkLocalRelayProof = async (
 
   return {
     checkId: "relay:local-proof",
-    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.backfill.actionCount} backfill action receipt(s), ${proof.backfill.captureFixCount} capture-fix receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
+    message: `Trusted local Dream relay proof passed with ${proof.sourceRootCount} source roots, ${proof.backfill.actionCount} backfill action receipt(s), ${proof.backfill.captureFixCount} capture-fix receipt(s), ${proof.signals.signalCount} signal receipt(s), ${proof.search.hitCount} search hits, ${proof.search.hydratedCount} hydrated redacted receipts, and ${proof.correlation.edgeCount} correlation edges${summarySuffix}${missingSourceFamilySuffix}`,
     redacted: true,
     required: true,
     requiredFor: [
@@ -995,7 +1006,7 @@ const requiredActionsForRemoteRegistry = (
     remoteRegistry.expectedPackageManifestHashMatched !== true
   ) {
     return [
-      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.`,
+      `Re-seed ${expectedCartridgePackageId} so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including joelclaw.dream.backfill-run, joelclaw.dream.signals, joelclaw.dream.correlate, joelclaw.dream.refinement-proposals, and joelclaw.dream.hitl-report.`,
     ];
   }
 

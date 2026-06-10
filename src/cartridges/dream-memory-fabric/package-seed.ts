@@ -47,6 +47,12 @@ export const dreamMemoryFabricPackageSeedTemplate: PackageSeedTemplate =
         nodeType: "joelclaw.dream.memory-search",
       },
       {
+        contractRef: "contract://workflow/dream-memory-fabric/signals.v1",
+        exportId: "dream-signals",
+        kind: "workflow-node",
+        nodeType: "joelclaw.dream.signals",
+      },
+      {
         contractRef: "contract://workflow/dream-memory-fabric/hydration.v1",
         exportId: "dream-hydration",
         kind: "workflow-node",

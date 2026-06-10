@@ -115,6 +115,16 @@ const localRelayProof = JSON.stringify({
     hitCount: 12,
     hydratedCount: 12,
   },
+  signals: {
+    receiptFamilyCounts: [
+      {
+        family: "agent-transcripts",
+        receiptCount: 3,
+      },
+    ],
+    signalCount: 3,
+    signalKinds: ["workflow-pattern"],
+  },
   sourceRootCount: 8,
 });
 
@@ -198,6 +208,7 @@ describe("Dream relay provisioning preflight", () => {
       recommendedSignoff: receipt.recommendedNextActions.includes(
         "Get explicit owner sign-off for exposing the trusted Dream relay over a new network boundary."
       ),
+      signalCount: receipt.localRelayProof.signalCount,
       signoffProvided: receipt.approval.signoffProvided,
       status: receipt.status,
     }).toStrictEqual({
@@ -208,6 +219,7 @@ describe("Dream relay provisioning preflight", () => {
       noSideEffectsPerformed: true,
       planSchemaVersion: "trusted.dream-memory-relay.provisioning-plan.v1",
       recommendedSignoff: true,
+      signalCount: 3,
       signoffProvided: false,
       status: "blocked",
     });

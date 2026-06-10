@@ -69,6 +69,7 @@ export const dreamMemoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCa
               dreamMemoryCorrelation: dreamMemoryRelay,
               dreamMemoryFabric: dreamMemoryRelay,
               dreamMemoryRetrieval: dreamMemoryRelay,
+              dreamMemorySignals: dreamMemoryRelay,
             }),
           });
         },

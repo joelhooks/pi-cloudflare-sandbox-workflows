@@ -26,9 +26,12 @@ import {
   DreamMemoryRelayHydrationPayloadSchema,
   DreamMemoryRelayLeaseReceiptSchema,
   DreamMemoryRelaySearchPayloadSchema,
+  DreamMemoryRelaySignalsPayloadSchema,
   DreamMemorySearchDocumentSchema,
   DreamRefinementProposalDocumentSchema,
   DreamRuntimeSchema,
+  DreamSignalDocumentSchema,
+  DreamSignalKindSchema,
   DreamSourceFamilySchema,
   DreamSourceHealthDocumentSchema,
   DreamSourceInventoryDocumentSchema,
@@ -46,6 +49,7 @@ import type {
   DreamMemoryRelayHydrationPayload,
   DreamMemoryRelayLeaseReceipt,
   DreamMemoryRelaySearchPayload,
+  DreamMemoryRelaySignalsPayload,
   DreamMemorySearchDocument,
   DreamMemorySearchHit,
   DreamReceiptRef,
@@ -54,6 +58,7 @@ import type {
   DreamRefinementProposalRecommendation,
   DreamRefinementProposalTargetKind,
   DreamRuntime,
+  DreamSignalDocument,
   DreamSourceFamily,
   DreamSourceHealthDocument,
   DreamSourceInventoryDocument,
@@ -108,6 +113,12 @@ export interface DreamMemoryRetrievalPort {
   ): Promise<DreamMemoryFabricResult<DreamMemorySearchDocument>>;
 }
 
+export interface DreamMemorySignalPort {
+  mineSignals(
+    input: DreamMemoryRelaySignalsPayload
+  ): Promise<DreamMemoryFabricResult<DreamSignalDocument>>;
+}
+
 export interface DreamMemoryCorrelationPort {
   correlateMemories(
     input: DreamMemoryRelayCorrelationPayload
@@ -126,6 +137,7 @@ export interface DreamMemoryFabricWorkflowNodeAdapterConfig {
   readonly dreamMemoryCorrelation?: DreamMemoryCorrelationPort;
   readonly dreamMemoryFabric: DreamMemoryFabricPort;
   readonly dreamMemoryRetrieval?: DreamMemoryRetrievalPort;
+  readonly dreamMemorySignals?: DreamMemorySignalPort;
 }
 
 type BlockedWorkflowNodeExecutionResult = Extract<
@@ -164,6 +176,13 @@ const DreamMemorySearchNodeConfigSchema = z.object({
   sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
 });
 
+const DreamSignalsNodeConfigSchema = z.object({
+  maxSignals: z.number().int().min(1).max(100).default(10),
+  query: z.string().min(1),
+  signalKinds: z.array(DreamSignalKindSchema).min(1).optional(),
+  sourceFamilies: z.array(DreamSourceFamilySchema).min(1).optional(),
+});
+
 const DreamHydrationNodeConfigSchema = z.object({
   maxReceipts: z.number().int().min(1).max(100).default(10),
   searchRef: ArtifactRefSchema.optional(),
@@ -191,6 +210,8 @@ const DreamRefinementProposalNodeConfigSchema = z.object({
   maxProposals: z.number().int().min(1).max(20).default(8),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
+  signalsRef: ArtifactRefSchema.optional(),
+  signalsStepId: z.string().min(1).optional(),
 });
 
 const DreamHitlReportNodeConfigSchema = z.object({
@@ -253,6 +274,7 @@ const writeDocument = async (input: {
     | DreamHydrationDocument
     | DreamMemorySearchDocument
     | DreamRefinementProposalDocument
+    | DreamSignalDocument
     | DreamSourceHealthDocument
     | DreamSourceInventoryDocument;
   readonly relayLeaseReceipt?: DreamMemoryRelayLeaseReceipt | undefined;
@@ -470,6 +492,31 @@ const loadHydration = async (input: {
   }
 };
 
+const loadSignals = async (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly artifactRef: ArtifactRef;
+}): Promise<
+  | {
+      readonly document: DreamSignalDocument;
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  try {
+    return {
+      document: DreamSignalDocumentSchema.parse(
+        await input.artifacts.readJson({ artifactRef: input.artifactRef })
+      ),
+      status: "loaded",
+    };
+  } catch {
+    return blocker(
+      "stale_package",
+      "Dream signals artifact could not be loaded by the Dream node."
+    );
+  }
+};
+
 const loadCorrelation = async (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
@@ -612,6 +659,7 @@ const refinementProposalRefsFor = (input: {
   readonly hydrationRef: ArtifactRef | null;
   readonly inventoryRef: ArtifactRef | null;
   readonly searchRef: ArtifactRef | null;
+  readonly signalsRef: ArtifactRef | null;
 } => ({
   backfillRunRef:
     input.config.backfillRunRef ??
@@ -648,6 +696,12 @@ const refinementProposalRefsFor = (input: {
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.searchStepId,
+    }),
+  signalsRef:
+    input.config.signalsRef ??
+    dependencyRefFor({
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      stepId: input.config.signalsStepId,
     }),
 });
 
@@ -1194,6 +1248,50 @@ const captureFixProposalFor = (input: {
   title: `Repair Dream capture path: ${input.captureFix.fixId}`,
 });
 
+const targetKindForSignal = (
+  signal: DreamSignalDocument["signals"][number]
+): DreamRefinementProposalTargetKind => {
+  if (signal.kind === "workflow-pattern") {
+    return "dynamic-workflow-pattern";
+  }
+
+  if (signal.kind === "agent-failure" || signal.kind === "friction") {
+    return "workflow-node-plugin";
+  }
+
+  if (signal.kind === "correction" || signal.kind === "preference") {
+    return "kernel-memory";
+  }
+
+  return "package-boundary";
+};
+
+const signalProposalFor = (input: {
+  readonly index: number;
+  readonly signal: DreamSignalDocument["signals"][number];
+  readonly sourceRefs: readonly ArtifactRef[];
+}): DreamRefinementProposal => {
+  const targetKind = targetKindForSignal(input.signal);
+
+  return {
+    proposalId: `proposal:${targetKind}:signal:${input.index + 1}:${proposalSlugFor(
+      input.signal.signalId
+    )}`,
+    proposedNextStep: proposedNextStepFor(targetKind),
+    rating: Math.min(10, Math.max(1, input.signal.rating * 2)),
+    reasoning: input.signal.reasoning,
+    receipts: input.signal.receipts,
+    recommendation:
+      targetKind === "workflow-node-plugin" || input.signal.rating >= 4
+        ? "turn-into-work"
+        : "hold",
+    sourceRefs: [...input.sourceRefs],
+    summary: input.signal.summary,
+    targetKind,
+    title: `Refine ${targetKind} from ${input.signal.kind}: ${input.signal.summary}`,
+  };
+};
+
 const refinementProposalDocumentFor = (input: {
   readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly backfillRunRef: ArtifactRef;
@@ -1208,11 +1306,14 @@ const refinementProposalDocumentFor = (input: {
   readonly maxProposals: number;
   readonly search: DreamMemorySearchDocument;
   readonly searchRef: ArtifactRef;
+  readonly signals: DreamSignalDocument;
+  readonly signalsRef: ArtifactRef;
 }): DreamRefinementProposalDocument => {
   const sourceRefs = [
     input.inventoryRef,
     input.healthRef,
     input.backfillRunRef,
+    input.signalsRef,
     input.searchRef,
     input.hydrationRef,
     input.correlationRef,
@@ -1247,6 +1348,13 @@ const refinementProposalDocumentFor = (input: {
         sourceRefs: [input.backfillRunRef],
       })
     );
+  const signalProposals = input.signals.signals.map((signal, index) =>
+    signalProposalFor({
+      index,
+      signal,
+      sourceRefs: [input.signalsRef],
+    })
+  );
   const hitProposals = input.search.hits.map((hit, index) =>
     proposalForHit({
       hit,
@@ -1259,6 +1367,7 @@ const refinementProposalDocumentFor = (input: {
     ...coverageProposals,
     ...captureFixProposals,
     ...backfillProposals,
+    ...signalProposals,
     ...hitProposals,
   ]
     .toSorted((left, right) => right.rating - left.rating)
@@ -1575,6 +1684,45 @@ const executeMemorySearchNode = async (
   });
 };
 
+const executeSignalsNode = async (
+  config: DreamMemoryFabricWorkflowNodeAdapterConfig,
+  input: DreamWorkflowNodeExecutionInput
+): Promise<WorkflowNodeExecutionResult> => {
+  if (config.dreamMemorySignals === undefined) {
+    return blocker(
+      "adapter_unavailable",
+      "Dream signals node requires a Dream memory signal adapter."
+    );
+  }
+
+  const nodeConfig = DreamSignalsNodeConfigSchema.parse(input.step.config);
+  const result = await config.dreamMemorySignals.mineSignals(
+    DreamMemoryRelaySignalsPayloadSchema.parse({
+      actor: input.actor,
+      maxSignals: nodeConfig.maxSignals,
+      query: nodeConfig.query,
+      runId: input.plan.runId,
+      ...(nodeConfig.signalKinds === undefined
+        ? {}
+        : { signalKinds: nodeConfig.signalKinds }),
+      ...(nodeConfig.sourceFamilies === undefined
+        ? {}
+        : { sourceFamilies: nodeConfig.sourceFamilies }),
+      workItemId: input.plan.workItemId,
+    })
+  );
+  if (result.status === "blocked") {
+    return result;
+  }
+
+  return await writeDocument({
+    artifacts: config.artifacts,
+    document: DreamSignalDocumentSchema.parse(result.document),
+    relayLeaseReceipt: result.relayLeaseReceipt,
+    step: input.step,
+  });
+};
+
 const executeHydrationNode = async (
   config: DreamMemoryFabricWorkflowNodeAdapterConfig,
   input: DreamWorkflowNodeExecutionInput
@@ -1716,11 +1864,12 @@ const executeRefinementProposalsNode = async (
     refs.healthRef === null ||
     refs.hydrationRef === null ||
     refs.inventoryRef === null ||
-    refs.searchRef === null
+    refs.searchRef === null ||
+    refs.signalsRef === null
   ) {
     return blocker(
       "stale_package",
-      "Dream refinement proposal node requires inventory, source health, backfill run receipt, search, hydration, and correlation artifact refs."
+      "Dream refinement proposal node requires inventory, source health, backfill run receipt, signals, search, hydration, and correlation artifact refs."
     );
   }
 
@@ -1756,6 +1905,14 @@ const executeRefinementProposalsNode = async (
     return search;
   }
 
+  const signals = await loadSignals({
+    artifactRef: refs.signalsRef,
+    artifacts: config.artifacts,
+  });
+  if (signals.status === "blocked") {
+    return signals;
+  }
+
   const hydration = await loadHydration({
     artifactRef: refs.hydrationRef,
     artifacts: config.artifacts,
@@ -1786,6 +1943,8 @@ const executeRefinementProposalsNode = async (
     maxProposals: nodeConfig.maxProposals,
     search: search.document,
     searchRef: refs.searchRef,
+    signals: signals.document,
+    signalsRef: refs.signalsRef,
   });
 
   return await writeDocument({
@@ -2030,6 +2189,10 @@ export const createDreamMemoryFabricWorkflowNodeAdapter = (
 
     if (nodeTypeResult.data === "joelclaw.dream.memory-search") {
       return await executeMemorySearchNode(config, input);
+    }
+
+    if (nodeTypeResult.data === "joelclaw.dream.signals") {
+      return await executeSignalsNode(config, input);
     }
 
     if (nodeTypeResult.data === "joelclaw.dream.backfill-run") {
