@@ -26,18 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T06:58Z status: the Wzrrd template-proof code deployed, the Dream relay proof remained passed, but the live Cloudflare Dream did not submit.
+2026-06-10T07:30Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
 
 Receipts:
 
-- Local trusted relay proof: `run:dream-relay-local-proof:20260610T064219761Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
-- Local proof coverage: 10 source roots, Pi `4737`, Codex `259`, Claude `129`, and Cloudflare `177` runtime coverage; `blaine`/`panda`/`flagg`/Cloudflare machine coverage; all required Dreamer source families captured; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
-- Worker deploy receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T06:58:31.272Z`, Worker version `2ac5f97b-f816-4fc2-b0c9-d8c559333499`. Package seed was skipped because `WORKFLOW_APP_ADMIN_TOKEN` was not present in this shell.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T06:58:42.967Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T065841557Z-18f2fd1a`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T065841557Z-18f2fd1a-receipt.json`, `submit.attempted=false`. The request now carries `outputTarget.primaryDocument.template` for `joel/tufte-mdsvx@0.1.0` plus renderer hint `joel/static-tufte-mdsvx-preview@0.1.0`.
+- Local trusted relay proof: `run:dream-relay-local-proof:20260610T073025130Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Local proof coverage: 10 source roots; required machine coverage for `blaine`, `panda`, `flagg`, and Cloudflare; required source families `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:30:41.334Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T073048856Z-bea3508f`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T073048856Z-bea3508f-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T073048856Z-bea3508f-receipt.json`, `submit.attempted=false`.
+- Package state: latest deploy seed receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` completed `2026-06-10T07:18:43.202Z` but package seed was skipped because `WORKFLOW_APP_ADMIN_TOKEN` was missing from local env or `.env.local`. Remote `workflow/dream-memory-fabric` hash is still `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`; current local expected hash is `c1da9f837a79a94ad03489ce3dd396728867c8b00394ea84d562b28f85ae5353`.
 - Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T06:17:23.191Z`, status `blocked`, no side effects performed.
 
-Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
+Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, the remote Dream package is stale, local `WORKFLOW_APP_ADMIN_TOKEN` is unavailable for reseeding, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
 
 ## Diagnosis
 
