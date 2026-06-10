@@ -3732,6 +3732,10 @@ describe("workflow app integration contract", () => {
         "## Access adapter shape"
       ),
       reportMdsvxIncludesD2: report.mdsvx.includes("```d2"),
+      reportMdsvxIncludesD2Fig: report.mdsvx.includes("<D2Fig"),
+      reportMdsvxIncludesD2FigAspectRatio: report.mdsvx.includes(
+        `aspectRatio="${report.proof.stateMachineFigure.aspectRatio}"`
+      ),
       reportMdsvxIncludesDreamsFirst: report.mdsvx.includes(
         "## The actual dreams"
       ),
@@ -4290,6 +4294,8 @@ describe("workflow app integration contract", () => {
       },
       reportMdsvxIncludesAccessAdapter: true,
       reportMdsvxIncludesD2: true,
+      reportMdsvxIncludesD2Fig: true,
+      reportMdsvxIncludesD2FigAspectRatio: true,
       reportMdsvxIncludesDreamsFirst: true,
       reportMdsvxIncludesDynamicProof: true,
       reportMdsvxIncludesGeneratedHarnessRef: true,

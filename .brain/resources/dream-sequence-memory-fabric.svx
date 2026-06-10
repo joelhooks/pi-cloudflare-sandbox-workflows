@@ -26,6 +26,17 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T09:54Z implementation progress: Dream HITL report MDSvX now treats the generated state machine as a first-class D2 figure contract instead of a loose code fence.
+
+Receipts:
+
+- `joelclaw.dream.hitl-report` now wraps the generated state-machine D2 source in a `D2Fig` MDSvX component marker carrying `aspectRatio`, `machineId`, `sourceKind`, `stateCount`, and `transitionCount`.
+- The fenced `d2` source remains inside the wrapper as the canonical fallback and still comes from the pinned generated `workflow.xstate-machine.v1` config.
+- The static Tufte Wzrrd preview renderer now consumes the `D2Fig` metadata, emits `data-component="D2Fig"`, applies the computed aspect ratio to the flow-chart source block, and suppresses the raw component tag from HTML output.
+- `docs/dream-report-canon.md` now records the D2 figure wrapper rule for future Dream HITL reports.
+
+This improves the Wzrrd/report artifact path. It still does not prove live Cloudflare Dream execution; the relay network-boundary gates remain unchanged.
+
 2026-06-10T09:42Z run attempt: Dream was pushed through the current local relay and live-run gates again. Local readiness/proof passed; live Cloudflare submit still correctly did not happen.
 
 Receipts:

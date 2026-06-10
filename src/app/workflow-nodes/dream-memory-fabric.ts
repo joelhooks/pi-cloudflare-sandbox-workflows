@@ -1186,6 +1186,9 @@ const dreamFamilyLabels: Record<DreamSourceFamily, string> = {
 
 const d2Label = (value: string): string => JSON.stringify(value);
 
+const mdsvxAttributeString = (value: string): string =>
+  value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+
 const dreamReportStateMachineFigureFor = (
   machine: DynamicWorkflowMachineDocument
 ): DreamHitlReportDocument["proof"]["stateMachineFigure"] => {
@@ -1991,11 +1994,15 @@ const reportMdsvxFor = (input: {
     "",
     "## Workflow state machine",
     "",
-    "The D2 source below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static Dream node list. It belongs below the dreams so proof does not bury the human decision.",
+    "The D2 figure below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static Dream node list. It belongs below the dreams so proof does not bury the human decision.",
+    "",
+    `<D2Fig aspectRatio="${mdsvxAttributeString(input.stateMachineFigure.aspectRatio)}" machineId="${mdsvxAttributeString(input.stateMachineFigure.machineId)}" sourceKind="${mdsvxAttributeString(input.stateMachineFigure.sourceKind)}" stateCount={${input.stateMachineFigure.stateCount}} title="Generated workflow state machine" transitionCount={${input.stateMachineFigure.transitionCount}}>`,
     "",
     "```d2",
     input.stateMachineFigure.source,
     "```",
+    "",
+    "</D2Fig>",
     "",
     "## Dynamic generation proof",
     "",

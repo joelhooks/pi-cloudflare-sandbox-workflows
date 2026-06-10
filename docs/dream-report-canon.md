@@ -241,6 +241,7 @@ Generated TypeScript source is optional inspection output. It is not required fo
 - Use margin notes sparingly for privacy and boundary notes.
 - A margin note without an explicit `href` must not render a `back`, arrow, or fake source link.
 - Use D2 for workflow/state-machine figures.
+- In MDSvX, wrap the D2 source fence in `D2Fig` with `aspectRatio`, `machineId`, `sourceKind`, `stateCount`, and `transitionCount`. The fenced `d2` source remains the canonical fallback; the component metadata gives the Wzrrd renderer the readable aspect ratio and proof metadata.
 - Pick the readable aspect ratio. Do not force horizontal or vertical layout.
 - Keep public Wzrrd reports `noindex` and expiring by default.
 

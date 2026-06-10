@@ -230,6 +230,61 @@ const frontMatterScalarFor = (input: {
   return match?.[1] === undefined ? null : unquoteScalar(match[1]);
 };
 
+interface D2FigureDirective {
+  readonly aspectRatio?: string;
+  readonly machineId?: string;
+  readonly sourceKind?: string;
+  readonly stateCount?: string;
+  readonly title?: string;
+  readonly transitionCount?: string;
+}
+
+const parseD2FigureDirective = (line: string): D2FigureDirective | null => {
+  if (!/^<D2Fig(?:\s|>)/u.test(line.trim())) {
+    return null;
+  }
+
+  const attrs: Record<string, string> = {};
+  const attributePattern = /([A-Za-z][A-Za-z0-9]*)=(?:"([^"]*)"|\{(\d+)\})/gu;
+  let match: RegExpExecArray | null;
+  while ((match = attributePattern.exec(line)) !== null) {
+    const [, key, quotedValue, numericValue] = match;
+    const value = quotedValue ?? numericValue;
+    if (key !== undefined && value !== undefined) {
+      attrs[key] = value;
+    }
+  }
+
+  return {
+    ...(attrs["aspectRatio"] === undefined
+      ? {}
+      : { aspectRatio: attrs["aspectRatio"] }),
+    ...(attrs["machineId"] === undefined
+      ? {}
+      : { machineId: attrs["machineId"] }),
+    ...(attrs["sourceKind"] === undefined
+      ? {}
+      : { sourceKind: attrs["sourceKind"] }),
+    ...(attrs["stateCount"] === undefined
+      ? {}
+      : { stateCount: attrs["stateCount"] }),
+    ...(attrs["title"] === undefined ? {} : { title: attrs["title"] }),
+    ...(attrs["transitionCount"] === undefined
+      ? {}
+      : { transitionCount: attrs["transitionCount"] }),
+  };
+};
+
+const cssAspectRatioFor = (aspectRatio: string | undefined): string | null => {
+  if (aspectRatio === undefined) {
+    return null;
+  }
+
+  const match = /^([1-9]\d*):([1-9]\d*)$/u.exec(aspectRatio);
+
+  return match === null ? null : `${match[1]} / ${match[2]}`;
+};
+
 const templateLabelFor = (
   template: NonNullable<
     NonNullable<WzrrdPublishPayload["primaryDocument"]>["template"]
@@ -265,13 +320,43 @@ const validatePrimaryDocumentTemplate = (input: {
 
 const renderCodeBlock = (input: {
   readonly code: string;
+  readonly d2Figure?: D2FigureDirective;
   readonly language: string;
 }): string => {
   const language = input.language.toLowerCase();
   if (language === "d2") {
-    return `<figure class="flow-chart" aria-label="D2 workflow state machine">
+    const title = input.d2Figure?.title ?? "Workflow state machine";
+    const aspectRatio = cssAspectRatioFor(input.d2Figure?.aspectRatio);
+    const style =
+      aspectRatio === null
+        ? ""
+        : ` style="--flow-chart-aspect-ratio:${escapeHtml(aspectRatio)}"`;
+    const dataAttributes = [
+      'data-component="D2Fig"',
+      ...(input.d2Figure?.aspectRatio === undefined
+        ? []
+        : [`data-aspect-ratio="${escapeHtml(input.d2Figure.aspectRatio)}"`]),
+      ...(input.d2Figure?.machineId === undefined
+        ? []
+        : [`data-machine-id="${escapeHtml(input.d2Figure.machineId)}"`]),
+      ...(input.d2Figure?.sourceKind === undefined
+        ? []
+        : [`data-source-kind="${escapeHtml(input.d2Figure.sourceKind)}"`]),
+      ...(input.d2Figure?.stateCount === undefined
+        ? []
+        : [`data-state-count="${escapeHtml(input.d2Figure.stateCount)}"`]),
+      ...(input.d2Figure?.transitionCount === undefined
+        ? []
+        : [
+            `data-transition-count="${escapeHtml(
+              input.d2Figure.transitionCount
+            )}"`,
+          ]),
+    ].join(" ");
+
+    return `<figure class="flow-chart" ${dataAttributes} aria-label="${escapeHtml(title)}"${style}>
       <pre class="d2-source"><code>${escapeHtml(input.code)}</code></pre>
-      <figcaption><strong>Workflow state machine</strong> - D2 source from the pinned report artifact. The canonical <code>.mdsvx</code> source is published beside this preview.</figcaption>
+      <figcaption><strong>${escapeHtml(title)}</strong> - D2 source from the pinned report artifact. The canonical <code>.mdsvx</code> source is published beside this preview.</figcaption>
     </figure>`;
   }
 
@@ -284,88 +369,135 @@ const renderCodeBlock = (input: {
   </figure>`;
 };
 
+interface MarkdownCodeBlock {
+  readonly d2Figure?: D2FigureDirective;
+  readonly language: string;
+  lines: string[];
+}
+
+interface MarkdownSubsetRenderState {
+  readonly headingIds: Map<string, number>;
+  readonly html: string[];
+  listItems: string[];
+  paragraph: string[];
+}
+
+const flushParagraph = (state: MarkdownSubsetRenderState): void => {
+  if (state.paragraph.length === 0) {
+    return;
+  }
+
+  state.html.push(`<p>${renderInlineMarkdown(state.paragraph.join(" "))}</p>`);
+  state.paragraph = [];
+};
+
+const flushList = (state: MarkdownSubsetRenderState): void => {
+  if (state.listItems.length === 0) {
+    return;
+  }
+
+  state.html.push(
+    `<ul>${state.listItems
+      .map((item) => `<li>${renderInlineMarkdown(item)}</li>`)
+      .join("")}</ul>`
+  );
+  state.listItems = [];
+};
+
+const flushTextBlocks = (state: MarkdownSubsetRenderState): void => {
+  flushParagraph(state);
+  flushList(state);
+};
+
+const renderCompletedCodeBlock = (codeBlock: MarkdownCodeBlock): string =>
+  renderCodeBlock({
+    code: `${codeBlock.lines.join("\n")}\n`,
+    ...(codeBlock.d2Figure === undefined
+      ? {}
+      : { d2Figure: codeBlock.d2Figure }),
+    language: codeBlock.language,
+  });
+
+const advanceCodeBlock = (input: {
+  readonly codeBlock: MarkdownCodeBlock;
+  readonly html: string[];
+  readonly line: string;
+}): MarkdownCodeBlock | undefined => {
+  if (input.line.startsWith("```")) {
+    input.html.push(renderCompletedCodeBlock(input.codeBlock));
+
+    return undefined;
+  }
+
+  input.codeBlock.lines.push(input.line);
+
+  return input.codeBlock;
+};
+
 const renderMarkdownSubset = (content: string): string => {
   const lines = stripFrontMatter(content).replaceAll("\r\n", "\n").split("\n");
-  const headingIds = new Map<string, number>();
-  const html: string[] = [];
-  let paragraph: string[] = [];
-  let listItems: string[] = [];
-  let codeBlock:
-    | {
-        readonly language: string;
-        lines: string[];
-      }
-    | undefined;
-
-  const flushParagraph = () => {
-    if (paragraph.length === 0) {
-      return;
-    }
-
-    html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
-    paragraph = [];
+  const state: MarkdownSubsetRenderState = {
+    headingIds: new Map<string, number>(),
+    html: [],
+    listItems: [],
+    paragraph: [],
   };
-
-  const flushList = () => {
-    if (listItems.length === 0) {
-      return;
-    }
-
-    html.push(
-      `<ul>${listItems
-        .map((item) => `<li>${renderInlineMarkdown(item)}</li>`)
-        .join("")}</ul>`
-    );
-    listItems = [];
-  };
-
-  const flushTextBlocks = () => {
-    flushParagraph();
-    flushList();
-  };
+  let codeBlock: MarkdownCodeBlock | undefined;
+  let pendingD2Figure: D2FigureDirective | undefined;
 
   for (const line of lines) {
     if (codeBlock !== undefined) {
-      if (line.startsWith("```")) {
-        html.push(
-          renderCodeBlock({
-            code: `${codeBlock.lines.join("\n")}\n`,
-            language: codeBlock.language,
-          })
-        );
-        codeBlock = undefined;
-      } else {
-        codeBlock.lines.push(line);
-      }
+      codeBlock = advanceCodeBlock({
+        codeBlock,
+        html: state.html,
+        line,
+      });
+      continue;
+    }
 
+    const d2Figure = parseD2FigureDirective(line);
+    if (d2Figure !== null) {
+      flushTextBlocks(state);
+      pendingD2Figure = d2Figure;
+      continue;
+    }
+
+    if (line.trim() === "</D2Fig>") {
+      flushTextBlocks(state);
+      pendingD2Figure = undefined;
       continue;
     }
 
     const fence = /^```([a-z0-9_-]*)\s*$/iu.exec(line);
     if (fence !== null) {
-      flushTextBlocks();
+      flushTextBlocks(state);
+      const language = fence[1] ?? "";
       codeBlock = {
-        language: fence[1] ?? "",
+        ...(language.toLowerCase() === "d2" && pendingD2Figure !== undefined
+          ? { d2Figure: pendingD2Figure }
+          : {}),
+        language,
         lines: [],
       };
+      pendingD2Figure = undefined;
       continue;
     }
 
     if (line.trim().length === 0) {
-      flushTextBlocks();
+      flushTextBlocks(state);
       continue;
     }
 
     const heading = /^(#{1,3})\s+(.+)$/u.exec(line);
     if (heading !== null) {
-      flushTextBlocks();
+      flushTextBlocks(state);
       const level = heading[1]?.length ?? 2;
       const text = heading[2] ?? "";
       const baseId = slugForHeading(text);
-      const nextCount = (headingIds.get(baseId) ?? 0) + 1;
-      headingIds.set(baseId, nextCount);
+      const nextCount = (state.headingIds.get(baseId) ?? 0) + 1;
+      state.headingIds.set(baseId, nextCount);
       const id = nextCount === 1 ? baseId : `${baseId}-${nextCount}`;
-      html.push(
+      state.html.push(
         `<h${level} id="${escapeHtml(id)}">${renderInlineMarkdown(text)}</h${level}>`
       );
       continue;
@@ -373,27 +505,22 @@ const renderMarkdownSubset = (content: string): string => {
 
     const listItem = /^[-*]\s+(.+)$/u.exec(line);
     if (listItem !== null) {
-      flushParagraph();
-      listItems.push(listItem[1] ?? "");
+      flushParagraph(state);
+      state.listItems.push(listItem[1] ?? "");
       continue;
     }
 
-    flushList();
-    paragraph.push(line.trim());
+    flushList(state);
+    state.paragraph.push(line.trim());
   }
 
   if (codeBlock !== undefined) {
-    html.push(
-      renderCodeBlock({
-        code: `${codeBlock.lines.join("\n")}\n`,
-        language: codeBlock.language,
-      })
-    );
+    state.html.push(renderCompletedCodeBlock(codeBlock));
   }
 
-  flushTextBlocks();
+  flushTextBlocks(state);
 
-  return html.join("\n");
+  return state.html.join("\n");
 };
 
 const renderLinkList = (
@@ -719,6 +846,10 @@ const renderPrimaryDocumentHtml = (input: {
     }
     .flow-chart {
       margin: 42px 0 48px;
+    }
+    .flow-chart .d2-source {
+      aspect-ratio: var(--flow-chart-aspect-ratio, auto);
+      max-height: min(72vh, 760px);
     }
     .flow-chart figcaption,
     .code-block figcaption {

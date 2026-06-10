@@ -361,9 +361,13 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       "",
       "Concise, actionable, and source-backed.",
       "",
+      '<D2Fig aspectRatio="16:9" machineId="dream-test-machine" sourceKind="generated-xstate-machine" stateCount={4} title="Generated workflow state machine" transitionCount={3}>',
+      "",
       "```d2",
       "generate -> execute -> verify -> publish",
       "```",
+      "",
+      "</D2Fig>",
       "",
     ].join("\n");
     const mdsvxWrite = await fixture.artifacts.writeText({
@@ -432,11 +436,16 @@ describe("Cloudflare Wzrrd publish adapter", () => {
           : delivery,
       filePaths: requestBody.files.map((file) => file.path),
       frontmatterStripped: !indexHtml.includes("---"),
+      indexContainsAspectRatio: indexHtml.includes(
+        'style="--flow-chart-aspect-ratio:16 / 9"'
+      ),
+      indexContainsD2FigMetadata: indexHtml.includes('data-component="D2Fig"'),
       indexContainsD2Figure: indexHtml.includes('class="flow-chart"'),
       indexContainsDreams: indexHtml.includes(
         '<h2 id="the-actual-dreams">The actual dreams</h2>'
       ),
       indexContainsTemplate: indexHtml.includes("joel/tufte-mdsvx@0.1.0"),
+      indexOmitsD2FigTag: !indexHtml.includes("&lt;D2Fig"),
       indexUsesStaticRenderer: indexHtml.includes(
         "joel/static-tufte-mdsvx-preview@0.1.0"
       ),
@@ -466,9 +475,12 @@ describe("Cloudflare Wzrrd publish adapter", () => {
         "review-surface.json",
       ],
       frontmatterStripped: true,
+      indexContainsAspectRatio: true,
+      indexContainsD2FigMetadata: true,
       indexContainsD2Figure: true,
       indexContainsDreams: true,
       indexContainsTemplate: true,
+      indexOmitsD2FigTag: true,
       indexUsesStaticRenderer: true,
       renderingReceipt: {
         primaryDocument: {
