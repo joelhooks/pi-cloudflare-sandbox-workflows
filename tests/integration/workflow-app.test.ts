@@ -34,6 +34,7 @@ import {
 import type {
   AgentLaneReceipt,
   ArtifactRef,
+  CapabilityBlocker,
   DynamicWorkflowBlueprint,
   DynamicWorkflowStep,
 } from "../../src/app/domain/schemas.ts";
@@ -2792,6 +2793,271 @@ describe("workflow app integration contract", () => {
       },
       lastSummary: "Pinned generated workflow machine failed validation.",
       status: "blocked",
+    });
+  });
+
+  it("blocks generated machines whose initial state is the done final state", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-skip-to-done-machine"
+    );
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        async proposePlan(input) {
+          const blueprint = await planner.proposePlan(input);
+          const firstStep = blueprint.plan.steps.at(0);
+          if (firstStep === undefined) {
+            throw new Error("Fixture planner returned no steps.");
+          }
+
+          const states = machineStatesFor(blueprint.plan.steps);
+          const doneState = states["done"];
+          if (doneState === undefined) {
+            throw new Error("Fixture machine states are missing done.");
+          }
+
+          states["done"] = {
+            ...doneState,
+            on: {
+              NEXT: {
+                target: generatedStepStateName(0, firstStep.stepId),
+              },
+            },
+          };
+
+          return DynamicWorkflowBlueprintSchema.parse({
+            ...blueprint,
+            machine: {
+              ...blueprint.machine,
+              xstate: {
+                id: blueprint.machine.machineId,
+                initial: "done",
+                states,
+              },
+            },
+          });
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection: createMemoryWorkflowStatusProjectionStore(),
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    const result = await workflow.run(buildIntegrationTestRunRequest());
+
+    expect({
+      blocker: result.status === "blocked" ? result.blocker : undefined,
+      lastSummary: result.eventLog.at(-1)?.summary,
+      status: result.status,
+    }).toStrictEqual({
+      blocker: {
+        code: "capability_denied",
+        message:
+          "Generated XState initial state must not be a terminal done or blocked state.",
+        redacted: true,
+      },
+      lastSummary: "Pinned generated workflow machine failed validation.",
+      status: "blocked",
+    });
+  });
+
+  it("captures generated machines that execute every planned step", async () => {
+    const { artifacts, result } = await runWorkflow();
+
+    const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: result.planArtifact.artifactRef,
+      })
+    );
+    const executionProof = WorkflowExecutionProofDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: result.executionProofArtifact.artifactRef,
+      })
+    );
+
+    expect({
+      completedStepIds: executionProof.completedStepIds,
+      status: result.status,
+    }).toStrictEqual({
+      completedStepIds: loadedPlan.steps.map((step) => step.stepId),
+      status: "captured",
+    });
+  });
+
+  it("blocks generated machines that reach done after executing only a subset of planned steps", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-skip-to-done-tripwire"
+    );
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: createIntegrationTestDynamicWorkflowPlanner(),
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection: createMemoryWorkflowStatusProjectionStore(),
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+    const request = buildIntegrationTestRunRequest();
+    const seeded = await workflow.run(request);
+    if (seeded.status !== "captured") {
+      throw new Error(seeded.blocker.message);
+    }
+
+    const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: seeded.planArtifact.artifactRef,
+      })
+    );
+    const machine = DynamicWorkflowMachineDocumentSchema.parse(
+      await artifacts.readJson({
+        artifactRef: seeded.machineArtifact.artifactRef,
+      })
+    );
+    const firstStep = loadedPlan.steps.at(0);
+    if (firstStep === undefined) {
+      throw new Error("Pinned plan returned no steps.");
+    }
+
+    const subsetMachine = DynamicWorkflowMachineDocumentSchema.parse({
+      ...machine,
+      xstate: {
+        id: machine.xstate.id,
+        initial: "ready",
+        states: {
+          blocked: {
+            meta: { summary: "Generated dynamic workflow blocked." },
+            on: {},
+            type: "final",
+          },
+          done: {
+            meta: { summary: "Generated dynamic workflow completed." },
+            on: {},
+            type: "final",
+          },
+          firstStepOnly: {
+            meta: {
+              stepId: firstStep.stepId,
+              stepKind: firstStep.kind,
+              summary: firstStep.summary,
+            },
+            on: {
+              STEP_BLOCKED: { target: "blocked" },
+              STEP_DONE: { target: "done" },
+            },
+          },
+          ready: {
+            meta: {
+              summary: "Generated dynamic workflow is ready to execute.",
+            },
+            on: { NEXT: { target: "firstStepOnly" } },
+          },
+        },
+      },
+    });
+    const blockCalls: {
+      readonly blockedBy: CapabilityBlocker;
+      readonly summary: string;
+    }[] = [];
+    const transitionCommands: string[] = [];
+    // oxlint-disable-next-line typescript/dot-notation -- Drive the private execution loop directly to prove the completion tripwire fires even if a future validator gap admits a skip-to-done machine.
+    const execution = await workflow["executeDynamicWorkflow"]({
+      block: (blockedBy, summary) => {
+        blockCalls.push({ blockedBy, summary });
+
+        return Promise.resolve({
+          blocker: blockedBy,
+          eventLog: [],
+          runId: request.runId,
+          status: "blocked" as const,
+        });
+      },
+      loadedPlan,
+      machine: subsetMachine,
+      request,
+      transition: (command) => {
+        transitionCommands.push(command.type);
+
+        return Promise.resolve();
+      },
+    });
+
+    expect({
+      blockCalls,
+      capturedTransitions: transitionCommands.filter(
+        (commandType) => commandType === "DYNAMIC_WORKFLOW_COMPLETED"
+      ),
+      executedStepTransitions: transitionCommands.filter(
+        (commandType) => commandType === "DYNAMIC_STEP_EXECUTED"
+      ),
+      resultStatus:
+        execution.status === "blocked"
+          ? execution.result.status
+          : execution.status,
+    }).toStrictEqual({
+      blockCalls: [
+        {
+          blockedBy: {
+            code: "capability_denied",
+            message:
+              "Generated workflow machine reached done without executing every planned step.",
+            redacted: true,
+          },
+          summary:
+            "Generated workflow machine completed without executing the full pinned plan.",
+        },
+      ],
+      capturedTransitions: [],
+      executedStepTransitions: ["DYNAMIC_STEP_EXECUTED"],
+      resultStatus: "blocked",
     });
   });
 

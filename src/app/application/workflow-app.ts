@@ -689,6 +689,17 @@ const validateGeneratedMachineStartupProtocol = (
     );
   }
 
+  if (
+    initialState.type === "final" ||
+    machine.xstate.initial === "done" ||
+    machine.xstate.initial === "blocked"
+  ) {
+    return blocker(
+      "capability_denied",
+      "Generated XState initial state must not be a terminal done or blocked state."
+    );
+  }
+
   if (initialState.meta.stepId !== undefined) {
     return blocker(
       "capability_denied",
@@ -3573,6 +3584,17 @@ export class WorkflowApp implements WorkflowAppContract {
           "Generated workflow machine did not reach its done state."
         ),
         "Generated workflow machine exceeded its transition budget."
+      );
+      return { result, status: "blocked" };
+    }
+
+    if (completedStepIds.size !== input.loadedPlan.steps.length) {
+      const result = await input.block(
+        blocker(
+          "capability_denied",
+          "Generated workflow machine reached done without executing every planned step."
+        ),
+        "Generated workflow machine completed without executing the full pinned plan."
       );
       return { result, status: "blocked" };
     }
