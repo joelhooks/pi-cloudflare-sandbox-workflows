@@ -26,18 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
-2026-06-10T07:48Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
+2026-06-10T07:55Z status: a Dream run was requested through the live runner, but Cloudflare submit correctly did not happen.
 
 Receipts:
 
 - Local trusted relay proof: `run:dream-relay-local-proof:20260610T073025130Z`, receipt `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
 - Local proof coverage: 10 source roots; required machine coverage for `blaine`, `panda`, `flagg`, and Cloudflare; required source families `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`; 8 mined signals; 12 search hits; 12 hydrated redacted receipts; 48 correlation edges; 35 correlation nodes; and no raw path/credential leakage.
-- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:48:35.271Z`, status `blocked`.
-- Live run request: `run-live-dream-memory-fabric-20260610T074833010Z-2e26ec14`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T074833010Z-2e26ec14-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T074833010Z-2e26ec14-receipt.json`, `submit.attempted=false`.
-- Package state: latest deploy seed receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` completed `2026-06-10T07:18:43.202Z` but package seed was skipped because `WORKFLOW_APP_ADMIN_TOKEN` was missing from local env or `.env.local`. Remote `workflow/dream-memory-fabric` hash is still `b36403a390d8a5f117d7ce302c0dff0579064e925999ef8767cf6680a3c0df1b`; the current local expected hash after the HITL decision seed node is `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a`.
-- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T06:17:23.191Z`, status `blocked`, no side effects performed.
+- Cloudflare live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:55:11.517Z`, status `blocked`.
+- Live run request: `run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5`, request `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5-request.json`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T075510132Z-4eeca6c5-receipt.json`, `submit.attempted=false`.
+- Package state: Worker deploy receipt `.wrangler/workflow-app/latest-deploy-seed-receipt.json` first deployed current code to Worker version `042c96eb-fedb-4922-a8d7-e24a7ef0344e` without Dream relay vars, then package seed completed at `2026-06-10T07:54:49.925Z`. Remote `workflow/dream-memory-fabric` now matches current manifest hash `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a` with seed commit `cde3a3707f3bb85223987a2848d7faac5a05d5ab`.
+- Relay provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T07:55:19.781Z`, status `blocked`, no side effects performed.
 
-Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, the remote Dream package is stale, local `WORKFLOW_APP_ADMIN_TOKEN` is unavailable for reseeding, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
+Why live Dream did not run: `DREAM_MEMORY_RELAY_BASE_URL` is not configured, `DREAM_MEMORY_RELAY_TOKEN` is not provisioned, Worker config does not define the relay URL, authenticated relay `/healthz` is not verified, and exact owner sign-off for the new network boundary has not been provided. This is correct behavior. Faking a Dream run from local receipts would violate the definition of done.
 
 2026-06-10T07:42Z implementation progress: accepted Dream HITL decisions can now feed the next generated workflow as package data instead of report prose.
 
@@ -47,11 +47,11 @@ Receipts:
 - New package-backed node: `joelclaw.dream.hitl-decision-seed`, exported from `workflow/dream-memory-fabric` as `dream-hitl-decision-workflow-seed`.
 - Node behavior: reads a redacted `dream.hitl-decision.v1` artifact, classifies accepted/work-conversion/held/rejected decisions, writes `dream.hitl-decision-workflow-seed.v1`, and preserves `nextWorkflowSeed` planner instructions, required capabilities, source refs, and artifact update targets for the next generated workflow.
 - Proof behavior: `dream.generated-workflow-proof.v1` recognizes `hitl-decision-seed` as a Dream effect but does not require a memory-relay lease sidecar because the node is artifact-only.
-- Current live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:48:35.271Z`, status `blocked`, now expects `joelclaw.dream.hitl-decision-seed` and manifest hash `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a`.
+- Current live preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T07:55:11.517Z`, status `blocked`, now expects `joelclaw.dream.hitl-decision-seed`, matches remote manifest hash `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a`, and only reports relay URL/token/config/healthz as required actions.
 - Verification: `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-hitl-decision-seed-node.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/workflow-app.test.ts` passed 5 files / 56 tests; `pnpm check`, `pnpm typecheck`, and `pnpm typecheck:tsc` passed.
 - Current local Dream package manifest hash after this change: `805599a1be1f3d25b1a6cf47d8934f82d00d69dc0d925b71a50d3376d7c36d9a`.
 
-This still does not prove live Dream execution. Remote package reseed, trusted relay URL/token/readiness, explicit network-boundary sign-off, generated-machine Cloudflare execution, and Wzrrd publication are still required before a Dream can claim done.
+This still does not prove live Dream execution. Trusted relay URL/token/readiness, explicit network-boundary sign-off, generated-machine Cloudflare execution, and Wzrrd publication are still required before a Dream can claim done.
 
 ## Diagnosis
 
