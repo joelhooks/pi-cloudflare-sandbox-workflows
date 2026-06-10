@@ -21,6 +21,7 @@ import type {
 } from "../../src/app/domain/schemas.ts";
 import { memoryRelayEndpointCatalog } from "../../src/cartridges/memory-fabric/cloudflare-relay.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const queriedRemoteRegistry: WorkflowLivePreflightRemoteRegistry = {
   command: ["pnpm", "exec", "wrangler", "d1", "execute"],
@@ -596,7 +597,7 @@ Wrangler 4.97.0
   });
 
   it("writes a blocked receipt instead of faking readiness when remote proof is skipped", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-preflight-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-preflight-");
 
     try {
       await mkdir(resolve(repoRoot, "scripts"), { recursive: true });

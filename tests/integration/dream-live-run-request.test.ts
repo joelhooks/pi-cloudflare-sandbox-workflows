@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -17,6 +16,7 @@ import {
 } from "../../src/app/domain/schemas.ts";
 import type { WorkflowLivePreflightReceipt } from "../../src/app/domain/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const profileArgs = [
   "--profile",
@@ -326,9 +326,7 @@ describe("Dream live run request harness", () => {
   });
 
   it("writes request and receipt but refuses --submit while preflight is blocked", async () => {
-    const repoRoot = await mkdtemp(
-      resolve(tmpdir(), "dream-live-run-blocked-")
-    );
+    const repoRoot = await workflowCliTestRepoRoot("dream-live-run-blocked-");
 
     try {
       await writePreflight(repoRoot, blockedPreflight);
@@ -381,8 +379,8 @@ describe("Dream live run request harness", () => {
   });
 
   it("refuses live submit when preflight is ready but relay boundary sign-off is missing", async () => {
-    const repoRoot = await mkdtemp(
-      resolve(tmpdir(), "dream-live-run-missing-signoff-")
+    const repoRoot = await workflowCliTestRepoRoot(
+      "dream-live-run-missing-signoff-"
     );
 
     try {
@@ -432,7 +430,7 @@ describe("Dream live run request harness", () => {
   });
 
   it("submits the typed request only after preflight is ready and relay boundary sign-off is present", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-live-run-ready-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-live-run-ready-");
 
     try {
       await writePreflight(repoRoot, readyPreflight);
@@ -502,7 +500,7 @@ describe("Dream live run request harness", () => {
   });
 
   it("refreshes preflight before --submit so stale receipts cannot submit", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-live-run-fresh-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-live-run-fresh-");
 
     try {
       await writePreflight(repoRoot, readyPreflight);

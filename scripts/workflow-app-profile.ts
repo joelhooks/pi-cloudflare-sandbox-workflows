@@ -1,14 +1,17 @@
 import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
-import { installedWorkflowCartridgeSourceProfiles } from "../src/cartridges/cloudflare-workflow-cartridges.ts";
+import {
+  installedSourceProfileIds,
+  installLocalPackagesHint,
+  resolveInstalledSourceProfile,
+  resolveWorkflowAppPackagesDir,
+} from "./workflow-app-installed-packages.ts";
+import type { WorkflowAppPackagesDirInput } from "./workflow-app-installed-packages.ts";
 
 export interface WorkflowProfileWorkspacePaths {
   readonly preflightReceiptPath: string;
   readonly readinessReportOutRoot: string;
   readonly runReceiptDir: string;
 }
-
-const installedProfileIds = (): readonly string[] =>
-  installedWorkflowCartridgeSourceProfiles.map((profile) => profile.profileId);
 
 export const profileArgValue = (
   argv: readonly string[],
@@ -29,25 +32,21 @@ export const profileArgValue = (
 };
 
 export const requireInstalledSourceProfile = (
-  argv: readonly string[]
+  argv: readonly string[],
+  options?: WorkflowAppPackagesDirInput
 ): MemorySourceProfile => {
+  const packagesDir = resolveWorkflowAppPackagesDir(options);
   const profileId = profileArgValue(argv, "--profile");
   if (profileId === undefined || profileId.trim().length === 0) {
+    const profileIds = installedSourceProfileIds(packagesDir);
     throw new Error(
-      `Missing required --profile <id>. Installed source profiles: ${installedProfileIds().join(", ")}.`
+      profileIds.length === 0
+        ? `Missing required --profile <id>. No installed source profiles found in ${packagesDir}. ${installLocalPackagesHint}`
+        : `Missing required --profile <id>. Installed source profiles: ${profileIds.join(", ")}.`
     );
   }
 
-  const profile = installedWorkflowCartridgeSourceProfiles.find(
-    (candidate) => candidate.profileId === profileId
-  );
-  if (profile === undefined) {
-    throw new Error(
-      `Unknown source profile "${profileId}". Installed source profiles: ${installedProfileIds().join(", ")}.`
-    );
-  }
-
-  return profile;
+  return resolveInstalledSourceProfile({ packagesDir, profileId });
 };
 
 export const workflowProfileWorkspacePaths = (

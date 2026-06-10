@@ -1088,7 +1088,10 @@ export const runMemoryRelayProvisioningPreflightCli = async (input: {
   readonly processEnv?: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
 }): Promise<MemoryRelayProvisioningPreflightReceipt> => {
-  const profile = requireInstalledSourceProfile(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv, {
+    env: input.processEnv ?? process.env,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv, profile);
   const livePreflightPath = resolve(input.repoRoot, args.livePreflightPath);
   const localRelayProofPath = resolve(input.repoRoot, args.localRelayProofPath);

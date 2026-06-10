@@ -27,16 +27,15 @@ export const installedWorkflowCartridgePackageSeedTemplates = [
   memoryFabricPackageSeedTemplate,
 ] as const satisfies readonly PackageSeedTemplate[];
 
+/**
+ * Compiled source for materializing the built-in cartridge packages via
+ * `pnpm app:packages:install-local`. Runtime profile resolution reads only the
+ * installed-packages directory (scripts/workflow-app-installed-packages.ts);
+ * do not resolve profiles from this array.
+ */
 export const installedWorkflowCartridgeSourceProfiles = [
   ...memoryFabricSourceProfiles,
 ] as const satisfies readonly MemorySourceProfile[];
-
-export const installedSourceProfileById = (
-  profileId: string
-): MemorySourceProfile | undefined =>
-  installedWorkflowCartridgeSourceProfiles.find(
-    (profile) => profile.profileId === profileId
-  );
 
 export const defaultPackageSeedTemplatesWithInstalledCartridges = [
   ...defaultPackageSeedTemplates,

@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { runMemoryRelayLocalReadinessCli } from "../../scripts/workflow-app-relay-local-readiness.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const writeJson = async (path: string, value: unknown): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
@@ -14,7 +14,7 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 
 describe("Memory relay local readiness", () => {
   it("boots from the local startup env and writes a redacted healthz proof", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-ready-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-ready-");
     const startupEnvPath =
       ".wrangler/workflow-app/memory-relay/local-relay-startup-env.json";
     const receiptPath =

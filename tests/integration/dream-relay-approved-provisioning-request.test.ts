@@ -1,11 +1,11 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { runMemoryRelayApprovedProvisioningRequestCli } from "../../scripts/workflow-app-relay-approved-provisioning-request.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const signoffPhrase = "exposing JoelClaw/Typesense over a new network boundary";
 const rawAuthorityRoot = "/private/tmp/dream-relay-approved-provisioning";
@@ -176,7 +176,7 @@ const forbiddenPrivateValuesIn = (value: string): string[] =>
 
 describe("Memory relay approved provisioning request", () => {
   it("blocks without exact signoff and does not leak token, source root, or relay URL", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-approved-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-approved-");
     const logs: string[] = [];
 
     await writeFixtureFiles(repoRoot);
@@ -215,7 +215,7 @@ describe("Memory relay approved provisioning request", () => {
   });
 
   it("marks the request ready with exact signoff, HTTPS relay URL, and local proofs", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-approved-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-approved-");
 
     await writeFixtureFiles(repoRoot);
 
@@ -257,7 +257,7 @@ describe("Memory relay approved provisioning request", () => {
   });
 
   it("rejects a non-HTTPS relay URL even with exact signoff", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-approved-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-approved-");
 
     await writeFixtureFiles(repoRoot);
 

@@ -1,9 +1,35 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+
+import { installLocalWorkflowPackages } from "../../scripts/workflow-app-install-local-packages.ts";
 import type {
   Actor,
   PackageMetadata,
   WorkflowRunRequest,
 } from "../../src/app/domain/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+
+/**
+ * Creates a temp repo root with the in-repo cartridge packages materialized
+ * into its default installed-packages directory, mirroring
+ * `pnpm app:packages:install-local` so script CLIs can resolve source profiles.
+ */
+const silentInstallLogs: string[] = [];
+
+export const workflowCliTestRepoRoot = async (
+  prefix: string
+): Promise<string> => {
+  const repoRoot = await mkdtemp(resolve(tmpdir(), prefix));
+  await installLocalWorkflowPackages({
+    log: (message) => {
+      silentInstallLogs.push(message);
+    },
+    repoRoot,
+  });
+
+  return repoRoot;
+};
 
 export const integrationTestActor = {
   id: "actor:integration-test-agent",

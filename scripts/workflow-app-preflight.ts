@@ -5,7 +5,6 @@ import { dirname, resolve } from "node:path";
 
 import { z } from "zod";
 
-import { hashJson } from "../src/app/domain/hash.ts";
 import {
   WorkflowLivePreflightReceiptSchema,
   WorkflowLivePreflightMemorySourceFamilySchema,
@@ -21,9 +20,11 @@ import type {
   WorkflowLivePreflightRemoteSecretInventory,
 } from "../src/app/domain/schemas.ts";
 import type { MemorySourceProfile } from "../src/app/domain/source-profile.ts";
-import { packageMetadataForSeedTemplate } from "../src/app/infrastructure/cloudflare-package-seeder.ts";
-import { defaultPackageSeedTemplatesWithInstalledCartridges } from "../src/cartridges/cloudflare-workflow-cartridges.ts";
 import { TrustedLocalMemoryRelayReadinessReceiptSchema } from "../src/cartridges/memory-fabric/trusted-local-relay-http.ts";
+import {
+  requireInstalledPackageManifest,
+  resolveWorkflowAppPackagesDir,
+} from "./workflow-app-installed-packages.ts";
 import {
   requireInstalledSourceProfile,
   workflowProfileWorkspacePaths,
@@ -159,28 +160,23 @@ const remoteSecretInventoryCommand = [
   "wrangler.jsonc",
 ] as const;
 
-const cartridgeExpectationsFor = (
-  profile: MemorySourceProfile
-): CartridgeExpectations => {
-  const seedTemplate = defaultPackageSeedTemplatesWithInstalledCartridges.find(
-    (template) => template.packageId === profile.packageId
-  );
-  if (seedTemplate === undefined) {
-    throw new Error(
-      `No installed package seed template found for ${profile.packageId}.`
-    );
-  }
-
-  const metadata = packageMetadataForSeedTemplate(seedTemplate);
+const cartridgeExpectationsFor = (input: {
+  readonly packagesDir: string;
+  readonly profile: MemorySourceProfile;
+}): CartridgeExpectations => {
+  const manifest = requireInstalledPackageManifest({
+    packageId: input.profile.packageId,
+    packagesDir: input.packagesDir,
+  });
 
   return {
-    expectedCartridgeArtifactRef: metadata.latestArtifactRef,
-    expectedCartridgeManifestHash: hashJson(metadata),
-    expectedCartridgePackageId: profile.packageId,
-    expectedCartridgeSchemaExportIds: metadata.exports
+    expectedCartridgeArtifactRef: manifest.artifactRef,
+    expectedCartridgeManifestHash: manifest.contentHash,
+    expectedCartridgePackageId: input.profile.packageId,
+    expectedCartridgeSchemaExportIds: manifest.exports
       .filter((exportRecord) => exportRecord.kind === "schema")
       .map((exportRecord) => exportRecord.exportId),
-    expectedCartridgeWorkflowNodeTypes: metadata.exports
+    expectedCartridgeWorkflowNodeTypes: manifest.exports
       .filter((exportRecord) => exportRecord.kind === "workflow-node")
       .map((exportRecord) => exportRecord.nodeType)
       .filter((nodeType): nodeType is string => nodeType !== undefined),
@@ -1170,9 +1166,18 @@ export const runWorkflowPreflightCli = async (input: {
   readonly processEnv: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
 }): Promise<WorkflowLivePreflightReceipt> => {
-  const profile = requireInstalledSourceProfile(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv, {
+    env: input.processEnv,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv, profile);
-  const expectations = cartridgeExpectationsFor(profile);
+  const expectations = cartridgeExpectationsFor({
+    packagesDir: resolveWorkflowAppPackagesDir({
+      env: input.processEnv,
+      repoRoot: input.repoRoot,
+    }),
+    profile,
+  });
   const dotEnv = await readDotEnvLocal(input.repoRoot);
   const env = {
     ...dotEnv,

@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -12,6 +11,7 @@ import {
   WorkflowLivePreflightReceiptSchema,
 } from "../../src/app/domain/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const profileArgs = [
   "--profile",
@@ -235,9 +235,7 @@ const runReceipt = (input: { readonly submitAttempted: boolean }) =>
 
 describe("Dream readiness report", () => {
   it("renders a Tufte MDSvX/static report from redacted blocked Dream receipts", async () => {
-    const repoRoot = await mkdtemp(
-      resolve(tmpdir(), "dream-readiness-report-")
-    );
+    const repoRoot = await workflowCliTestRepoRoot("dream-readiness-report-");
     const localProofPath = resolve(repoRoot, "proof.json");
     const preflightPath = resolve(repoRoot, "preflight.json");
     const runReceiptPath = resolve(repoRoot, "run-receipt.json");
@@ -311,9 +309,7 @@ describe("Dream readiness report", () => {
   });
 
   it("refuses to render a readiness report for a submitted Dream receipt", async () => {
-    const repoRoot = await mkdtemp(
-      resolve(tmpdir(), "dream-readiness-report-")
-    );
+    const repoRoot = await workflowCliTestRepoRoot("dream-readiness-report-");
     const localProofPath = resolve(repoRoot, "proof.json");
     const preflightPath = resolve(repoRoot, "preflight.json");
     const runReceiptPath = resolve(repoRoot, "run-receipt.json");
@@ -340,9 +336,7 @@ describe("Dream readiness report", () => {
   });
 
   it("publishes the rendered report behind an explicit publish flag and writes a receipt", async () => {
-    const repoRoot = await mkdtemp(
-      resolve(tmpdir(), "dream-readiness-report-")
-    );
+    const repoRoot = await workflowCliTestRepoRoot("dream-readiness-report-");
     const localProofPath = resolve(repoRoot, "proof.json");
     const preflightPath = resolve(repoRoot, "preflight.json");
     const runReceiptPath = resolve(repoRoot, "run-receipt.json");

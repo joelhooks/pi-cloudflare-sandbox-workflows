@@ -136,7 +136,10 @@ const fetchHealthz = async (input: {
 export const runMemoryRelayLocalReadinessCli = async (
   input: MemoryRelayLocalReadinessCliInput
 ): Promise<MemoryRelayLocalReadinessProofReceipt> => {
-  const profile = requireInstalledSourceProfile(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv, {
+    env: input.processEnv ?? process.env,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv);
   const startupEnv = {
     ...(await readStartupEnvArtifact(

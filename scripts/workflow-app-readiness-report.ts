@@ -1149,7 +1149,9 @@ export const renderWorkflowReadinessReport = async (input: {
 export const runWorkflowReadinessReportCli = async (
   input: RunWorkflowReadinessReportCliInput
 ): Promise<WorkflowReadinessReportReceipt> => {
-  const profile = requireInstalledSourceProfile(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv, {
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv, profile);
   const localProofPath = resolve(input.repoRoot, args.localProofPath);
   const preflightPath = resolve(input.repoRoot, args.preflightPath);

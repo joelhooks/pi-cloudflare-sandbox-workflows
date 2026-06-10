@@ -21,6 +21,7 @@
     "app:dream:relay:provisioning-preflight": "tsx scripts/workflow-app-relay-provisioning-preflight.ts --profile joelhooks/dream-transcript-review",
     "app:dream:report": "tsx scripts/workflow-app-readiness-report.ts --profile joelhooks/dream-transcript-review",
     "app:dream:run": "tsx scripts/workflow-app-run.ts --profile joelhooks/dream-transcript-review",
+    "app:packages:install-local": "tsx scripts/workflow-app-install-local-packages.ts",
     "app:preflight": "tsx scripts/workflow-app-preflight.ts",
     "app:relay": "tsx scripts/trusted-memory-relay.ts",
     "app:relay:approved-provisioning": "tsx scripts/workflow-app-relay-approved-provisioning-request.ts",

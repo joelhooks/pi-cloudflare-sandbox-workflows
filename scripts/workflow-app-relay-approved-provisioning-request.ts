@@ -390,8 +390,11 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
 export const runMemoryRelayApprovedProvisioningRequestCli = async (
   input: MemoryRelayApprovedProvisioningRequestCliInput
 ): Promise<MemoryRelayApprovedProvisioningRequestReceipt> => {
-  const profile = requireInstalledSourceProfile(input.argv);
   const processEnv = input.processEnv ?? process.env;
+  const profile = requireInstalledSourceProfile(input.argv, {
+    env: processEnv,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv, processEnv);
   const approvalStatus = approvalStatusFor(args.approvalSignoff);
   const relayEndpoint = relayUrlSummary(args.relayBaseUrl);

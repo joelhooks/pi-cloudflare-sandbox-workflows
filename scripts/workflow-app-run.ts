@@ -453,7 +453,10 @@ export const runWorkflowLiveRunCli = async (
   input: RunWorkflowLiveRunCliInput
 ): Promise<WorkflowLiveRunRequestReceipt> => {
   const now = new Date();
-  const profile = requireInstalledSourceProfile(input.argv);
+  const profile = requireInstalledSourceProfile(input.argv, {
+    env: input.processEnv,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv, profile);
   const runId = args.runId ?? defaultRunId(now);
   const preflightPath = resolve(input.repoRoot, args.preflightPath);

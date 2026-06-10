@@ -204,7 +204,10 @@ const receiptFor = (input: {
 export const runMemoryRelayLocalStartupEnvCli = async (
   input: MemoryRelayLocalStartupEnvCliInput
 ): Promise<MemoryRelayLocalStartupEnvReceipt> => {
-  requireInstalledSourceProfile(input.argv);
+  requireInstalledSourceProfile(input.argv, {
+    env: input.processEnv ?? process.env,
+    repoRoot: input.repoRoot,
+  });
   const args = parseArgs(input.argv);
   const sourceRootsPath = resolve(input.repoRoot, args.sourceRootsPath);
   const startupEnvPath = resolve(input.repoRoot, args.startupEnvPath);

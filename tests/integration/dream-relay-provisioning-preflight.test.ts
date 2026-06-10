@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -9,6 +8,7 @@ import {
   runMemoryRelayProvisioningPreflightCli,
 } from "../../scripts/workflow-app-relay-provisioning-preflight.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const visionWithSignoffRule = `
 # Vision
@@ -711,7 +711,7 @@ describe("Memory relay provisioning preflight", () => {
   });
 
   it("loads the local relay startup env artifact without leaking its token or raw roots", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-preflight-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-preflight-");
     const localRelayReadinessPath =
       ".wrangler/workflow-app/memory-relay/latest-local-readiness.json";
     const localRelayStartupEnvPath =

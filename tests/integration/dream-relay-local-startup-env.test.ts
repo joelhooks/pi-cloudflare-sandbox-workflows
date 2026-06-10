@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -7,6 +6,7 @@ import { z } from "zod";
 
 import { runMemoryRelayLocalStartupEnvCli } from "../../scripts/workflow-app-relay-local-startup-env.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
+import { workflowCliTestRepoRoot } from "./workflow-app-fixtures.ts";
 
 const StartupEnvArtifactSchema = z.record(z.string(), z.string());
 
@@ -22,7 +22,7 @@ const readStartupEnv = async (
 
 describe("Memory relay local startup env", () => {
   it("writes a private startup env artifact and redacted receipt", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-env-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-env-");
     const sourceRootsPath =
       ".wrangler/workflow-app/memory-relay/source-roots.json";
     const startupEnvPath =
@@ -104,7 +104,7 @@ describe("Memory relay local startup env", () => {
   });
 
   it("preserves the existing token unless rotation is requested", async () => {
-    const repoRoot = await mkdtemp(resolve(tmpdir(), "dream-relay-env-"));
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-env-");
     const sourceRootsPath =
       ".wrangler/workflow-app/memory-relay/source-roots.json";
     const startupEnvPath =
