@@ -27,6 +27,13 @@ type WzrrdPublishLease = CapabilityLease & {
   readonly resource: WzrrdResource;
 };
 
+type WzrrdPublishedPrimaryDocument = NonNullable<
+  Extract<
+    WzrrdPublishDeliveryResult,
+    { readonly status: "published" }
+  >["primaryDocument"]
+>;
+
 export interface WzrrdApiTokenSecretResolver {
   resolve(input: {
     readonly leaseId: string;
@@ -197,6 +204,63 @@ const stripFrontMatter = (content: string): string => {
   const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/u.exec(content);
 
   return match === null ? content : content.slice(match[0].length);
+};
+
+const frontMatterBlockFor = (content: string): string | null => {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/u.exec(content);
+
+  return match?.[1] ?? null;
+};
+
+const unquoteScalar = (value: string): string =>
+  value.trim().replaceAll(/^["']|["']$/gu, "");
+
+const frontMatterScalarFor = (input: {
+  readonly content: string;
+  readonly key: string;
+}): string | null => {
+  const frontMatter = frontMatterBlockFor(input.content);
+  if (frontMatter === null) {
+    return null;
+  }
+
+  const pattern = new RegExp(`^${input.key}:\\s*(.+)$`, "mu");
+  const match = pattern.exec(frontMatter);
+
+  return match?.[1] === undefined ? null : unquoteScalar(match[1]);
+};
+
+const templateLabelFor = (
+  template: NonNullable<
+    NonNullable<WzrrdPublishPayload["primaryDocument"]>["template"]
+  >
+): string => `${template.templateId}@${template.version}`;
+
+const validatePrimaryDocumentTemplate = (input: {
+  readonly content: string;
+  readonly document: NonNullable<WzrrdPublishPayload["primaryDocument"]>;
+}): null | WzrrdPublishDeliveryResult => {
+  if (
+    input.document.template === undefined ||
+    input.document.mediaType !== "text/mdsvx"
+  ) {
+    return null;
+  }
+
+  const expectedTemplate = templateLabelFor(input.document.template);
+  const declaredTemplate = frontMatterScalarFor({
+    content: input.content,
+    key: "template",
+  });
+
+  if (declaredTemplate !== expectedTemplate) {
+    return blocked(
+      "capability_denied",
+      "Wzrrd primary MDSvX document does not match the declared report template."
+    );
+  }
+
+  return null;
 };
 
 const renderCodeBlock = (input: {
@@ -554,6 +618,10 @@ const renderPrimaryDocumentHtml = (input: {
     input.document.mediaType === "text/html"
       ? input.content
       : renderMarkdownSubset(input.content);
+  const templateSummary =
+    input.document.template === undefined
+      ? "untyped primary document template"
+      : templateLabelFor(input.document.template);
 
   return `<!doctype html>
 <html lang="en">
@@ -689,12 +757,13 @@ const renderPrimaryDocumentHtml = (input: {
           <div>Run <code>${escapeHtml(input.payload.runId)}</code></div>
           <div>Work item <code>${escapeHtml(input.payload.workItemId)}</code></div>
           <div>Source <a href="${escapeHtml(input.document.path)}">${escapeHtml(input.document.path)}</a></div>
+          <div>Template <code>${escapeHtml(templateSummary)}</code></div>
           <div>Review data <a href="review-surface.json">review-surface.json</a></div>
         </div>
       </header>
       ${body}
       <footer>
-        Static preview rendered by <code>joel/static-tufte-mdsvx-preview@0.1.0</code> from a hash-pinned redacted artifact. The canonical report source is published unchanged beside this page.
+        Static preview rendered by <code>joel/static-tufte-mdsvx-preview@0.1.0</code> from a hash-pinned redacted artifact using <code>${escapeHtml(templateSummary)}</code>. The canonical report source is published unchanged beside this page.
       </footer>
     </article>
   </main>
@@ -726,6 +795,7 @@ const renderPrimaryDocumentFiles = async (input: {
 }): Promise<
   | {
       readonly files: readonly WzrrdPublishFile[];
+      readonly rendererId: string;
       readonly status: "rendered";
     }
   | {
@@ -804,6 +874,7 @@ const renderPrimaryDocumentFiles = async (input: {
 
   return {
     files: renderResult.files,
+    rendererId: renderResult.rendererId,
     status: "rendered",
   };
 };
@@ -840,6 +911,17 @@ const loadPrimaryDocumentContent = async (input: {
       };
     }
 
+    const templateBlocker = validatePrimaryDocumentTemplate({
+      content,
+      document,
+    });
+    if (templateBlocker !== null) {
+      return {
+        result: templateBlocker,
+        status: "blocked",
+      };
+    }
+
     return { content, status: "loaded" };
   } catch {
     return {
@@ -850,6 +932,105 @@ const loadPrimaryDocumentContent = async (input: {
       status: "blocked",
     };
   }
+};
+
+const filesForWzrrdPublish = async (input: {
+  readonly artifacts: Pick<ArtifactStoreContract, "readText">;
+  readonly payload: WzrrdPublishPayload;
+  readonly renderer?: WzrrdPrimaryDocumentRenderer;
+  readonly reviewSurface: ReviewSurfaceDocument;
+}): Promise<
+  | {
+      readonly files: readonly WzrrdPublishFile[];
+      readonly primaryDocument?: WzrrdPublishedPrimaryDocument;
+      readonly status: "ready";
+    }
+  | {
+      readonly result: WzrrdPublishDeliveryResult;
+      readonly status: "blocked";
+    }
+> => {
+  if (input.payload.primaryDocument === undefined) {
+    return {
+      files: [
+        {
+          content: renderReviewSurfaceHtml({
+            payload: input.payload,
+            reviewSurface: input.reviewSurface,
+          }),
+          path: "index.html",
+        },
+        {
+          content: `${JSON.stringify(input.reviewSurface, null, 2)}\n`,
+          path: "review-surface.json",
+        },
+      ],
+      status: "ready",
+    };
+  }
+
+  const primaryDocumentContent = await loadPrimaryDocumentContent({
+    artifacts: input.artifacts,
+    payload: input.payload,
+  });
+  if (primaryDocumentContent.status === "blocked") {
+    return primaryDocumentContent;
+  }
+
+  const primaryDocumentDescriptor = input.payload.primaryDocument;
+  const rendered = await renderPrimaryDocumentFiles({
+    content: primaryDocumentContent.content,
+    document: primaryDocumentDescriptor,
+    payload: input.payload,
+    reviewSurface: input.reviewSurface,
+    ...(input.renderer === undefined ? {} : { renderer: input.renderer }),
+  });
+  if (rendered.status === "blocked") {
+    return rendered;
+  }
+
+  const primaryDocument: WzrrdPublishedPrimaryDocument = {
+    artifactRef: primaryDocumentDescriptor.artifactRef,
+    hash: primaryDocumentDescriptor.hash,
+    mediaType: primaryDocumentDescriptor.mediaType,
+    path: primaryDocumentDescriptor.path,
+    rendererId: rendered.rendererId,
+    ...(primaryDocumentDescriptor.template === undefined
+      ? {}
+      : { template: primaryDocumentDescriptor.template }),
+    title: primaryDocumentDescriptor.title,
+  };
+
+  return {
+    files: [
+      ...rendered.files,
+      {
+        content: primaryDocumentContent.content,
+        path: primaryDocumentDescriptor.path,
+      },
+      {
+        content: `${JSON.stringify(
+          {
+            primaryDocument,
+            redacted: true,
+            rendererId: rendered.rendererId,
+            runId: input.payload.runId,
+            schemaVersion: "wzrrd.primary-document-rendering.v1",
+            workItemId: input.payload.workItemId,
+          },
+          null,
+          2
+        )}\n`,
+        path: "report-rendering.json",
+      },
+      {
+        content: `${JSON.stringify(input.reviewSurface, null, 2)}\n`,
+        path: "review-surface.json",
+      },
+    ],
+    primaryDocument,
+    status: "ready",
+  };
 };
 
 const coercePublishedAt = (input: {
@@ -957,57 +1138,16 @@ export const createCloudflareWzrrdPublishAdapter = (
       );
     }
 
-    const primaryDocument = await loadPrimaryDocumentContent({
+    const publishFiles = await filesForWzrrdPublish({
       artifacts: config.artifacts,
       payload,
+      reviewSurface: reviewSurface.data,
+      ...(config.primaryDocumentRenderer === undefined
+        ? {}
+        : { renderer: config.primaryDocumentRenderer }),
     });
-    if (primaryDocument.status === "blocked") {
-      return primaryDocument.result;
-    }
-
-    let files: readonly WzrrdPublishFile[];
-    if (payload.primaryDocument === undefined) {
-      files = [
-        {
-          content: renderReviewSurfaceHtml({
-            payload,
-            reviewSurface: reviewSurface.data,
-          }),
-          path: "index.html",
-        },
-        {
-          content: `${JSON.stringify(reviewSurface.data, null, 2)}\n`,
-          path: "review-surface.json",
-        },
-      ];
-    } else {
-      const primaryDocumentDescriptor = payload.primaryDocument;
-      const rendered = await renderPrimaryDocumentFiles({
-        content: primaryDocument.content,
-        document: primaryDocumentDescriptor,
-        payload,
-        reviewSurface: reviewSurface.data,
-        ...(config.primaryDocumentRenderer === undefined
-          ? {}
-          : {
-              renderer: config.primaryDocumentRenderer,
-            }),
-      });
-      if (rendered.status === "blocked") {
-        return rendered.result;
-      }
-
-      files = [
-        ...rendered.files,
-        {
-          content: primaryDocument.content,
-          path: primaryDocumentDescriptor.path,
-        },
-        {
-          content: `${JSON.stringify(reviewSurface.data, null, 2)}\n`,
-          path: "review-surface.json",
-        },
-      ];
+    if (publishFiles.status === "blocked") {
+      return publishFiles.result;
     }
 
     const apiBaseUrl = (
@@ -1015,7 +1155,7 @@ export const createCloudflareWzrrdPublishAdapter = (
     ).replaceAll(/\/+$/gu, "");
     const response = await (config.fetch ?? fetch)(`${apiBaseUrl}/api/sites`, {
       body: JSON.stringify({
-        files,
+        files: publishFiles.files,
         indexing: "noindex",
         slug: payload.slug,
         source: `pi-cloudflare-sandbox-workflows:${lease.runId}`,
@@ -1046,6 +1186,9 @@ export const createCloudflareWzrrdPublishAdapter = (
         fallback: config.now ?? (() => new Date().toISOString()),
         value: body.site.updatedAt ?? body.site.createdAt,
       }),
+      ...(publishFiles.primaryDocument === undefined
+        ? {}
+        : { primaryDocument: publishFiles.primaryDocument }),
       redacted: true,
       reviewSurfaceRef: payload.reviewSurface.artifactRef,
       slug: body.site.slug,

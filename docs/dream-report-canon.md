@@ -33,7 +33,9 @@ wzrrd.report.render -> hash-pinned static files
 wzrrd.site.publish -> leased side-effect publish
 ```
 
-`src/app/infrastructure/cloudflare-wzrrd-publish-adapter.ts` accepts a `primaryDocumentRenderer` for package-style report renderers. The default renderer is `joel/static-tufte-mdsvx-preview@0.1.0`: it renders a safe static preview from a hash-pinned `text/mdsvx`/markdown artifact, preserves the canonical source file beside `review-surface.json`, and does not pretend to be a full SvelteKit/MDSvX compiler. A real `@joelhooks/wzrrd-hitl-report` package can replace this renderer without owning Wzrrd publication.
+`src/app/infrastructure/cloudflare-wzrrd-publish-adapter.ts` accepts a `primaryDocumentRenderer` for package-style report renderers. The default renderer is `joel/static-tufte-mdsvx-preview@0.1.0`: it renders a safe static preview from a hash-pinned `text/mdsvx`/markdown artifact, preserves the canonical source file beside `review-surface.json`, writes `report-rendering.json` with the actual renderer/template/source metadata, and does not pretend to be a full SvelteKit/MDSvX compiler. A real `@joelhooks/wzrrd-hitl-report` package can replace this renderer without owning Wzrrd publication.
+
+When a Wzrrd primary document declares a template, the publish payload carries the template id/version/format/noindex/default-expiry/renderer hint, the publisher verifies `text/mdsvx` frontmatter declares the matching template label, and the published delivery receipt records the renderer id that actually produced `index.html`.
 
 ## Required order
 

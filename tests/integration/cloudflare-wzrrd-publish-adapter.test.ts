@@ -65,6 +65,38 @@ const WzrrdPublishRequestBodySchema = z.object({
 });
 
 const wzrrdToken = "wzrrd-api-token-never-in-receipts";
+const tufteMdsvxTemplate = {
+  defaultExpiresIn: "24h",
+  format: "mdsvx",
+  noindex: true,
+  rendererId: "joel/static-tufte-mdsvx-preview@0.1.0",
+  templateId: "joel/tufte-mdsvx",
+  version: "0.1.0",
+} as const;
+
+const PrimaryDocumentRenderingReceiptSchema = z.object({
+  primaryDocument: z.object({
+    artifactRef: z.string().min(1),
+    hash: z.string().min(1),
+    mediaType: z.literal("text/mdsvx"),
+    path: z.string().min(1),
+    rendererId: z.string().min(1),
+    template: z.object({
+      defaultExpiresIn: z.literal("24h"),
+      format: z.literal("mdsvx"),
+      noindex: z.literal(true),
+      rendererId: z.string().min(1),
+      templateId: z.literal("joel/tufte-mdsvx"),
+      version: z.literal("0.1.0"),
+    }),
+    title: z.string().min(1),
+  }),
+  redacted: z.literal(true),
+  rendererId: z.string().min(1),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("wzrrd.primary-document-rendering.v1"),
+  workItemId: z.string().min(1),
+});
 
 const responseFrom = (body: unknown, status = 200): Response =>
   Response.json(body, {
@@ -320,6 +352,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     const mdsvx = [
       "---",
       'title: "This dream found work to do."',
+      'template: "joel/tufte-mdsvx@0.1.0"',
       "---",
       "",
       "# This dream found work to do.",
@@ -347,6 +380,7 @@ describe("Cloudflare Wzrrd publish adapter", () => {
         hash: sha256Hex(mdsvx),
         mediaType: "text/mdsvx",
         path: "report.mdsvx",
+        template: tufteMdsvxTemplate,
         title: "This dream found work to do.",
       },
     });
@@ -384,29 +418,139 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       requestBody.files.map((file) => [file.path, file.content])
     );
     const indexHtml = filesByPath.get("index.html") ?? "";
+    const renderingReceipt = PrimaryDocumentRenderingReceiptSchema.parse(
+      JSON.parse(filesByPath.get("report-rendering.json") ?? "{}")
+    );
 
     expect({
-      deliveryStatus: delivery.status,
+      delivery:
+        delivery.status === "published"
+          ? {
+              primaryDocument: delivery.primaryDocument,
+              status: delivery.status,
+            }
+          : delivery,
       filePaths: requestBody.files.map((file) => file.path),
       frontmatterStripped: !indexHtml.includes("---"),
       indexContainsD2Figure: indexHtml.includes('class="flow-chart"'),
       indexContainsDreams: indexHtml.includes(
         '<h2 id="the-actual-dreams">The actual dreams</h2>'
       ),
+      indexContainsTemplate: indexHtml.includes("joel/tufte-mdsvx@0.1.0"),
       indexUsesStaticRenderer: indexHtml.includes(
         "joel/static-tufte-mdsvx-preview@0.1.0"
       ),
+      renderingReceipt: {
+        primaryDocument: renderingReceipt.primaryDocument,
+        rendererId: renderingReceipt.rendererId,
+      },
       reportSourceMatches: filesByPath.get("report.mdsvx") === mdsvx,
       reviewSurfaceIncluded: filesByPath.has("review-surface.json"),
     }).toStrictEqual({
-      deliveryStatus: "published",
-      filePaths: ["index.html", "report.mdsvx", "review-surface.json"],
+      delivery: {
+        primaryDocument: {
+          artifactRef: mdsvxWrite.artifactRef,
+          hash: sha256Hex(mdsvx),
+          mediaType: "text/mdsvx",
+          path: "report.mdsvx",
+          rendererId: "joel/static-tufte-mdsvx-preview@0.1.0",
+          template: tufteMdsvxTemplate,
+          title: "This dream found work to do.",
+        },
+        status: "published",
+      },
+      filePaths: [
+        "index.html",
+        "report.mdsvx",
+        "report-rendering.json",
+        "review-surface.json",
+      ],
       frontmatterStripped: true,
       indexContainsD2Figure: true,
       indexContainsDreams: true,
+      indexContainsTemplate: true,
       indexUsesStaticRenderer: true,
+      renderingReceipt: {
+        primaryDocument: {
+          artifactRef: mdsvxWrite.artifactRef,
+          hash: sha256Hex(mdsvx),
+          mediaType: "text/mdsvx",
+          path: "report.mdsvx",
+          rendererId: "joel/static-tufte-mdsvx-preview@0.1.0",
+          template: tufteMdsvxTemplate,
+          title: "This dream found work to do.",
+        },
+        rendererId: "joel/static-tufte-mdsvx-preview@0.1.0",
+      },
       reportSourceMatches: true,
       reviewSurfaceIncluded: true,
+    });
+  });
+
+  it("rejects a primary MDSvX document that does not match its declared template", async () => {
+    const fixture = await createReviewSurfaceFixture();
+    const mdsvx = [
+      "---",
+      'title: "This dream found work to do."',
+      "---",
+      "",
+      "# This dream found work to do.",
+      "",
+    ].join("\n");
+    const mdsvxWrite = await fixture.artifacts.writeText({
+      mediaType: "text/mdsvx",
+      path: "dream/hitl-report.mdsvx",
+      redacted: true,
+      runId: fixture.request.runId,
+      value: mdsvx,
+    });
+    const payload = WzrrdPublishPayloadSchema.parse({
+      ...buildPayload(fixture),
+      primaryDocument: {
+        artifactRef: mdsvxWrite.artifactRef,
+        hash: sha256Hex(mdsvx),
+        mediaType: "text/mdsvx",
+        path: "report.mdsvx",
+        template: tufteMdsvxTemplate,
+        title: "This dream found work to do.",
+      },
+    });
+    const lease = buildLease({
+      payload,
+      request: fixture.request,
+    });
+    const fakeFetch = createFakeFetch(
+      responseFrom({
+        ok: true,
+        site: {
+          createdAt: "2026-06-08T23:59:05.000Z",
+          slug: payload.slug,
+          url: `https://${payload.slug}.wzrrd.sh/`,
+        },
+      })
+    );
+    const adapter = createCloudflareWzrrdPublishAdapter({
+      artifacts: fixture.artifacts,
+      fetch: fakeFetch.fetcher,
+      secretResolver: createCloudflareWzrrdApiTokenResolver({
+        secret: wzrrdToken,
+        secretRef: "secretref:wzrrd-api",
+      }),
+      userAgent: "pi-cloudflare-sandbox-workflows/0.0.0",
+      wzrrdApiBaseUrl: "https://wzrrd.example.invalid",
+      wzrrdPublishSecretRef: "secretref:wzrrd-api",
+    });
+
+    const delivery = await adapter.execute({ lease, payload });
+
+    expect({
+      blockerCode: delivery.status === "blocked" ? delivery.blocker.code : null,
+      fetchCount: fakeFetch.calls.length,
+      status: delivery.status,
+    }).toStrictEqual({
+      blockerCode: "capability_denied",
+      fetchCount: 0,
+      status: "blocked",
     });
   });
 
@@ -493,6 +637,10 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     );
 
     expect({
+      deliveryRenderer:
+        delivery.status === "published"
+          ? delivery.primaryDocument?.rendererId
+          : null,
       deliveryStatus: delivery.status,
       filePaths: requestBody.files.map((file) => file.path),
       indexOwnedByRenderer: filesByPath
@@ -501,11 +649,13 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       rendererInputs,
       sourceStillPublished: filesByPath.get("report.mdsvx") === mdsvx,
     }).toStrictEqual({
+      deliveryRenderer: "@joelhooks/wzrrd-hitl-report/static@0.1.0",
       deliveryStatus: "published",
       filePaths: [
         "index.html",
         "assets/report-renderer.txt",
         "report.mdsvx",
+        "report-rendering.json",
         "review-surface.json",
       ],
       indexOwnedByRenderer: true,

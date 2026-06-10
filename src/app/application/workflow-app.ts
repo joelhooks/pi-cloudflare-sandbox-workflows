@@ -2220,6 +2220,9 @@ export class WorkflowApp implements WorkflowAppContract {
           hash: sha256Hex(content),
           mediaType: primaryDocument.mediaType,
           path: primaryDocument.publishPath,
+          ...(primaryDocument.template === undefined
+            ? {}
+            : { template: primaryDocument.template }),
           title: primaryDocument.title,
         },
         status: "ready",

@@ -262,7 +262,7 @@ export const buildDreamLiveRunRequest = (
         `Generated Dream source-inventory steps must declare requiredRuntimes, sourceFamiliesExpected, and requiredMachineIds matching the source profile, including machines ${dreamTranscriptReviewSourceProfile.requiredMachineIds.join(", ")}.`,
         "Require native runtime coverage for Pi, Codex, Claude, and Cloudflare or state the missing/false-positive coverage explicitly in the report.",
         "Search across horizons: 24h, 7d, 30d, current quarter, and all-time. Do not collapse the dream into a recent-only summary.",
-        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do."}}.',
+        'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"dream/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
         "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
         "Cloudflare must access memory only through the trusted Dream relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",
         "Accepted dreams should propose kernel/package/workflow/schema/access-lease refinements with reasoning, rating, recommendation, and receipt metadata.",

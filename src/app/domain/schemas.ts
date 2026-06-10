@@ -625,6 +625,16 @@ export const OutputTargetSchema = z.discriminatedUnion("kind", [
         artifactPath: z.string().min(1),
         mediaType: z.enum(["text/mdsvx", "text/html", "text/markdown"]),
         publishPath: z.string().min(1),
+        template: z
+          .object({
+            defaultExpiresIn: z.string().min(1).optional(),
+            format: z.enum(["html", "markdown", "mdsvx"]),
+            noindex: z.literal(true),
+            rendererId: z.string().min(1).optional(),
+            templateId: z.string().min(1),
+            version: z.string().min(1),
+          })
+          .optional(),
         title: z.string().min(1),
       })
       .optional(),
@@ -1201,6 +1211,16 @@ export const WzrrdPublishPayloadSchema = z.object({
       hash: Sha256HexSchema,
       mediaType: z.enum(["text/mdsvx", "text/html", "text/markdown"]),
       path: z.string().min(1),
+      template: z
+        .object({
+          defaultExpiresIn: z.string().min(1).optional(),
+          format: z.enum(["html", "markdown", "mdsvx"]),
+          noindex: z.literal(true),
+          rendererId: z.string().min(1).optional(),
+          templateId: z.string().min(1),
+          version: z.string().min(1),
+        })
+        .optional(),
       title: z.string().min(1),
     })
     .optional(),
@@ -1344,6 +1364,26 @@ export const WzrrdPublishDeliveryResultSchema = z.discriminatedUnion("status", [
   z.object({
     dryRun: z.literal(false),
     payloadHash: Sha256HexSchema,
+    primaryDocument: z
+      .object({
+        artifactRef: ArtifactRefSchema,
+        hash: Sha256HexSchema,
+        mediaType: z.enum(["text/mdsvx", "text/html", "text/markdown"]),
+        path: z.string().min(1),
+        rendererId: z.string().min(1),
+        template: z
+          .object({
+            defaultExpiresIn: z.string().min(1).optional(),
+            format: z.enum(["html", "markdown", "mdsvx"]),
+            noindex: z.literal(true),
+            rendererId: z.string().min(1).optional(),
+            templateId: z.string().min(1),
+            version: z.string().min(1),
+          })
+          .optional(),
+        title: z.string().min(1),
+      })
+      .optional(),
     publishedAt: IsoDateTimeSchema,
     redacted: z.literal(true),
     reviewSurfaceRef: ArtifactRefSchema,

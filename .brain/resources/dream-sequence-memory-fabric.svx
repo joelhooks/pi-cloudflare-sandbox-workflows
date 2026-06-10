@@ -1367,6 +1367,34 @@ Validation receipts:
 - `pnpm typecheck:tsc` passed.
 - `pnpm check` passed.
 
+## Dream Wzrrd Template Proof Receipt
+
+On 2026-06-10, the Wzrrd primary-document path stopped relying on inference to prove the Dream report used the canonical Tufte/MDSvX template.
+
+Decision:
+
+- `outputTarget.primaryDocument` and `wzrrd.publish-payload.v1` can now carry template metadata: `templateId`, `version`, `format`, `noindex`, optional `defaultExpiresIn`, and optional renderer hint.
+- The Dream live-run request now tells the planner to publish `dream/hitl-report.mdsvx` as `report.mdsvx` with `joel/tufte-mdsvx@0.1.0`, `format=mdsvx`, `noindex=true`, `defaultExpiresIn=24h`, and renderer hint `joel/static-tufte-mdsvx-preview@0.1.0`.
+- `createCloudflareWzrrdPublishAdapter` verifies a declared `text/mdsvx` template against the source artifact frontmatter before it calls Wzrrd. A report that declares `joel/tufte-mdsvx@0.1.0` in the payload but omits or changes that frontmatter blocks before publication.
+- Published primary-document runs now include `report-rendering.json` beside `index.html`, `report.mdsvx`, and `review-surface.json`. That receipt records the actual renderer id, primary document ref/hash/path/media type/title, template metadata, run id, and work item id.
+- Published Wzrrd delivery receipts now mirror the actual primary-document renderer id. This proves the rendered preview path without making `wzrrd.site.publish` own the Dream report node.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` extends Wzrrd primary-document data in `OutputTargetSchema`, `WzrrdPublishPayloadSchema`, and `WzrrdPublishDeliveryResultSchema`.
+- `src/app/application/workflow-app.ts` copies the planned primary-document template into the pinned Wzrrd publish payload after hashing the source artifact.
+- `src/app/infrastructure/cloudflare-wzrrd-publish-adapter.ts` verifies MDSvX template frontmatter, writes `report-rendering.json`, and returns the renderer id in the published delivery result.
+- `scripts/workflow-app-dream-run.ts` asks the real Dream planner for the canonical Tufte/MDSvX output target template.
+- `tests/integration/cloudflare-wzrrd-publish-adapter.test.ts` proves positive publication, custom package renderer ownership, and rejection when the declared template is not present in MDSvX frontmatter.
+- `tests/integration/workflow-app.test.ts` proves the generated Dream workflow pins the Tufte/MDSvX template into the Wzrrd primary-document payload.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-wzrrd-publish-adapter.test.ts tests/integration/workflow-app.test.ts` passed: `2` files, `31` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+
 ## Dream Live Readiness Receipt
 
 On 2026-06-09, the live Dream preflight was rerun after refreshing the trusted local relay proof with correlation counts.
