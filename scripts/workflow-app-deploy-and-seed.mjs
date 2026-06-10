@@ -38,6 +38,7 @@ const deploySecretNames = [
   "GITHUB_TOKEN",
   "LINEAR_API_TOKEN",
   "WORKFLOW_APP_ADMIN_TOKEN",
+  "WORKFLOW_APP_RUNS_TOKEN",
 ];
 const redactedMaterialNames = [
   ...deploySecretNames,

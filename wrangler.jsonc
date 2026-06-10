@@ -81,6 +81,16 @@
     "WZRRD_USER_AGENT": "pi-cloudflare-sandbox-workflows/0.0.0",
   },
   "secrets": {
-    "required": ["WORKFLOW_APP_ADMIN_TOKEN"],
+    "required": [
+      "DISCORD_BOT_TOKEN",
+      "GITHUB_TOKEN",
+      "LINEAR_API_TOKEN",
+      "MEMORY_RELAY_TOKEN",
+      "PI_AUTH_JSON_B64",
+      "WORKFLOW_APP_ADMIN_TOKEN",
+      "WORKFLOW_APP_MODEL",
+      "WORKFLOW_APP_RUNS_TOKEN",
+      "WZRRD_API_TOKEN",
+    ],
   },
 }

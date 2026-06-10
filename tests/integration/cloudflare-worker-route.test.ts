@@ -19,6 +19,7 @@ import {
   __cloudflareWorkerRouteTestHooks,
   handleWorkflowWorkerRequest,
 } from "../../src/app/infrastructure/cloudflare-worker-route.ts";
+import type { WorkflowRunStatusSnapshot } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
@@ -43,13 +44,29 @@ const createBlockedFrontDoor = (calls: unknown[]): WorkerFrontDoorContract => ({
   },
 });
 
+const runsToken = "runs-route-token";
+
+const createRunsAuthEnv = () => ({
+  WORKFLOW_APP_RUNS_TOKEN: runsToken,
+});
+
+const runsAuthHeaders = {
+  authorization: `Bearer ${runsToken}`,
+};
+
 const fetchWithTestFrontDoor = (input: {
   readonly request: Request;
   readonly calls: unknown[];
+  readonly env?: Record<string, unknown>;
+  readonly readRunStatus?: (
+    env: Record<string, unknown>,
+    runInput: { readonly runId: string }
+  ) => Promise<null | WorkflowRunStatusSnapshot>;
 }): Promise<Response> =>
   handleWorkflowWorkerRequest({
     createFrontDoor: () => createBlockedFrontDoor(input.calls),
-    env: {},
+    env: input.env ?? createRunsAuthEnv(),
+    readRunStatus: input.readRunStatus ?? (() => Promise.resolve(null)),
     request: input.request,
   });
 
@@ -289,7 +306,7 @@ describe("Cloudflare Worker route", () => {
       latestStatus: "captured",
     });
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         calls.push(input);
 
@@ -298,6 +315,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/debugger?after=1",
         {
+          headers: runsAuthHeaders,
           method: "GET",
         }
       ),
@@ -378,7 +396,7 @@ describe("Cloudflare Worker route", () => {
   it("rejects invalid debugger attach cursors before reading D1", async () => {
     const calls: unknown[] = [];
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         calls.push(input);
 
@@ -387,6 +405,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/debugger?after=latest",
         {
+          headers: runsAuthHeaders,
           method: "GET",
         }
       ),
@@ -412,7 +431,7 @@ describe("Cloudflare Worker route", () => {
   it("rejects non-GET debugger attach requests without invoking the reader", async () => {
     const calls: unknown[] = [];
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         calls.push(input);
 
@@ -421,6 +440,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/debugger",
         {
+          headers: runsAuthHeaders,
           method: "POST",
         }
       ),
@@ -473,7 +493,7 @@ describe("Cloudflare Worker route", () => {
       workItemId: "work-item:route-test",
     });
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         expect(input).toStrictEqual({ runId: "run-route-test" });
 
@@ -482,6 +502,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/events",
         {
+          headers: runsAuthHeaders,
           method: "GET",
         }
       ),
@@ -527,14 +548,14 @@ describe("Cloudflare Worker route", () => {
       workItemId: "work-item:route-test",
     });
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream() {
         return Promise.resolve(eventStream);
       },
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/events",
         {
-          headers: { accept: "text/event-stream" },
+          headers: { accept: "text/event-stream", ...runsAuthHeaders },
           method: "GET",
         }
       ),
@@ -586,7 +607,7 @@ describe("Cloudflare Worker route", () => {
     ];
     const calls: unknown[] = [];
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       eventStreamTail: {
         maxPolls: 2,
         now: () => "2026-06-09T10:14:00.000Z",
@@ -602,6 +623,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/events?tail=live&after=1",
         {
+          headers: runsAuthHeaders,
           method: "GET",
         }
       ),
@@ -696,7 +718,7 @@ describe("Cloudflare Worker route", () => {
       ];
       const calls: unknown[] = [];
       const routeResponse = await handleWorkflowWorkerRequest({
-        env: {},
+        env: createRunsAuthEnv(),
         eventStreamTail: {
           maxPolls: 2,
           now: () => "2026-06-09T10:14:00.000Z",
@@ -713,6 +735,7 @@ describe("Cloudflare Worker route", () => {
           "https://workflow.example.test/runs/run-route-test/events?after=1",
           {
             headers: {
+              ...runsAuthHeaders,
               connection: "Upgrade",
               upgrade: "websocket",
             },
@@ -801,7 +824,7 @@ describe("Cloudflare Worker route", () => {
   it("rejects invalid event stream cursors before reading D1", async () => {
     const calls: unknown[] = [];
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         calls.push(input);
 
@@ -810,6 +833,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/events?tail=live&after=latest",
         {
+          headers: runsAuthHeaders,
           method: "GET",
         }
       ),
@@ -835,7 +859,7 @@ describe("Cloudflare Worker route", () => {
   it("rejects non-GET event stream route requests without invoking the reader", async () => {
     const calls: unknown[] = [];
     const response = await handleWorkflowWorkerRequest({
-      env: {},
+      env: createRunsAuthEnv(),
       readEventStream(_env, input) {
         calls.push(input);
 
@@ -844,6 +868,7 @@ describe("Cloudflare Worker route", () => {
       request: new Request(
         "https://workflow.example.test/runs/run-route-test/events",
         {
+          headers: runsAuthHeaders,
           method: "POST",
         }
       ),
@@ -876,7 +901,7 @@ describe("Cloudflare Worker route", () => {
       calls,
       request: new Request("https://workflow.example.test/runs", {
         body: JSON.stringify(body),
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...runsAuthHeaders },
         method: "POST",
       }),
     });
@@ -902,12 +927,281 @@ describe("Cloudflare Worker route", () => {
     });
   });
 
+  it("rejects POST /runs without a bearer token before invoking the front door", async () => {
+    const calls: unknown[] = [];
+
+    const response = await fetchWithTestFrontDoor({
+      calls,
+      request: new Request("https://workflow.example.test/runs", {
+        body: JSON.stringify(buildIntegrationTestRunRequest()),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("rejects POST /runs with a wrong bearer token using the same redacted response", async () => {
+    const calls: unknown[] = [];
+
+    const response = await fetchWithTestFrontDoor({
+      calls,
+      request: new Request("https://workflow.example.test/runs", {
+        body: JSON.stringify(buildIntegrationTestRunRequest()),
+        headers: {
+          authorization: "Bearer not-the-runs-token",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("fails closed with 503 on run routes when the runs token binding is unset", async () => {
+    const calls: unknown[] = [];
+
+    const response = await fetchWithTestFrontDoor({
+      calls,
+      env: {},
+      request: new Request("https://workflow.example.test/runs", {
+        body: JSON.stringify(buildIntegrationTestRunRequest()),
+        headers: {
+          authorization: `Bearer ${runsToken}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "runs_auth_unconfigured",
+          message: "Run routes are not configured.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 503,
+    });
+  });
+
+  it("rejects duplicate run ids with the stored status without re-executing the lanes", async () => {
+    const body = buildIntegrationTestRunRequest();
+    const calls: unknown[] = [];
+    const duplicateLookups: unknown[] = [];
+
+    const response = await fetchWithTestFrontDoor({
+      calls,
+      readRunStatus(_env, runInput) {
+        duplicateLookups.push(runInput);
+
+        return Promise.resolve({
+          runId: runInput.runId,
+          status: "captured",
+        });
+      },
+      request: new Request("https://workflow.example.test/runs", {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json", ...runsAuthHeaders },
+        method: "POST",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      duplicateLookups,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "duplicate_run_id",
+          message: "Run id already exists; refusing to re-execute.",
+          redacted: true,
+        },
+        run: {
+          runId: body.runId,
+          status: "captured",
+        },
+      },
+      calls: [],
+      duplicateLookups: [{ runId: body.runId }],
+      status: 409,
+    });
+  });
+
+  it("rejects unauthenticated event stream reads before touching the reader", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readEventStream(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(null);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/events",
+        {
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("rejects unauthenticated debugger attach reads before touching the reader", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readEventStream(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(null);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/debugger",
+        {
+          headers: { authorization: "Bearer not-the-runs-token" },
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("keeps admin routes on the admin token gate when the runs token binding is present", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: {
+        ...createPackageSeedEnv(),
+        WORKFLOW_APP_RUNS_TOKEN: runsToken,
+      },
+      request: new Request(
+        "https://workflow.example.test/admin/packages/seed",
+        {
+          body: JSON.stringify({
+            subjects: [
+              {
+                subjectId: "actor:seed-admin",
+                subjectType: "actor",
+              },
+            ],
+          }),
+          headers: {
+            authorization: "Bearer admin-token",
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }
+      ),
+      seedPackages(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(
+          PackageSeedReceiptSchema.parse({
+            packages: [
+              {
+                entitlementCount: 1,
+                manifestArtifactRef:
+                  "artifact://cloudflare-artifacts/pkg-badass-courses-claw-kernel/package.json",
+                manifestHash: "0".repeat(64),
+                packageId: "badass-courses/claw-kernel",
+                repoName: "pkg-badass-courses-claw-kernel",
+                seedCommitSha: "seed-commit",
+                status: "created",
+              },
+            ],
+            schemaVersion: "workflow.package-seed.v1",
+          })
+        );
+      },
+    });
+
+    expect({
+      callCount: calls.length,
+      status: response.status,
+    }).toStrictEqual({
+      callCount: 1,
+      status: 200,
+    });
+  });
+
   it("rejects non-POST /runs without invoking the front door", async () => {
     const calls: unknown[] = [];
 
     const response = await fetchWithTestFrontDoor({
       calls,
       request: new Request("https://workflow.example.test/runs", {
+        headers: runsAuthHeaders,
         method: "GET",
       }),
     });
@@ -938,7 +1232,7 @@ describe("Cloudflare Worker route", () => {
       calls,
       request: new Request("https://workflow.example.test/runs", {
         body: "{",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...runsAuthHeaders },
         method: "POST",
       }),
     });
@@ -967,7 +1261,7 @@ describe("Cloudflare Worker route", () => {
       calls,
       request: new Request("https://workflow.example.test/runs", {
         body: JSON.stringify({}),
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...runsAuthHeaders },
         method: "POST",
       }),
     });

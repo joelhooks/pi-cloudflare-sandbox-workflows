@@ -164,8 +164,16 @@ export type { CloudflareReviewGateActorConfig } from "./infrastructure/cloudflar
 export { createCloudflareReviewGateActor } from "./infrastructure/cloudflare-review-gate-actor.ts";
 export type { CloudflareWorkflowStatusProjectionConfig } from "./infrastructure/cloudflare-workflow-status-projection.ts";
 export { createCloudflareWorkflowStatusProjection } from "./infrastructure/cloudflare-workflow-status-projection.ts";
-export type { CloudflareWorkflowEventStreamReaderConfig } from "./infrastructure/cloudflare-workflow-event-stream.ts";
-export { createCloudflareWorkflowEventStreamReader } from "./infrastructure/cloudflare-workflow-event-stream.ts";
+export type {
+  CloudflareWorkflowEventStreamReaderConfig,
+  CloudflareWorkflowRunStatusReaderConfig,
+  WorkflowRunStatusSnapshot,
+} from "./infrastructure/cloudflare-workflow-event-stream.ts";
+export {
+  createCloudflareWorkflowEventStreamReader,
+  createCloudflareWorkflowRunStatusReader,
+  WorkflowRunStatusSnapshotSchema,
+} from "./infrastructure/cloudflare-workflow-event-stream.ts";
 export type {
   AnalyticsEngineDatasetLike,
   CloudflareAnalyticsEngineWorkflowTelemetrySinkConfig,

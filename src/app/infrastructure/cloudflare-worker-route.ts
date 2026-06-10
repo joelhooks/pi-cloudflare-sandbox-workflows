@@ -44,7 +44,12 @@ import type {
   PackageSeedPreparationReceipt,
   PackageSeedReceipt,
 } from "./cloudflare-package-seeder.ts";
-import { createCloudflareWorkflowEventStreamReader } from "./cloudflare-workflow-event-stream.ts";
+import {
+  createCloudflareWorkflowEventStreamReader,
+  createCloudflareWorkflowRunStatusReader,
+  WorkflowRunStatusSnapshotSchema,
+} from "./cloudflare-workflow-event-stream.ts";
+import type { WorkflowRunStatusSnapshot } from "./cloudflare-workflow-event-stream.ts";
 import { createCloudflareWorkflowFrontDoor } from "./cloudflare-workflow-front-door.ts";
 import { createCloudflareWzrrdApiTokenResolver } from "./cloudflare-wzrrd-publish-adapter.ts";
 
@@ -67,6 +72,10 @@ export interface WorkflowWorkerHandlerOptions<Environment> {
     env: Environment,
     input: { readonly runId: string }
   ) => Promise<WorkflowEventStreamDocument | null>;
+  readonly readRunStatus?: (
+    env: Environment,
+    input: { readonly runId: string }
+  ) => Promise<WorkflowRunStatusSnapshot | null>;
 }
 
 export interface WorkflowWorkerRequestInput<Environment> {
@@ -90,6 +99,10 @@ export interface WorkflowWorkerRequestInput<Environment> {
     env: Environment,
     input: { readonly runId: string }
   ) => Promise<WorkflowEventStreamDocument | null>;
+  readonly readRunStatus?: (
+    env: Environment,
+    input: { readonly runId: string }
+  ) => Promise<WorkflowRunStatusSnapshot | null>;
 }
 
 export interface WorkflowEventStreamTailOptions {
@@ -196,6 +209,10 @@ const WorkerPackageSeedRequestSchema = PackageSeedRequestSchema.extend({
 const WorkflowEventStreamEnvBindingSchema = z.object({
   WORKFLOW_APP_D1:
     z.custom<CloudflareD1PackageRegistryConfig["d1"]>(objectBinding),
+});
+
+const WorkflowRunsAuthEnvBindingSchema = z.object({
+  WORKFLOW_APP_RUNS_TOKEN: z.string().min(1),
 });
 
 export const __cloudflareWorkerRouteTestHooks = {
@@ -467,6 +484,33 @@ const requirePackageSeedAuth = async (
   return null;
 };
 
+const requireWorkflowRunsAuth = async (
+  request: Request,
+  env: unknown
+): Promise<Response | null> => {
+  const bindings = WorkflowRunsAuthEnvBindingSchema.safeParse(env);
+  if (!bindings.success) {
+    return jsonError(
+      503,
+      "runs_auth_unconfigured",
+      "Run routes are not configured."
+    );
+  }
+
+  const token = bearerToken(request);
+  if (
+    token === null ||
+    !(await timingSafeSecretMatch({
+      actual: token,
+      expected: bindings.data.WORKFLOW_APP_RUNS_TOKEN,
+    }))
+  ) {
+    return jsonError(401, "missing_auth", "Run routes require a bearer token.");
+  }
+
+  return null;
+};
+
 const enforcePost = (request: Request, route: string): Response | null => {
   if (request.method === "POST") {
     return null;
@@ -620,6 +664,17 @@ const readEventStreamFromEnv = async (
   const bindings = WorkflowEventStreamEnvBindingSchema.parse(env);
 
   return await createCloudflareWorkflowEventStreamReader({
+    d1: bindings.WORKFLOW_APP_D1,
+  }).read(input);
+};
+
+const readRunStatusFromEnv = async (
+  env: unknown,
+  input: { readonly runId: string }
+): Promise<WorkflowRunStatusSnapshot | null> => {
+  const bindings = WorkflowEventStreamEnvBindingSchema.parse(env);
+
+  return await createCloudflareWorkflowRunStatusReader({
     d1: bindings.WORKFLOW_APP_D1,
   }).read(input);
 };
@@ -1223,10 +1278,117 @@ const handleWorkflowDebuggerAttachRequest = async <Environment>(
   );
 };
 
+const handleWorkflowRunSubmissionRequest = async <Environment>(
+  input: WorkflowWorkerRequestInput<Environment>,
+  url: URL
+): Promise<Response> => {
+  if (input.request.method !== "POST") {
+    return jsonError(405, "method_not_allowed", "Use POST /runs.", {
+      headers: {
+        Allow: "POST",
+      },
+    });
+  }
+
+  let body: z.infer<typeof WorkflowRunRequestSchema>;
+  try {
+    body = WorkflowRunRequestSchema.parse(
+      await parseJsonRequest(input.request)
+    );
+    WorkflowFrontDoorRequestSchema.parse({
+      body,
+      method: input.request.method,
+      route: url.pathname,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return jsonError(
+        413,
+        "request_body_too_large",
+        "Request body is too large."
+      );
+    }
+
+    if (error instanceof SyntaxError) {
+      return jsonError(400, "invalid_json", "Request body must be JSON.");
+    }
+
+    if (error instanceof z.ZodError) {
+      return jsonError(
+        422,
+        "invalid_workflow_request",
+        "Request body does not match the workflow run schema."
+      );
+    }
+
+    throw error;
+  }
+
+  const readRunStatus = input.readRunStatus ?? readRunStatusFromEnv;
+  let existingRun: WorkflowRunStatusSnapshot | null;
+  try {
+    existingRun = await readRunStatus(input.env, { runId: body.runId });
+  } catch (error) {
+    console.error("workflow run duplicate guard failed", error);
+
+    return jsonError(
+      500,
+      "run_duplicate_guard_failed",
+      "Run duplicate guard failed before execution."
+    );
+  }
+  if (existingRun !== null) {
+    return Response.json(
+      {
+        error: {
+          code: "duplicate_run_id",
+          message: "Run id already exists; refusing to re-execute.",
+          redacted: true,
+        },
+        run: WorkflowRunStatusSnapshotSchema.parse(existingRun),
+      },
+      { status: 409 }
+    );
+  }
+
+  try {
+    const frontDoor =
+      input.createFrontDoor?.(input.env) ?? createFrontDoorFromEnv(input.env);
+    const result = WorkflowRunResultSchema.parse(
+      await frontDoor.startRun(body)
+    );
+
+    return Response.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return jsonError(
+        422,
+        "invalid_workflow_result",
+        "Workflow result did not match the response schema."
+      );
+    }
+
+    console.error("workflow route failed", error);
+
+    return jsonError(
+      500,
+      "workflow_route_failed",
+      "Workflow route failed before a receipt was captured."
+    );
+  }
+};
+
 export const handleWorkflowWorkerRequest = async <Environment>(
   input: WorkflowWorkerRequestInput<Environment>
 ): Promise<Response> => {
   const url = new URL(input.request.url);
+  if (url.pathname === "/runs" || url.pathname.startsWith("/runs/")) {
+    const authError = await requireWorkflowRunsAuth(input.request, input.env);
+    if (authError !== null) {
+      return authError;
+    }
+  }
+
   const debuggerAttachRoute = /^\/runs\/([^/]+)\/debugger$/u.exec(url.pathname);
   if (debuggerAttachRoute !== null) {
     const [, runIdSegment] = debuggerAttachRoute;
@@ -1263,73 +1425,7 @@ export const handleWorkflowWorkerRequest = async <Environment>(
     return jsonError(404, "not_found", "Route not found.");
   }
 
-  if (input.request.method !== "POST") {
-    return jsonError(405, "method_not_allowed", "Use POST /runs.", {
-      headers: {
-        Allow: "POST",
-      },
-    });
-  }
-
-  let body: unknown;
-  try {
-    body = WorkflowRunRequestSchema.parse(
-      await parseJsonRequest(input.request)
-    );
-    WorkflowFrontDoorRequestSchema.parse({
-      body,
-      method: input.request.method,
-      route: url.pathname,
-    });
-  } catch (error) {
-    if (error instanceof RangeError) {
-      return jsonError(
-        413,
-        "request_body_too_large",
-        "Request body is too large."
-      );
-    }
-
-    if (error instanceof SyntaxError) {
-      return jsonError(400, "invalid_json", "Request body must be JSON.");
-    }
-
-    if (error instanceof z.ZodError) {
-      return jsonError(
-        422,
-        "invalid_workflow_request",
-        "Request body does not match the workflow run schema."
-      );
-    }
-
-    throw error;
-  }
-
-  try {
-    const frontDoor =
-      input.createFrontDoor?.(input.env) ?? createFrontDoorFromEnv(input.env);
-    const result = WorkflowRunResultSchema.parse(
-      await frontDoor.startRun(body)
-    );
-
-    return Response.json(result);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return jsonError(
-        422,
-        "invalid_workflow_result",
-        "Workflow result did not match the response schema."
-      );
-    }
-
-    console.error("workflow route failed", error);
-
-    return jsonError(
-      500,
-      "workflow_route_failed",
-      "Workflow route failed before a receipt was captured."
-    );
-  }
+  return await handleWorkflowRunSubmissionRequest(input, url);
 };
 
 export const createWorkflowWorkerHandler = <Environment = Env>(
@@ -1357,6 +1453,9 @@ export const createWorkflowWorkerHandler = <Environment = Env>(
       ...(options.readEventStream === undefined
         ? {}
         : { readEventStream: options.readEventStream }),
+      ...(options.readRunStatus === undefined
+        ? {}
+        : { readRunStatus: options.readRunStatus }),
     });
   },
 });

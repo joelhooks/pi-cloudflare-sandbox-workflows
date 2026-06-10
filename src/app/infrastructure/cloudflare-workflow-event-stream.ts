@@ -5,6 +5,7 @@ import {
   D1WorkflowEventRowSchema,
 } from "../control-plane/d1-schema.ts";
 import {
+  SafetyEnvelopeStateSchema,
   WorkflowEventSchema,
   WorkflowEventStreamDocumentSchema,
   WorkflowEventStreamEntrySchema,
@@ -30,6 +31,24 @@ export interface CloudflareWorkflowEventStreamReaderConfig {
   readonly d1: D1DatabaseLike;
   readonly now?: () => string;
 }
+
+export interface CloudflareWorkflowRunStatusReaderConfig {
+  readonly d1: D1DatabaseLike;
+}
+
+const D1RunStatusRowSchema = z.object({
+  run_id: z.string().min(1),
+  status: SafetyEnvelopeStateSchema,
+});
+
+export const WorkflowRunStatusSnapshotSchema = z.object({
+  runId: z.string().min(1),
+  status: SafetyEnvelopeStateSchema,
+});
+
+export type WorkflowRunStatusSnapshot = z.infer<
+  typeof WorkflowRunStatusSnapshotSchema
+>;
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -122,3 +141,31 @@ export const createCloudflareWorkflowEventStreamReader = (
     },
   };
 };
+
+export const createCloudflareWorkflowRunStatusReader = (
+  config: CloudflareWorkflowRunStatusReaderConfig
+) => ({
+  async read(input: {
+    readonly runId: string;
+  }): Promise<WorkflowRunStatusSnapshot | null> {
+    const result = await config.d1
+      .prepare(
+        `select run_id, status
+         from runs
+         where run_id = ?
+         limit 1`
+      )
+      .bind(input.runId)
+      .all();
+    const firstRow = result.results?.[0];
+    if (firstRow === undefined) {
+      return null;
+    }
+    const row = D1RunStatusRowSchema.parse(firstRow);
+
+    return WorkflowRunStatusSnapshotSchema.parse({
+      runId: row.run_id,
+      status: row.status,
+    });
+  },
+});

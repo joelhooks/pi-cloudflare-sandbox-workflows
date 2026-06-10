@@ -434,9 +434,13 @@ const submitLiveRunIfAllowed = async (input: {
     };
   }
 
+  const runsToken = input.processEnv["WORKFLOW_APP_RUNS_TOKEN"];
   const response = await (input.fetch ?? fetch)(`${input.workerUrl}/runs`, {
     body: JSON.stringify(input.request),
     headers: {
+      ...(runsToken === undefined || runsToken === ""
+        ? {}
+        : { authorization: `Bearer ${runsToken}` }),
       "content-type": "application/json",
     },
     method: "POST",
