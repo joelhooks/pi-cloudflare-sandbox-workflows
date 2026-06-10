@@ -11,6 +11,21 @@ Stop for owner sign-off before exposing JoelClaw/Typesense over a new network bo
 `;
 const approvalSignoff =
   "exposing JoelClaw/Typesense over a new network boundary";
+const localRelayStartupEnv = {
+  DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON: JSON.stringify([
+    {
+      authorityRoot: "/tmp/dream-relay-test",
+      family: "agent-transcripts",
+      includeExtensions: [".jsonl"],
+      label: "Pi transcripts",
+      privacyTier: "private",
+      runtime: "pi",
+      sourceId: "source:agent-transcripts:pi:blaine",
+      sourceSystem: "pi",
+    },
+  ]),
+  DREAM_MEMORY_RELAY_TOKEN: "relay-secret",
+};
 
 const machineCoverage = [
   {
@@ -415,6 +430,7 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightText: livePreflightBlocked,
       localRelayProofPath: "local-proof.json",
       localRelayProofText: localRelayProof,
+      localRelayStartupEnv,
       networkTools: [
         {
           available: true,
@@ -431,14 +447,75 @@ describe("Dream relay provisioning preflight", () => {
       healthzAction: receipt.recommendedNextActions.includes(
         "Provision an approved HTTPS relay endpoint and verify authenticated /healthz."
       ),
+      localRelayStartup: {
+        sourceRootCount: receipt.localRelayStartup.sourceRootCount,
+        status: receipt.localRelayStartup.status,
+        tokenConfigured: receipt.localRelayStartup.tokenConfigured,
+      },
       signoffProvided: receipt.approval.signoffProvided,
       status: receipt.status,
     }).toStrictEqual({
       approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
       approvalStatus: "approved",
       healthzAction: true,
+      localRelayStartup: {
+        sourceRootCount: 1,
+        status: "ready",
+        tokenConfigured: true,
+      },
       signoffProvided: true,
       status: "ready-for-approved-provisioning",
+    });
+  });
+
+  it("keeps approved provisioning blocked until local relay startup env is configured", () => {
+    const receipt = buildDreamRelayProvisioningPreflightReceipt({
+      approvalRef: "approval:joel:2026-06-09:dream-relay-network-boundary",
+      approvalSignoff,
+      checkedAt: "2026-06-09T10:00:00.000Z",
+      livePreflightPath: "dream-preflight.json",
+      livePreflightText: livePreflightBlocked,
+      localRelayProofPath: "local-proof.json",
+      localRelayProofText: localRelayProof,
+      networkTools: [
+        {
+          available: true,
+          command: "ngrok",
+          path: "/opt/homebrew/bin/ngrok",
+        },
+      ],
+      visionText: visionWithSignoffRule,
+    });
+    const stepsById = new Map(
+      receipt.provisioningPlan.steps.map((step) => [step.stepId, step])
+    );
+
+    expect({
+      localRelayStartup: receipt.localRelayStartup,
+      sourceRootsAction: receipt.recommendedNextActions.includes(
+        "Set DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay."
+      ),
+      startRelayBlockers: stepsById.get("start-local-trusted-relay")?.blockedBy,
+      status: receipt.status,
+      tokenAction: receipt.recommendedNextActions.includes(
+        "Set DREAM_MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret."
+      ),
+    }).toStrictEqual({
+      localRelayStartup: {
+        invalidEnv: [],
+        missingEnv: [
+          "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON",
+          "DREAM_MEMORY_RELAY_TOKEN",
+        ],
+        redacted: true,
+        sourceRootCount: 0,
+        status: "blocked",
+        tokenConfigured: false,
+      },
+      sourceRootsAction: true,
+      startRelayBlockers: ["local-relay-startup-config-missing"],
+      status: "blocked",
+      tokenAction: true,
     });
   });
 
@@ -451,6 +528,7 @@ describe("Dream relay provisioning preflight", () => {
       livePreflightText: livePreflightBlocked,
       localRelayProofPath: "local-proof.json",
       localRelayProofText: localRelayProof,
+      localRelayStartupEnv,
       networkTools: [
         {
           available: false,

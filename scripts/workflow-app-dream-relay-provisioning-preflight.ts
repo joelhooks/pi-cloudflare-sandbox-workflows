@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 import { dreamTranscriptReviewSourceProfile } from "../src/cartridges/dream-memory-fabric/source-profile.ts";
+import { trustedLocalDreamMemoryRelayHttpConfigFromEnv } from "../src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts";
 
 const defaultLivePreflightPath =
   ".wrangler/workflow-app/dream-preflight/latest-dream-preflight.json";
@@ -20,6 +21,15 @@ const exactSignoffAction =
   "Get explicit owner sign-off for exposing the trusted Dream relay over a new network boundary.";
 const invalidSignoffAction =
   "Recorded relay exposure sign-off did not match the required phrase; provide the exact sign-off phrase before provisioning.";
+const localRelaySourceRootsAction =
+  "Set DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON before starting the local trusted relay.";
+const localRelayTokenAction =
+  "Set DREAM_MEMORY_RELAY_TOKEN locally before starting the relay and provisioning the Worker secret.";
+const localRelayStartupEnvNames = [
+  "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON",
+  "DREAM_MEMORY_RELAY_TOKEN",
+] as const;
+const LocalRelayStartupEnvNameSchema = z.enum(localRelayStartupEnvNames);
 
 const DreamRelayProvisioningPlanStepSchema = z.object({
   blockedBy: z.array(z.string().min(1)).default([]),
@@ -194,6 +204,16 @@ export const DreamRelayProvisioningPreflightReceiptSchema = z.object({
     sourceRootCount: z.number().int().min(0).optional(),
     status: z.enum(["failed", "missing", "passed"]),
   }),
+  localRelayStartup: z.object({
+    host: z.string().min(1).optional(),
+    invalidEnv: z.array(LocalRelayStartupEnvNameSchema).default([]),
+    missingEnv: z.array(LocalRelayStartupEnvNameSchema).default([]),
+    port: z.number().int().min(1).optional(),
+    redacted: z.literal(true),
+    sourceRootCount: z.number().int().min(0),
+    status: z.enum(["blocked", "ready"]),
+    tokenConfigured: z.boolean(),
+  }),
   networkTools: z.array(
     z.object({
       available: z.boolean(),
@@ -236,6 +256,7 @@ export interface BuildDreamRelayProvisioningPreflightInput {
   readonly livePreflightText: string;
   readonly localRelayProofPath: string;
   readonly localRelayProofText: string;
+  readonly localRelayStartupEnv?: Readonly<Record<string, string | undefined>>;
   readonly networkTools: readonly CommandProbe[];
   readonly visionText: string;
 }
@@ -493,10 +514,56 @@ const livePreflightSummary = (input: {
   };
 };
 
+const localRelayStartupSummary = (
+  env: Readonly<Record<string, string | undefined>> = {}
+): DreamRelayProvisioningPreflightReceipt["localRelayStartup"] => {
+  const missingEnv = localRelayStartupEnvNames.filter((name) => {
+    const value = env[name];
+
+    return value === undefined || value.length === 0;
+  });
+
+  if (missingEnv.length > 0) {
+    return {
+      invalidEnv: [],
+      missingEnv,
+      redacted: true,
+      sourceRootCount: 0,
+      status: "blocked",
+      tokenConfigured: (env["DREAM_MEMORY_RELAY_TOKEN"]?.length ?? 0) > 0,
+    };
+  }
+
+  try {
+    const config = trustedLocalDreamMemoryRelayHttpConfigFromEnv(env);
+
+    return {
+      host: config.host,
+      invalidEnv: [],
+      missingEnv: [],
+      port: config.port,
+      redacted: true,
+      sourceRootCount: config.memoryFabric.sourceRoots.length,
+      status: "ready",
+      tokenConfigured: true,
+    };
+  } catch {
+    return {
+      invalidEnv: ["DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"],
+      missingEnv: [],
+      redacted: true,
+      sourceRootCount: 0,
+      status: "blocked",
+      tokenConfigured: true,
+    };
+  }
+};
+
 const recommendedNextActions = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
 }): readonly string[] => {
@@ -538,6 +605,21 @@ const recommendedNextActions = (input: {
 
   if (input.approvalStatus === "required") {
     actions.push(exactSignoffAction);
+  }
+
+  if (
+    input.localRelayStartup.missingEnv.includes(
+      "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"
+    ) ||
+    input.localRelayStartup.invalidEnv.includes(
+      "DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON"
+    )
+  ) {
+    actions.push(localRelaySourceRootsAction);
+  }
+
+  if (input.localRelayStartup.missingEnv.includes("DREAM_MEMORY_RELAY_TOKEN")) {
+    actions.push(localRelayTokenAction);
   }
 
   if (!input.networkTools.some((tool) => tool.available)) {
@@ -601,6 +683,7 @@ const provisioningPlanBlockedBy = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
 }): readonly string[] => {
@@ -616,6 +699,10 @@ const provisioningPlanBlockedBy = (input: {
 
   if (input.localRelayProof.status !== "passed") {
     blockers.push("local-relay-proof-not-passed");
+  }
+
+  if (input.localRelayStartup.status !== "ready") {
+    blockers.push("local-relay-startup-config-missing");
   }
 
   if (!input.networkTools.some((tool) => tool.available)) {
@@ -678,6 +765,7 @@ const buildProvisioningPlan = (input: {
   readonly approvalStatus: "approved" | "invalid" | "required";
   readonly livePreflight: DreamRelayProvisioningPreflightReceipt["livePreflight"];
   readonly localRelayProof: DreamRelayProvisioningPreflightReceipt["localRelayProof"];
+  readonly localRelayStartup: DreamRelayProvisioningPreflightReceipt["localRelayStartup"];
   readonly networkTools: readonly CommandProbe[];
   readonly visionHasSignoffRule: boolean;
 }): DreamRelayProvisioningPlan => {
@@ -809,6 +897,9 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     path: input.localRelayProofPath,
     text: input.localRelayProofText,
   });
+  const localRelayStartup = localRelayStartupSummary(
+    input.localRelayStartupEnv
+  );
   const livePreflight = livePreflightSummary({
     path: input.livePreflightPath,
     text: input.livePreflightText,
@@ -818,6 +909,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus,
     livePreflight,
     localRelayProof,
+    localRelayStartup,
     networkTools: input.networkTools,
     visionHasSignoffRule,
   });
@@ -825,6 +917,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus,
     livePreflight,
     localRelayProof,
+    localRelayStartup,
     networkTools: input.networkTools,
     visionHasSignoffRule,
   });
@@ -832,6 +925,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     approvalStatus === "approved" &&
     visionHasSignoffRule &&
     localRelayProof.status === "passed" &&
+    localRelayStartup.status === "ready" &&
     input.networkTools.some((tool) => tool.available);
 
   return DreamRelayProvisioningPreflightReceiptSchema.parse({
@@ -847,6 +941,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
     checkedAt: input.checkedAt,
     livePreflight,
     localRelayProof,
+    localRelayStartup,
     networkTools: input.networkTools.map((tool) => ({
       available: tool.available,
       command: tool.command,
@@ -865,6 +960,7 @@ export const buildDreamRelayProvisioningPreflightReceipt = (
 export const runDreamRelayProvisioningPreflightCli = async (input: {
   readonly argv: readonly string[];
   readonly log?: (message: string) => void;
+  readonly processEnv?: Readonly<Record<string, string | undefined>>;
   readonly repoRoot: string;
 }): Promise<DreamRelayProvisioningPreflightReceipt> => {
   const args = parseArgs(input.argv);
@@ -883,6 +979,7 @@ export const runDreamRelayProvisioningPreflightCli = async (input: {
     livePreflightText: await readTextOrEmpty(livePreflightPath),
     localRelayProofPath: args.localRelayProofPath,
     localRelayProofText: await readTextOrEmpty(localRelayProofPath),
+    localRelayStartupEnv: input.processEnv ?? process.env,
     networkTools: defaultNetworkToolProbes(),
     visionText: await readTextOrEmpty(resolve(input.repoRoot, "VISION.md")),
   });

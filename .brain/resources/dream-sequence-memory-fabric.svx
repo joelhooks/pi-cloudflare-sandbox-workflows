@@ -26,6 +26,18 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T08:57Z implementation progress: Dream relay provisioning preflight now verifies local relay startup configuration before claiming readiness for approved provisioning.
+
+Receipts:
+
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` now emits `localRelayStartup` with redacted startup status, missing/invalid env names, source-root count, token-configured boolean, and host/port only when valid.
+- The preflight reuses the trusted local relay config parser, so `DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON` must parse as relay source roots and `DREAM_MEMORY_RELAY_TOKEN` must be present before approved provisioning can be considered ready.
+- `local-relay-startup-config-missing` now blocks local relay start, relay exposure, Worker token provisioning, Worker relay URL config, healthz verification, and live Dream submit steps in the provisioning plan.
+- Refreshed provisioning receipt `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T08:57:10.449Z`, status `blocked`, `localRelayStartup.status=blocked`, missing `DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON` and local `DREAM_MEMORY_RELAY_TOKEN`, no side effects performed.
+- Verification passed: `pnpm vitest run tests/integration/dream-relay-provisioning-preflight.test.ts`, `pnpm test:integration`, `pnpm check`, `pnpm typecheck`, `pnpm typecheck:tsc`, and `git diff --check`.
+
+This still does not expose the relay or execute a live Dream. It tightens the approved-provisioning gate so an exact sign-off alone cannot advance without a runnable local relay configuration.
+
 2026-06-10T08:50Z run attempt: Dreaming was run as far as the current safety gates permit. Local relay proof completed; live Cloudflare submit correctly did not happen.
 
 Receipts:
