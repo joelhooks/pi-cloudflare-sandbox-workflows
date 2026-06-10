@@ -233,7 +233,7 @@ verifier acceptance
 D2 figure generated from the pinned machine artifact
 ```
 
-Every `dream.hitl-report.v1` JSON artifact must also carry `definitionOfDoneAudit` with schema `dream.hitl-report.definition-of-done-audit.v1`. This audit maps the Dream objective to concrete requirement items and marks each as `captured`, `not-proven`, `blocked`, or `missing`. Report-time proof must not claim post-report side effects: relay lease sidecars, workflow-owned Wzrrd publish, HITL seed/follow-up artifacts, Cloudflare execution receipts, and verifier acceptance stay `not-proven` until their own receipts exist.
+Every `dream.hitl-report.v1` JSON artifact must also carry `definitionOfDoneAudit` with schema `dream.hitl-report.definition-of-done-audit.v1`. This audit maps the Dream objective to concrete requirement items and marks each as `captured`, `not-proven`, `blocked`, or `missing`. Report-time proof must not claim post-report side effects: relay lease sidecars, workflow-owned Wzrrd publish, HITL seed/follow-up artifacts, Cloudflare execution receipts, and verifier acceptance stay `not-proven` until their own receipts exist. The post-execution `dream.generated-workflow-proof.v1` verifier must then check `report:definition-of-done-audit` against the generated report artifact.
 
 Generated TypeScript source is optional inspection output. It is not required for runtime execution.
 

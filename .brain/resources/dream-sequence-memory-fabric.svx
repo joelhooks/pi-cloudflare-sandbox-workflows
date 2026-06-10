@@ -26,6 +26,16 @@ The output is not just a report. It is a refinement mechanism: dreams propose ke
 
 ## Latest Run Receipts
 
+2026-06-10T11:55Z implementation progress: the Dream post-execution verifier now checks the generated HITL report's definition-of-done audit.
+
+Receipts:
+
+- `createDreamGeneratedWorkflowProofRecorder` now loads the generated `dream/hitl-report.json` artifact after workflow execution and adds proof check `report:definition-of-done-audit`.
+- The check parses the report as `dream.hitl-report.v1`, verifies all canonical Dream audit requirement ids are present, verifies the audit summary counts match the items, and fails if report-time proof overclaims post-report gates that must stay `not-proven`.
+- Integration coverage now asserts the generated `dream.generated-workflow-proof.v1` artifact includes `report:definition-of-done-audit` with the report artifact ref as evidence.
+
+This closes the loop between the report contract and the verifier proof. A generated Dream report can no longer carry a pretty audit while the post-execution proof ignores it.
+
 2026-06-10T11:39Z implementation progress: the actual Dream HITL report contract now carries its own definition-of-done audit.
 
 Receipts:

@@ -3724,6 +3724,9 @@ describe("workflow app integration contract", () => {
         generatedWorkflowProof.rawTranscriptsReturned,
       dreamGeneratedProofRelayLeaseRefs:
         generatedWorkflowProof.relayLeaseReceiptRefs,
+      dreamGeneratedProofReportAuditCheck: generatedWorkflowProof.checks.find(
+        (check) => check.checkId === "report:definition-of-done-audit"
+      ),
       dreamGeneratedProofRuntimeSourceCoverage:
         generatedWorkflowProof.runtimeSourceCoverage,
       dreamGeneratedProofSourcePackDisposition:
@@ -4130,6 +4133,7 @@ describe("workflow app integration contract", () => {
         "execution:generated-machine-sequence",
         "execution:relay-lease-sidecars",
         "execution:no-raw-transcripts",
+        "report:definition-of-done-audit",
       ],
       dreamGeneratedProofEffectCoverage: {
         coveredEffects: [
@@ -4188,6 +4192,12 @@ describe("workflow app integration contract", () => {
       ],
       dreamGeneratedProofRawTranscriptsReturned: false,
       dreamGeneratedProofRelayLeaseRefs: [],
+      dreamGeneratedProofReportAuditCheck: {
+        checkId: "report:definition-of-done-audit",
+        evidenceRefs: [dreamRefs.reportRef],
+        status: "passed",
+        summary: `Dream HITL report ${dreamRefs.reportRef} carries not-proven definition-of-done audit without overclaiming post-report gates.`,
+      },
       dreamGeneratedProofRuntimeSourceCoverage: {
         declaredMachineIds: ["blaine", "panda", "flagg", "cloudflare"],
         declaredRuntimes: ["pi", "codex", "claude", "cloudflare"],
