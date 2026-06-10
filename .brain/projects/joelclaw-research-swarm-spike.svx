@@ -81,7 +81,7 @@ The output should be a robust, detailed, source-grounded Brain page about verifi
 ## Non-goals
 
 - Do not build a generic custom UI before the workflow proof exists.
-- Do not make this a Worker-only source search demo while claiming hot Cloudflare research lanes.
+- Do not make this a Worker-only source search proof while claiming hot Cloudflare research lanes.
 - Do not hard-code a magic lane count like 50. Lane count is derived from scout evidence and operator-approved limits.
 - Do not promote prototype code into `src/`.
 - Do not launch expensive hot swarms without hash-bound operator approval.
@@ -235,8 +235,8 @@ Dockerfile
 wrangler.jsonc
 fixtures/workflow-verifier-evals-task.json
 scripts/wrangler-with-cloudflare-token.mjs
-scripts/run-plan-demo.mjs
-scripts/run-real-demo.mjs
+src/run-plan.ts
+scripts/run-real-proof.mjs
 src/schema.ts
 src/machine.ts
 src/planner.ts

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">ShitRat Kernel Proposal</title>
+  <desc id="desc">A white-paper style review page for an Artifacts-first ShitRat kernel and versioned packs.</desc>
+  <rect width="1200" height="630" fill="#ffffff"/>
+  <rect x="72" y="64" width="1056" height="2" fill="#191613"/>
+  <text x="72" y="132" fill="#5f554b" font-family="IBM Plex Sans, Arial, sans-serif" font-size="26" font-weight="700" letter-spacing="3">SHITRAT KERNEL PROPOSAL</text>
+  <text x="72" y="252" fill="#191613" font-family="Georgia, 'Times New Roman', serif" font-size="82" font-weight="600">A small kernel</text>
+  <text x="72" y="342" fill="#191613" font-family="Georgia, 'Times New Roman', serif" font-size="82" font-weight="600">with versioned packs.</text>
+  <text x="76" y="430" fill="#5f554b" font-family="IBM Plex Sans, Arial, sans-serif" font-size="30">Artifacts first · agents first · semver</text>
+  <text x="76" y="482" fill="#5f554b" font-family="IBM Plex Sans, Arial, sans-serif" font-size="30">Pi · Claude · Codex · Cloudflare workflows</text>
+  <text x="922" y="428" fill="#191613" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif" font-size="182">🐀</text>
+  <rect x="72" y="564" width="1056" height="2" fill="#d9d3ca"/>
+  <text x="72" y="598" fill="#6f3b00" font-family="IBM Plex Sans, Arial, sans-serif" font-size="23" font-weight="700">@joelhooks/shitrat-kernel</text>
+</svg>

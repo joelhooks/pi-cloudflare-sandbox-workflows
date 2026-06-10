@@ -1,0 +1,266 @@
+<script lang="ts">
+  import FlowChart from "$lib/flow-chart.svelte";
+  import MarginNote from "$lib/margin-note.svelte";
+  import PatternCards from "$lib/pattern-cards.svelte";
+  import ReportLayout from "$lib/ReportLayout.svelte";
+  import StatLine from "$lib/stat-line.svelte";
+
+  const statItems = [
+    { label: "Scope", value: "JoelClaw network" },
+    { label: "Sources", value: "blaine, panda, flagg, Cloudflare" },
+    { label: "Shape", value: "T-shaped timeline + Brain graph" },
+    { label: "Proof", value: "Generated + Cloudflare-run" },
+  ];
+
+  const nonNegotiables = [
+    {
+      receipts: [
+        { href: "#cloudflare-proof", label: "Cloudflare execution proof" },
+      ],
+      title: "Dynamic means generated and run in Cloudflare.",
+      why: "A local harness, static phase list, hand-written branch table, or deterministic if/else/switch dispatcher fails the definition of done.",
+    },
+    {
+      receipts: [
+        { href: "#note-brain-receipts", label: "dream-sequence-memory-fabric" },
+      ],
+      title: "Backfill repairs missing memory. It is not the product.",
+      why: "The workflow can rebuild stale derived indexes, but the real fix is capture paths that keep Pi, Codex, Claude, Cloudflare, Brain, docs, and outputs flowing without heroic archaeology.",
+    },
+    {
+      receipts: [
+        { href: "#capability-leases", label: "capability leases" },
+      ],
+      title: "Cloudflare leases access through a relay.",
+      why: "Cloudflare should ask for inventory, search, hydration, backfill, and report capabilities. It should not receive raw transcript paths, Typesense credentials, Slack tokens, or customer data.",
+    },
+    {
+      receipts: [
+        { href: "#t-shaped-dreaming", label: "whole timeline rule" },
+      ],
+      title: "Dreaming is wide first, then deep.",
+      why: "A dream has to sweep horizons and runtimes before it goes deep into selected evidence. Recent-only reports and Pi transcripts pretending to be Codex coverage are invalid.",
+    },
+    {
+      receipts: [
+        { href: "#kernel-loop", label: "package feedback loop" },
+      ],
+      title: "The report is a refinement mechanism.",
+      why: "Accepted dreams should update Brain, package manifests, workflow nodes, port contracts, lease policy, schema/types, report canon, and the next generated workflow.",
+    },
+  ];
+
+  const proofItems = [
+    {
+      receipts: [
+        { href: "#generated-proof", label: "machine proof" },
+      ],
+      title: "The generated workflow must leave artifacts.",
+      why: "The planner prompt, generated XState config, generated TypeScript, harness source, hashes, Cloudflare run receipts, and verifier receipt are the difference between dynamic workflow and static cosplay.",
+    },
+    {
+      receipts: [
+        { href: "#cloudflare-proof", label: "Cloudflare run proof" },
+      ],
+      title: "Cloudflare execution is part of validity.",
+      why: "The system must prove that Cloudflare executed the generated machine artifacts. Local-only proof is useful for tests, but it is not a valid Dream run.",
+    },
+    {
+      receipts: [
+        { href: "#source-coverage", label: "coverage proof" },
+      ],
+      title: "Coverage has to be source-native.",
+      why: "Pi, Codex, Claude, and Cloudflare each need native counts, earliest/latest timestamps, freshness, skipped reasons, and hydration proof. Proxy hits do not count.",
+    },
+    {
+      receipts: [
+        { href: "#source-coverage", label: "index health" },
+      ],
+      title: "Derived indexes are guilty until checked.",
+      why: "Typesense, QMD-style stores, local SQLite views, and docs indexes are derived. Raw blobs and source systems are authority. Health checks decide whether retrieval is trustworthy.",
+    },
+    {
+      receipts: [
+        { href: "#report-node", label: "HITL report node" },
+      ],
+      title: "Dreams go first. Proof goes underneath.",
+      why: "The human artifact needs concise dreams with summary, reasoning, rating, and recommendation. The proof exists to support action, not bury the lead.",
+    },
+  ];
+</script>
+
+<ReportLayout>
+  <p class="eyebrow"><span class="mascot">🧠</span> Dream Sequence Vision / 2026-06-09</p>
+
+  <h1>Dreaming should repair the memory fabric.</h1>
+
+  <p class="lead">
+    The goal is a dynamic Dreaming workflow that turns the JoelClaw network into a
+    source-backed learning loop for the kernel/package system. It inventories the
+    whole system, fixes ingest gaps, leases capabilities safely, dreams T-shaped
+    across time and graph, and feeds accepted learning back into packages,
+    workflow nodes, schemas, and Brain. It only counts when the workflow is
+    generated for the task and provably executed in Cloudflare.
+  </p>
+
+  <StatLine items={statItems} />
+
+  <h2 id="goal">Goal</h2>
+
+  <p>
+    Build Dreaming as a generated workflow that can inspect and repair the
+    memory fabric across <code>blaine</code>, <code>panda</code>,
+    <code>flagg</code>, Cloudflare, local agent transcripts, Brain roots,
+    docs/pdf-brain, workflow outputs, GitHub/Slack/Linear/support surfaces, and
+    org/project graphs. A local script or canned deterministic control path is
+    not Dreaming, even if it prints the right words.
+    <MarginNote id="brain-receipts" number="1" href="https://joelclaw.com/api/docs">
+      Durable source: <code>.brain/resources/dream-sequence-memory-fabric.svx</code>.
+      The public docs surface is <code>joelclaw.com/api/docs</code>; the desired
+      <code>/api/documents</code> alias is not currently proven live.
+    </MarginNote>
+  </p>
+
+  <p>
+    The workflow starts by proving what sources exist, what is fresh, what is
+    missing, and what is unsafe to expose. If indexes are stale, it plans scoped
+    backfills from authoritative sources. Then it fixes ingest so future
+    Cloudflare lanes, Pi/Codex/Claude sessions, Wzrrd pages, observability
+    packs, and Brain updates report back automatically instead of requiring
+    archaeology every time.
+  </p>
+
+  <PatternCards items={nonNegotiables} label="Dreaming non-negotiables" />
+
+  <h2 id="workflow">Dynamic Workflow Shape</h2>
+
+  <FlowChart
+    alt="State machine for dynamic Dreaming workflow"
+    caption="Target state machine shape for Dreaming. The real implementation must generate machine artifacts, run them in Cloudflare, and verify the event log before the report can claim a valid Dream run."
+    src="/figures/dream-workflow-state-machine.svg"
+    title="Dynamic Dreaming Workflow"
+    version="0.2.0"
+  />
+
+  <h2 id="capability-leases">Capability Leases</h2>
+
+  <p>
+    Cloudflare gets provisioned capabilities, not raw substrate access. The
+    trusted relay owns local paths, Typesense/docs credentials, transcript
+    hydration, comms credentials, org policy, redaction, source-specific
+    backfills, and artifact capture. Cloudflare receives redacted evidence,
+    hashes, coverage counts, freshness, trace ids, lease receipts, and links it
+    is allowed to follow.
+  </p>
+
+  <h2 id="t-shaped-dreaming">T-Shaped Dreaming</h2>
+
+  <p>
+    Wide means explicit horizons: last 24h, 7d, 30d, quarter, and all-time
+    across Pi, Codex, Claude, Cloudflare, Brain, docs, repos, reports, and comms.
+    Deep means selected evidence gets hydrated, correlated, and checked against
+    older memory, repeated corrections, package manifests, accepted Brain claims,
+    prior reports, runtime outputs, and unresolved promises.
+  </p>
+
+  <h2 id="kernel-loop">Kernel And Package Loop</h2>
+
+  <p>
+    The output is not a vibes report. Dreams propose concrete refinements:
+    kernel memories, package boundaries, workflow-node plugins, access leases,
+    schema/types, observability requirements, report-node improvements, and
+    generated workflow patterns. Accepted dreams leave receipts and update the
+    next workflow so the system gets smarter instead of merely louder.
+  </p>
+
+  <h2 id="generated-proof">Proof Contract</h2>
+
+  <PatternCards items={proofItems} label="Proof contract" />
+
+  <article class="hitl-item" id="cloudflare-proof">
+    <h3>Cloudflare execution is mandatory.</h3>
+    <p class="hitl-summary">
+      A Dream run is not valid until Cloudflare executes the generated workflow
+      artifacts and returns proof. Local execution can test the harness, but it
+      cannot be presented as the real dynamic workflow.
+    </p>
+    <dl class="three-rs">
+      <div>
+        <dt>Reasoning</dt>
+        <dd>The kernel design depends on honest runtime receipts. If the workflow is a static script with labels, it teaches the system bullshit.</dd>
+      </div>
+      <div>
+        <dt>Rating</dt>
+        <dd>10/10</dd>
+      </div>
+      <div>
+        <dt>Recommendation</dt>
+        <dd>Require planner transcript, generated machine/source/harness hashes, Cloudflare run id, event log, lease ids, and verifier acceptance.</dd>
+      </div>
+    </dl>
+  </article>
+
+  <article class="hitl-item" id="source-coverage">
+    <h3>Source coverage is a gate.</h3>
+    <p class="hitl-summary">
+      A dream is invalid if it only answers what happened just now, or if it
+      claims Codex/Claude/Cloudflare coverage from proxy evidence.
+    </p>
+    <dl class="three-rs">
+      <div>
+        <dt>Reasoning</dt>
+        <dd>Derived search can scout. Durable claims require native source proof, freshness, skipped reasons, and hydrated receipts.</dd>
+      </div>
+      <div>
+        <dt>Rating</dt>
+        <dd>10/10</dd>
+      </div>
+      <div>
+        <dt>Recommendation</dt>
+        <dd>Make source inventory and runtime coverage audit the first machine states.</dd>
+      </div>
+    </dl>
+  </article>
+
+  <article class="hitl-item" id="report-node">
+    <h3>The Dream report is a workflow node.</h3>
+    <p class="hitl-summary">
+      Use the Tufte/MDSvX Wzrrd report as an installable HITL node. Dreams go
+      first; proof, machine artifacts, coverage counts, hashes, and receipts go
+      underneath.
+    </p>
+    <dl class="three-rs">
+      <div>
+        <dt>Reasoning</dt>
+        <dd>Humans need concise actionable dreams. Machines need typed artifacts and verifier receipts.</dd>
+      </div>
+      <div>
+        <dt>Rating</dt>
+        <dd>9/10</dd>
+      </div>
+      <div>
+        <dt>Recommendation</dt>
+        <dd>Package this as a <code>DreamReportPort</code> plus a leased <code>wzrrd.site.publish</code> adapter.</dd>
+      </div>
+    </dl>
+  </article>
+
+  <h2 id="next-build">Next Build Slice</h2>
+
+  <ol>
+    <li>Emit <code>dream.source-inventory.v1</code> before retrieval starts.</li>
+    <li>Run ingest health checks for Pi, Codex, Claude, Cloudflare, Brain, docs, and workflow artifacts.</li>
+    <li>Plan scoped backfills only for stale derived indexes, then fix capture paths that caused the drift.</li>
+    <li>Generate the XState workflow machine, TypeScript source, and harness from the task, source inventory, and leased capability set.</li>
+    <li>Run those generated artifacts in Cloudflare and verify the Cloudflare event log against the machine and artifact hashes.</li>
+    <li>Run wide horizon retrieval, deep graph investigation, hydration, correlation, and Dream assembly.</li>
+    <li>Render a concise HITL report with dreams first and proof underneath.</li>
+    <li>Apply accepted dreams to Brain/package/kernel artifacts with receipts and feed them into the next generated workflow.</li>
+  </ol>
+
+  <footer>
+    Source artifact: <code>.brain/resources/dream-sequence-memory-fabric.svx</code>.
+    This page is a reference surface for the goal, not a claim that the dynamic
+    machine has already executed in Cloudflare.
+  </footer>
+</ReportLayout>

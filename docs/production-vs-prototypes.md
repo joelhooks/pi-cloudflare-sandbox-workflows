@@ -78,4 +78,8 @@ Parallel Cloudflare proof:
 
 - `cloudflare-parallel-workflow-spike/` proves the deployed real Cloudflare control shape for dynamic parallel workflows: Worker API + queue consumer, Durable Object capsule supervisor, Queue-backed lane scheduling/backpressure, real Sandbox lanes, Artifacts plan/lane/synthesis/verifier/output receipts, fan-in, verification, generic `implementation_plan` delivery, and cleanup. Receipt: `cloudflare-parallel-workflow-receipt.v1`, latest run `run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, repo `piwfp-run-parallel-cloudflare-patterns-3e945e7e-887dd5a9`, plan commit `4e8ec58ee343e6f3fa6adf190e02607c28a0706c`, synthesis commit `03c30e7a847e33f23790aeea8b5464782cbf8727`, lanes `8`, cap `3`, max observed active lanes `3`, final state `captured`, verifier `verified`, cleanup all `:ok`.
 
+Registry/context-pack proof:
+
+- `cloudflare-registry-workflow-os-spike/` proves a real deployed internal context-pack registry shape for prompts and skills: Worker registry API, Durable Object package/job state, Queue-backed validation/install jobs, one Artifacts repo per package, real Sandbox validation, real Sandbox install-smoke, and destroy receipts. Latest clean receipt: package `internal-context-pack-registry-f8be2fa6@0.1.0`, repo `pi-registry-internal-context-pack-registry-f8be2fa6-cc3d6c9a`, publish commit `456312d52876ba81c32cabc4175ab1f81d6e50ea`, validation commit `d4777c23df550575b60c9c6ff4cddebbb6af721b`, validation sandbox `rv-internal-context-pack-registry-f8be2fa-b6ff9b7f`, install-smoke sandbox `ri-internal-context-pack-registry-f8be2fa-be8a933a`, final state `captured`, cleanup all `:ok`.
+
 Do not promote prototype code. Rewrite production interfaces around these receipts instead.

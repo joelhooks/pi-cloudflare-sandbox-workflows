@@ -18,13 +18,14 @@ Prototype code must either be deleted or rewritten into `src/`. Do not gradually
 
 Read first:
 
-1. `BRAIN.md`
-2. `.brain/projects/pi-sandbox-workflows.svx`
-3. `docs/production-vs-prototypes.md`
-4. `PROTOTYPES.md`
-5. `docs/source-map.md`
-6. `docs/dynamic-workflow-machine.md`
-7. `docs/tooling-baseline.md`
+1. `VISION.md`
+2. `BRAIN.md`
+3. `.brain/projects/pi-sandbox-workflows.svx`
+4. `docs/production-vs-prototypes.md`
+5. `PROTOTYPES.md`
+6. `docs/source-map.md`
+7. `docs/dynamic-workflow-machine.md`
+8. `docs/tooling-baseline.md`
 
 ## First spike
 
@@ -61,7 +62,7 @@ The Cloudflare parallel workflow spike is the real massively-parallel control pr
 - Workspace/task runner: Turborepo, lightly installed up front so `apps/*`, `packages/*`, and `prototypes/*` can grow without repo surgery
 - TypeScript: Matt Pocock's `@total-typescript/tsconfig` extended with stricter local flags
 - Type checker: `tsgo` from `@typescript/native-preview` for the fast path, plus `pnpm typecheck:tsc` as compatibility fallback
-- Lint/format: Ultracite with `oxlint` + `oxfmt`
+- Lint/format: direct `oxlint` + `oxfmt`; `.oxlintrc.json` contains the cloned Ultracite Oxlint rule policy and `.oxlintrc.type-aware.json` enables the `oxlint-tsgolint` extension for `src`/`tests`
 - Git hooks: Lefthook formats staged files, then runs full lint and full typecheck before commit
 
 ## Production direction
@@ -77,3 +78,46 @@ Production code eventually owns:
 - event logs and Wzrrd publication metadata
 
 Anything else belongs in `prototypes/` until proven.
+
+## Worker entrypoint
+
+The production-intended Worker entrypoint is `src/app/worker.ts`, configured by root `wrangler.jsonc`. Generated binding types live in `worker-configuration.d.ts`; regenerate them with:
+
+```bash
+pnpm exec wrangler types
+```
+
+The current route surface is `POST /runs`. The root `Dockerfile` is the Sandbox lane image, and `migrations/0001_workflow_app_d1.sql` mirrors the app D1 schema.
+
+Required control-plane binding before deploy:
+
+```bash
+pnpm exec wrangler secret put WORKFLOW_APP_ADMIN_TOKEN
+```
+
+Additional runtime bindings required before `POST /runs` can execute real Pi lanes, Discord sends, or real Wzrrd publication:
+
+```bash
+pnpm exec wrangler secret put PI_AUTH_JSON_B64
+pnpm exec wrangler secret put WORKFLOW_APP_MODEL
+pnpm exec wrangler secret put DISCORD_BOT_TOKEN
+pnpm exec wrangler secret put WZRRD_API_TOKEN
+pnpm exec wrangler secret put GITHUB_TOKEN
+```
+
+The production-intended deploy/seed receipt path is:
+
+```bash
+pnpm app:deploy
+```
+
+It applies remote D1 migrations, deploys the Worker, includes any local secrets in the deploy secrets file, prepares package repos through `/admin/packages/prepare-seed`, pushes package manifests from the local deploy process, finalizes D1 rows through `/admin/packages/finalize-seed`, and writes a redacted receipt to `.wrangler/workflow-app/latest-deploy-seed-receipt.json`.
+
+After the Worker is deployed with D1 and Artifacts bindings, the one-shot package seed route is still available for controlled setup:
+
+```bash
+curl -X POST "$WORKER_URL/admin/packages/seed" \
+  -H "Authorization: Bearer $WORKFLOW_APP_ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"subjects":[{"subjectType":"actor","subjectId":"actor:operator"}]}'
+```

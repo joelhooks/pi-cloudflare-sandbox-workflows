@@ -1,0 +1,616 @@
+---
+name: deep-review-2026-06-09
+description: Ultracode multi-agent deep review — 89 agents, 7 dimensions, adversarial verification (49 confirmed / 4 uncertain / 1 refuted)
+---
+
+# Deep Review — 2026-06-09
+
+Multi-agent review: 7 dimensions (spine correctness, infra correctness, security, concurrency/durability, architecture, docs drift, tests, prototype hygiene), every bug-class finding verified by two independent adversarial agents, plus a completeness critic. 89 agents total.
+
+## Dimension summaries
+
+### correctness-spine
+
+The core spine is unusually disciplined — hash-pinned artifacts, schema-parsed boundaries, and a safety-envelope machine whose transitions line up exactly with how WorkflowApp.run drives it (I traced every send against machine.ts and found no silent no-op transitions). However, I found and empirically proved one real hole in the central guarantee: a generated XState machine whose initial state is the 'done' final state passes every validator and yields a fully 'captured' run receipt with zero steps executed (verified by running the actual WorkflowApp with a wrapped planner: status=captured, completedStepIds=[]). Two systemic issues compound it: unhandled adapter throws escape the safety envelope leaving the D1 projection/event log permanently non-terminal, and capability lease IDs are keyed by capability+runId so duplicate same-capability steps break differently in prod (D1 PK violation throw) than in tests (silent receipt overwrite). The workflow-nodes and cartridge layers (dream-memory-fabric, artifact-backed adapter, dream proof recorder) are clean — consistent blocked-result plumbing, correct primary-output-ref ordering, and the node-type dispatch fallthrough is exhaustive against the enum.
+
+### correctness-infra
+
+The infrastructure adapters are mostly carefully built — D1 schema/migrations match the SQL in the event stream, status projection, review gate, seeder, and telemetry sinks, and the GitHub/Linear/Wzrrd adapters do defensive content-hash verification. The serious problems are: the Discord path is the one capability whose pinned content is never actually hash-verified (the body can be swapped post-approval by anything with the run-repo write token, which the agent lanes hold); the capability lease broker is the only non-idempotent D1 writer (deterministic lease/receipt IDs + plain INSERT means same-capability duplicate steps or run retries die on UNIQUE constraints mid-run); and the production "durable workflow" path is not durable at all — the whole multi-lane run executes inside one Worker fetch invocation with no Workflows binding. There is also a verified zod bug that makes package discovery throw for any NULL manifest_hash row, and the Analytics Engine sink ignores the platform's 5120-byte blob and 25-points-per-invocation limits.
+
+### security
+
+The production hexagonal app has a serious authentication gap: the expensive, side-effect-producing POST /runs route (and the /runs/:runId event/debugger read routes) has no auth at all, while the cheap admin/package-seed setup routes are correctly protected by a timing-safe admin token. The deployed Worker is public, so this is the dominant risk. Secret handling in package.json scripts and the extract-codex-auth/wrangler-token helpers is reasonable (piped stdin, base64, no argv/file leakage), and the trusted local dream-memory relay defaults to 127.0.0.1 with a required bearer token. Sandbox command construction passes user/workflow input through the env map rather than interpolating into shell strings, so I found no shell-injection vector; .env/.dev.vars are gitignored and committed artifacts (.wzrrd/state.json, migrations) contain no secrets. Secondary issues: one prototype is open-by-default, several accept the token via URL query param, and the per-run Artifacts write token is exposed inside the agent sandbox.
+
+### concurrency-durability
+
+The production spine has strong artifact-pinning/hash hygiene but its concurrency-and-durability story is structurally hollow: the entire multi-lane run executes inside a single HTTP fetch with an in-memory XState actor (nothing survives a restart), the lane admission DO has no expiry/alarm so a single crash permanently leaks concurrency slots and wedges the work item, and the capability lease ledger is write-only — expiry and single-use status exist in D1 but are never read or enforced, while deterministic lease/lane IDs make any same-runId retry hard-fail after side effects already fired. The queue-consuming prototypes show the same family of bugs at different maturity: the parallel spike double-admits running lanes on redelivery and wedges forever on any finalization crash (a bug the newer swarm spike fixed but never backported), and the registry spike re-runs terminal jobs with no idempotency. No reaper, timeout, or resume mechanism exists anywhere in src/app (zero alarm() usage), so every crash window identified ends in a permanently stuck run rather than a recovery.
+
+### architecture
+
+The hexagon is structurally real: domain and application have zero Cloudflare imports, infrastructure adapters depend inward through ports.ts, prototypes are correctly firewalled (no src/ <-> prototypes/ imports), and the machine.ts vs generated-machine.ts split is sound — the generated machine document is produced at runtime, executed via createGeneratedWorkflowActor, hash-pinned (machine.config.json + rendered machine.ts source), and re-verified on reload (sha256 check at workflow-app.ts:2946) plus in dream-generated-workflow-proof. The real architectural debt is depth, not direction: capability support is copy-pasted monomorphically across all layers (five identical adapter interfaces, five identical broker record methods, four ~200-line delivery pipelines), workflow-app.ts is a 4,241-line god-file that embeds domain validation and its own integration-test doubles, and two boundary leaks undercut the spine — infrastructure imports src/cartridges (plugins wired inside the spine instead of the composition root) and AgentLaneRuntimeRequest hardcodes the sandbox script's filesystem/git/provider mechanics into a port. Highest leverage: genericize the capability pipeline, split workflow-app, and invert the cartridge registry to the worker entrypoint.
+
+### docs-drift
+
+The docs are unusually receipt-dense and most concrete claims check out: every pnpm command cited in README/docs/dogfood-plan exists in package.json, all referenced files/prototypes/migrations exist, the D1 table list matches code, the 156-test integration suite passes, and the renamed demo->proof scripts left no stale references. The real drift is concentrated in two places: a large undocumented production surface (the dream-memory-fabric/cartridge/workflow-nodes subsystem, ~4,200 lines plus scripts and 11 tests, invisible in every doc including CONTEXT.md's "one production context" claim), and workflow-app-spine.md describing the generated machine source and harness as optional when the schema and loader make both mandatory and execution-blocking. Smaller staleness: production-vs-prototypes.md still says the capsule DO is not deployed as the production Worker path (it is), the documented step-kind and safety-envelope state lists each omit one real entry, README understates the route surface, and the prototypes index is missing six spikes.
+
+### tests
+
+The suite is in good shape mechanically — 156/156 pass in 678ms, typecheck clean, zero skips, near-universal toStrictEqual on full composite objects (only 2 loose assertions in 16k lines), and denial/blocker paths (review_required, payload_hash_mismatch, planner failures, protocol violations) are genuinely asserted at the application layer. But it is an application-layer suite wearing an integration-test label: nothing touches workerd, real D1, Durable Object storage, a Cloudflare Sandbox, or a git remote, so the three components the repo exists for — the Sandbox Pi lane runtime, the concurrency-controlling capsule supervisor DO, and the Artifacts git store I/O — have zero coverage, and every D1/admission interaction is a hand-rolled fake that can drift from real behavior. The sharpest gaps a maintainer should act on: POST /runs has no auth and no test demanding any, and the production-mode safety guards (real-agent enforcement, verifier requirement, Cloudflare execution proof) are never asserted — the one production-mode test passes in Node because the 'Cloudflare execution proof' is a hardcoded constant.
+
+### prototypes-hygiene
+
+Mechanical hygiene is mostly clean: the run-real-demo.mjs -> run-real-proof.mjs renames left zero stale references, every package.json prototype/app script target exists on disk, src/ contains no imports from prototypes/, and prototypes/_captures/ is an empty untracked directory (delete it, but it breaks nothing). The real problem is graduation debt: at least 7 prototypes whose own READMEs say 'delete after rewritten into src/' have had that condition fire (capsule supervisor DO, capability lease broker, review gate actor, package registry, planner lane all now live in src/app and wrangler.jsonc) yet remain 'Status: active', several with deployed Workers, queues, and real secrets (GitHub App private key). Supporting drift compounds it: docs/production-vs-prototypes.md still claims shipped seams are 'not yet' in production, prototypes/README.md omits 6 of 16 prototypes, three copy-pasted SvelteKit report UIs have already diverged, and untracked junk (.wzrrd/ machine-local publish state, shitrat-brain-proposal-ui's un-ignored build/.svelte-kit) is one 'git add .' away from being committed.
+
+## Confirmed findings
+
+### [CRITICAL] [concurrency-durability] Entire production workflow run executes inside one HTTP fetch invocation — no durable execution, no resume path
+
+**Where:** `src/app/infrastructure/cloudflare-worker-route.ts:1311`
+
+POST /runs synchronously awaits the whole multi-lane run (planner Pi lane, N worker Pi lanes, verifier Pi lane, capability deliveries) inside the fetch handler. The safety-envelope state machine is an in-memory XState actor created per request (workflow-app.ts:1238 'const actor = createActor(dynamicWorkflowSafetyEnvelopeMachine)'); nothing is checkpointed for resumption. There is no Cloudflare Workflow, no queue, no waitUntil, and zero alarm() usage anywhere in src/app (verified by grep). If the worker is evicted, hits limits, or the isolate dies mid-run (these runs span multiple multi-minute sandbox lanes), the run dies silently: the D1 runs row stays frozen at its last state forever (no reaper marks it failed), admitted lanes stay 'active' in the supervisor DO forever, and the issued capability lease rows stay 'issued' forever. This directly contradicts the dimension requirement that workflow state machines survive restarts — the production spine does not survive a restart at all.
+
+**Evidence:** cloudflare-worker-route.ts:1308-1315: `const result = WorkflowRunResultSchema.parse(await frontDoor.startRun(body)); return Response.json(result);` — and front-door startRun (cloudflare-workflow-front-door.ts:590) is `return await workflow.run(request);` with no step durability. workflow-app.ts:1237-1241: `const eventLog: WorkflowEvent[] = []; const actor = createActor(dynamicWorkflowSafetyEnvelopeMachine); ... actor.start();`
+
+**Fix:** Move run execution onto Cloudflare Workflows (or a queue + DO state machine where each transition is persisted and resumable), and add a reaper (DO alarm or cron) that times out runs stuck in non-terminal states in D1.
+
+### [CRITICAL] [security] Production POST /runs triggers paid agent runs and real side-effects with zero authentication
+
+**Where:** `src/app/infrastructure/cloudflare-worker-route.ts:1262`
+
+The deployed Worker's default export is createWorkflowWorkerHandler() (src/app/worker.ts:9) with no auth wrapper. handleWorkflowWorkerRequest gates /admin/packages/* behind requirePackageSeedAuth (WORKFLOW_APP_ADMIN_TOKEN, timing-safe), but the /runs route goes straight from schema validation to frontDoor.startRun(body) with no bearer/token/Access check at all. POST /runs provisions a Cloudflare Sandbox, runs real Pi planner/worker/verifier lanes (burns Codex/Pi tokens = real money), and can drive leased GitHub branch+PR, Discord sends, Linear comments, and public Wzrrd publishes. The GET /runs/:runId/events and /runs/:runId/debugger read routes are likewise unauthenticated. The Worker is live and public (docs/workflow-app-spine.md:79 'https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev'), and the docs publicly paste working /runs/.../events and /debugger URLs. Nothing in the repo (wrangler.jsonc, worker.ts, docs) configures Cloudflare Access or any edge auth in front of /runs, so anyone who can reach the URL can spend the account's agent budget and read run event streams. Admin setup routes are protected while the actual expensive capability is wide open.
+
+**Evidence:** if (url.pathname !== "/runs") { return jsonError(404, ...); }
+ if (input.request.method !== "POST") { ... }
+ // no auth check here
+ const frontDoor = input.createFrontDoor?.(input.env) ?? createFrontDoorFromEnv(input.env);
+ const result = WorkflowRunResultSchema.parse(await frontDoor.startRun(body));
+
+**Fix:** Require a bearer token on /runs and the /runs/:runId/* read routes using the same timingSafeSecretMatch + a RUNS_ACCESS_TOKEN (or reuse WORKFLOW_APP_ADMIN_TOKEN) binding, or document and enforce a Cloudflare Access policy in wrangler config. Fail closed if the token binding is absent.
+
+### [HIGH] [architecture] Capability plumbing is monomorphic: adding a sixth capability is shotgun surgery across every layer
+
+**Where:** `src/app/application/ports.ts:129`
+
+The capability concept (lease -> execute -> record receipt) is re-implemented per capability instead of abstracted once. ports.ts defines five structurally identical adapter interfaces (Discord, Wzrrd, GitHubPullRequest, GitHubBranchCommit, LinearComment), all shaped `execute({lease, payload}) => DeliveryResult`. CapabilityLeaseBrokerActorContract has five `record*Execution` methods; the broker implementation (src/app/infrastructure/cloudflare-capability-lease-broker.ts:461-770) duplicates the same ~70-line body five times, differing only in capability string, schema name, and receiptKind. WorkflowApp duplicates a ~200-line lease/approve/execute/record pipeline per target (deliverLinearReviewSurface at 1997, deliverWzrrdReviewSurface at 2241, deliverGitHubReviewBranch at 2460, deliverGitHubReviewSurface at 2666), and WorkflowDependencies hardcodes per-capability fields plus per-capability secretRef objects (workflow-app.ts:114-154). The worker route env schema also carries per-capability secret-ref bindings. Adding one capability today means touching domain/schemas.ts, ports.ts (interface + broker method), the broker, workflow-app (new ~200-line method), worker-route env schema, and index.ts. This is the textbook shotgun-surgery smell and is the single biggest tax on the spine's stated goal of absorbing new workflow capabilities.
+
+**Evidence:** ports.ts: `recordDiscordExecution(...)`, `recordGitHubPullRequestExecution(...)`, `recordGitHubBranchCommitExecution(...)`, `recordLinearCommentExecution(...)`, `recordWzrrdExecution(...)` all `(input: { delivery; lease }) => Promise<CapabilityLeaseReceipt>`; broker bodies are byte-near-identical: both recordDiscordExecution and recordGitHubBranchCommitExecution do `config.artifacts.writeJson({ path: `receipts/capability-executions/${safePathSegment(input.lease.leaseId)}.json`, ... })` then the same `update capability_leases set status = ? where lease_id = ?`.
+
+**Fix:** Collapse to one generic `CapabilityAdapter<Payload, Delivery>` registry keyed by capability id (the discriminant already exists on CapabilityLease.capability), one generic `recordExecution(lease, delivery)` on the broker that dispatches schema validation via a capability descriptor table, and one parameterized review-surface delivery pipeline driven by `outputTarget.kind`. The five payload/delivery zod schemas stay; everything else becomes data.
+
+### [HIGH] [architecture] workflow-app.ts is a 4,241-line god-file whose application layer embeds machine validation, per-target delivery, proof capture, and its own test doubles
+
+**Where:** `src/app/application/workflow-app.ts:1115`
+
+The entire use-case layer is one file: ~700 lines of free-function generated-machine validation (validateGeneratedMachineBinding/TransitionTargets/StepReferences/StartupProtocol/TerminalStates/StepTransitions/AgainstPlan, lines 576-836), Discord step rebinding (920-1083), the WorkflowApp class with a 356-line run() (1235-1591) plus a dozen 150-250 line private methods, and integration-test fakes inline: executeResearchReviewStep writes synthetic worker output via `this.dependencies.artifacts.writeJson` when `isIntegrationTestMode()` (line 3942+), and verification is bypassed in-core (line 3639: 'Integration-test path bypassed verifier execution'). Per Ousterhout this is the opposite of a deep module: the class interface is one method (`run`) but the implementation conflates at least four separable concerns, and the test-mode branches mean ports do not fully isolate the core — the core itself branches on execution mode instead of receiving fake adapters at the edge. This file will be the merge-conflict and comprehension bottleneck for every future change.
+
+**Evidence:** grep of workflow-app.ts: `1235: async run(...)` ... `1591: }` (356 lines); `810:const validateGeneratedMachineAgainstPlan`; `3639: if (this.isIntegrationTestMode()) { ... "Integration-test path bypassed verifier execution..." }`; executeResearchReviewStep: `if (!this.isIntegrationTestMode()) { return { blocker: ... "Production research/review steps require a real worker agent lane." } } const writeReceipt = await this.dependencies.artifacts.writeJson({ path: input.step.outputPath, ... })`
+
+**Fix:** Three extractions, in value order: (1) move the validateGeneratedMachine* family into a pure domain module (it only touches DynamicWorkflowMachineDocument/PlanDocument — it is domain logic, not application wiring); (2) extract review-surface delivery into one service parameterized by capability descriptor (merges with finding 1); (3) replace `executionMode: "integration-test"` branches with injected fake AgentWorkerLanePort/verifier adapters provided by tests/integration/workflow-app-fixtures.ts, so the core has exactly one behavior.
+
+### [HIGH] [concurrency-durability] Capsule supervisor lane admission leaks slots permanently on crash — no expiry, no alarm, and 'deferred' is thrown as a hard error
+
+**Where:** `src/app/infrastructure/cloudflare-capsule-supervisor.ts:119`
+
+admitLane adds laneId to activeLaneIds; only releaseLane removes it. If the worker dies between admit and release (the window covers an entire Pi sandbox lane run), the laneId stays active forever: there is no admittedAt timestamp on the stored record, no DO alarm, no staleness eviction. Re-running the same runId then gets status 'deferred' (reason already-active) forever — and createAdmittedAgentLaneRuntime converts ANY deferred decision into a thrown Error (admitted-agent-lane-runtime.ts:81-85) with no retry loop, despite the decision advertising retryAfterSeconds. So one crash mid-lane permanently wedges that laneId, leaks one slot of maxActiveLanes for the workItemId DO (shared across all future runs of that work item), and after maxActiveLanes crashes the work item can never run another lane.
+
+**Evidence:** cloudflare-capsule-supervisor.ts:119-133: `if (record.activeLaneIds.includes(input.laneId)) { return json(...{ reason: "already-active", retryAfterSeconds: 1, status: "deferred" }); }` — no expiry field, no alarm() anywhere in src/app. admitted-agent-lane-runtime.ts:81-85: `if (admission.status === "deferred") { throw new Error(\`Agent lane admission deferred: ... retry after ${admission.retryAfterSeconds}s.\`); }`
+
+**Fix:** Store admittedAt per active lane, set a DO alarm to evict stale admissions past lane timeoutMs, and either honor retryAfterSeconds with a bounded retry loop or treat already-active-with-stale-admission as reclaimable.
+
+### [HIGH] [concurrency-durability] Capability lease expiry and single-use status are never enforced; deterministic lease_id makes any same-runId retry crash after the side effect
+
+**Where:** `src/app/infrastructure/cloudflare-capability-lease-broker.ts:437`
+
+Leases are issued with expiresAt (workflow-app sets now+15min) and persisted with status 'issued', but the broker never reads the lease row back: grep confirms expires_at is only ever inserted, never selected, and recordXExecution runs an unconditional `update capability_leases set status='executed' where lease_id=?` with no `and status='issued' and expires_at > now` guard. The execution flow is requestLease → adapter.execute (real Discord/GitHub/Linear/Wzrrd side effect) → recordExecution. If the worker crashes between execute and recordExecution, the external side effect happened but the lease stays 'issued' with no receipt — and because lease_id is the deterministic `lease:${capability}:${runId}` (a D1 primary key), any retry of the same runId throws a raw PK-conflict exception inside requestLease's insert, so the run can never be completed or retried; conversely nothing in the code path would stop a re-executed in-memory lease from delivering the side effect a second time, since lease state in D1 is write-only audit, not enforcement.
+
+**Evidence:** Lease id: `leaseId: \`lease:${input.request.capability}:${input.request.runId}\`` (line 437) inserted via plain `insert into capability_leases (...)` (lines 165-167, PK lease_id). Execution recording (lines 504-512): `update capability_leases set status = ? where lease_id = ?` bound to ("executed", leaseId) — no status/expiry predicate. Workflow flow (workflow-app.ts:2342-2402): `requestLease(... expiresAt: new Date(Date.now() + 15 * 60_000) ...)` then `await this.dependencies.wzrrdPublisher.execute(...)` then `recordWzrrdExecution(...)`.
+
+**Fix:** Make requestLease idempotent (insert ... on conflict return existing lease, denying if status != 'issued' or expired), and gate execution recording with `where lease_id=? and status='issued' and expires_at > ?`, treating 0 rows changed as a replay signal that must not re-deliver.
+
+### [HIGH] [concurrency-durability] Retrying a run with the same runId is guaranteed to fail, and concurrent same-runId runs silently overwrite each other's D1 events
+
+**Where:** `src/app/infrastructure/cloudflare-workflow-status-projection.ts:59`
+
+There is no run-level idempotency anywhere: the front door never checks the runs table for an existing run_id (grep shows no `select ... from runs` in src/app outside the read-only event-stream reader), the runs row is a blind upsert, and workflow_events rows are written with event_index = the in-memory eventLog.length with `on conflict(run_id, event_index) do update`. A client retry of POST /runs after a 500 (the route returns 500 'workflow_route_failed' on any mid-run error) re-executes from scratch with the same runId: it will burn a real planner agent lane until admitLane returns 'already-completed', which createAdmittedAgentLaneRuntime turns into a thrown error ('Agent lane already completed; refusing duplicate execution'), blocking the run — so transient failures are unrecoverable per runId by design but cost agent spend on every retry attempt. If two requests with the same runId run concurrently, their per-request event counters interleave and the upsert silently rewrites each other's event history and run status, corrupting the audit trail that the verifier and review surface treat as evidence.
+
+**Evidence:** cloudflare-workflow-status-projection.ts:59 `event_index: projection.eventCount` (eventCount = in-memory `eventLog.length`, workflow-app.ts:1265) written via `insert into workflow_events ... on conflict(run_id, event_index) do update set ... state = excluded.state, summary = excluded.summary` (lines 97-107). admitted-agent-lane-runtime.ts:75-79: `if (admission.status === "already-completed") { throw new Error(\`Agent lane already completed; refusing duplicate execution: ${request.laneId}\`); }`
+
+**Fix:** Reject (or short-circuit to the stored receipt) POST /runs whose run_id already exists in runs; alternatively make lanes idempotent by returning the persisted lane receipt on already-completed instead of throwing.
+
+### [HIGH] [concurrency-durability] Parallel-workflow spike: admitLane grants a second slot to an already-running lane on queue redelivery — duplicate execution in the same sandboxId
+
+**Where:** `prototypes/cloudflare-parallel-workflow-spike/src/worker.ts:186`
+
+Unlike the production supervisor (which defers on activeLaneIds.includes), this spike's admitLane only checks committed/degraded status, machine state, and the cap count. A lane in status 'running' whose consumer crashed (or whose message was duplicated — Queues are at-least-once, and Pi lanes here run up to 300s inside the consumer) gets admitted AGAIN: activeLaneIds gets a duplicate entry, and buildSandboxId(runId, laneId, lane.retryCount) returns the SAME sandboxId because retryCount was not bumped (only fail-lane bumps it). Two consumers then exec concurrently in one sandbox (clobbering /workspace, double-charging compute), and the leaked first slot eats the concurrency cap; if lanes keep crashing before /fail-lane is recorded, slots accumulate until every admission returns concurrency-cap-full, messages exhaust queue retries to the DLQ, and the run wedges in runningFanoutLanes forever (no alarm/reaper in this DO either). The newer joelclaw-research-swarm-spike copied the same admitLane verbatim (worker.ts:151-208) including the missing already-active check.
+
+**Evidence:** admitLane (lines 189-217): `if (lane.status === "committed" || lane.status === "degraded") { return json({ alreadyDone: true ... }) } ... if (record.activeLaneIds.length >= ...concurrencyCap) {...} const sandboxId = buildSandboxId(record.runId, body.laneId, lane.retryCount);` — no `record.activeLaneIds.includes(body.laneId)` or `lane.status === "running"` guard before `activeLaneIds: [...record.activeLaneIds, body.laneId]`.
+
+**Fix:** Defer (or reclaim-after-staleness) when the lane is already in activeLaneIds / status running, and include an attempt nonce in sandboxId so a reclaimed lane never shares a sandbox with a zombie attempt.
+
+### [HIGH] [concurrency-durability] Parallel-workflow spike: any crash during finalization wedges the run forever — redelivered finalize messages are acked as no-ops
+
+**Where:** `prototypes/cloudflare-parallel-workflow-spike/src/worker.ts:250`
+
+beginFinalization returns shouldFinalize:false whenever status is 'synthesizing' or 'verifying', with no check of whether synthesis/verification actually completed. First finalize attempt sets status 'synthesizing' then runs three sequential sandbox phases in the consumer; if the consumer crashes or any phase throws after that point, the queue redelivers the finalize message, begin-finalization answers shouldFinalize:false, processFinalizeMessage returns, and the message is acked — the run is permanently stuck in synthesizing/verifying with no reaper. A second variant of the same crash window: completeLane persists the fan-in-satisfied record and only THEN sends the finalize queue message (lines 296-308); a failure between putRecord and LANE_QUEUE.send means finalize is never enqueued and nothing re-triggers it. Notably the joelclaw-research-swarm-spike already fixed the first bug (its beginFinalization returns shouldFinalize:true when 'status === "synthesizing" && !record.synthesisCommitSha', etc., worker.ts:229-237) — that fix was never backported here, which is real drift if this spike is still a reference for the production spine.
+
+**Evidence:** Lines 250-252: `if (record.status === "synthesizing" || record.status === "verifying") { return json({ ok: true, record, shouldFinalize: false }); }` — contrast joelclaw-research-swarm-spike/src/worker.ts:229-230: `if (record.status === "synthesizing" && !record.synthesisCommitSha) { return json({ ok: true, record, shouldFinalize: true }); }`. completeLane: `await this.putRecord(...); if (fanInSatisfied) { await this.env.LANE_QUEUE.send({ ... type: "finalize" ... }); }`
+
+**Fix:** Backport the swarm spike's resumable beginFinalization checks (phase-completion shas) and enqueue the finalize message before (or atomically with) the state flip, since begin-finalization already dedupes.
+
+### [HIGH] [correctness-infra] Capability lease broker uses non-idempotent plain INSERTs with deterministic IDs — retries or two same-capability steps in one run hit UNIQUE constraint failures
+
+**Where:** `src/app/infrastructure/cloudflare-capability-lease-broker.ts:162`
+
+leaseId is `lease:${capability}:${runId}` (line 437) and receipt ids are `${leaseId}:lease` / `${leaseId}:discord` etc. `persistIssuedLease` and `writeReceiptRow` do plain `insert into capability_leases ...` / `insert into receipts ...` with no `on conflict` clause, while `capability_leases.lease_id` and `receipts.receipt_id` are PRIMARY KEY in migrations/0001_workflow_app_d1.sql. Consequences: (a) any run whose generated plan contains two steps of the same capability (the planner is an LLM; uniqueness is only encouraged by prompt text) produces the same lease_id twice and the second `requestLease` blows up with a D1 UNIQUE-constraint error mid-run, after earlier side effects executed; (b) replaying/retrying a run with the same runId (the entire run executes in one Worker fetch invocation, see separate finding) fails the same way. Every other D1 writer in this codebase is idempotent: review-gate actor uses `on conflict(review_id)/on conflict(receipt_id) do update` (cloudflare-review-gate-actor.ts:67,107), the status projection and telemetry sink also upsert. The broker is the only non-idempotent writer.
+
+**Evidence:** `insert into capability_leases (lease_id, run_id, capability, resource_ref, payload_hash, policy_id, status, expires_at, redacted) values (?, ?, ?, ?, ?, ?, ?, ?, ?)` (no on-conflict), and broker's writeReceiptRow: `insert into receipts (receipt_id, run_id, receipt_kind, artifact_ref, receipt_hash, redacted) values (?, ?, ?, ?, ?, ?)` vs. review-gate actor's `insert into receipts ... on conflict(receipt_id) do update set ...`
+
+**Fix:** Include the stepId in leaseId, and add `on conflict ... do update` to both broker insert statements to match the review-gate actor.
+
+### [HIGH] [correctness-infra] Production front door executes the entire multi-lane agent run inside one Worker fetch invocation — no Cloudflare Workflows durability exists in the production path
+
+**Where:** `src/app/infrastructure/cloudflare-workflow-front-door.ts:422`
+
+`startRun` constructs the full WorkflowApp and `await workflow.run(request)` synchronously inside the `POST /runs` handler (invoked directly at cloudflare-worker-route.ts:1312 `await frontDoor.startRun(body)`). There is no `WorkflowEntrypoint`, no `step.do`, and wrangler.jsonc has no `workflows` binding — only Durable Objects. So planner lane + N worker lanes + verifier lane + capability executions (each a sandbox session with `timeoutMs` per lane) all run within a single request: an isolate eviction, deploy, uncaught exception, or client disconnect mid-run loses the run entirely, leaving partial non-idempotent D1 writes (leases/receipts) and orphaned run repos with no resume path. This directly contradicts the repo premise ("running Pi inside Cloudflare Sandboxes via durable workflows") and the D1 sink description ("while the control plane advances the run"). A maintainer reading 'production spine' will assume durability that is not there.
+
+**Evidence:** cloudflare-workflow-front-door.ts: `route: "POST /runs", async startRun(input) { ... const workflow = new WorkflowApp({...}); return await workflow.run(request); }` — and `grep -rn "WorkflowEntrypoint|step.do" src/app` returns nothing; wrangler.jsonc contains only durable_objects bindings.
+
+**Fix:** Move run execution into a Cloudflare Workflows entrypoint with idempotent steps (or at minimum a queue/DO-driven resumable loop), and have POST /runs enqueue and return 202.
+
+### [HIGH] [correctness-spine] Generated machine with a final initial state passes all validators and produces a 'captured' run with zero steps executed (proven end-to-end)
+
+**Where:** `src/app/application/workflow-app.ts:680`
+
+validateGeneratedMachineStartupProtocol checks that the initial state has no stepId and has an on.NEXT transition to the first planned step, but never checks that the initial state is not a final state. A planner-emitted machine document with `initial: "done"` where the done final state carries `on: { NEXT: { target: <first step> } }` passes every check in validateGeneratedMachineAgainstPlan (the schema allows `on` on final states, and XState silently ignores transitions on final states). At runtime the actor is immediately done, `workflowActor.send({ type: "NEXT" })` is a no-op, and the first loop iteration in executeDynamicWorkflow sees status "done" and sets workflowCompleted=true. The post-loop guard only checks `!workflowCompleted` — it never asserts `completedStepIds.size === loadedPlan.steps.length`. I verified this end-to-end with the real WorkflowApp + in-memory adapters: wrapping the integration planner to set `initial: "done"` yielded `status: captured`, `completedStepIds: []`, `generatedStateSequence: ["done"]` — a full run receipt, review surface, and execution proof for a run that executed nothing. Downstream cloudflare-proof guards don't save you: `workerLaneReceipts.every(isRealAgentLaneReceipt)` is vacuously true on an empty array, and the verification contract is itself planner-authored. Since the planner is a stochastic LLM lane and this validation layer exists precisely to constrain its output, this is a real hole in the spine's core guarantee (fake success looking like real work).
+
+**Evidence:** validateGeneratedMachineStartupProtocol: `if (initialState.meta.stepId !== undefined) { return blocker(...) } const initialTarget = initialState.on["NEXT"]?.target;` — no `initialState.type === "final"` check. executeDynamicWorkflow post-loop: `if (!workflowCompleted) { ... return { result, status: "blocked" }; }` — no completedStepIds count check. Probe output: `status: captured / completedStepIds: [] / generatedStateSequence: ["done"]`
+
+**Fix:** Two-line fix, defense in depth: (1) in validateGeneratedMachineStartupProtocol, block when `initialState.type === "final"` (or when `machine.xstate.initial` is "done"/"blocked"); (2) after the loop in executeDynamicWorkflow, block when `completedStepIds.size !== input.loadedPlan.steps.length`. The second check closes the whole class of skip-to-done machines regardless of future validator gaps.
+
+### [HIGH] [docs-drift] Entire dream-memory-fabric/cartridge production surface is undocumented; CONTEXT.md claims a single Workflow App context
+
+**Where:** `CONTEXT.md:3`
+
+CONTEXT.md states the repo has "one production-intended context today" and that "Production code lives under src/app/", and its Bounded Contexts table lists only domain/application/workflow/control-plane/infrastructure. The workflow-app-spine.md architecture table (lines 30-39) lists the same five boundaries plus worker.ts. Reality: there is a large second production surface — src/app/workflow-nodes/ (dream-memory-fabric.ts at 1,949 lines, dream-memory-fabric-schemas.ts at 959 lines, dream-generated-workflow-proof.ts, artifact-backed-cartridge-adapter.ts; ~3,400 lines), src/cartridges/ (dream-memory-fabric cartridge plus cloudflare-workflow-cartridges.ts), dream relay infrastructure (trusted-dream-memory-relay-server.ts 432 lines, cloudflare-dream-memory-fabric-relay.ts 440 lines, cloudflare-workflow-cartridge-installer.ts), six app:dream:* package.json scripts with scripts/*.ts entrypoints, and 11+ dream/cartridge integration tests in tests/integration. Grep for "cartridge", "workflow-nodes", or "app:dream" across README.md, CONTEXT.md, AGENTS.md, VISION.md, and docs/workflow-app-spine.md returns zero hits. A maintainer relying on the docs has no idea roughly a third of the production code exists, what its contracts are, or how to run it.
+
+**Evidence:** CONTEXT.md: "This repo has one production-intended context today: **Workflow App** ... Production code lives under `src/app/`." vs `wc -l src/app/workflow-nodes/*.ts`: dream-memory-fabric.ts 1949, dream-memory-fabric-schemas.ts 959, dream-generated-workflow-proof.ts 284, artifact-backed-cartridge-adapter.ts 167; package.json: "app:dream:run": "tsx scripts/workflow-app-dream-run.ts"; grep for cartridge/workflow-nodes/app:dream in docs/ README.md CONTEXT.md AGENTS.md returned no matches.
+
+**Fix:** Add a dream-memory-fabric/cartridge section to docs/workflow-app-spine.md and CONTEXT.md (or a dedicated doc) covering src/app/workflow-nodes, src/cartridges, the relay server, the app:dream:* commands, and the workflow.node.invoke step kind, and update the bounded-context tables.
+
+### [HIGH] [prototypes-hygiene] Graduated prototypes violate their own delete/absorb rules — disposition needed for all 17
+
+**Where:** `prototypes/README.md:3`
+
+The repo's own policy (prototypes/README.md: 'Every directory here is disposable... It is deleted or rewritten after capture'; docs/production-vs-prototypes.md: prototype code may not 'stay alive after learning is captured without a deletion date') has fired for at least 7 prototypes whose capabilities now exist in src/app, yet all still read 'Status: active'. Concretely: capsule-supervisor-spike and capsule-do-spike say 'Delete after the real Durable Object supervisor is rewritten into src/' — wrangler.jsonc now deploys class_name CloudflareWorkflowCapsuleSupervisor as a production DO. secret-lease-broker-spike says 'Delete after a real control-plane secret broker is rewritten into src/' — src/app/infrastructure/cloudflare-capability-lease-broker.ts (821 lines) exists. review-gate-spike says 'Delete after the review gate shape is rewritten into src/' — src/app/infrastructure/cloudflare-review-gate-actor.ts exists. machine-planner-spike says 'Delete after the production planner is rewritten into src/' — the spine planner is the Pi planner lane in src/app/infrastructure/cloudflare-agent-lane-adapters.ts (Zod-schema-validated PlannerLaneBlueprintDocumentSchema), a different and superseding design. cloudflare-registry-workflow-os-spike is already marked 'Status: captured' with rule 'Delete or rewrite after the real Cloudflare registry proof is captured' — src/app/infrastructure/cloudflare-package-registry.ts exists. Several of these have deployed Cloudflare Workers, queues, and secrets (GitHub App keys in cloud-capability-lease-broker-spike) that keep accumulating drift and live attack surface the longer the corpses ride in the wagon.
+
+**Evidence:** capsule-do-spike/README.md: 'Delete after the real Durable Object supervisor is rewritten into `src/` and integrated with the real sandbox/artifacts/wzrrd route.' — vs wrangler.jsonc: '"durable_objects": ... "class_name": "CloudflareWorkflowCapsuleSupervisor"'. cloudflare-registry-workflow-os-spike/README.md: 'Status: captured ... Delete or rewrite after the real Cloudflare registry proof is captured.' — vs src/app/infrastructure/cloudflare-package-registry.ts (303 lines) existing.
+
+**Fix:** Per-prototype disposition: DELETE (absorbed, condition fired): capsule-supervisor-spike, capsule-do-spike, integrated-capsule-run-spike, secret-lease-broker-spike, review-gate-spike, machine-planner-spike (capture pattern-library receipt to .brain/ first), cloudflare-registry-workflow-os-spike (tear down Worker+queue first), prototypes/_captures/ (empty dir). DELETE AFTER WORKER TEARDOWN: sandbox-workflow-spike + cloudflare-parallel-workflow-spike + cloud-capability-lease-broker-spike (revoke GitHub App secrets) + workflow-observability-spine-spike — these have deployed Workers/queues/secrets; sandbox-workflow-spike must go together with integrated-capsule-run-spike which calls its deployed endpoint. KEEP WITH DEADLINE (only home of a needed capability): joelclaw-research-swarm-spike (research-swarm use case not yet a cartridge), shitrat-dream-workflow-spike (TODO.md tracks unproved seams; partially absorbed into src/cartridges/dream-memory-fabric), registry-office-ui-spike (only UI over the registry), system-dream-review-ui (canonical report pattern per docs/source-map.md, seed for wzrrd.report.render node). DELETE (one-shot reports already published): shitrat-brain-proposal-ui, dream-sequence-vision-ui.
+
+### [HIGH] [security] Registry prototype is open-by-default: isAuthorized returns true when ACCESS_TOKEN is unset
+
+**Where:** `prototypes/cloudflare-registry-workflow-os-spike/src/worker.ts:1003`
+
+Unlike its sibling prototypes (sandbox/parallel/joelclaw/observability/capsule), which fall back to a localhost-hostname check when ACCESS_TOKEN is unset (and therefore deny on a public *.workers.dev hostname), the registry prototype returns true unconditionally. The deploy script only puts the secret conditionally ('test -z "$ACCESS_TOKEN" || ... secret put ACCESS_TOKEN' in package.json:47), so if ACCESS_TOKEN is empty in the deploy environment the secret is never set and every route — including run-triggering routes — is fully public with no gate at all.
+
+**Evidence:** function isAuthorized(request: Request, env: Env): boolean {
+  if (!env.ACCESS_TOKEN) {
+    return true;
+  }
+  return request.headers.get("authorization") === `Bearer ${env.ACCESS_TOKEN}`;
+}
+
+**Fix:** Mirror the other prototypes: fall back to a localhost-only allow (or deny entirely) when ACCESS_TOKEN is unset, and/or make the deploy script fail when ACCESS_TOKEN is missing instead of silently skipping the secret put.
+
+### [HIGH] [tests] Core Sandbox Pi lane runtime has zero test coverage; its test hooks are exported but never imported
+
+**Where:** `src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts:411`
+
+The 422-line module that actually runs Pi inside a Cloudflare Sandbox (creates sandbox, writes prompt, mounts packages, runs the embedded shell/node scripts, clones/commits/pushes the artifact repo, destroys the sandbox on failure) is the reason this repo exists, and no test imports it. The module even exports __cloudflareSandboxAgentLaneTestHooks ({ buildPiAgentLaneCommand }) 'for tests', but grep shows the only reference is the re-export in src/app/index.ts:183 — no test uses it. Worse, the file tests/integration/cloudflare-sandbox-agent-lanes.test.ts exists and its name claims this coverage, but it only imports agent-lane-json-output.ts and agent-lane-package-mounts.ts (helper modules). A maintainer scanning the test directory would believe the sandbox runtime is covered when it is not. Regressions in command construction, env propagation, or the error-path sandbox destroy (line 401: destroySandbox in catch) would ship silently.
+
+**Evidence:** src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts:420: `export const __cloudflareSandboxAgentLaneTestHooks = { buildPiAgentLaneCommand, };` — `grep -rn "__cloudflareSandboxAgentLaneTestHooks" src tests` matches only `src/app/index.ts:183`. Meanwhile tests/integration/cloudflare-sandbox-agent-lanes.test.ts imports only `from "../../src/app/infrastructure/agent-lane-json-output.ts"` and `from "../../src/app/infrastructure/agent-lane-package-mounts.ts"` — never the sandbox lanes module it is named after.
+
+**Fix:** At minimum, add unit tests for buildPiAgentLaneCommand via the already-exported test hooks (assert the exact command/env for planner vs worker lanes, secret handling, timeout). Rename the existing test file to match what it covers (agent-lane-helpers), and add a workerd-based test (vitest-pool-workers) or a recorded-fake Sandbox contract test for runCloudflareSandboxPiAgentLane including the destroy-on-error path.
+
+### [HIGH] [tests] Durable Object concurrency admission (CloudflareWorkflowCapsuleSupervisor) untested; every test re-implements its semantics in a hand-rolled fake
+
+**Where:** `src/app/infrastructure/cloudflare-capsule-supervisor.ts:103`
+
+The DO that enforces lane concurrency caps, duplicate-lane admission, already-completed detection, and release bookkeeping against ctx.storage (325 lines) has no test referencing it. admitted-agent-lane-runtime.test.ts builds its own fake controller (createController, lines 127-168) that fabricates admission decisions, and cloudflare-workflow-front-door.test.ts uses another fake (createAdmissionCapsuleController). So the tests prove the *runtime wrapper* honors decisions, but the component that actually makes the decisions — the cap check `record.activeLaneIds.length >= input.maxActiveLanes` (line 135), the dedup check on line 119, and the storage read/parse/put cycle (lines 268-273) — is exercised nowhere. This is the classic drift risk: the fakes encode what the authors believe the DO does. A bug in releaseLane (e.g. failing to remove a lane id, leaving the cap permanently full and deadlocking all runs) would pass the entire suite.
+
+**Evidence:** `grep -rln "CloudflareWorkflowCapsuleSupervisor\|capsule-supervisor" tests/` returns nothing. tests/integration/admitted-agent-lane-runtime.test.ts:136-154 fakes admission: `admitLane(input) { admissions.push(input); const decision = decisions.shift() ?? AgentLaneAdmissionDecisionSchema.parse({ ... status: "admitted" ... }); return Promise.resolve(decision); }` while the real logic lives untested at cloudflare-capsule-supervisor.ts:135: `if (record.activeLaneIds.length >= input.maxActiveLanes)`.
+
+**Fix:** The DO's admit/release logic is pure record-transformation around ctx.storage; extract it to a pure function and test admit-at-cap, admit-duplicate, release-unknown-lane, and already-completed transitions directly, or run the DO under @cloudflare/vitest-pool-workers with real DO storage.
+
+### [HIGH] [tests] POST /runs is unauthenticated and no test asserts any auth on the main run-submission route
+
+**Where:** `src/app/infrastructure/cloudflare-worker-route.ts:1262`
+
+The worker route handler accepts POST /runs from anyone: the handler goes straight from method check to body parsing to frontDoor.startRun with no token/Access check. The only auth-rejection tests in the 1302-line cloudflare-worker-route.test.ts cover the admin package-seed routes ('rejects package seed requests without the admin bearer token'). Starting a run provisions an artifact repo, spends Pi/sandbox compute, and can trigger leased capabilities — this is the most expensive and most outward-facing endpoint, and the test suite encodes that it requires nothing. The prototype workers gated everything behind ACCESS_TOKEN; the production worker has no equivalent and no test demanding one, so the gap is invisible to CI.
+
+**Evidence:** cloudflare-worker-route.ts:1262-1280: `if (url.pathname !== "/runs") { return jsonError(404, ...); } if (input.request.method !== "POST") { ... } let body: unknown; try { body = WorkflowRunRequestSchema.parse(await parseJsonRequest(input.request)); ...` — no bearerToken() call on this path; bearerToken (line 236) is only consulted by the seed guard at line 452. Test list for the route includes only `"rejects package seed requests without the admin bearer token"` for auth.
+
+**Fix:** Decide the auth story for /runs (worker-level bearer token or Cloudflare Access service token validation), implement it, and add tests: 401 without credentials, 401 with wrong token, 202/200 with valid token. If auth is intentionally delegated to Cloudflare Access at the edge, encode that as a documented invariant and test that the handler rejects when the Access-injected header is absent.
+
+### [MEDIUM] [architecture] Dependency inversion break: app/infrastructure imports src/cartridges, which imports back into src/app
+
+**Where:** `src/app/infrastructure/cloudflare-worker-route.ts:6`
+
+The generic worker route (infrastructure spine) imports the installed-cartridge registry from src/cartridges, and src/cartridges imports app/infrastructure (package-seeder, cartridge-installer) and app/workflow-nodes. That is a bidirectional src/app <-> src/cartridges dependency: the spine knows about its plugins instead of being composed at the entrypoint (src/app/worker.ts, which is only 9 lines and would be the natural composition root). Worse, the route's env binding schema is literally aliased to the dream cartridge's schema (`InstalledWorkflowCartridgeEnvBindingSchema = DreamMemoryFabricCloudflareEnvBindingSchema` in cloudflare-workflow-cartridges.ts:13), so every installed cartridge's Cloudflare bindings leak into the generic route contract. Adding a second cartridge forces edits inside the spine's infrastructure layer rather than only in the cartridge and the composition root.
+
+**Evidence:** cloudflare-worker-route.ts: `import { InstalledWorkflowCartridgeEnvBindingSchema, defaultPackageSeedTemplatesWithInstalledCartridges, workflowCartridgeDependenciesFromWorkerBindings } from "../../cartridges/cloudflare-workflow-cartridges.ts";` while cloudflare-workflow-cartridges.ts has `import { defaultPackageSeedTemplates } from "../app/infrastructure/cloudflare-package-seeder.ts";`
+
+**Fix:** Make createWorkflowWorkerHandler accept a cartridge registry (installers + seed templates + env schema fragment) as a parameter with the current set as default supplied from worker.ts. src/cartridges may depend on src/app; src/app must never depend on src/cartridges.
+
+### [MEDIUM] [architecture] workflow-nodes/ is an undocumented sixth layer holding a ~3,300-line vertical feature with ports and schemas outside their declared homes
+
+**Where:** `src/app/workflow-nodes/dream-memory-fabric.ts:74`
+
+src/README.md documents exactly five layers (domain, application, workflow, control-plane, infrastructure) and the rule 'Zod owns runtime contracts' under domain. workflow-nodes/ is none of these. dream-memory-fabric.ts (1,949 lines) defines its own ports (DreamMemoryFabricPort, DreamMemoryRetrievalPort, DreamMemoryBackfillPort) inside the feature file rather than application/ports.ts, and dream-memory-fabric-schemas.ts (959 lines) is a second schema home outside domain/. The app barrel (src/app/index.ts) then re-exports roughly 120 Dream* symbols (lines 55-173), so one feature dominates the package's public API. The layering decision may be fine (vertical slice behind WorkflowNodeAdapterPort), but it is currently invisible: a maintainer following the README will not find half the runtime contracts, and the next cartridge author has no documented pattern to copy.
+
+**Evidence:** src/README.md lists only `app/domain/`, `app/application/`, `app/workflow/`, `app/control-plane/`, `app/infrastructure/` (no workflow-nodes); dream-memory-fabric.ts declares `export interface DreamMemoryFabricPort { inventorySources(...) ... }` outside application/ports.ts; wc -l: dream-memory-fabric.ts 1949, dream-memory-fabric-schemas.ts 959.
+
+**Fix:** Either promote workflow-nodes to a documented layer with an explicit rule ('feature node adapters colocate their ports and schemas; the spine only sees WorkflowNodeAdapterPort'), or move the Dream ports into application/ports.ts and schemas into domain/. Also split dream-memory-fabric.ts — it is the second-largest file in the repo and covers inventory, hydration, search, correlation, backfill, HITL reporting, and refinement proposals in one module. Trim the Dream re-exports from index.ts to the surface cartridge consumers actually need.
+
+### [MEDIUM] [architecture] AgentLaneRuntimeRequest port leaks sandbox/Pi runtime mechanics into the application boundary
+
+**Where:** `src/app/application/ports.ts:244`
+
+Cloudflare types do NOT leak into domain/application (verified: zero @cloudflare imports there; the lease broker even defines D1DatabaseLike structurally). But the agent-lane port leaks a different implementation: AgentLaneRuntimeRequest encodes the Cloudflare-sandbox shell-script contract — git artifact remote + token secret name, base64-encoded Pi auth file, prompt/receipt/transcript filesystem paths, and a hardcoded `provider: "openai-codex"` literal. Any alternative runtime (the README's 'future Think lanes', or a non-sandbox runtime) must impersonate this exact filesystem-and-git layout, and supporting a second Pi provider requires editing the port type itself. The port describes how the current adapter works, not what the application needs (a deep-module inversion: the abstraction is shaped by its only implementation).
+
+**Evidence:** ports.ts AgentLaneRuntimeRequest: `readonly artifactRemote: string; readonly artifactTokenSecret: string; ... readonly leasedPiAuthJsonBase64: string; readonly prompt: string; readonly promptPath: string; readonly provider: "openai-codex"; readonly receiptPath: string; ... readonly transcriptPath: string;` consumed by cloudflare-sandbox-agent-lanes.ts:360 `PI_PROVIDER: input.input.provider`.
+
+**Fix:** Shrink the port to intent (laneId, kind, prompt, model, provider as a branded string, timeout, package mounts, trace context, auth lease) and let the sandbox runtime derive its own paths/remote/secret wiring from its config. At minimum widen `provider` to a domain enum so adding a provider is a schema change, not a port-type change.
+
+### [MEDIUM] [concurrency-durability] Registry-workflow-os spike: queue jobs have zero idempotency — terminal jobs are resurrected and failed jobs retry-storm
+
+**Where:** `prototypes/cloudflare-registry-workflow-os-spike/src/worker.ts:656`
+
+processValidationJob/processInstallSmokeJob never consult job status before executing: a redelivered message (crash between /job-complete and message.ack, or any duplicate) re-runs the full sandbox validation and markJobRunning flips a 'succeeded'/'failed' job straight back to 'running' with no status guard (lines 300-317). Worse, on failure the consumer records the terminal failure via /job-failed and then rethrows, so the outer handler calls message.retry — every transient error therefore re-executes a job whose record already says 'failed', flapping validationStatus failed→running→failed until queue max retries, with each attempt reusing the same deterministic sandboxId (buildSandboxId('rv', message.name)) so concurrent duplicates share one sandbox.
+
+**Evidence:** Lines 656-662: `await postDo(stub, "/job-failed", { error: ..., jobId: message.jobId, ... }); throw error;` followed by the queue handler's `catch (error) { ... message.retry({ delaySeconds: QUEUE_RETRY_DELAY_SECONDS }); }` (lines 596-599). markJobRunning (lines 300-317) sets `status: "running"` after only `requireValue(record.jobs[body.jobId], "job")` — no check of current status.
+
+**Fix:** Add an admit-style gate: refuse to run a job whose status is succeeded/failed (ack the duplicate), and decide retry vs. terminal-fail inside the DO (like the lane spikes' fail-lane retryCount) instead of recording failure and retrying anyway.
+
+### [MEDIUM] [concurrency-durability] Capsule supervisor stores all events and lane receipts for a work item in a single DO storage value — unbounded growth toward the 128 KiB value cap
+
+**Where:** `src/app/infrastructure/cloudflare-capsule-supervisor.ts:178`
+
+The DO keeps one 'record' key per workItemId containing every workflow event ever appended (appendEvent pushes onto record.events with no pruning), plus completedLaneIds, failedLaneIds, and a laneReleases map that grows with every lane of every run. The DO is keyed by workItemId, not runId, so this accumulates across all runs of a work item for its lifetime. Durable Object storage values are capped at 128 KiB; each run appends ~15-20 events (each with summary + refs hashes) plus 3+ lane release receipts, so a long-lived work item will eventually make putRecord throw on every appendEvent — and since workflow-app awaits appendEvent inside every transition, the work item becomes permanently unable to run anything (every run blocks at the first transition).
+
+**Evidence:** appendEvent (lines 178-190): `await this.putRecord(SupervisorRecordSchema.parse({ ...record, events: [...record.events, input.event], ... }))` into the single key: `await this.ctx.storage.put("record", ...)` (line 273), with `events: z.array(WorkflowEventSchema).default([])` and `laneReleases: z.record(...)` in SupervisorRecordSchema (lines 38-49) and no deletion/truncation anywhere in the class.
+
+**Fix:** Shard events into per-run keys (or stop mirroring events in the DO at all — D1 workflow_events already holds them) and prune lane bookkeeping for completed runs.
+
+### [MEDIUM] [correctness-infra] Package registry parse throws on NULL manifest_hash rows — the null-stripping conditional is dead code
+
+**Where:** `src/app/infrastructure/cloudflare-package-registry.ts:109`
+
+`parsePackageRow` builds `manifestHash = row.manifest_hash === null ? {} : {manifest_hash: ...}` then does `D1PackageRowSchema.parse({ ...row, ...manifestHash })`. Spreading `{}` over `...row` does NOT remove the `manifest_hash: null` key already present from the row spread, and `D1PackageRowSchema.manifest_hash` is `Sha256HexSchema.optional()` which rejects null. Verified with the repo's zod: `{...{id:'x',manifest_hash:null}, ...{}}` => `{"id":"x","manifest_hash":null}` => `safeParse(...).success === false`. The `packages.manifest_hash` column is nullable in both d1-schema.ts and migrations/0001 (`manifest_hash text`), so any row inserted without a hash makes `discoverMetadata()` (which maps every entitled row) throw a ZodError — one bad row blocks planning for every run by that actor. The event-stream reader got the same problem right by building the object key-by-key (cloudflare-workflow-event-stream.ts:36-52); the registry got it wrong.
+
+**Evidence:** const manifestHash = row["manifest_hash"] === null || row["manifest_hash"] === undefined ? {} : { manifest_hash: row["manifest_hash"] }; return D1PackageRowSchema.parse({ ...row, ...manifestHash });
+
+**Fix:** Destructure manifest_hash out of the row before spreading: `const { manifest_hash, ...rest } = row; return D1PackageRowSchema.parse({ ...rest, ...manifestHash });` and add a test with a NULL manifest_hash row.
+
+### [MEDIUM] [correctness-spine] Thrown adapter errors escape the safety envelope, leaving the run permanently non-terminal in persistent state
+
+**Where:** `src/app/application/workflow-app.ts:1283`
+
+Error handling in run() is inconsistent: packageRegistry.discoverMetadata, the planner, verifiers, and workflowNodeAdapter are wrapped in try/catch and converted to BLOCK transitions, but many other awaited dependencies are not — contextCapsules.resolve, every artifacts.writeJson/writeText in run()/pinDynamicWorkflowBlueprint (plan pin, machine/harness/contract writes), observabilityRecorder.capturePack, reviewGate.summarize, reviewSurfacePublisher.publish, capabilityLeases.record*Execution, and statusProjection.record inside transition() itself. Any rejection there throws straight out of run(). The front door (createCloudflareWorkflowFrontDoor.startRun) has no catch; the worker route catches and returns a 500 whose own message admits the problem: "Workflow route failed before a receipt was captured." The consequence is durable-state inconsistency: the D1 status projection and workflow_events log are left at a non-terminal state (e.g. executingDynamicWorkflow) with no BLOCK event, no blocker, no receipt. The SSE event-stream tail in cloudflare-worker-route.ts only stops on terminal states (`terminalWorkflowStates = new Set(["blocked", "captured"])`), so consumers poll until the budget runs out. For a system whose entire observability story is the safety-envelope event log, a mid-run R2/D1/network failure produces a run that looks forever in-flight.
+
+**Evidence:** run(): `const capsule = await this.dependencies.contextCapsules.resolve({ runId: request.runId, workItemId: request.workItemId });` (no try/catch), `const planWrite = await this.dependencies.artifacts.writeJson({ path: "run/plan.json", ... })` (no try/catch); cloudflare-worker-route.ts:1327-1331: `return jsonError(500, "workflow_route_failed", "Workflow route failed before a receipt was captured.");`
+
+**Fix:** Wrap the body of run() (after actor.start()) in a top-level try/catch that converts unexpected throws into `block(blocker("adapter_unavailable", ...), ...)` so the envelope machine and status projection always reach a terminal state — with a best-effort fallback if the projection write itself is what failed.
+
+### [MEDIUM] [correctness-spine] Capability lease identity is keyed by capability+runId, so two steps with the same capability in one plan collide (duplicate-PK throw in prod, silent receipt overwrite in tests)
+
+**Where:** `src/app/infrastructure/cloudflare-capability-lease-broker.ts:437`
+
+Both brokers mint `leaseId: lease:${capability}:${runId}` with no per-step component, and DynamicWorkflowStepSchema/the machine validators happily accept a plan containing two `capability.discord.message` steps (both bound to the same pinned payload). In production, capability_leases has `lease_id text primary key` (migrations/0001_workflow_app_d1.sql:40), so the second requestLease for the same capability fails the D1 insert and assertD1Write throws — un-caught by the discord branch of executeDynamicWorkflow (`const leaseDecision = await this.requestDiscordLease(...)` has no try/catch), so the run dies via finding #2's unhandled-throw path after the first Discord message was already sent. In the in-memory policy broker the same plan instead 'succeeds' while writing every receipt to the fixed path `receipts/discord-capability.json`, so the second receipt artifact overwrites the first and both CapabilityLeaseReceipt.receiptRef values point at one artifact describing only the last delivery — corrupting the audit trail the receipts exist to provide. Same fixed-path pattern applies to the other capabilities in the memory broker. Integration tests therefore cannot detect the production-breaking duplicate-lease behavior.
+
+**Evidence:** cloudflare-capability-lease-broker.ts: `leaseId: ``lease:${input.request.capability}:${input.request.runId}``` and `insert into capability_leases (lease_id, ...)` with `lease_id text primary key`; memory-adapters.ts recordDiscordExecution: `const writeReceipt = await artifactStore.writeJson({ path: "receipts/discord-capability.json", ... })` and `leaseId: ``lease:${input.capability}:${input.runId}```
+
+**Fix:** Include the step id (or a monotonically increasing lease sequence) in leaseId and in receipt paths — workflow-app already passes a per-step traceContext (`stepId`) into the lease request, so the broker has the data. Alternatively, validate at plan-load time that each leased capability appears at most once per run if that is the intended invariant.
+
+### [MEDIUM] [docs-drift] workflow-app-spine.md claims generated machine source and harness are optional; the schema and loader make both mandatory
+
+**Where:** `docs/workflow-app-spine.md:100`
+
+The spine doc repeatedly describes the generated machine TypeScript source and the harness artifact as conditional: "optional generated machine TypeScript source for inspection", "generated harness artifact ref and hash, only when the planner creates new step bindings or adapter wiring" (line 126), "Generated TypeScript source may be emitted as an inspectable/debuggable artifact, but it is not required for execution" (line 112), and the integration-assertions section says machine.ts/harness.ts are written only "when ... emitted"/"when new step bindings ... require it" (lines 428-429, 446-447). In code, DynamicWorkflowMachineArtifactSchema requires sourceArtifactRef/sourceHash, DynamicWorkflowPlanDocumentSchema requires harness: GeneratedHarnessArtifactSchema (no .optional()), and WorkflowApp.loadPinnedDynamicWorkflowMachine blocks the run if the machine source cannot be read or its hash mismatches — so the source is required for execution to proceed, not optional inspection material. CONTEXT.md (line 67) actually agrees with the code: "The app pins both `workflows/machine.config.json` and generated `workflows/machine.ts` before execution" — so the two docs also contradict each other.
+
+**Evidence:** schemas.ts:756-762: `DynamicWorkflowMachineArtifactSchema = z.object({ artifactRef: ArtifactRefSchema, hash: Sha256HexSchema, machineId: ..., sourceArtifactRef: ArtifactRefSchema, sourceHash: Sha256HexSchema })`; schemas.ts:1070-1076: `DynamicWorkflowPlanDocumentSchema = DynamicWorkflowPlanBaseSchema.extend({ harness: GeneratedHarnessArtifactSchema, machine: ... })`; workflow-app.ts loadPinnedDynamicWorkflowMachine: `machineSource = await this.dependencies.artifacts.readText({ artifactRef: input.loadedPlan.machine.sourceArtifactRef })` with catch returning `status: "blocked"` and `if (sha256Hex(machineSource) !== input.loadedPlan.machine.sourceHash) ... blocked`.
+
+**Fix:** Either make the schema fields optional to match the documented intent, or fix the spine doc to say machine source and harness are always pinned and hash-verified before execution (matching CONTEXT.md).
+
+### [MEDIUM] [docs-drift] production-vs-prototypes.md says the capsule Durable Object is "not yet deployed as the production Worker path" — it is
+
+**Where:** `docs/production-vs-prototypes.md:66`
+
+The "Current prototype receipts" section still frames seam 1 (capsule keyed by external work item) as only partially proved by prototypes and explicitly says the DO capsule "is not yet deployed as the production Worker path." Reality: src/app/worker.ts exports CloudflareWorkflowCapsuleSupervisor, wrangler.jsonc binds it as a Durable Object class, and docs/workflow-app-spine.md records multiple live deployed runs through that path (Worker https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev, e.g. run-live-verifier-lane-260609t1216-9078d6 with status captured). The doc describes the prototype era as the current state of the spine, which would misdirect a maintainer deciding what still needs to be built.
+
+**Evidence:** production-vs-prototypes.md: "`capsule-do-spike/` proves the same boundary in local Wrangler ... It is not yet deployed as the production Worker path." vs src/app/worker.ts:6: `export { CloudflareWorkflowCapsuleSupervisor } from "./infrastructure/cloudflare-capsule-supervisor.ts";` and wrangler.jsonc:38: `"class_name": "CloudflareWorkflowCapsuleSupervisor"` plus spine doc line 47: "`CloudflareWorkflowCapsuleSupervisor` is the production-intended Durable Object adapter for the context capsule and lane admission contracts."
+
+**Fix:** Update the seam-status section to record that seams 1 and (partially) 3 now have deployed production-Worker receipts, pointing at docs/workflow-app-spine.md for the live receipt trail.
+
+### [MEDIUM] [docs-drift] Documented "Current step kinds" omit workflow.node.invoke, which exists in the domain schema
+
+**Where:** `docs/workflow-app-spine.md:136`
+
+workflow-app-spine.md lists exactly three current step kinds (research.review, capability.discord.message, review.summary), and CONTEXT.md's Dynamic Workflow Plan entry repeats the same three. The DynamicWorkflowStepSchema discriminated union in src/app/domain/schemas.ts contains a fourth variant, `workflow.node.invoke` (with nodeType, inputRefs, packageRefs, outputPath), which is the entrypoint for the package-backed workflow-node/cartridge execution path. Anyone designing a planner prompt or validating plans from the docs will produce an incomplete step-kind contract.
+
+**Evidence:** docs/workflow-app-spine.md:136-140: "Current step kinds:\n- `research.review`\n- `capability.discord.message`\n- `review.summary`" vs schemas.ts:657: `kind: z.literal("workflow.node.invoke"), nodeType: z.string().min(1), outputPath: z.string().min(1), packageRefs: z.array(ArtifactRefSchema)...` inside DynamicWorkflowStepSchema.
+
+**Fix:** Add workflow.node.invoke to the step-kind lists in both docs and describe its node-invocation semantics.
+
+### [MEDIUM] [prototypes-hygiene] .wzrrd/ contains machine-local publish state and is not gitignored
+
+**Where:** `.wzrrd/state.json:1`
+
+The untracked .wzrrd/ directory (state.json + a generated workflow-run-observability-pack/index.html, 44K) is machine-specific tool state: it embeds absolute /Users/joel/... source paths and live wzrrd.sh publish URLs. `git check-ignore .wzrrd/state.json` exits 1 — it is not ignored, so the next broad `git add .` commits this machine's publish ledger into the repo. The .keep file suggests intent, but state.json with absolute local paths does not belong in version control per the repo's own machine-specific-config norms.
+
+**Evidence:** .wzrrd/state.json: '"source": "/Users/joel/Code/joelhooks/pi-cloudflare-sandbox-workflows/prototypes/shitrat-brain-proposal-ui/build"' ... git check-ignore .wzrrd/state.json -> exit 1 (not ignored); .gitignore has no .wzrrd entry.
+
+**Fix:** Add `.wzrrd/` to .gitignore (or at minimum `.wzrrd/state.json` and `.wzrrd/workflow-run-observability-pack/` if you want to keep the .keep). If publish receipts are durable learning, capture the URLs in .brain/ instead.
+
+### [MEDIUM] [prototypes-hygiene] shitrat-brain-proposal-ui has no .gitignore — 1.4MB of build output will be committed by the next git add
+
+**Where:** `prototypes/shitrat-brain-proposal-ui`
+
+The other SvelteKit spikes (system-dream-review-ui, dream-sequence-vision-ui) each carry a .gitignore covering .svelte-kit/build/node_modules, but shitrat-brain-proposal-ui has none. Its build/ (404K) and .svelte-kit/ (1.0M) directories are NOT git-ignored, and since the whole prototype is currently untracked ('?? prototypes/shitrat-brain-proposal-ui/'), `git add prototypes/` will commit generated build artifacts and the SvelteKit cache.
+
+**Evidence:** git check-ignore results: 'NOT IGNORED: prototypes/shitrat-brain-proposal-ui/build (404K)' and 'svelte-kit NOT ignored', while prototypes/system-dream-review-ui/.gitignore contains '.svelte-kit\nbuild\nnode_modules'.
+
+**Fix:** Copy system-dream-review-ui/.gitignore into shitrat-brain-proposal-ui (or add prototypes/**/build/ and prototypes/**/.svelte-kit/ to the root .gitignore alongside the existing prototypes/**/out/ rule). Moot if the prototype is deleted per disposition.
+
+### [MEDIUM] [prototypes-hygiene] Three copy-pasted SvelteKit report UIs with already-diverged components — canonical copy ambiguous
+
+**Where:** `prototypes/system-dream-review-ui/src/lib`
+
+shitrat-brain-proposal-ui, system-dream-review-ui, and dream-sequence-vision-ui are the same Tufte report app copied three times. md5 comparison shows ReportLayout.svelte, margin-note.svelte, and pattern-cards.svelte are identical across all three, but flow-chart.svelte and stat-line.svelte have already drifted: brain-proposal-ui's copies (640651..., cb6d89...) differ from the identical pair shared by the other two (15c2d1..., 42969b...). system-dream-review-ui's own README admits the problem ('make this a package-backed workflow node, not a copied report directory') and docs/source-map.md names it the current source pattern — so a fourth copy is one dream-run away, and a fix applied to the wrong copy is silently lost.
+
+**Evidence:** MD5 (shitrat-brain-proposal-ui/src/lib/flow-chart.svelte) = 640651a269a6a712ba6dba71637f8293 vs MD5 (system-dream-review-ui/src/lib/flow-chart.svelte) = 15c2d1dd9d9e055c20dbecd5af8139cc; system-dream-review-ui/README.md: 'the important next step is to make this a package-backed workflow node, not a copied report directory.'
+
+**Fix:** Declare system-dream-review-ui canonical (matches docs/source-map.md), delete the other two copies after capturing their published-report receipts, and build the wzrrd.report.render workflow node from it before any further dream runs spawn copy number four.
+
+### [MEDIUM] [prototypes-hygiene] prototypes/README.md 'Active' list omits 6 of 16 prototypes
+
+**Where:** `prototypes/README.md:12`
+
+The README's Active list documents 11 prototypes but says nothing about cloud-capability-lease-broker-spike, cloudflare-registry-workflow-os-spike, dream-sequence-vision-ui, joelclaw-research-swarm-spike, registry-office-ui-spike, or workflow-observability-spine-spike — including three that have deployed Cloudflare Workers with secrets (capability broker holds GitHub App private key, registry, observability spine). The index that is supposed to make prototypes disposable does not know these exist, which is exactly how dead deployed Workers get forgotten.
+
+**Evidence:** prototypes/README.md Active list ends at 'system-dream-review-ui'; `ls prototypes/` additionally shows cloud-capability-lease-broker-spike, cloudflare-registry-workflow-os-spike, dream-sequence-vision-ui, joelclaw-research-swarm-spike, registry-office-ui-spike, workflow-observability-spine-spike.
+
+**Fix:** Add the 6 missing entries with status + deletion condition, or better: apply the disposition list and shrink the README to what actually survives.
+
+### [MEDIUM] [prototypes-hygiene] docs/production-vs-prototypes.md is stale — claims seams are 'not yet' in production that src/app now ships
+
+**Where:** `docs/production-vs-prototypes.md:66`
+
+The doc that defines the graduation boundary still describes capsule-do-spike as 'not yet deployed as the production Worker path' and the secret broker as 'not yet connected to real encrypted secret storage or the deployed Worker', while src/app now contains cloudflare-capsule-supervisor.ts (deployed as the CloudflareWorkflowCapsuleSupervisor DO via root wrangler.jsonc), cloudflare-capability-lease-broker.ts, cloudflare-package-registry.ts, cloudflare-review-gate-actor.ts and an app:deploy script. The 'Current prototype receipts' section also stops at the registry spike — workflow-observability-spine-spike, joelclaw-research-swarm-spike, shitrat-dream-workflow-spike, and all three UI spikes are unaccounted for. Anyone using this doc to decide what still needs proving will re-prove shipped seams and miss unproven ones.
+
+**Evidence:** docs/production-vs-prototypes.md:66: 'It is not yet deployed as the production Worker path.' and :67: 'It is not yet connected to real encrypted secret storage or the deployed Worker.' — vs wrangler.jsonc '"class_name": "CloudflareWorkflowCapsuleSupervisor"' and src/app/infrastructure/cloudflare-capability-lease-broker.ts (821 lines).
+
+**Fix:** Rewrite the receipts section as a graduation ledger: per seam, which prototype proved it, which src/app module absorbed it, and whether the prototype can now be deleted. Add entries for the 6 prototypes the doc never mentions.
+
+### [MEDIUM] [security] Several prototype workers accept the access token as a URL query parameter
+
+**Where:** `prototypes/sandbox-workflow-spike/src/worker.ts:1397`
+
+sandbox-workflow-spike, cloudflare-parallel-workflow-spike, joelclaw-research-swarm-spike, and workflow-observability-spine-spike all accept the access token via ?token= in the URL in addition to the Authorization header. Tokens in URLs leak into Cloudflare/access logs, Referer headers when the page links out, browser history, and any intermediary that records request lines. Because this same token authorizes run-triggering routes that spend agent budget, a leaked URL token is a usable credential.
+
+**Evidence:** const queryToken = url.searchParams.get("token");
+ const headerToken = request.headers.get("X-Access-Token");
+ const authorization = request.headers.get("Authorization");
+ ...
+ return [queryToken, headerToken, bearerToken].some((token) => token === env.ACCESS_TOKEN);
+
+**Fix:** Drop the query-parameter token path; require the header form only. If a query token is genuinely needed for SSE/WebSocket clients that cannot set headers, scope it to read-only event routes and prefer a short-lived signed token.
+
+### [MEDIUM] [security] Per-run Artifacts write credential is injected into the agent sandbox environment in cleartext
+
+**Where:** `src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts:330`
+
+runCloudflareSandboxPiAgentLane builds ARTIFACTS_GIT_REMOTE as https://x:TOKEN@host (toAuthenticatedRemote) and passes it as a plain env var into the sandbox that executes the Pi agent. The Pi lane runs model-generated code with the artifact write token readable in its environment (env, /proc/self/environ, git config), so a misbehaving or prompt-injected agent can read the credential and push arbitrary content to the run's Artifacts repo or attempt to exfiltrate it. The token is per-run and time-scoped, which limits blast radius, but it is still a live write credential handed directly to untrusted agent code rather than mediated behind a helper that the agent cannot read.
+
+**Evidence:** ARTIFACTS_GIT_REMOTE: toAuthenticatedRemote(input.input.artifactRemote, input.input.artifactTokenSecret).remote,
+ ...
+ remote: `https://x:${tokenSecret}@${remote.slice("https://".length)}`,
+
+**Fix:** Confirm the lane truly needs git-push from inside the sandbox; if so, prefer a git credential helper or askpass that resolves the token out-of-band, scope the token to the single run repo (already partly done), and ensure it expires at lane teardown. Document this exposure as an accepted trust boundary if it must stay.
+
+### [MEDIUM] [tests] No test touches a Workers runtime: all D1 is string-routed fakes, so SQL never executes and schema drift cannot fail
+
+**Where:** `tests/integration/cloudflare-workflow-event-stream.test.ts:33`
+
+Despite the directory being named tests/integration and the files being named cloudflare-*, the entire 156-test suite completes in ~680ms with zero workerd/miniflare involvement (no @cloudflare/vitest-pool-workers in devDependencies; wrangler is present but unused by tests). Every D1 interaction is a hand-rolled fake whose prepare() routes responses by substring matching on the SQL text and whose run() unconditionally returns success. The SQL in the adapters is never parsed or executed, so a typo'd column name, a query that violates the real migrations in migrations/0001-0003, or a D1 constraint error would pass all tests and only surface in production. D1 *failure* behavior (run() rejecting) is also untested anywhere. The fakes' row shapes happen to match migrations today (I checked workflow_events), but nothing enforces that they keep matching.
+
+**Evidence:** tests/integration/cloudflare-workflow-event-stream.test.ts:33-39: `if (query.includes("from runs")) { return Promise.resolve({ results: input.runRows }); } if (query.includes("from workflow_events")) { return Promise.resolve({ results: input.eventRows }); }` and cloudflare-capability-lease-broker.test.ts:48-52: `run() { operations.push({ query, values }); return Promise.resolve({ success: true }); }`. package.json devDependencies contain vitest and wrangler but no @cloudflare/vitest-pool-workers.
+
+**Fix:** Add a small second tier using @cloudflare/vitest-pool-workers (or miniflare's D1 over better-sqlite3) that applies migrations/*.sql and runs the event-stream reader, status projection, lease broker, and package registry against real SQLite. Keep the fast fakes for orchestration tests, but let at least one test per adapter execute its actual SQL.
+
+### [MEDIUM] [tests] Production-mode safety guards in WorkflowApp are never asserted; the one production-mode test satisfies the 'Cloudflare execution proof' via a static constant
+
+**Where:** `src/app/application/workflow-app.ts:1355`
+
+17 of 18 WorkflowApp constructions in tests use executionMode: "integration-test", which bypasses verifier execution (VERIFICATION_BYPASSED), fabricates worker-lane receipts (shouldRecordIntegrationTestWorkerReceipts), and substitutes a local-integration execution proof. The production-only guards — block when the planner lane is not a realAgent (line 1355), block when deterministic/agent verifiers are missing (lines 3639/3663), block research/review steps without a real worker lane (line 3942), require a cloudflare-workers runtimeEnvironment for execution proof (line 1676) — have zero tests asserting they fire. A regression inverting any of these conditions (the rails that stop fake receipts reaching production) would not fail CI. The single production-mode test (front-door composition) passes while running in Node because the front door statically claims `platform: "cloudflare-workers"`, which also demonstrates the execution-proof requirement is satisfiable by assertion rather than evidence — the test proves the proof mechanism is self-certifying.
+
+**Evidence:** workflow-app.ts:1354-1357: `!this.isIntegrationTestMode() && (!blueprint.plannerLane.realAgent || blueprint.plannerLane.runtime === "integration-test")` — `grep -rn executionMode tests/integration` shows every construction is `executionMode: "integration-test"` except cloudflare-workflow-front-door.test.ts, and cloudflare-workflow-front-door.ts:560-563 hardcodes `runtimeEnvironment: { platform: "cloudflare-workers", workerName: "pi-cloudflare-sandbox-workflows" }` even when invoked from a vitest Node process.
+
+**Fix:** Add negative tests that construct WorkflowApp with executionMode "production" (or omitted) and assert each adapter_unavailable blocker fires: non-real planner lane, missing verifier, missing worker lane, missing runtimeEnvironment. Separately, consider deriving runtimeEnvironment from an actual runtime probe (e.g. navigator.userAgent === 'Cloudflare-Workers') instead of a constant, so the proof means something.
+
+### [MEDIUM] [tests] Cloudflare Artifacts git store: real clone/commit/push paths untested; only ref-name derivation is covered
+
+**Where:** `tests/integration/cloudflare-artifacts-store.test.ts:8`
+
+Every artifact write/read in production flows through createCloudflareArtifactsGitStore, which does isomorphic-git clone/commit/push against the Artifacts remote (cloudflare-artifacts-store.ts lines 168-290: readJson, writeJson, push, clone by commitSha). The test file covers only namespace/artifactRef string derivation across three cases — never a write, read, commit, push, push-rejection, or token-expiry path. The supporting GitMemoryFS gets exactly two trivial assertions (ENOENT rejection and git init writes HEAD), nowhere near the surface isomorphic-git exercises during clone/commit/push. Since all other tests substitute createMemoryArtifactStore, the suite proves artifact *semantics* on a Map, while the component that persists every receipt, plan, and proof in production has its I/O entirely unverified.
+
+**Evidence:** tests/integration/cloudflare-artifacts-store.test.ts asserts only `runStore.store.artifactRef({...})` string outputs (e.g. line 32: `artifactRef: "artifact://piwf-run-live-test/runs/run-live-test/run/planner-blueprint.json"`), while cloudflare-artifacts-store.ts imports `clone, commit as gitCommit, push` from isomorphic-git and uses them at lines 236 (`await push({...})`) and 277 (`await clone({...})`). git-memory-fs.test.ts is 29 lines with two assertions.
+
+**Fix:** isomorphic-git works against a local bare repo over the filesystem or a local HTTP git server: add a round-trip test (writeJson → readJson → clone at commitSha) plus a push-failure test. This needs no Cloudflare account.
+
+### [LOW] [architecture] Vocabulary drift: 'cartridge' is load-bearing in code but absent from the documented domain language
+
+**Where:** `src/README.md:23`
+
+The README declares the domain vocabulary: 'Package is the top-level saved primitive' with categories 'Context packs, workflow packs, tool packs, support packs, adapters, and kernels.' Cartridge is not in that list, yet it names a directory (src/cartridges/), domain schemas (WorkflowCartridgeManifestSchema, WorkflowCartridgeInvocationProofDocumentSchema at domain/schemas.ts:339-371), an installer, and an adapter — and `grep -rn cartridge docs/*.md` returns zero hits across all 13 docs. Meanwhile the same artifact is called a 'package' in proofs (packageId, pinnedPackage, manifestHash) and a 'workflow node' at invocation time. Three names for one lifecycle makes the planner contract, the seed templates, and the proof documents harder to correlate, and the next contributor will coin a fourth.
+
+**Evidence:** src/README.md:23-24 lists package categories with no 'cartridge'; domain/schemas.ts:353 `WorkflowCartridgeManifestSchema`; docs/*.md contain 0 occurrences of 'cartridge'.
+
+**Fix:** Pick one: either 'cartridge' is the official name for a package that exports workflow nodes — then add it to the README domain rules and docs — or rename the cartridge schemas/dirs to the package vocabulary. One sentence in src/README.md defining cartridge = workflow-node-exporting package would resolve most of it.
+
+### [LOW] [correctness-infra] GitHub branch-commit adapter does not catch fetch network errors, unlike the pull-request adapter
+
+**Where:** `src/app/infrastructure/cloudflare-github-branch-commit-adapter.ts:251`
+
+The PR adapter wraps its fetch in try/catch and converts network failures into a blocked delivery (`catch { return blockerForGitHubStatus(503); }`, cloudflare-github-pull-request-adapter.ts:286-288). The branch-commit adapter makes six sequential fetch calls (`headRefResponse`, parent commit, tree, commit, ref write) with no try/catch, so a transient TCP/DNS failure throws out of `execute()` instead of returning a `blocked` GitHubBranchCommitDeliveryResult. Because the run executes in a single Worker invocation with the workflow-app expecting a delivery result (it handles `delivery.status === "blocked"` gracefully), an uncaught throw aborts the whole run instead of recording a blocker receipt. Worse, a network failure between the create-commit POST and the ref-write PATCH leaves an orphaned commit and an unrecorded partial state.
+
+**Evidence:** const headRefResponse = await request(`${apiBase}/git/ref/heads/${encodedHeadBranch}`, { headers, method: "GET" }); — no try/catch anywhere in executeGitHubBranchCommit, vs. PR adapter: `try { response = await (config.fetch ?? fetch)(...); } catch { return blockerForGitHubStatus(503); }`
+
+**Fix:** Wrap executeGitHubBranchCommit's fetches in try/catch returning blocked("adapter_unavailable", ...), matching the PR adapter.
+
+### [LOW] [correctness-infra] Branch-commit dry-run/committed branchUrl is broken for github:repo: prefixed repository refs
+
+**Where:** `src/app/infrastructure/cloudflare-github-branch-commit-adapter.ts:111`
+
+`repositoryParts` explicitly accepts refs of the form `github:repo:owner/repo` (and the blocked message documents both forms), but `branchUrlFor` interpolates the raw `repositoryRef` into the URL, producing `https://github.com/github:repo:owner/repo/tree/...` for the prefixed form. The PR adapter's deliveryForDryRun strips the prefix before building its compare URL (cloudflare-github-pull-request-adapter.ts:105-109); the branch-commit adapter forgot to. Receipts and review surfaces will carry dead links for the prefixed ref form.
+
+**Evidence:** const branchUrlFor = (input) => `https://github.com/${input.repositoryRef}/tree/${encodeURIComponent(input.headBranch)}`; — while repositoryParts handles `repositoryRef.startsWith("github:repo:")`.
+
+**Fix:** Normalize the ref (strip `github:repo:`) in branchUrlFor, as the PR adapter does.
+
+### [LOW] [docs-drift] Safety-envelope state diagram omits the verifyingDynamicWorkflow state
+
+**Where:** `docs/workflow-app-spine.md:271`
+
+The "Safety Envelope States" section presents the current machine flow as executingDynamicWorkflow -> recordingReceipts (via requestingCapabilityLease/executingCapability) with no verification state. Both SafetyEnvelopeStateSchema and the actual machine in src/app/workflow/machine.ts include `verifyingDynamicWorkflow`, which sits between dynamic-workflow execution and recordingReceipts and handles DYNAMIC_WORKFLOW_VERIFIED / VERIFICATION_BYPASSED / BLOCK. Since verification is the trust core of this app, the canonical state diagram omitting the verification state is misleading.
+
+**Evidence:** docs/workflow-app-spine.md lines 271-290 list received ... executingDynamicWorkflow -> recordingReceipts ... captured with no verifying state, while schemas.ts:1522 includes `"verifyingDynamicWorkflow"` in SafetyEnvelopeStateSchema and machine.ts:216 defines `verifyingDynamicWorkflow: { on: { DYNAMIC_WORKFLOW_VERIFIED: { target: "recordingReceipts" }, VERIFICATION_BYPASSED: ... } }`.
+
+**Fix:** Insert verifyingDynamicWorkflow into the documented state flow between executingDynamicWorkflow and recordingReceipts.
+
+### [LOW] [docs-drift] README understates the Worker route surface and the D1 migration set
+
+**Where:** `README.md:90`
+
+README says "The current route surface is `POST /runs`" and "`migrations/0001_workflow_app_d1.sql` mirrors the app D1 schema." The deployed route adapter also serves GET /runs/:runId/events (JSON/SSE/live-tail/WebSocket), GET /runs/:runId/debugger, and POST /admin/packages/{seed,prepare-seed,finalize-seed}; the D1 schema now spans three migrations (0001 plus 0002_workflow_telemetry_logs.sql and 0003_workflow_events.sql), matching the workflow_telemetry_logs and workflow_events tables in d1-schema.ts. The spine doc documents all of this, so the README is simply stale relative to it.
+
+**Evidence:** README.md: "The current route surface is `POST /runs`. ... `migrations/0001_workflow_app_d1.sql` mirrors the app D1 schema." vs cloudflare-worker-route.ts:1230-1262: `/^\/runs\/([^/]+)\/debugger$/u`, `/^\/runs\/([^/]+)\/events$/u`, `"/admin/packages/prepare-seed"`, `"/admin/packages/finalize-seed"`, `"/admin/packages/seed"`; `ls migrations`: 0001_workflow_app_d1.sql, 0002_workflow_telemetry_logs.sql, 0003_workflow_events.sql.
+
+**Fix:** Update README to list the events/debugger observer routes and reference the migrations directory rather than only 0001.
+
+### [LOW] [docs-drift] prototypes/README.md index lists only 11 of 17 prototypes
+
+**Where:** `prototypes/README.md:12`
+
+The prototypes index's "Active" list omits six existing spikes: cloud-capability-lease-broker-spike, cloudflare-registry-workflow-os-spike, workflow-observability-spine-spike, joelclaw-research-swarm-spike, registry-office-ui-spike, and dream-sequence-vision-ui. PROTOTYPES.md's deletion contract depends on every prototype having a visible status (active | captured | delete-after) — major proven spikes (the capability broker proof and registry proof are both cited as receipts in docs/dogfood-plan.md and docs/production-vs-prototypes.md) being absent from the index undermines the tombstone/cleanup discipline the repo's own docs mandate.
+
+**Evidence:** prototypes/README.md is 24 lines and its Active list ends at `system-dream-review-ui/`; `ls prototypes/` shows 17 spike directories including cloud-capability-lease-broker-spike, cloudflare-registry-workflow-os-spike, workflow-observability-spine-spike, joelclaw-research-swarm-spike, registry-office-ui-spike, and dream-sequence-vision-ui, none of which appear in the README.
+
+**Fix:** Add the six missing spikes to the index with their status, or mark captured ones with deletion triggers per PROTOTYPES.md.
+
+### [LOW] [prototypes-hygiene] Helper scripts forked across 6 prototypes with behavioral drift
+
+**Where:** `prototypes/workflow-observability-spine-spike/scripts/extract-codex-auth.mjs:7`
+
+wrangler-with-cloudflare-token.mjs exists in 6 prototypes with 4 distinct md5 hashes, and extract-codex-auth.mjs exists in 3 prototypes with 2 variants whose behavior differs: the sandbox-workflow/joelclaw copies take the auth path as argv[2] ('process.argv[2] ?? join(homedir(), ...)'), while the observability copy reads PI_AUTH_JSON_PATH from env ('process.env.PI_AUTH_JSON_PATH ?? join(homedir(), ...)'). Same script name, different invocation contract — an operator who learned one prototype's auth:put flow gets silent default-path behavior on another. Low severity only because all copies live in disposable prototypes; if the deletion disposition is applied, most copies disappear anyway.
+
+**Evidence:** diff sandbox-workflow-spike/scripts/extract-codex-auth.mjs workflow-observability-spine-spike/scripts/extract-codex-auth.mjs: '<   process.argv[2] ?? join(homedir(), ".pi", "agent", "auth.json");' vs '>   process.env.PI_AUTH_JSON_PATH ?? join(homedir(), "...")'; md5 shows 4 variants of wrangler-with-cloudflare-token.mjs across 6 prototypes.
+
+**Fix:** If any prototypes survive the disposition pass, hoist the two helpers into a shared prototypes/_shared/scripts/ (prototypes importing prototypes is allowed; src importing prototypes is not) and standardize on the env-var auth-path contract.
+
+### [LOW] [security] Non-constant-time bearer comparison in the trusted dream-memory relay and prototype workers
+
+**Where:** `src/app/infrastructure/trusted-dream-memory-relay-server.ts:384`
+
+The trusted dream-memory relay (which serves local private memory/corpus over HTTP) compares the bearer token with a plain `!==`, as do the prototype workers (`=== env.ACCESS_TOKEN`). The production admin route correctly uses timingSafeSecretMatch, but these paths do byte-short-circuiting string compares, leaking timing. Exploitability is low because the relay defaults to binding 127.0.0.1 and requires the token, but DREAM_MEMORY_RELAY_HOST is operator-configurable (e.g. 0.0.0.0), at which point the local-memory HTTP surface becomes timing-attackable on the network.
+
+**Evidence:** if (token !== input.config.expectedBearerToken) {
+   return jsonError(403, "secret_denied", "Invalid relay bearer token.");
+ }
+
+**Fix:** Use a constant-time comparison (the existing sha256-then-compare helper) for the relay and prototype token checks, and consider refusing to start the relay if HOST is set to a non-loopback address without an explicit override flag.
+
+### [LOW] [tests] jsonOutputNormalizerNodeScript is verified by substring inclusion, not by executing the script
+
+**Where:** `tests/integration/cloudflare-sandbox-agent-lanes.test.ts:101`
+
+The node script that normalizes raw agent output inside the sandbox is asserted only via string `.includes()` checks on its source text ('usesExtractor', 'readsRawOutputPath', etc.). The script could be syntactically broken or behave incorrectly and these assertions still pass. The sibling agentLanePackageMountWriterNodeScript test in the same file shows the right pattern — it actually runs the script via execFileSync(process.execPath, ["-e", ...]) and validates outputs against schemas — so this is an inconsistency, not a missing capability.
+
+**Evidence:** tests/integration/cloudflare-sandbox-agent-lanes.test.ts:103-114: `expect({ avoidsBundlerHelpers: !jsonOutputNormalizerNodeScript.includes("__name"), readsRawOutputPath: jsonOutputNormalizerNodeScript.includes("process.env.raw_output_path"), usesExtractor: jsonOutputNormalizerNodeScript.includes("extractFirstJsonValueText"), ... })` — compare line 170 where the mount writer script is genuinely executed: `execFileSync(process.execPath, ["-e", agentLanePackageMountWriterNodeScript], {...})`.
+
+**Fix:** Execute jsonOutputNormalizerNodeScript with execFileSync like the mount-writer test: write a chatty raw output file to a tmpdir, set raw_output_path, run the script, and assert the normalized JSON file content.
+
+### [LOW] [tests] pnpm check (part of the verify gate) currently fails on formatting; full gate is red despite green tests and typecheck
+
+**Where:** `scripts/trusted-local-dream-memory-relay-proof.ts`
+
+Actual run results: `pnpm test:integration` → 32 files / 156 tests passed in 678ms, zero skips; `pnpm typecheck` (tsgo) → clean. But `pnpm check` exits 1 because oxfmt finds format issues in two script files, which means `pnpm verify` (check && typecheck) is red and oxlint never even runs in that invocation. Anyone relying on `pnpm verify` as the pre-push gate is currently blocked or, worse, has learned to ignore it.
+
+**Evidence:** `pnpm check` output: `scripts/trusted-local-dream-memory-relay-proof.ts (1ms)` / `scripts/workflow-app-dream-relay-provisioning-preflight.ts (0ms)` / `Format issues found in above 2 files. Run without --check to fix.` / `[ELIFECYCLE] Command failed with exit code 1.`
+
+**Fix:** Run `pnpm fix` (or `oxfmt --write` on the two files) and commit, then confirm `pnpm verify` is green end to end.
+
+## Critic additions (gaps the 7 reviewers missed)
+
+### [HIGH] Entire production spine has never been committed to git — deployed Worker source exists only in the working tree
+**Where:** `src/app`
+
+Every reviewer treated src/app as 'the production code', and prototypes-hygiene worried about junk being 'one git add away', but nobody noticed the inverse: the whole production surface is untracked. `git ls-files src/app src/cartridges tests migrations scripts wrangler.jsonc Dockerfile worker-configuration.d.ts` returns 0 files; `git ls-files src` returns only src/README.md. That is ~1.6MB of source (src/app 900K, tests 596K, src/cartridges 108K) plus the D1 migrations, wrangler config, Dockerfile, and deploy scripts for a Worker that is actually deployed (hardcoded live URL, real secrets, applied remote migrations) — with zero version-control history, no stash, and no remote copy. A `git clean -fd`, disk failure, or careless checkout permanently loses the production system, and none of the repo's own 'receipt-first' history covers it. Compounding it, the pre-commit gate is currently red (lefthook runs `pnpm check`, and `oxfmt --check .` fails on tests/integration/workflow-app.test.ts), so a naive commit attempt is blocked right now. This also reframes several docs-drift findings: the docs aren't just stale, they describe code that isn't in the repository history at all.
+
+**Fix:** Commit the production spine immediately (after fixing the one oxfmt failure or with --no-verify as a one-time escape), on a branch if main is protected. Treat this as blocking before any further refactor work the other reviewers proposed.
+
+### [LOW] Deploy pipeline reports 'completed' with required runtime secrets missing; wrangler.jsonc secrets.required lists 1 of 8
+**Where:** `scripts/workflow-app-deploy-and-seed.mjs:126`
+
+The worker boot schema hard-requires PI_AUTH_JSON_B64 and WORKFLOW_APP_MODEL (`PI_AUTH_JSON_B64: z.string().min(1)`, `WORKFLOW_APP_MODEL: z.string().min(1)` in cloudflare-worker-route.ts:141,150), but the deploy script treats a missing local secret as a non-fatal step result and finishes with status 'completed' — so a fresh deploy on a machine without WORKFLOW_APP_MODEL in .env.local produces a green receipt for a Worker that fails env parsing on every run request. wrangler.jsonc's `secrets.required` declares only WORKFLOW_APP_ADMIN_TOKEN, while the script's own `deploySecretNames` lists 8 — per the wrangler config schema, secrets.required drives type generation and local-dev missing-secret warnings, so the generated worker-configuration.d.ts Env omits PI_AUTH_JSON_B64/WORKFLOW_APP_MODEL/etc. (verified: only `WORKFLOW_APP_ADMIN_TOKEN: string` appears) and `wrangler dev` will not warn about the secrets the worker actually needs. Fail-late instead of fail-fast on the exact secrets that brick the worker.
+
+**Fix:** List all eight deploy secrets in wrangler.jsonc secrets.required (the canonical list already exists in deploySecretNames), and make the deploy script fail (or at least exit nonzero) when a schema-required secret resolves to missing-local-value.
+
+### [LOW] No data-retention story anywhere: per-run Artifacts repos and all D1 run/telemetry tables grow forever with no delete, expiry, or scheduled cleanup
+**Where:** `src/app/infrastructure/cloudflare-artifacts-store.ts:304`
+
+Dimension blind spot none of the seven reviews touched. Every run creates a dedicated git repo in Cloudflare Artifacts (`artifacts.create(input.repoName, ...)`) and appends rows to runs, workflow_events, capability_leases, receipts, review_gates, and workflow_telemetry_logs (one row per log event per run). There is not a single DELETE statement in src/app (grep for 'delete from'/'DELETE FROM' returns nothing), no repo deletion API call, no `scheduled()` handler in the worker (grep 'scheduled' in src/app: no handler), and no admin purge route. D1 has a hard per-database size cap and workflow_telemetry_logs is the fastest-growing append-only table; Artifacts accumulates one repo per run with no lifecycle. Receipts persisting is by design ('receipt-first'), but telemetry logs and dead run repos having literally no retention mechanism is an operational gap — made worse by the separately-filed unauthenticated POST /runs, which lets anonymous callers mint repos and rows.
+
+**Fix:** Decide retention per surface: keep receipts/runs (audit), add a scheduled() pruner or admin purge for workflow_telemetry_logs and an Artifacts repo lifecycle (e.g. delete or archive run repos N days after terminal state).
+
+## Uncertain (verifiers split — worth a human look)
+
+### [low] [correctness-spine] Invalid planner output is mislabeled as 'adapter_unavailable / Dynamic workflow planner failed'
+**Where:** `src/app/application/workflow-app.ts:1221`
+
+proposeDynamicWorkflowBlueprint's try block covers DynamicWorkflowBlueprintSchema.parse of the planner output, the Discord capability rebinding (which itself ends with another DynamicWorkflowBlueprintSchema.parse), and the verification-contract path validation. The single catch maps every throw — including ZodErrors meaning 'the planner returned a malformed blueprint' — to `blocker("adapter_unavailable", "Dynamic workflow planner failed: ...")` with summary 'Planner lane adapter failed.' Schema-invalid planner output and infrastructure failure are different failure classes for an operator triaging blocked runs (retry vs fix the planner prompt/contract), and elsewhere in the file schema mismatches deliberately use payload_hash_mismatch (e.g. loadPinnedDynamicWorkflowMachine). This mislabel makes blocked-run telemetry lie about root cause.
+
+- verdict isReal=True (high): Verified the catch at workflow-app.ts:1221-1232 wraps both DynamicWorkflowBlueprintSchema.parse calls (lines 1170 and 1072) and maps all throws — including ZodErrors from malformed LLM planner output, a realistic path given the production adapter parses raw lane output at cloudflare-agent-lane-adapters.ts:327-337 — to adapter_unavailable, the same code the integration test (workflow-app.test.ts:3419) pins for a container-start infra failure. The file's own convention labels schema failures payload_hash_mismatch (lines 2926, 3011), so structured blocker-code telemetry genuinely conflates two triage-distinct failure classes; only the free-text message (which embeds error.message) partially mitigates. Severity low is appropriate since the run still blocks safely.
+
+- verdict isReal=False (high): The quoted catch exists and does map all throws to adapter_unavailable, but the impact is imaginary: the blocker message embeds the underlying ZodError text so operators see the real root cause, nothing programmatically branches on this code in the planner path (no retry logic; the only code-branching consumer is the cartridge-installer composite adapter, a different subsystem), and the production planner adapter (cloudflare-agent-lane-adapters.ts:273-340) already parses LLM output and throws plain Errors internally, so the failure classes are conflated upstream and cannot be separated at this catch site — nor does the enum contain a correct code (payload_hash_mismatch is used for pinned-binding mismatches, equally wrong for schema-invalid output).
+
+### [high] [correctness-infra] Discord adapter never verifies message body against bodyHash, so pinned-payload integrity is not actually enforced
+**Where:** `src/app/infrastructure/cloudflare-discord-message-adapter.ts:106`
+
+The whole capability-lease design pins side-effect content by hash so that what was reviewed is what gets sent. The Linear adapter re-verifies content (`sha256Hex(input.payload.body) !== input.payload.bodyHash`, cloudflare-linear-comment-adapter.ts:138), the GitHub branch-commit adapter verifies every file (`sha256Hex(file.content) !== file.contentHash`), and the Wzrrd adapter verifies the primary document (`sha256Hex(content) !== document.hash`). The Discord adapter and the lease broker only compare the self-declared `bodyHash` field to the lease hash — neither ever hashes `payload.body`. `DiscordMessagePayloadSchema` (domain/schemas.ts:518) has no refine binding body to bodyHash. The payload is re-read from the run artifact store at execution time (workflow-app.ts:4066 `readJson({ artifactRef: step.payloadRef })`), and worker/planner lanes hold a write token to that same artifacts repo (front door passes `runStore.artifactTokenSecret` into the lane adapter config), so a lane can rewrite `payloads/discord-message.json` with arbitrary `body` while keeping the approved `bodyHash`, and the approved message will be silently replaced before the real send.
+
+- verdict isReal=False (high): The quoted code is accurate (Discord adapter/broker never rehash payload.body, unlike Linear/GitHub/Wzrrd), but the claimed attack does not work: the execution-time read at workflow-app.ts:4066 uses readJson without artifactCommitSha, which reads the control plane's process-local GitMemoryFS worktree (cloudflare-artifacts-store.ts:184-190; ensureWritableWorktree does gitInit only and never clones/pulls), so a lane pushing a tampered payloads/discord-message.json to the remote repo can never be read back. Pin, broker validation, and adapter execute all share one in-process store within a single startRun invocation, with bodyHash computed by the control plane from the actual body (workflow-app.ts:4107), so body/bodyHash cannot diverge; cross-invocation reads fail closed as blocked("stale_package"). The missing rehash is real drift vs sibling adapters but not the claimed exploitable integrity hole.
+
+- verdict isReal=True (high): Verified all three Discord verification points (adapter validateLeasePayloadBinding:110, cloudflare broker validateDiscordPayload:198, execution-time loadDiscordPayload:4089) only compare the self-declared bodyHash field to the pinned hash and never recompute sha256Hex(payload.body), whereas Linear (adapter:138) and GitHub/Wzrrd (hashJson over full payload) and even the in-memory broker (memory-adapters.ts:1155) do bind content to hash; DiscordMessagePayloadSchema:519-524 has no refine. The threat model holds: the artifact store is path-addressed and mutable, loadDiscordPayload re-reads at execution with no pinned commit sha, and lanes receive runStore.artifactTokenSecret (front-door:453 -> lane-adapters:286/466/616), so a lane can rewrite payloads/discord-message.json with an arbitrary body while keeping the approved bodyHash and every gate (including the review gate, which pins bodyHash not body) passes.
+
+### [medium] [correctness-infra] Analytics Engine telemetry sink exceeds Workers Analytics Engine per-data-point and per-invocation limits
+**Where:** `src/app/infrastructure/cloudflare-workflow-telemetry-sinks.ts:72`
+
+The sink writes 20 blobs per data point, each truncated to 768 bytes (`analyticsEngineBlobMaxBytes = 768`). Workers Analytics Engine limits the TOTAL size of all blobs in a data point to 5120 bytes, not 768 per blob — 20 × 768 = 15,360 bytes worst case, ~3x over the limit, so data points with long runIds/artifact refs/payload hashes will be rejected at write time. Separately, `analyticsEngineDataPointLimit = 250` caps writes per recordLogs call, but Analytics Engine allows only 25 writeDataPoint calls per Worker invocation; since the entire run (and its observability pack) executes in one invocation, points 26+ are dropped/error while the receipt still reports status "captured" whenever `logsToWrite.length === input.logs.length`. The index truncation to 96 bytes is the only limit handled correctly.
+
+- verdict isReal=True (high): Verified the quoted constants (768/blob, 250 points, 20-blob array with only per-blob truncation) exist at cloudflare-workflow-telemetry-sinks.ts:72-73,180-201 with no total-blob-budget check; AE's real limits are 5120 bytes total per point and 25 writes per invocation, and the code's exact 96-byte index handling confirms the author worked from that limits page. The front door (cloudflare-workflow-front-door.ts:530) wires the sink with the 250 default, the observability recorder emits 2+ records per workflow event so >25 points per run is realistic, and the receipt logic (line 355-356) reports "captured" based solely on the 250 cap — only the failure mode differs slightly (writeDataPoint may throw rather than silently drop, failing the step instead of lying in the receipt).
+
+- verdict isReal=False (high): The quoted code exists, but the claimed Cloudflare limits are wrong: current Analytics Engine docs (developers.cloudflare.com/analytics/analytics-engine/limits) state a 16 KB total-blob limit per data point (20 x 768 = 15,360 bytes fits) and 250 data points per Worker invocation (matching analyticsEngineDataPointLimit = 250 exactly), not 5120 bytes / 25 writes. The code's constants are precisely tuned to the real documented limits, and the receipt already reports "blocked" when logs exceed the 250 cap.
+
+### [medium] [correctness-infra] Dream relay server catch-all converts every adapter/upstream failure into HTTP 400 "invalid_json" and echoes internal error messages
+**Where:** `src/app/infrastructure/trusted-dream-memory-relay-server.ts:417`
+
+`dispatchSupportedOperation` awaits real port calls (`dreamMemoryFabric.inventorySources`, `dreamMemoryRetrieval.searchMemories`, etc.). Any throw from those adapters — upstream outage, D1 error, bug — is caught by the trailing catch and returned as `jsonError(400, "invalid_json", error.message)`. Clients (the Cloudflare relay client in cloudflare-dream-memory-fabric-relay.ts maps non-ok statuses via blockerForRelayStatus) will classify genuine server-side failures as client errors ("failed with HTTP 400"), making retry/alerting decisions wrong, and raw internal `error.message` strings leak to the caller in a server that otherwise insists on `redacted: true` everywhere.
+
+- verdict isReal=True (high): Verified the catch-all at trusted-dream-memory-relay-server.ts:417-431 exists verbatim and that dispatchSupportedOperation awaits port calls and does server-side schema parses with no other error handling, so any non-payload throw becomes HTTP 400 "invalid_json" with raw error.message echoed; no test or guard mitigates it. Caveats: the only wired adapters (local cartridge) swallow most upstream failures internally, and the relay client treats all non-401/403/404 statuses identically as blocked, so the "wrong retry decisions" consequence is overstated — but the status mislabeling and internal-message leak are genuinely what the code does.
+
+- verdict isReal=False (high): The quoted catch exists, but its realistic throw paths are the Zod payload.parse() calls (genuine client errors, 400 correct); the only production wiring (trusted-local-relay-http.ts) uses adapters that catch all fs/docs-API/exec failures internally and never touch D1, so the "upstream outage becomes 400" scenario is unreachable. The claimed client impact is also false: blockerForRelayStatus maps 400 and 500 to the identical adapter_unavailable blocker with no retry/status-differentiated logic, so even a hypothetical mis-statused throw changes nothing downstream.
+
+## Refuted
+
+- [correctness-spine] Dead defensive branches in verifyDynamicWorkflow can never fire — The quoted code exists and the branches are indeed unreachable at runtime (readonly deps, two-member verifier union per schemas.ts:805-814), but they are not dead code in any actionable sense: TypeScript cannot carry the correlated narrowing from the compound top guard across the intervening awaits, so the re-checks at 3777-3787 and 3811-3821 are required for `verify()` to type-check without non-null assertions. They also fail safe (block) if the top guards ever change, so the claimed rot/masking impact is imaginary and no maintainer would change the code. | The quoted blocks exist and are runtime-unreachable given the early guards, but they are required TypeScript narrowing guards for the optional ports (deterministicVerifier?/agentVerifierLane? at workflow-app.ts:136-137) — removing them breaks compilation at the .verify() call sites (3791, 3824). The only claimed consequence ('will silently rot') actually inverts: if the early bypass were widened, these checks fire correctly as a production backstop. Reviewer admits zero runtime impact, making this a style observation, not an actionable finding.

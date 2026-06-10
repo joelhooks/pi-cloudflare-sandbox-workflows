@@ -1,0 +1,94 @@
+direction: down
+
+Request: {
+  label: "Actor requests\none operation"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Policy: {
+  label: "Policy broker\nrole, resource, budget"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Allowed: {
+  label: "Lease allowed?"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Review: {
+  label: "Review page\nhuman approves"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Lease: {
+  label: "Capability lease\npayload hash + expiry"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Boundary: {
+  label: "Trusted Worker / DO\nsecret stays inside"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Sandbox: {
+  label: "Sandbox run\nplaceholder refs only"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Gate: {
+  label: "Safety gate\nchecks + leak scan"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Apply: {
+  label: "Approved action\napply exact payload"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Receipt: {
+  label: "Receipt\ntrace + rollback ref"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Request -> Policy: "asks"
+Policy -> Allowed: "evaluates"
+Allowed -> Lease: "yes"
+Allowed -> Review: "needs human"
+Review -> Lease: "approved"
+Lease -> Boundary: "leases power"
+Boundary -> Sandbox: "injects only when needed"
+Sandbox -> Gate: "produces evidence"
+Gate -> Apply: "passes"
+Gate -> Review: "fails or uncertain"
+Apply -> Receipt: "records"
+Receipt -> Policy: "updates trust"

@@ -1,0 +1,86 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pi-cloudflare-sandbox-workflows",
+  "main": "src/app/worker.ts",
+  "compatibility_date": "2026-06-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": true,
+    },
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "WORKFLOW_TELEMETRY",
+      "dataset": "pi_cloudflare_sandbox_workflows_telemetry",
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 5,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox",
+      },
+      {
+        "class_name": "CloudflareWorkflowCapsuleSupervisor",
+        "name": "WORKFLOW_CAPSULE_SUPERVISOR",
+      },
+    ],
+  },
+  "d1_databases": [
+    {
+      "binding": "WORKFLOW_APP_D1",
+      "database_name": "pi-cloudflare-sandbox-workflows",
+      "database_id": "72ab80e4-600d-4dd8-b581-8560eff16967",
+      "migrations_dir": "migrations",
+      "remote": true,
+    },
+  ],
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox", "CloudflareWorkflowCapsuleSupervisor"],
+      "tag": "v1",
+    },
+  ],
+  "vars": {
+    "DISCORD_BOT_SECRET_REF": "secretref:discord-bot",
+    "DISCORD_DRY_RUN_SECRET_REF": "secretref:discord-dry-run",
+    "DISCORD_USER_AGENT": "pi-cloudflare-sandbox-workflows/0.0.0",
+    "GITHUB_BRANCH_COMMIT_SECRET_REF": "secretref:github-branch-commit",
+    "GITHUB_DRY_RUN_SECRET_REF": "secretref:github-dry-run",
+    "GITHUB_PULL_REQUEST_SECRET_REF": "secretref:github-pr",
+    "GITHUB_USER_AGENT": "pi-cloudflare-sandbox-workflows/0.0.0",
+    "LINEAR_AUTHORIZATION_SCHEME": "api-key",
+    "LINEAR_COMMENT_SECRET_REF": "secretref:linear-api",
+    "LINEAR_DRY_RUN_SECRET_REF": "secretref:linear-dry-run",
+    "LINEAR_USER_AGENT": "pi-cloudflare-sandbox-workflows/0.0.0",
+    "PI_AUTH_SECRET_REF": "secretref:pi-agent-auth-json",
+    "WORKFLOW_APP_ARTIFACTS_ACCOUNT_ID": "baac0d692a7fb14f11b159b48b13055e",
+    "WORKFLOW_APP_ARTIFACTS_NAMESPACE": "default",
+    "WORKFLOW_APP_DISCORD_POLICY_ID": "discord-message-policy.v1",
+    "WORKFLOW_APP_MAX_ACTIVE_LANES": "3",
+    "WORKFLOW_APP_REPO_PREFIX": "piwf",
+    "WORKFLOW_APP_TELEMETRY_DATASET": "pi_cloudflare_sandbox_workflows_telemetry",
+    "WORKFLOW_APP_TIMEOUT_MS": "600000",
+    "WZRRD_DRY_RUN_SECRET_REF": "secretref:wzrrd-dry-run",
+    "WZRRD_PUBLISH_SECRET_REF": "secretref:wzrrd-api",
+    "WZRRD_SITE_REF": "wzrrd:default",
+    "WZRRD_USER_AGENT": "pi-cloudflare-sandbox-workflows/0.0.0",
+  },
+  "secrets": {
+    "required": ["WORKFLOW_APP_ADMIN_TOKEN"],
+  },
+}

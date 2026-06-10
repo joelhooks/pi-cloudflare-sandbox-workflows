@@ -1,0 +1,58 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pi-workflow-observability-spine-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox",
+      },
+      {
+        "name": "CAPSULE_SUPERVISOR",
+        "class_name": "CapsuleSupervisor",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox", "CapsuleSupervisor"],
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "queue": "piwf-observability-spine-lanes",
+        "binding": "LANE_QUEUE",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "piwf-observability-spine-lanes",
+        "max_batch_size": 4,
+        "max_batch_timeout": 2,
+      },
+    ],
+  },
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": true,
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 8,
+    },
+  ],
+}

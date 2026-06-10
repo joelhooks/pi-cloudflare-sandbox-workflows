@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "workflow-candidate.source-profile.v1",
+  "profileId": "badass-courses/aihero-support-sweep",
+  "title": "AIHero Support Sweep",
+  "workflowId": "aihero.support-sweep",
+  "packageId": "workflow/aihero-support-sweep",
+  "purpose": "Review AIHero support, comms, customer, and org signals, then produce HITL support actions under scoped customer-private leases.",
+  "sourceRootsRef": ".brain/data/workflow-candidates/aihero-support-sweep-source-roots.json",
+  "sourceFamiliesExpected": ["brain", "support", "comms", "people-org-memory"],
+  "requiredRuntimes": [],
+  "requiredMachineIds": [],
+  "timeHorizons": ["24h", "7d", "30d", "quarter", "all-time"],
+  "outputBoundary": {
+    "noCustomerDataInPublicArtifacts": true,
+    "noRawCredentials": true,
+    "noRawPrivatePaths": true,
+    "noRawSupportThreads": true
+  },
+  "status": "candidate-not-installed",
+  "notes": [
+    "This is a separate workflow candidate, not Dreamer readiness.",
+    "It needs its own cartridge/package, source adapters, capability leases, report style, and HITL action surface."
+  ]
+}

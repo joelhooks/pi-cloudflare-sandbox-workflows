@@ -4,6 +4,7 @@ This repo is explicitly prototype-to-production. Keep the boundary sharp.
 
 ## Read first
 
+- `VISION.md` for project intent and decision boundaries; do not treat it as an ops runbook.
 - `BRAIN.md`
 - `.brain/projects/pi-sandbox-workflows.svx`
 - `docs/production-vs-prototypes.md`
@@ -13,9 +14,10 @@ This repo is explicitly prototype-to-production. Keep the boundary sharp.
 ## Tooling law
 
 - Use `pnpm`, not npm/yarn/bun, for this repo.
+- When adding dependencies, use `pnpm add` / `pnpm add -D` instead of hand-editing guessed package versions.
 - Use `pnpm typecheck` for fast TS7/tsgo checks.
 - Use `pnpm typecheck:tsc` when verifying compatibility with classic TypeScript tooling.
-- Use `pnpm check` / `pnpm fix` for Ultracite through `oxlint` + `oxfmt`.
+- Use `pnpm check` / `pnpm fix` for direct `oxlint` + `oxfmt`; `.oxlintrc.json` contains the cloned Ultracite rule policy and `.oxlintrc.type-aware.json` enables the `oxlint-tsgolint` extension for production TypeScript surfaces.
 - Lefthook runs on pre-commit: format staged files, full lint, full typecheck.
 - Turborepo is present as a light workspace spine; do not turn it into ceremony until packages/apps actually exist.
 

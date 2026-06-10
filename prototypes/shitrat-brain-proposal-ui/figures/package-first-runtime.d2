@@ -1,0 +1,111 @@
+direction: down
+
+Repo: {
+  label: "Package repo\nArtifacts-backed Git"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Manifest: {
+  label: "package.json\nmanifest + exports"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Checks: {
+  label: "Package checks\ndeps, leaks, contracts"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Publish: {
+  label: "Published artifact\nbundle + manifest hash"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Discovery: {
+  label: "Metadata discovery\ntitle, tags, exports"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Entitlement: {
+  label: "Entitled?"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+InvokeKind: {
+  label: "Invocation kind\nstatic or dynamic"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Static: {
+  label: "Static import\npinned snapshot"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Dynamic: {
+  label: "invokeChecked\ncurrent package"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+SideEffect: {
+  label: "Side effect?"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Lease: {
+  label: "Capability lease\nexact payload"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Receipt: {
+  label: "Receipt\nrun, package, result"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Repo -> Manifest: "declares"
+Manifest -> Checks: "validates"
+Checks -> Publish: "passes"
+Publish -> Discovery: "indexes"
+Discovery -> Entitlement: "actor asks"
+Entitlement -> InvokeKind: "allowed"
+InvokeKind -> Static: "library dependency"
+InvokeKind -> Dynamic: "runtime dispatch"
+Static -> SideEffect: "executes"
+Dynamic -> SideEffect: "checks contract"
+SideEffect -> Lease: "yes"
+SideEffect -> Receipt: "no"
+Lease -> Receipt: "allowed"

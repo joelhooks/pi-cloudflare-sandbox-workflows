@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pi-skill-registry-office",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2026-06-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".svelte-kit/cloudflare",
+  },
+  "services": [
+    {
+      "binding": "REGISTRY_WORKER",
+      "service": "pi-cloudflare-registry-workflow-os-spike",
+    },
+  ],
+}

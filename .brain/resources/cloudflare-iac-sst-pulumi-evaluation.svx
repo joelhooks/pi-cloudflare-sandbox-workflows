@@ -1,0 +1,203 @@
+---
+title: Cloudflare IaC SST/Pulumi Evaluation
+type: research
+status: active
+updated: 2026-06-09
+scope:
+  - pi-cloudflare-sandbox-workflows
+  - wzrrd-sh-cli
+tags:
+  - research
+  - cloudflare
+  - iac
+  - sst
+  - pulumi
+  - wrangler
+  - wzrrd
+---
+
+# Cloudflare IaC SST/Pulumi Evaluation
+
+Research capture for the question: should the Cloudflare-heavy systems use SST, Pulumi, Terraform, or stay closer to Wrangler/native Cloudflare configuration?
+
+Brain gardening applies because this is a cross-project architecture tradeoff spanning `pi-cloudflare-sandbox-workflows` and `wzrrd-sh-cli`.
+
+## Decision
+
+Do **not** do a blanket migration to SST right now.
+
+Use a split stance:
+
+1. Keep `pi-cloudflare-sandbox-workflows` runtime deployment Wrangler-native for now.
+2. Prototype SST for Wzrrd's future framework/prototype deploy lane, where SST's higher-level Cloudflare framework components may actually improve product/developer experience.
+3. Consider raw Pulumi or Terraform only for long-lived account-level infrastructure and cross-project inventory, not as the runtime orchestrator for agent runs.
+
+The key distinction: SST can help define/deploy application infrastructure, but it must not become the authority for workflow receipts, capability leases, sandbox admission, secret materialization, or context capsules.
+
+## Local Receipts
+
+`pi-cloudflare-sandbox-workflows` currently has a sharp Cloudflare runtime surface:
+
+- `wrangler.jsonc` binds Cloudflare Artifacts, Analytics Engine, Containers/Sandbox, Durable Objects, D1, migrations, policy vars, and required secrets.
+- The project Brain states that ports/adapters are first-class and Cloudflare adapters implement Artifacts, Sandbox Pi lanes, Durable Object capsule supervision, D1 package registry, capability lease broker, review surfaces, event streams, telemetry sinks, and Wzrrd/GitHub/Linear delivery.
+- The production surface depends on runtime artifacts and receipts: generated XState machine, generated harness, plan, verification contract/result, lane receipts, capability leases, observability pack, and review surface.
+
+`wzrrd-sh-cli` is also Cloudflare-heavy, but with a different shape:
+
+- `app/wrangler.jsonc` deploys the SvelteKit app Worker with Workers Assets, KV, D1, and public/auth vars.
+- `templates/artifacts/wrangler.jsonc` deploys a dedicated template Artifacts Worker.
+- Wzrrd Brain's Cloudflare substrate map records app Worker `wzrrd-app`, router Worker `wzzrd-router`, app bindings `DB`/`CACHE`/`ASSETS`, router binding `SITES`, optional `SSR_DISPATCH`, KV namespace `wzzrd-sites`, D1 database `wzrrd-auth`, and CLI setup that directly calls Cloudflare APIs for router/DNS/route/worker repair.
+- Wzrrd's framework deploy ADR says the next dynamic lane should be prototype-first Cloudflare framework deploy, not an enterprise PaaS.
+
+## External Receipts
+
+SST is credible, but not universal:
+
+- SST defines apps in `sst.config.ts`, supports 150+ providers, and uses Pulumi behind the scenes with Terraform providers bridged through Pulumi. Source: `https://sst.dev/docs/`.
+- SST Cloudflare docs list provider setup and Cloudflare components including Worker, D1, KV, Cron, Astro, Queue, Bucket, Workflow, RateLimit, StaticSite, Hyperdrive, ReactRouter, and TanStackStart. Source: `https://sst.dev/docs/cloudflare/` and `https://sst.dev/docs/examples/`.
+- SST Worker docs support Durable Object migrations and explicitly mirror Wrangler's migration history model. Source: `https://sst.dev/docs/component/cloudflare/worker/`.
+- SST examples now include Cloudflare Durable Object, Queue, Workflow, React Router, TanStack Start, Astro, and KV examples. Source: `https://sst.dev/docs/examples/`.
+- SST issue `anomalyco/sst#6683` asked for first-class components for every Cloudflare binding and was closed "not planned." Source: `https://github.com/anomalyco/sst/issues/6683`.
+- SST issue `anomalyco/sst#6846` says plain `sst.cloudflare.Worker` still lacks object-style `dev.command` / `dev.url` parity with AWS/framework components. Source: `https://github.com/anomalyco/sst/issues/6846`.
+
+Cloudflare native docs still matter for the sharp edges:
+
+- Wrangler supports `containers`, and Cloudflare requires a matching Durable Object class to communicate with a container-enabled Worker. Source: `https://developers.cloudflare.com/workers/wrangler/configuration/`.
+- Artifacts creates isolated Git repos on demand with repo-scoped tokens and durable state. Source: `https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/`.
+- The Cloudflare Artifacts + Sandbox example passes short-lived Artifacts Git remotes into a Sandbox. Source: `https://developers.cloudflare.com/artifacts/examples/sandbox-sdk-artifacts/`.
+- Cloudflare's Pulumi tutorial explicitly uses Pulumi for supported resources and Wrangler for unsupported deployment tasks such as Worker updates and D1 migrations. Source: `https://developers.cloudflare.com/pulumi/tutorial/dynamic-provider-and-wrangler/`.
+- Cloudflare's Workers IaC docs warn that examples do not bundle Workers, and if Wrangler builds but another tool uploads, all Wrangler config must be copied into the IaC/API request, especially compatibility date/flags. Source: `https://developers.cloudflare.com/workers/platform/infrastructure-as-code/`.
+
+## Tool Fit
+
+### SST
+
+Best fit:
+
+- Wzrrd prototype/framework deploy lane for Cloudflare React Router, TanStack Start, Astro, Vite/static, or similar surfaces.
+- Higher-level app definitions where `link`/`Resource` improves developer experience.
+- Scratch environments or preview/prototype deploys where resource creation is disposable or easy to import.
+
+Risky fit:
+
+- `pi-cloudflare-sandbox-workflows` current runtime Worker, because the active surface includes Containers/Sandbox, Artifacts binding, Analytics Engine, D1 migrations, Durable Object migrations, and receipt-sensitive policy vars.
+- Wzrrd existing production app/router until SST can import existing KV/D1/routes/workers/dispatch namespace without recreation or hidden drift.
+- Any path where new Cloudflare primitives must be available the same week Cloudflare ships them.
+
+### Pulumi
+
+Best fit:
+
+- Lower-level multi-project Cloudflare inventory and static resources.
+- Account/zone resources, DNS, routes, queues, R2, D1 databases, Workers that can tolerate lower-level resource modeling.
+- Wrapping Wrangler with a command/dynamic provider when the Cloudflare provider lags.
+
+Risky fit:
+
+- Replacing Wrangler for Workers that rely on exact build/bundle/config behavior.
+- D1 migrations or Worker deploys unless the command path records deterministic receipts.
+
+### Terraform
+
+Best fit:
+
+- Boring long-lived resources where declarative drift detection matters more than developer ergonomics.
+- Org/account infrastructure inventory and non-app Cloudflare configuration.
+
+Risky fit:
+
+- Fast-moving app deploys, generated Workers, dynamic package/runtime workflows, and anything that depends on Cloudflare preview/beta primitives.
+
+### Wrangler / Native Cloudflare API
+
+Best fit:
+
+- Current `pi-cloudflare-sandbox-workflows` runtime deploy.
+- Wzrrd existing app/router deploys.
+- Cloudflare newest primitives: Artifacts, Sandbox/Containers, Analytics Engine details, dispatch namespace SSR routing, D1 migrations.
+- Operations where exact Cloudflare receipts matter more than prettier IaC.
+
+Risk:
+
+- Bespoke scripts can sprawl and hide resource graph drift.
+- Cross-project inventory stays weak unless we add a thin manifest/check layer.
+
+## Adoption Gates
+
+Before adopting SST or Pulumi for either production path, require a no-bullshit proof:
+
+1. It can import or reference existing Cloudflare resources without recreating production D1/KV/routes/Workers.
+2. It can emit a plan/diff that an agent and human can read.
+3. It can preserve exact compatibility dates, flags, bindings, secrets, routes, Durable Object migrations, D1 migrations, and Worker names.
+4. It can represent or safely pass through Artifacts, Analytics Engine, Containers/Sandbox, and dispatch namespace behavior.
+5. It can run the current verification commands and live smoke checks.
+6. It records non-secret receipts: resource ids, Worker versions, migration status, binding names, route names, and deploy URLs.
+7. It does not materialize broad Cloudflare tokens or provider secrets into generated app code, prompts, public receipts, or Artifacts.
+
+## Recommended Experiments
+
+### Experiment A: Wzrrd SST Framework Deploy Spike
+
+Create a disposable Wzrrd prototype that uses SST for one Cloudflare framework deploy path.
+
+Target candidates:
+
+- `sst.cloudflare.TanStackStart`
+- `sst.cloudflare.ReactRouter`
+- `sst.cloudflare.Astro`
+- `sst.cloudflare.StaticSiteV2` for Vite/static output
+
+Question: can SST make `wzrrd deploy --slug <slug>` less custom without losing agent-readable receipts?
+
+Stop if SST cannot cleanly connect to the desired Wzrrd routing model, existing domain strategy, dispatch namespace/Workers for Platforms target, or existing KV/D1 ownership model.
+
+### Experiment B: Pi Current Wrangler Parity Spike
+
+Try to encode the current `pi-cloudflare-sandbox-workflows/wrangler.jsonc` in SST or Pulumi without changing app code.
+
+Expected result: this probably exposes gaps around Containers/Sandbox, Artifacts, Analytics Engine, and D1 migration orchestration.
+
+Stop if more than one critical resource needs ad hoc raw provider escape hatches. That means we are just rebuilding Wrangler badly with extra ceremony.
+
+### Experiment C: Cross-Project Cloudflare Manifest
+
+Before migrating tools, define a small repo-tracked Cloudflare resource manifest and checker:
+
+```txt
+cloudflare-resource-map.json
+  projects[]
+    name
+    repo
+    workers[]
+    d1Databases[]
+    kvNamespaces[]
+    artifactsNamespaces[]
+    analyticsDatasets[]
+    routes[]
+    dispatchNamespaces[]
+    requiredSecrets[]
+```
+
+Use it to answer "what Cloudflare shit do we own?" across both projects. This may deliver most of the value people reach for IaC to get, without forcing a premature migration.
+
+## Current Recommendation
+
+Use SST where it behaves like product leverage:
+
+- Wzrrd framework deploy prototypes.
+- Disposable stages and preview environments.
+- Higher-level Cloudflare app components after import/drift behavior is proven.
+
+Use Pulumi/Terraform where it behaves like inventory and policy leverage:
+
+- Account/zone/DNS/static resources.
+- Cross-project Cloudflare substrate inventory.
+- Long-lived resources that rarely change.
+
+Keep Wrangler/native Cloudflare APIs where exact platform truth matters:
+
+- Pi sandbox workflow runtime.
+- Wzrrd existing production app/router.
+- D1 migrations, Worker builds, Containers/Sandbox, Artifacts, Analytics Engine, dispatch namespace/Workers for Platforms, and live deploy receipts.
+
+The shit to avoid: making SST the new magical control plane before it proves parity on the ugly Cloudflare bits. That just moves sludge from shell scripts into `sst.config.ts`.

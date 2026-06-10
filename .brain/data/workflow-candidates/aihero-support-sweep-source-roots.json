@@ -1,0 +1,54 @@
+[
+  {
+    "authorityRoot": "/Users/joel/Code/badass-courses/aihero-support/.brain",
+    "family": "brain",
+    "includeExtensions": [".svx"],
+    "label": "AIHero Support Brain",
+    "privacyTier": "customer-private",
+    "scope": {
+      "organizationId": "org:badass-courses",
+      "projectId": "aihero-support"
+    },
+    "sourceId": "source:brain:badass-courses:aihero-support",
+    "sourceSystem": "local:brain"
+  },
+  {
+    "authorityRoot": "/Users/joel/Code/badass-courses/aihero-support/.brain/data/aih-triage-ingest/front-snapshot",
+    "family": "support",
+    "includeExtensions": [".json", ".jsonl"],
+    "label": "AIHero Front support snapshots",
+    "privacyTier": "customer-private",
+    "scope": {
+      "organizationId": "org:badass-courses",
+      "projectId": "aihero-support"
+    },
+    "sourceId": "source:support:badass-courses:aihero-front-snapshot",
+    "sourceSystem": "local:front-snapshot"
+  },
+  {
+    "authorityRoot": "/Users/joel/Code/badass-courses/aihero-support/data/internal-comms-archive",
+    "family": "comms",
+    "includeExtensions": [".json", ".jsonl", ".md", ".txt"],
+    "label": "AIHero internal comms archive",
+    "privacyTier": "customer-private",
+    "scope": {
+      "organizationId": "org:badass-courses",
+      "projectId": "aihero-support"
+    },
+    "sourceId": "source:comms:badass-courses:aihero-internal-comms",
+    "sourceSystem": "local:internal-comms-archive"
+  },
+  {
+    "authorityRoot": "/Users/joel/Code/badass-courses/aihero-support/.brain/resources/crm",
+    "family": "people-org-memory",
+    "includeExtensions": [".svx", ".md", ".json"],
+    "label": "AIHero CRM and org memory Brain",
+    "privacyTier": "customer-private",
+    "scope": {
+      "organizationId": "org:badass-courses",
+      "projectId": "aihero-support"
+    },
+    "sourceId": "source:people-org-memory:badass-courses:aihero-crm",
+    "sourceSystem": "local:brain-crm"
+  }
+]

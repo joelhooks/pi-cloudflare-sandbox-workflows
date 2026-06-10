@@ -18,5 +18,12 @@
     "noPropertyAccessFromIndexSignature": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "prototypes/**/*.ts", "scripts/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "prototypes/**/*.ts",
+    "scripts/**/*.ts",
+    "worker-configuration.d.ts"
+  ],
+  "exclude": ["prototypes/registry-office-ui-spike/**/*"]
 }

@@ -6,7 +6,15 @@ This document captures the current answer from `prototypes/sandbox-workflow-spik
 
 The next production spine is not one fixed workflow. It is a supervisor-shaped system that can generate or select an **XState v5 workflow machine** for the job, pin that plan before sandbox creation, then execute trusted lanes against the pinned plan.
 
-The prototype proves this with a constrained `reader -> verifier` pattern. The final delivery step should be modeled as an instruction-selected **output target**. Wzrrd is a good review/output target, not a hardcoded core subsystem; another run might deliver a GitHub PR, issue comment, Linear update, artifact-only capture, or email draft.
+Dreams fit this spine directly: a dream is a dynamic workflow that crawls session history, hydrates receipts, connects dots across near-term and long-term memory, ratifies flows, sorts core memories, and assembles review/apply/deploy/test/rollback lanes. The named prototype home is `prototypes/shitrat-dream-workflow-spike/`.
+
+Dream correction: dreams should be stochastic. The generated/proposed phases and lanes are artifact data; only the mutation safety envelope should be deterministic.
+
+The prototype proves the general spine with a constrained `reader -> verifier` pattern. The final delivery step should be modeled as an instruction-selected **output target**. Wzrrd is a good review/output target, not a hardcoded core subsystem; another run might deliver a GitHub PR, issue comment, Linear update, artifact-only capture, or email draft.
+
+Report rendering is also a node, not just an output string. A dynamic workflow that needs HITL review should install/invoke a Wzrrd report renderer package, render a hash-pinned review surface from typed artifacts, then request a separate `wzrrd.site.publish` lease only if the surface should be published. The current seed pattern is `joel/tufte-mdsvx`, proven in `prototypes/shitrat-brain-proposal-ui/` and applied to Dreaming in `prototypes/system-dream-review-ui/`.
+
+Every Wzrrd HITL report should show the workflow state machine as a D2 figure. The figure source should come from the pinned generated XState machine when present. If a run only has a pinned `workflow-plan.json`, render that state path and label it as a plan-derived figure. If the run uses static patterns or theme libraries, the report should expose that proof gap instead of implying the machine was dynamically generated end to end.
 
 ## Receipts
 
@@ -186,8 +194,9 @@ It commits these files to Artifacts using `isomorphic-git` and an in-memory file
 
 ```txt
 run/plan.json
-workflows/machine.ts
-workflows/harness.js
+workflows/machine.config.json
+workflows/machine.ts             # optional source receipt, not execution input
+workflows/harness.js             # only when generated bindings are needed
 run/verification-contract.json
 run/manifest.json
 run/source-seed.json
@@ -207,7 +216,8 @@ If the plan is not pinned before execution, the run is not auditable enough to t
 
 For this prototype:
 
-- `workflows/machine.ts` is a source receipt only.
+- `workflows/machine.config.json` is the executable machine receipt.
+- `workflows/machine.ts` is a source receipt only when emitted.
 - The Worker executes a fixed constrained `reader -> verifier` path.
 - Generated lifecycle code is not runtime-loaded into the Worker yet.
 
@@ -279,7 +289,7 @@ Do not absorb directly:
 - hard-coded research source seed
 - static `PI_AUTH_JSON_B64` Worker secret path
 - inline shell strings
-- generated Wzrrd HTML string
+- generated Wzrrd HTML strings; absorb the installable HITL report-node contract instead
 - prototype route glue
 
 ## Next production questions
@@ -289,3 +299,5 @@ Do not absorb directly:
 3. Should warning captures produce `captured_with_warnings` as a final state or as context on `captured`?
 4. How should a verifier request human review without blocking cleanup?
 5. Which workflow patterns belong in the first pattern library package?
+6. Should the first report-node package be `@joelhooks/wzrrd-hitl-report`, or should it live inside a broader Wzrrd adapter package with `renderReviewSurface` as one export?
+7. What verifier check proves a D2 state-machine figure was generated from the pinned machine artifact and not redrawn by hand?

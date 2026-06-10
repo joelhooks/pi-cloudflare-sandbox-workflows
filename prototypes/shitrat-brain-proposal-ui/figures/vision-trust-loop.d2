@@ -1,0 +1,84 @@
+direction: down
+
+Vision: {
+  label: "VISION.md core\nwhy, good, may, must not"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Propose: {
+  label: "Agent proposes\nsmall useful change"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+ReviewPage: {
+  label: "Wzrrd review\nreceipts near prose"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Checks: {
+  label: "Checks run\ntypes, lint, source"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Decision: {
+  label: "Approve?"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Apply: {
+  label: "Apply path\nmanual or leased"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Receipts: {
+  label: "Receipts\nwhat, why, rollback"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Trust: {
+  label: "Trust policy\nversioned update"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Autonomy: {
+  label: "Bounded autonomy\nonly earned lanes"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Vision -> Propose: "bounds"
+Propose -> ReviewPage: "explains"
+ReviewPage -> Checks: "validates"
+Checks -> Decision: "evidence"
+Decision -> Apply: "yes"
+Decision -> Propose: "rewrite"
+Apply -> Receipts: "captures"
+Receipts -> Trust: "updates"
+Trust -> Autonomy: "earns"
+Autonomy -> Propose: "next run"

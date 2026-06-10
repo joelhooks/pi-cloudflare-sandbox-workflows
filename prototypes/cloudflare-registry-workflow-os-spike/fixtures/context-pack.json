@@ -1,0 +1,32 @@
+{
+  "name": "internal-context-pack-registry",
+  "version": "0.1.0",
+  "description": "Fixture context pack proving prompt and skill registry publication through Cloudflare Artifacts.",
+  "pack": {
+    "id": "internal-context-pack-registry",
+    "version": "0.1.0",
+    "compatibility": {
+      "pi": ">=0.0.0"
+    },
+    "taskMatchers": ["context-pack-registry", "internal-prompts", "skills"],
+    "permissions": {
+      "network": false,
+      "secrets": []
+    },
+    "defaultVerificationContract": "registry-layout-smoke-v1"
+  },
+  "files": [
+    {
+      "path": "prompts/review-pack.md",
+      "content": "# Review Pack Prompt\n\nReview this context pack for scope, source receipts, and safe install shape.\n"
+    },
+    {
+      "path": "skills/context-pack-review/SKILL.md",
+      "content": "---\nname: context-pack-review\ndescription: Review prompt and skill context packs before publication.\n---\n\n# Context Pack Review\n\nCheck pack metadata, prompt clarity, secret boundaries, and install safety.\n"
+    },
+    {
+      "path": "docs/registry-note.md",
+      "content": "# Registry Note\n\nThis fixture represents a non-code prompt and skill pack managed through the registry spike.\n"
+    }
+  ]
+}

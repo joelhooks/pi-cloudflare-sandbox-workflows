@@ -14,7 +14,7 @@ pnpm prototype:capsule-do:local
 
 ## Success signal
 
-The local Wrangler demo response proves:
+The local Wrangler proof response proves:
 
 - Worker routes by external `workItemId`
 - Durable Object storage owns the capsule record

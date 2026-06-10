@@ -442,7 +442,7 @@ const buildApproval = (
           decidedBy: "operator",
           decision: "approved",
           notes:
-            "Prototype demo approval generated only because JOELCLAW_SWARM_APPROVE=1 was set by the operator.",
+            "Prototype proof approval generated only because JOELCLAW_SWARM_APPROVE=1 was set by the operator.",
         }
       : {
           decision: "pending",

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wzrrd.sh/schema/config.json",
+  "favicon": {
+    "emoji": "🧠"
+  },
+  "site": {
+    "emoji": "🧠",
+    "slug": "system-dream-review-ui",
+    "theme": "tufte-notes",
+    "title": "System Dream Review"
+  },
+  "template": {
+    "id": "joel/tufte-mdsvx",
+    "source": "local-fixture",
+    "version": "0.1.0"
+  }
+}

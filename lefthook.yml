@@ -7,7 +7,7 @@ pre-commit:
       stage_fixed: true
 
     - name: lint all files
-      run: pnpm exec ultracite check .
+      run: pnpm check
 
     - name: typecheck all files
       run: pnpm typecheck

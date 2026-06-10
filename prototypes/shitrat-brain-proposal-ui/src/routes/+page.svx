@@ -1,0 +1,618 @@
+<script lang="ts">
+  import FlowChart from "$lib/flow-chart.svelte";
+  import MarginNote from "$lib/margin-note.svelte";
+  import PatternCards from "$lib/pattern-cards.svelte";
+  import ReportLayout from "$lib/ReportLayout.svelte";
+  import StatLine from "$lib/stat-line.svelte";
+
+  const cloudflarePatterns = [
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabfleet/blob/main/wrangler.jsonc",
+          label: "openclaw/crabfleet/wrangler.jsonc",
+        },
+      ],
+      title: "Worker front door, durable state behind it",
+      why: "Keep ShitRat orchestration HTTP-friendly while Durable Objects own stateful session and control behavior.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabfleet/blob/main/src/index.ts",
+          label: "openclaw/crabfleet/src/index.ts",
+        },
+      ],
+      title: "Sandbox credential mediation",
+      why: "Use placeholder env vars and trusted request interception so sandboxes get capability-shaped access, not raw secrets.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabfleet/blob/main/src/index.ts",
+          label: "SessionControlDO",
+        },
+      ],
+      title: "Session control actor",
+      why: "A ShitRat apply loop needs policy, checkpoints, rollback refs, and review receipts in a durable single-writer actor.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabbox/blob/main/worker/wrangler.cloudflare.jsonc",
+          label: "openclaw/crabbox/worker/wrangler.cloudflare.jsonc",
+        },
+      ],
+      title: "Multi-size container runner",
+      why: "Runtime packs can request capacity by job class instead of pretending every workflow fits one sandbox shape.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabbox/blob/main/worker/src/cloudflare-container-runner.ts",
+          label: "cloudflare-container-runner.ts",
+        },
+      ],
+      title: "Lease metadata and idle expiry",
+      why: "Agent sandboxes need explicit lifecycle, ttl, idle timeout, cleanup states, and stateful stop rules.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/openclaw/crabbox/blob/main/worker/src/artifacts.ts",
+          label: "openclaw/crabbox/worker/src/artifacts.ts",
+        },
+      ],
+      title: "Artifact upload broker",
+      why: "Dream outputs and review artifacts need scrubbed, bounded, hashable publishing before any public handoff.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody",
+          label: "kentcdodds/kody",
+        },
+      ],
+      title: "Multi-user assistant isolation",
+      why: "Organization access should isolate packs, jobs, memories, secrets, and state by actor instead of treating context as global soup.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/packages/worker/src/mcp/capabilities/secrets/secret-list.ts",
+          label: "secret-list.ts",
+        },
+      ],
+      title: "Metadata-only secret discovery",
+      why: "Agents need to discover secret references, names, allowed hosts, and capabilities without ever seeing plaintext.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/packages/worker/src/mcp/fetch-gateway.ts",
+          label: "fetch-gateway.ts",
+        },
+      ],
+      title: "Host approval gateway",
+      why: "Capability leasing should expand power at the trusted boundary, not inside prompts, generated code, or sandbox logs.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://blog.cloudflare.com/dynamic-workflows/",
+          label: "Cloudflare Dynamic Workflows",
+        },
+      ],
+      title: "Dynamic workflow dispatch",
+      why: "Project packs may eventually define durable plans without forcing every tenant or agent through one global workflow class.",
+    },
+  ];
+
+  const packageFraming = [
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/use/packages.md",
+          label: "Kody packages",
+        },
+      ],
+      title: "Package is the saved primitive",
+      why: "Kody's strongest idea is that package is the top-level saved entity across search, execute, repo editing, UI hosting, jobs, workflows, subscriptions, and retrievers.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/contributing/packages-and-manifests.md",
+          label: "packages-and-manifests.md",
+        },
+      ],
+      title: "Manifest is source of truth",
+      why: "A package is a repo-backed module rooted at package.json. The manifest declares metadata, exports, dependencies, package-owned surfaces, and runtime contract.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/use/packages.md#package-exports",
+          label: "package exports",
+        },
+      ],
+      title: "Exports are the runtime surface",
+      why: "Packages should be callable and importable through explicit exports, with descriptions, JSDoc, type hints, checks, and published artifacts before execution.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/use/packages.md#dynamic-package-invocation",
+          label: "dynamic package invocation",
+        },
+      ],
+      title: "Static snapshots, dynamic invocation",
+      why: "Use static imports when the caller should keep the dependency snapshot it was published with. Use checked dynamic invocation when workflows, events, or agents should call the current published export.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/use/packages.md#dynamic-package-invocation",
+          label: "invokeChecked",
+        },
+      ],
+      title: "Check before invoke",
+      why: "Runtime dispatch should surface contract metadata and warnings before invocation, use idempotency keys for domain events, and depth-limit nested package calls.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://github.com/kentcdodds/kody/blob/main/docs/use/packages.md#package-apps",
+          label: "package-owned surfaces",
+        },
+      ],
+      title: "Leases wrap side effects",
+      why: "Package architecture defines what exists and can be reused. Capability leases should only authorize exact side effects that a package export wants to perform.",
+    },
+  ];
+
+  const runtimeCommitments = [
+    {
+      receipts: [
+        {
+          href: "https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/",
+          label: "Durable Objects rules",
+        },
+      ],
+      title: "Context capsule actor",
+      why: "The durable unit should be an external work item or thread, not a sandbox. One capsule owns locks, hot state, event log, active run refs, pending reviews, and receipts.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://developers.cloudflare.com/workflows/build/rules-of-workflows/",
+          label: "Cloudflare Workflows rules",
+        },
+      ],
+      title: "Plan-pin-before-run",
+      why: "A workflow must pin the plan artifact before creating a sandbox or applying changes. Generated harness code can be dynamic; the trusted lifecycle cannot be improvised mid-flight.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://better-auth.com/docs/plugins/organization",
+          label: "Better Auth organization",
+        },
+        {
+          href: "https://better-auth.com/docs/plugins/device-authorization",
+          label: "device authorization",
+        },
+      ],
+      title: "Auth is identity; policy is runtime",
+      why: "Better Auth should answer who this human, device, service, or agent session is. ShitRat policy still decides pack entitlements, trust tier, spend, review gates, and exact leases.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://developers.cloudflare.com/dynamic-workers/usage/dynamic-workflows/",
+          label: "Dynamic Workflows",
+        },
+        {
+          href: "https://developers.cloudflare.com/dynamic-workers/usage/durable-object-facets/",
+          label: "DO Facets",
+        },
+      ],
+      title: "Static workflows first",
+      why: "Dynamic Workers, Dynamic Workflows, and DO Facets are useful later for package-owned services and validators, but the first production core should use registered Workflows until isolation receipts are boring.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://developers.cloudflare.com/sandbox/concepts/architecture/",
+          label: "Sandbox architecture",
+        },
+        {
+          href: "https://developers.cloudflare.com/containers/platform-details/architecture/",
+          label: "Containers architecture",
+        },
+      ],
+      title: "Disposable sandboxes, durable outputs",
+      why: "Sandbox and container filesystems are scratch space. Canonical outputs belong in Artifacts, D1, R2, and capsule state before teardown.",
+    },
+    {
+      receipts: [
+        {
+          href: "https://developers.cloudflare.com/artifacts/concepts/how-artifacts-works/",
+          label: "Artifacts model",
+        },
+      ],
+      title: "GitHub is mirror, Artifacts is runtime",
+      why: "GitHub stays excellent for PRs and collaboration. Runtime packs, plans, receipts, rollback refs, and generated harnesses should load from pinned Artifacts refs.",
+    },
+  ];
+</script>
+
+<svelte:head>
+  <title>ShitRat Kernel Proposal</title>
+  <meta
+    name="description"
+    content="A proposal for a forkable agent kernel that loads only the context a job needs, leases capabilities instead of secrets, and lets projects earn more autonomy through receipts."
+  />
+  <meta property="og:title" content="ShitRat Kernel Proposal" />
+  <meta
+    property="og:description"
+    content="A proposal for a forkable agent kernel that loads only the context a job needs, leases capabilities instead of secrets, and lets projects earn more autonomy through receipts."
+  />
+  <meta property="og:image" content="https://shitrat-brain-proposal.wzrrd.sh/og.svg" />
+  <meta property="og:image:type" content="image/svg+xml" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://shitrat-brain-proposal.wzrrd.sh/og.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap"
+    rel="stylesheet"
+  />
+</svelte:head>
+
+<ReportLayout>
+
+<p class="eyebrow"><span class="mascot" aria-hidden="true">🐀</span> ShitRat kernel proposal</p>
+
+# A small kernel with versioned packs.
+
+<p class="lead">ShitRat should be a small, durable kernel plus versioned packs. The kernel carries the personality, writing style, memory habits, communication defaults, and operating rules that should feel stable a year from now. Packs carry the work-specific context.</p>
+
+<p class="lead">The system is agents-first. Humans review and steer, but the primary consumers are Pi, Claude, Codex, <a href="https://developers.cloudflare.com/agents/">Cloudflare Agents</a><MarginNote id="cloudflare-agents" number="1">Cloudflare Agents provides durable identity, state, sessions, routing, WebSockets, scheduling, tools, and observability for agents on Workers.</MarginNote>, Cloudflare workflow agents, and future agents that need fast, pinned context from <a href="https://developers.cloudflare.com/artifacts/">Cloudflare Artifacts</a><MarginNote id="artifacts" number="2">Artifacts is the agent-first Git-compatible storage primitive. The useful bit for us is repo-scoped tokens, fork/import semantics, Workers/REST/Git access, and Durable Object-backed isolation.</MarginNote>.</p>
+
+<StatLine
+  items={[
+    { label: "Primitive", value: "runtime packages" },
+    { label: "Runtime source", value: "Cloudflare Artifacts" },
+    { label: "Access", value: "roles + leases" },
+    { label: "Trust", value: "earned by receipts" },
+  ]}
+/>
+
+## Intent and outcomes
+
+The intent is to keep ShitRat durable while letting working context change. The kernel should feel like the same familiar next year: same attitude, same writing taste, same memory habits, same bias toward receipts, and the same caution around applying changes. The packs around it can grow, split, churn, and specialize.
+
+The outcome is not one mega install. It is a set of Artifacts-backed packages with versions. The kernel gets loaded every time. Other packs get mounted when the workflow needs them. The important correction: packs should not be vague prompt blobs. They should be packages.
+
+<div class="two-column-list">
+  <div>
+    <h3>Intent</h3>
+    <ul>
+      <li>Install ShitRat consistently across Pi, Claude, Codex, Cloudflare workflow agents, and local/tailnet nodes.</li>
+      <li>Bake the feel into the prompt: writing style, attitude, taste, receipt-first behavior, and Joel's preferred way of working.</li>
+      <li>Keep the kernel evergreen. It should be small, durable, and rarely churn compared with task-specific packs.</li>
+      <li>Make dynamic packs load based on workflow intent instead of stuffing every installed skill into memory.</li>
+      <li>Use dreaming as the stochastic improvement loop that reviews usage, writing style, trust, skill friction, and pack hotness.</li>
+      <li>Build trust over time. Low-trust loops require review. Proven high-trust loops can run with more autonomy under explicit policies.</li>
+    </ul>
+  </div>
+  <div>
+    <h3>Outcomes</h3>
+    <ul>
+      <li>ShitRat has a pinned kernel version and independently pinned pack versions.</li>
+      <li>A good behavior from last week can be traced to exact kernel and pack versions, then diffed against today.</li>
+      <li>Often-used skills and packs can become hot; rarely used ones stay dynamic and loaded on demand.</li>
+      <li>Support, coding, research, business ops, and system maintenance can each develop their own trust policies and state machines.</li>
+      <li>Non-ShitRat agents can reuse packs like AI Hero support without inheriting Joel's rat personality.</li>
+      <li>Every apply path can explain what changed, why, which vision it aligns with, what policy allowed it, and how to roll it back.</li>
+    </ul>
+  </div>
+</div>
+
+## Artifacts first
+
+Artifacts should be the first-class package substrate. These packages are Git repositories, so they can sync to GitHub, clone locally, and be inspected like normal code. But the fast path for agents should be Artifacts: built for loading Git repos quickly inside <a href="https://developers.cloudflare.com/sandbox/">sandboxes</a><MarginNote id="sandbox" number="3">Cloudflare Sandbox and Containers give agents isolated execution for command running, file management, terminals, and test environments.</MarginNote>, <a href="https://developers.cloudflare.com/durable-objects/">Durable Objects</a><MarginNote id="durable-objects" number="4">Durable Objects are the stateful coordination primitive for session registries, policy actors, checkpoint stores, and single-writer control planes.</MarginNote>, and <a href="https://developers.cloudflare.com/workflows/">workflow runtimes</a><MarginNote id="workflows" number="5">Cloudflare Workflows handles durable multi-step execution. Dynamic Workflows is especially relevant for tenant or project-defined durable plans.</MarginNote>.
+
+That means the ShitRat system should not be one giant version. The kernel, default kernel, JoelClaw runtime pack, AI Hero support pack, communication pack, writing-style pack, and project packs can each be their own Artifacts-backed repositories with their own versions. The kernel references the packs it wants, like package dependencies.
+
+GitHub can remain a mirror and collaboration surface. It does not need to be the canonical runtime package store. Agents want fast pinned context. Artifacts gives us that without cloning from GitHub for every run.
+
+## Package-first runtime
+
+Kody's strongest lesson is not the secret handling. Secret handling is the safety envelope. The deeper architecture is that the package is the top-level saved primitive: a repo-backed module rooted at `package.json`, with a manifest, exports, dependency rules, package-owned apps, services, jobs, workflows, subscriptions, retrievers, checks, published artifacts, and invocation semantics.
+
+That is the right framing for ShitRat. `badass-courses/claw-kernel`, `@joelhooks/shitrat-kernel`, workflow packs, support packs, writing-style packs, tool packs, and Discord adapters should all be packages. A package declares what exists and what can be discovered, imported, invoked, versioned, checked, published, and reused.
+
+Capability leases still matter, but they are not the architecture. They are the side-effect safety envelope around package exports.
+
+<PatternCards items={packageFraming} label="Package-first runtime" />
+
+<FlowChart
+  alt="Vertical package runtime flow showing package repo, package.json manifest, package checks, published artifact, metadata discovery, entitlement, invocation kind, static snapshot or checked dynamic invocation, side-effect decision, capability lease, and receipt."
+  caption="Package-first means context packs and plugins behave like real runtime packages: manifest first, checked exports, pinned snapshots when desired, dynamic checked invocation when current behavior matters, and leases only when a side effect is requested."
+  src="/figures/package-first-runtime.svg"
+  title="Package-first runtime path"
+/>
+
+## Default kernel
+
+ShitRat should not be the only kernel. We need a default kernel that is close to ShitRat in operating discipline but not Joel's rat personality. For our use case, Badass Courses is the default organization, so the default org kernel should be `badass-courses/claw-kernel`.
+
+The default kernel is meant to be run directly or forked. ShitRat can depend on it, extend it, and override specific pieces. Treat this like a layered plugin system: default rules first, then organization defaults, then personal kernel overrides, then workflow packs.
+
+The important bit: the default kernel only includes defaults we want every instance of that claw variety to inherit. If a behavior is Joel-only, network-only, or workflow-only, it belongs in a pack, not the default kernel. We do not need a lower-level generic default yet. If that appears later, it can simply be `claw-kernel` underneath the Badass Courses org default.
+
+```ts
+import { z } from "zod";
+
+const KernelDependency = z.object({
+  name: z.string(),
+  version: z.string(),
+  source: z.enum(["artifact", "github", "local"]),
+  optional: z.boolean().default(false),
+});
+
+export const KernelManifest = z.object({
+  name: z.string(),
+  version: z.string(),
+  extends: z.array(KernelDependency).default([]),
+  overrides: z.record(z.string(), z.unknown()).default({}),
+  packs: z.array(KernelDependency).default([]),
+});
+```
+
+This matters because many packs should be reusable. AI Hero support, code-stack packs, and project packs should be usable by other authorized agents without inheriting ShitRat's identity.
+
+<FlowChart
+  alt="Vertical flow showing default kernel, organization layer, ShitRat kernel, workflow intent, entitlement check, mounted packs, compiled prompt, and agent run."
+  caption="The kernel is not a blob. It is a layered load path: default org kernel, ShitRat overrides, workflow intent, entitlement check, then only the packs the job can actually use."
+  src="/figures/kernel-pack-load.svg"
+  title="Kernel and pack load path"
+/>
+
+## Organization access
+
+The system should work like an organization. Users, agents, and service accounts get roles. Roles grant access to context slices, tools, secrets, spend limits, and capabilities. A user might get privileged context for one project, light context for another, and no access to a third.
+
+Use <a href="https://www.better-auth.com/">Better Auth</a><MarginNote id="better-auth" number="6">Better Auth has organization and device authorization plugins that match human-approved agent/CLI/device access better than hand-rolled auth.</MarginNote> early. Its organization and device authorization plugin surface maps nicely to agent work: humans can approve devices, CLIs, and agents; organizations can own memberships; and the app can issue scoped sessions instead of spraying raw keys around.
+
+Capabilities should be assigned through leases, not raw keys. We already proved this direction in the <a href="https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/tree/main/prototypes/cloud-capability-lease-broker-spike">cloud capability lease broker spike</a><MarginNote id="capability-prototype" number="7">Local receipt: <code>prototypes/cloud-capability-lease-broker-spike</code> proved payload-bound GitHub PR capability execution from Cloudflare with leak-scan receipts.</MarginNote>. A lease says exactly what an actor can do, against which payload, for how long, with which rollback and receipt requirements. Secrets stay behind the lease boundary.
+
+Kent C. Dodds' <a href="https://github.com/kentcdodds/kody">Kody</a><MarginNote id="kody" number="8">Kody is Kent C. Dodds' Cloudflare Workers + MCP assistant. The central lesson is package as the saved primitive; the secret model is the side-effect safety envelope.</MarginNote> is also worth stealing from here. Its package model gives us the reusable runtime unit. Its secret model then protects side effects through metadata discovery, encrypted storage, placeholder references, host approval, and gateway-time expansion at the trusted boundary.
+
+### Distribution and entitlements
+
+For distribution, think less “user has app access” and more “actor can mount these packs and lease these capabilities.” Badass Courses becomes the default organization for now, and other organizations can exist later without forcing a lower-level generic kernel too early.
+
+| Surface | Default stance | Why |
+| --- | --- | --- |
+| organization | Badass Courses owns the first default kernel and org packs | This is our real operating context. Start concrete. |
+| user | gets roles, context tiers, pack visibility, and spend ceilings | Humans steer work and approve wider trust. |
+| agent | gets pack titles/descriptions first, then mounted context when allowed | Keeps prompts small and access explicit. |
+| service account | gets narrow capability leases and receipts | Lets workflows act without pretending they are humans. |
+| secret | remains a reference until trusted code resolves it | Prevents prompt, sandbox, artifact, and log leakage. |
+| capability | is leased for one operation envelope | Binds actor, repo/resource, payload hash, expiry, rollback, and receipt. |
+
+```ts
+export const CapabilityLease = z.object({
+  actorId: z.string(),
+  actorType: z.enum(["human", "agent", "service"]),
+  capability: z.string(),
+  resource: z.string(),
+  payloadHash: z.string(),
+  expiresAt: z.string().datetime(),
+  rollbackRef: z.string().optional(),
+  receiptRequired: z.boolean().default(true),
+});
+```
+
+Spend and observability belong in this layer too. If invited users run real model calls, we should expect straight API pricing and track cost, trace usage, and enforce budgets per user, team, project, pack, or workflow.
+
+<FlowChart
+  alt="Vertical flow showing an actor requesting one operation, policy broker evaluation, capability lease, trusted boundary, sandbox run, safety gate, approved action, and receipt."
+  caption="The sandbox never needs the raw secret. It gets placeholder refs and evidence duties. The trusted Worker or Durable Object expands power only when policy, payload hash, expiry, and review gates line up."
+  src="/figures/capability-lease-apply.svg"
+  title="Capability lease apply path"
+/>
+
+## Kernel shape
+
+The core package should probably be `@joelhooks/shitrat-kernel`. It is the always-loaded ShitRat kernel: identity, compact writing-style core, hot system defaults, adapter rules, pack dependencies, memory refs, access rules, and trust/todo metadata.
+
+The kernel is more like `package.json` than a monolithic prompt. It references other packs, pins versions, describes adapter targets, and gives agents the files they need quickly from Artifacts.
+
+| Artifact | What it contains |
+| --- | --- |
+| `kernel.json` / `package.json` | Package name, semver, adapter targets, dependency refs, files, hashes, compatibility, role requirements, and policy refs. |
+| `IDENTITY.md` | Stable ShitRat role, laws, boundaries, model/tool policy, and public/private contract. |
+| `WRITING_STYLE.md` | Compact ShitRat writing-style core plus a pointer to the full writing-style skill/doc when needed. |
+| `SYSTEM_DEFAULTS.jsonl` | Curated defaults every kernel instance should inherit. Not every installed skill. |
+| `PACK_DEPENDENCIES.jsonl` | Pinned references to default kernel, organization packs, project packs, and personal runtime packs. |
+| `ADAPTERS/pi.md`, `claude.md`, `codex.md`, `cloudflare.md` | Harness-specific compile rules that keep identity consistent while staying honest about available tools. |
+| `TOOLS.md` | Per-harness tool and capability manifest generated from observed tools, not host skill dumps. |
+| `ACCESS.md` | Role requirements, context tiers, secret refs, and capability lease policies only. No secret material. |
+| `TODO.jsonl` / `TRUST.md` / `REVIEW.md` | Open work, approval gates, trust levels, grilling requests, rejected items, drift, validation, and rollback plan. |
+
+## ShitRat writing style
+
+ShitRat writing style belongs in the compiled system prompt, but the hot portion should stay small. It carries the feel and personality: plain language, directness, taste, skepticism, useful profanity, receipts, and Joel's idioms instead of generic model idioms.
+
+The full writing-style skill/doc should be a pointer that can load on demand. The kernel should know the compact law. The pack should hold examples, eval notes, drift receipts, and expansion material.
+
+It should also be part of dreaming. Dreams should notice dull language, fake warmth, missing receipts, over-explaining, and places where the familiar sounds less like Joel's working partner. Those observations become versioned writing-style proposals. They do not silently mutate the live kernel.
+
+## Kernel defaults and packs
+
+The hot path should be defaults, not every skill wearing a ShitRat prefix. If something belongs to every `claw-kernel` instance, it can be a default. If it only belongs to Joel, Badass Courses, AI Hero support, or one project, it is a pack.
+
+| Layer | Scope | Examples |
+| --- | --- | --- |
+| default org kernel | every Badass Courses claw instance | tool honesty, receipts, compact writing law, memory policy, capability boundaries |
+| organization pack | Badass Courses or another org | support, course ops, launch, content, subscriber intelligence |
+| personal pack | Joel-only | <a href="https://github.com/joelhooks/joelclaw">JoelClaw</a><MarginNote id="joelclaw" number="9">JoelClaw is Joel's runtime/ops system. It belongs as a personal pack, not a universal kernel dependency.</MarginNote> runtime, private Brain, tailnet topology, personal comms |
+| project pack | one repo/product | `VISION.md`, `AGENTS.md`, source map, validation commands, local trust gates |
+| workflow pack | one job shape | research fan-out, support triage, deploy repair, sandbox review |
+
+Dynamic packs should advertise only titles and very short descriptions in the system prompt. The active workflow and access policy decide which pack gets mounted.
+
+## Cloudflare patterns worth stealing
+
+Crabfleet, Crabbox, Kody, and Cloudflare's own Agents/Workflows examples deserve a deep research pass because they already use the same substrate family we are circling: Workers, D1, R2, Durable Objects, Containers, Sandbox sessions, credential policy, repo workflow directives, dynamic code, and human-approved secret use.
+
+<PatternCards items={cloudflarePatterns} label="Cloudflare patterns worth stealing" />
+
+The research pass shifts the proposal from “this substrate seems right” to a sharper boundary: Workers are policy doors, Durable Objects are context actors, Workflows run pinned plans, sandboxes execute scratch work, Artifacts preserve versioned truth, D1 indexes global policy state, and R2 stores big blobs.
+
+## Runtime commitments
+
+These are the most important production constraints from the research. They should survive the first implementation plan.
+
+<PatternCards items={runtimeCommitments} label="Runtime commitments" />
+
+<FlowChart
+  alt="Vertical runtime flow showing Better Auth identity, ShitRat policy, pack metadata, pack pinning, plan pinning, static workflow execution, context capsule state, sandbox work, capability lease, trusted adapter, durable receipts, and review surface."
+  caption="The core runtime shape: identify the actor, check ShitRat policy, pin context and plan artifacts, execute scratch work, lease exact side effects, then persist receipts before trust changes."
+  src="/figures/production-runtime-flow.svg"
+  title="Production runtime flow"
+/>
+
+The thing to avoid is starting with the shiny dynamic pieces. Dynamic Workers, Dynamic Workflows, and Durable Object Facets are promising for package-owned services, retrievers, validators, and tenant-defined harnesses. They should be prototype-gated until isolation, metadata, and local/prod parity receipts are boring.
+
+## JoelClaw runtime pack
+
+JoelClaw should be its own personal runtime pack. ShitRat needs it when operating inside Joel's network. Most other agents do not.
+
+The runtime pack teaches topology, gateway behavior, logs and traces, system-bus, k8s, network storage, workflow rigs, local Workflow OS, Cloudflare sandbox fan-out, and how to repair nodes without acting like a cowboy.
+
+The workflow direction is stochastic discovery followed by deterministic capture. Dreams and sandboxes fan out, explore, and find workflows that work. The good workflows get stored as versioned deterministic workflow artifacts and reused on purpose.
+
+## Dynamic packs
+
+Domain skills should be available, but not always loaded. The active workflow declares intent, then ShitRat or any other agent mounts the relevant pack with its skills, memory, tools, and constraints.
+
+Dreaming and day-to-day evaluation should decide what becomes hot. If a pack or skill is used constantly and pays rent, it can move closer to the hot path. If it is rarely used, it stays dynamic.
+
+Most of these are Badass Courses org packs, not ShitRat kernel defaults:
+
+| Pack | Example mounted context |
+| --- | --- |
+| `ai-hero-support` | high-trust support loops, confidence policy, send/review/archive gates; defer policy details until session/email data is reviewed |
+| `communications` | email, imsg, telegram, contacts, X, GitHub, Slack/Discord adapters |
+| `content-and-publishing` | joelclaw-web, content-publish, video-note, mux-video |
+| `research-and-monitoring` | ahrefs, pdf-brain, discovery, monitor, x-api |
+| `business-and-course-strategy` | Badass Courses, STB, launch, value-path skills |
+| `code-stack` | effect-ts, pi-effect, rust-sop, nextjs-static-shells |
+| `project` | project-local `VISION.md`, `AGENTS.md`, Brain notes, trust gates, workflows |
+
+These can be built later as they earn their keep. The immediate kernel work only needs enough pack metadata to advertise what could be mounted and enough access policy to decide whether a specific actor may mount it.
+
+## Trust, to-dos, and project vision
+
+Trust should be project-specific and loop-specific. AI Hero support may become high trust for certain cases, but the actual policy should come from data: past conversations, sent emails, confidence history, and what needed human correction.
+
+These policies should be explicit state machines, ideally XState v5 actors. The loop knows its states, retries, approvals, stop rules, confidence thresholds, spend limits, and apply gates. As trust improves, the policy can change by versioned proposal instead of hand-wavy permission creep.
+
+Any project maintained by dream or ShitRat loops should have a `VISION.md`. It does not need every field every time. It needs a tiny core, then recommended extensions as the project becomes more autonomous.
+
+### Smallest useful VISION.md
+
+My suggestion: do not start with the full schema as a hard gate. Start with four required sections and lint the rest as recommendations.
+
+```md
+---
+schema: vision.v0
+owner: badass-courses
+autonomy: manual
+---
+
+# VISION
+
+## What this is
+Name the project, who it serves, and why it exists.
+
+## What good looks like
+List the outcomes that mean the project is working.
+
+## What agents may do
+Describe the work agents can safely propose or perform.
+
+## What agents must not do
+Name the non-goals, hard boundaries, and blocked actions.
+```
+
+For loop-maintained projects, add `roles`, `contextTiers`, `capabilities`, `checks`, and `reviewSurface`. Those should become required only when the project actually lets agents run loops, lease capabilities, or apply changes.
+
+<FlowChart
+  alt="Vertical flow showing VISION.md core, agent proposal, Wzrrd review, checks, approval decision, apply path, receipts, trust policy update, and bounded autonomy."
+  caption="Autonomy should be earned in narrow lanes. A project starts manual, proves checks and receipt quality, then graduates only the paths that keep passing."
+  src="/figures/vision-trust-loop.svg"
+  title="VISION.md trust loop"
+/>
+
+| Field | Level | Why it matters |
+| --- | --- | --- |
+| project identity | required | Name, slug, owner, repo/artifact refs, and controlling organization/team. |
+| purpose and desired outcomes | required | What the project exists to do, who it serves, and what success looks like. |
+| allowed work | required | What agents may propose, draft, inspect, or run. |
+| hard boundaries | required | What the project must not do, even if an agent thinks it is useful. |
+| authorized actors and roles | required for loops | Humans, agents, service accounts, and roles that can read, propose, approve, or apply changes. |
+| context access tiers | required for private/org work | Public, light, privileged, private, and secret-backed context slices. |
+| capability policy | required for apply paths | Which operations can be leased, who can request them, expiry rules, payload binding, and rollback requirements. |
+| trust and autonomy policy | required for loops | What can run automatically, what needs review, what needs grilling, and what is always blocked. |
+| dream policy | required for dream-maintained projects | Allowed stochastic lanes, cadence, sandbox limits, proposal format, and mutation boundaries. |
+| state machines and apply gates | recommended | Lifecycle states, confidence thresholds, HITL checkpoints, validation commands, and stop rules. |
+| communication policy | recommended | Where agents report, ask for help, notify, or reply publicly; channel-specific approval rules. |
+| observability and spend | recommended | Logs, traces, evals, model/tool cost budgets, usage attribution, and required receipts. |
+| to-do and review surface | optional but useful | Where open work lives, how priority is decided, and how decisions are captured back into the project. |
+
+```ts
+export const VisionDocument = z.object({
+  identity: z.object({
+    name: z.string(),
+    owner: z.string(),
+    refs: z.array(z.string()).default([]),
+  }),
+  purpose: z.string(),
+  outcomes: z.array(z.string()).min(1),
+  allowedWork: z.array(z.string()).min(1),
+  hardBoundaries: z.array(z.string()).min(1),
+  roles: z.array(z.string()).default([]),
+  contextTiers: z.array(z.string()).default([]),
+  capabilities: z.array(CapabilityLease.pick({ capability: true, resource: true })).default([]),
+  autonomy: z.enum(["manual", "reviewed", "bounded-auto"]).default("manual"),
+});
+```
+
+Two current projects already point at this shape. They are not the kernel, but they are useful examples of projects that run loops, evaluate repo directives, and should eventually follow explicit `VISION.md` trust rules.
+
+- <a href="https://github.com/openclaw/crabfleet">openclaw/crabfleet</a><MarginNote id="crabfleet" number="10">Crabfleet is the mission-control side: board, run attempts, heartbeats, allowlists, repo workflow evaluation, D1/R2/Sandbox bindings, and session control.</MarginNote>: mission control for agent runs and repo workflow policy. It tracks durable run attempts, heartbeats, session logs, allowlists, roles, and repo workflow evaluation through <code>CRABBOX.md</code>.
+- <a href="https://github.com/openclaw/crabbox">openclaw/crabbox</a><MarginNote id="crabbox" number="11">Crabbox is the remote execution substrate: lease capacity, sync checkouts, stream command output, collect evidence, and release.</MarginNote>: remote execution and testing substrate for loops. It leases capacity, syncs a checkout, runs commands, streams output, collects evidence, and releases.
+
+## Current recommendations
+
+1. Use `badass-courses/claw-kernel` as the default Badass Courses org kernel. Do not invent a lower-level generic default until a real second org needs it.
+2. Start production with one low-risk research workflow pack: metadata discovery, version pinning, plan-pin-before-run, sandbox execution, redacted receipts, and Wzrrd/GitHub review output.
+3. Use Better Auth for identity and sessions, not side-effect authorization. ShitRat-owned policy still controls pack entitlements, trust tiers, spend, review gates, and capability leases.
+4. Use registered Workflows for the first production spine. Keep Dynamic Workers, Dynamic Workflows, and Durable Object Facets behind explicit spikes until isolation, metadata, and local/prod parity receipts are boring.
+5. Hard-fail only the tiny VISION core and dangerous schema violations. Treat richer fields as lint warnings until the project enables loops, secrets, or apply paths.
+6. Do not start with deploy/apply/write capabilities. Earn those paths through receipts from lower-risk research and review workflows first.
+
+<footer>
+This is a review proposal, not a deployment manifest. No raw prompt bodies, secrets, transcript bodies, or private Brain contents are embedded here.
+</footer>
+
+
+</ReportLayout>

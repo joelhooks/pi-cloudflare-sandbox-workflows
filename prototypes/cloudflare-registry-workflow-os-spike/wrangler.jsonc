@@ -1,0 +1,60 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "pi-cloudflare-registry-workflow-os-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": true,
+    },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 3,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox",
+      },
+      {
+        "class_name": "RegistrySupervisor",
+        "name": "REGISTRY_SUPERVISOR",
+      },
+    ],
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "REGISTRY_QUEUE",
+        "queue": "piwf-registry-jobs",
+      },
+    ],
+    "consumers": [
+      {
+        "max_batch_size": 4,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "queue": "piwf-registry-jobs",
+        "retry_delay": 2,
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["Sandbox", "RegistrySupervisor"],
+      "tag": "v1",
+    },
+  ],
+}

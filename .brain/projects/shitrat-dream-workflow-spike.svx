@@ -1,0 +1,228 @@
+---
+title: ShitRat Dream Workflow Spike
+status: active
+updated: 2026-06-09
+---
+
+# ShitRat Dream Workflow Spike
+
+Named prototype for migrating `/Users/joel/Code/joelhooks/pi-cloudflare-dream` into the Cloudflare sandbox workflows project.
+
+## PARA classification
+
+- Recommended bucket: Project
+- Confidence: high
+- Why: the next use is execution: prove dreams as dynamic workflows inside the workflow rig, with a clear prototype finish/review point.
+- Missing fields: runnable command is not migrated yet; this checkpoint moves Brain/docs only.
+- Smallest useful change: keep `pi-cloudflare-dream` as source evidence, but make this named prototype the owning surface.
+- Source pointers:
+  - `/Users/joel/Code/joelhooks/pi-cloudflare-dream/README.md`
+  - `/Users/joel/Code/joelhooks/pi-cloudflare-dream/docs/artifact-format.md`
+  - `/Users/joel/Code/joelhooks/pi-cloudflare-dream/docs/dream-workflow-model.md`
+  - `/Users/joel/Code/joelhooks/pi-cloudflare-dream/docs/shitrat-cloud-artifacts.md`
+
+## Decision
+
+Dreams belong inside `/Users/joel/Code/joelhooks/pi-cloudflare-sandbox-workflows` as dynamic workflow prototypes.
+
+A dream is not a report, a search query, or a static batch of proposed memories. A dream crawls near-term and long-term session history, hydrates receipts, connects dots across machines/projects/time, ratifies or rejects remembered flows, sorts candidate core memories, then assembles review/apply/deploy/test/rollback lanes.
+
+Correction from grill: dreams must remain stochastic. Do not pre-enumerate the dream itself as a fixed state enum. Store generated/proposed phases, lanes, graph edges, and candidate memories as artifact data. Keep deterministic control only around the safety envelope: receipts, capability leases, review gates, artifact commits, forward/rollback patches, validation output, and final run status.
+
+## Memory split
+
+```txt
+JoelClaw/Typesense = broad session-history memory substrate
+JoelClaw hydration = raw transcript receipts for durable claims
+Cloudflare Artifacts = distilled core memories + deployable component graph
+Brain/SVX = human-readable review/durable memory surface
+```
+
+Artifacts store accepted core memories and pointers back to source receipts. They should not duplicate the full transcript history.
+
+## Prototype path
+
+```txt
+prototypes/shitrat-dream-workflow-spike/
+```
+
+Migrated docs:
+
+```txt
+prototypes/shitrat-dream-workflow-spike/README.md
+prototypes/shitrat-dream-workflow-spike/docs/artifact-format.md
+prototypes/shitrat-dream-workflow-spike/docs/workflow-model.md
+```
+
+Related project-level docs:
+
+```txt
+docs/dynamic-workflow-machine.md
+docs/shitrat-operating-graph-artifacts.md
+```
+
+## Current non-goals
+
+- No cron yet.
+- No Discord/review UI yet.
+- No remote mutation.
+- No code migration yet.
+- No automatic system Brain/prompt/skill patching without forward diff, rollback diff, hash check, validation, and apply receipt.
+
+## Tangible workflow execution framing
+
+2026-06-09 operator request: run two real workflows, Dreaming and AI Hero support sweep.
+
+Dreaming source repo: `/Users/joel/Code/joelhooks/pi-cloudflare-dream`.
+
+Support source repo: `/Users/joel/Code/badass-courses/aihero-support`.
+
+Execution boundary:
+
+- Dreaming is a system-scope memory/improvement workflow. It should explore JoelClaw network agent session transcripts across Pi, Codex, and Claude, hydrate transcript receipts, capture candidate memories and improvement proposals, and produce ShitRat/kernel update candidates.
+- Dreaming may propose patches to Brain, prompts, skills, or kernel package surfaces, but the first pass should stop at reviewable artifacts unless each item has forward diff, rollback diff, pre-apply hash check, validation output, and apply receipt.
+- AI Hero support sweep is a private support workflow in the AI Hero support cockpit. It should not leak customer/support memory into public workflow repo notes. It must preserve the AI Hero approval gate: no customer-visible Front reply, archive, assignment, tag, Kit write, Contact State write, sequence enrollment, refund, invoice, or sensitive account mutation without the repo's explicit approval rules and stale checks.
+- If both workflows run in the same operator session, keep their artifacts separate: Dreaming writes ShitRat/session-memory candidates; AI Hero support writes private triage receipts, draft packs, and approval reports under the support repo.
+
+Current execution gotcha: `joelclaw sessions search "pi-cloudflare-dream dreaming shitrat kernel session transcripts" --source both --machine dark-wizard --limit 5 --extract` failed because `dark-wizard.tail7af24.ts.net` could not resolve, and `joelclaw status` reported the server/worker unreachable. Direct Typesense access worked when `~/.config/system-bus.env` was loaded by the Dream repo. Standalone `joelclaw sessions search --source typesense` did not load that env path, and `joelclaw sessions signals --source typesense` reported that Typesense-only signal mining is unsupported because it needs role-aware raw transcript context.
+
+## System Dream run receipt
+
+2026-06-09 run:
+
+```txt
+run id: dream-hunt-2026-06-09-998d4b
+scope: system
+focus: recent-system-memory-kernel-improvements
+source repo: /Users/joel/Code/joelhooks/pi-cloudflare-dream
+artifact repo: /Users/joel/Code/joelhooks/pi-cloudflare-dream/out/artifacts/dream-hunt-2026-06-09-998d4b
+artifact commit: c8683244449c3c764d4d1bce11a82fd5990a98e3
+wzrrd review: https://dream-hunt-2026-06-09-998d4b.wzrrd.sh/
+wzrrd expiry: 2026-06-10T15:48:43.318Z
+```
+
+Result:
+
+- Final state: `captured`.
+- Candidates: 9 total; 7 pending; 2 `needs_more_evidence`; 0 accepted/applied.
+- Hydration: 9 hydrated JoelClaw session receipts and 75 total locator receipts.
+- Coverage: Typesense machines `blaine`, `dark-wizard`, `flagg`, `panda`; hydrated receipts from local JoelClaw transcript paths; runtimes `pi`, `claude`, `codex`.
+- Review page is `noindex`, expiring, and redacted: raw transcript lines and hydrated local session paths are not published.
+
+Candidate themes:
+
+- Workflow deployment rig should access JoelClaw/Typesense through a tailnet runner or narrow authenticated bridge, not raw public Typesense.
+- Durable system memory claims may scout with Typesense chunks but require JoelClaw hydration receipts before Brain/prompt/skill mutation.
+- System dreams need explicit system scope and must not let project-scoped candidates auto-apply to global memory.
+- Accepted system dream items need forward diff, rollback diff, pre-apply hash check, validation output, and apply receipt.
+- Operating graph should keep versioned snapshot lineage first, then smaller component packs.
+- Dynamic workflow assembly and per-item review are promising but still need stronger hydrated evidence in this run.
+
+## Cloudflare sandbox access model
+
+Assumption confirmed for the next migration step: Cloudflare sandbox workers should not hold raw Typesense credentials, private transcript paths, or direct JoelClaw filesystem assumptions.
+
+Preferred adapter shape:
+
+- Cloudflare Dream worker requests a narrow memory capability lease from a trusted runner or authenticated JoelClaw relay.
+- The lease covers bounded operations such as `search-sessions`, `hydrate-session`, `export-redacted-evidence`, and `write-dream-artifact`.
+- Lease metadata must include actor, scope, purpose, source filters, query budget, TTL, policy version, idempotency key, and audit receipt.
+- The relay returns redacted evidence plus signed/session-addressable receipts; local/raw transcript hydration remains behind the trusted boundary.
+- Cloudflare artifacts store distilled candidates, graph edges, decisions, and receipt locators, not raw transcripts or long-lived database secrets.
+
+## HITL report node
+
+2026-06-09 reporting correction: Dream report rendering should be baked into the workflow system as an installable HITL workflow node/plugin, not as a copied one-off HTML generator.
+
+Local Wzrrd template discovery found `joel/tufte-mdsvx@0.1.0` and `system/tufte-mdsvx@0.1.0`; the remembered "tufte-smoke" name was not installed under that id. The existing `prototypes/shitrat-brain-proposal-ui/` is the concrete source pattern.
+
+Decision:
+
+- Treat report rendering as a package export such as `@joelhooks/wzrrd-hitl-report/renderReviewSurface`.
+- Dynamic workflows invoke that node when they need human-in-the-loop review.
+- The node renders typed artifacts into a SvelteKit/MDSvX static review surface with source, template, redaction, and surface-hash receipts.
+- Wzrrd publishing remains a separate `wzrrd.site.publish` capability lease and adapter. Rendering a review surface and publishing it externally are different boundaries.
+- The report node should support Dreaming, support sweeps, capability approvals, implementation reviews, and other HITL gates.
+
+Current prototype receipt:
+
+```txt
+prototype: prototypes/system-dream-review-ui/
+template: joel/tufte-mdsvx@0.1.0
+pattern receipt: prototypes/shitrat-brain-proposal-ui/
+run page target: https://dream-hunt-2026-06-09-998d4b.wzrrd.sh/
+expires: 2026-06-10T16:48:11.902Z
+```
+
+Report-node requirements added 2026-06-09:
+
+- HITL reports should include a workflow state-machine figure when a workflow plan or generated machine artifact exists.
+- Figure source priority is pinned generated XState machine -> pinned workflow-plan artifact -> clearly labeled fallback derived from redacted run facts.
+- The current Dream report uses `figures/dream-workflow-state-machine.d2`, rendered to `static/figures/dream-workflow-state-machine.svg` with `viewBox="0 0 685 1272"`.
+- The current proof level is dynamic evidence-driven lane assembly over a static theme/pattern library, not a fully generated XState machine.
+- Current dynamic receipts: 410 events, 176 Typesense scout queries, 176 Typesense scout results, 44 local JoelClaw result events, 9 hydrated JoelClaw session events, and 9 assembled review lanes.
+- Current static ingredients found in the source hunt path: correction phrases, system/project theme libraries, and a static phase list.
+- A future "generated state machine" claim requires planner prompt/transcript receipt, generated machine config, plan binding, artifact hashes, verifier acceptance, and a D2 figure generated from the pinned machine artifact.
+- Generated XState TypeScript source is optional/debuggable source output, not a runtime requirement. Prefer executing a validated `workflow.xstate-machine.v1` config with the trusted runtime over executing arbitrary generated TypeScript.
+- A generated harness is required only when the planner creates new step bindings or adapter wiring. If the plan selects known package exports/adapters, the dynamic plan can bind step ids directly to pinned package exports without a separate generated harness source file.
+- Tufte margin notes without an explicit `href` should not render a trailing `back`, arrow, or source link. Explicit `href` may render a source link with `linkLabel`.
+- Good HITL artifacts must be concise, actionable, and proof-backed. Put a tight human summary at the top, then directly actionable line items. Each line item should include a short Joel-style summary plus the Three Rs: reasoning, rating, and recommendation. Receipts should be close enough to prove the item is worth review, but not so noisy that the human has to decode the artifact graph before deciding.
+- Dream run reports should put the actual dreams as the first item of interest after the run context. Each dream needs the same human Three-R shape: concise summary, reasoning, rating, and recommendation. Proof, state-machine diagrams, run coverage, and artifact tables belong below the dreams as receipts.
+
+Canonical report style:
+
+```txt
+docs/dream-report-canon.md
+```
+
+Use that document for future Dreaming HITL pages. It captures the reusable section order, dream card contract, Three-R review format, proof placement, voice rules, and anti-patterns from the `dream-hunt-2026-06-09-998d4b` report.
+
+## Dream memory fabric correction
+
+2026-06-09 correction: the dream itself needs a deeper memory fabric, not just a better report.
+
+Canonical resource:
+
+```txt
+.brain/resources/dream-sequence-memory-fabric.svx
+```
+
+Diagnosis:
+
+- The current `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts` path is too shallow for system dreaming. It uses static correction phrases, static theme libraries, query expansion around the focus string, direct Typesense scouting, bounded local JoelClaw chunks, and a small hydration cap.
+- A real dream sequence should inventory sources first, then run layered near-term sweep, far-term recall, output investigation, correlation, hydration, dream assembly, and HITL reporting.
+- Source families include Pi/Codex/Claude transcripts, Cloudflare lane transcripts and observability packs, all discovered `.brain` roots, repo outputs, GitHub, Slack/Discord, Linear, support inboxes, and org/person context through scoped leases.
+- Toby's QMD pattern is worth evaluating as a local collection/index adapter, but it should sit behind memory ports rather than replace JoelClaw, Typesense, Brain, Cloudflare Artifacts, or capability leases.
+- Cloudflare lanes must report redacted transcripts, logs, observability packs, review surfaces, and capability receipts back into the memory fabric.
+
+Verification receipts:
+
+```txt
+pnpm --filter system-dream-review-ui check
+pnpm --filter system-dream-review-ui build
+pnpm --filter shitrat-brain-proposal-ui check
+pnpm --filter shitrat-brain-proposal-ui build
+playwright chromium desktop: footnote-backref=0, overflow=false, figure=685x1272
+playwright chromium mobile 390px: footnote-backref=0, overflow=false, figure=353.984375x657.34375
+curl header: HTTP 200, x-robots-tag: noindex, nofollow
+curl negative scan: no footnote-backref/back/arrow/private paths/obvious secret markers
+```
+
+## Future success signal
+
+A runnable prototype writes:
+
+```txt
+out/latest-receipt.json
+out/artifacts/<run-id>/manifest.json
+out/artifacts/<run-id>/crawl-plan.json
+out/artifacts/<run-id>/hydration-receipts.jsonl
+out/artifacts/<run-id>/candidate-core-memories.jsonl
+out/artifacts/<run-id>/flow-ratifications.jsonl
+out/artifacts/<run-id>/workflow-plan.json
+out/artifacts/<run-id>/review-decisions.json
+out/artifacts/<run-id>/patches/*.diff
+out/artifacts/<run-id>/rollback/*.diff
+out/artifacts/<run-id>/apply-receipts/*.json
+out/artifacts/<run-id>/summaries/review.md
+```

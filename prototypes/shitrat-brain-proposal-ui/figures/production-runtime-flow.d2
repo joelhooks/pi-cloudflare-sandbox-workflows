@@ -1,0 +1,118 @@
+direction: down
+
+Auth: {
+  label: "Better Auth\nidentity only"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Policy: {
+  label: "ShitRat policy\nentitlements + trust"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Metadata: {
+  label: "Pack metadata\ntitle + mount rules"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+PackPin: {
+  label: "Pin pack refs\nmanifest + hashes"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+PlanPin: {
+  label: "Pin plan artifact\nbefore execution"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Workflow: {
+  label: "Static Workflow\ndeterministic steps"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Capsule: {
+  label: "Context capsule DO\nlocks + event log"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Sandbox: {
+  label: "Sandbox / Container\nscratch execution"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+ReviewGate: {
+  label: "Review gate\nif side effect"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Lease: {
+  label: "Capability lease\nexact operation"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Adapter: {
+  label: "Trusted adapter\nsecret stays inside"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Receipts: {
+  label: "Durable outputs\nArtifacts, D1, R2"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Surface: {
+  label: "Review surface\nWzrrd or GitHub"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Auth -> Policy: "session ids"
+Policy -> Metadata: "visible packs"
+Metadata -> PackPin: "select"
+PackPin -> PlanPin: "compile"
+PlanPin -> Workflow: "start"
+Workflow -> Capsule: "state transition"
+Capsule -> Sandbox: "hydrate"
+Sandbox -> ReviewGate: "evidence"
+ReviewGate -> Lease: "approved"
+Lease -> Adapter: "issued"
+Adapter -> Receipts: "executes"
+Receipts -> Surface: "redacted summary"

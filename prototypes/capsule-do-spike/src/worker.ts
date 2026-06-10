@@ -67,7 +67,7 @@ const CapsuleRecordSchema = z.object({
 
 type CapsuleRecord = z.infer<typeof CapsuleRecordSchema>;
 
-const DemoReceiptSchema = z.object({
+const IntegrationReceiptSchema = z.object({
   cancellation: z.object({
     cancelState: z.literal("cancelled"),
     destroyReceipt: z.string().min(1),
@@ -392,8 +392,8 @@ export default {
     if (url.pathname === "/healthz") {
       return json({ authRequired: Boolean(env.ACCESS_TOKEN), ok: true });
     }
-    if (request.method === "POST" && url.pathname === "/api/demo") {
-      return runDemo(request, env);
+    if (request.method === "POST" && url.pathname === "/api/integration-run") {
+      return runIntegrationRun(request, env);
     }
 
     const match = url.pathname.match(
@@ -411,19 +411,22 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runDemo(request: Request, env: Env): Promise<Response> {
+async function runIntegrationRun(
+  request: Request,
+  env: Env
+): Promise<Response> {
   const { origin } = new URL(request.url);
-  const demoSuffix = crypto.randomUUID().slice(0, 8);
+  const runSuffix = crypto.randomUUID().slice(0, 8);
   const requestBody = WorkRequestSchema.parse({
     contextPackRefs: ["research-claude-workflows@0.1.0"],
     secretRefs: ["piCodexAuth"],
     task: "research this and produce a report",
     verificationContract: "source-grounded-report-v1",
-    workItemId: `thread-or-issue-do-${demoSuffix}`,
+    workItemId: `thread-or-issue-do-${runSuffix}`,
   });
   const cancelBody = {
     ...requestBody,
-    workItemId: `thread-or-issue-do-cancel-${demoSuffix}`,
+    workItemId: `thread-or-issue-do-cancel-${runSuffix}`,
   };
   const successStub = env.CAPSULE_SUPERVISOR.get(
     env.CAPSULE_SUPERVISOR.idFromName(requestBody.workItemId)
@@ -447,7 +450,7 @@ async function runDemo(request: Request, env: Env): Promise<Response> {
   const beforeSuccessRecord = CapsuleRecordSchema.parse(beforeSuccess.record);
   const cancelledRecord = CapsuleRecordSchema.parse(cancelled.record);
   const ignoredRecord = CapsuleRecordSchema.parse(afterCancelWork.record);
-  const receipt = DemoReceiptSchema.parse({
+  const receipt = IntegrationReceiptSchema.parse({
     cancellation: {
       cancelState: cancelledRecord.status,
       destroyReceipt: cancelledRecord.sandbox?.destroyReceipt,

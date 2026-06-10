@@ -1,7 +1,7 @@
 ---
 title: Workflow Observability Spine
 status: active
-updated: 2026-06-04
+updated: 2026-06-09
 tags:
   - observability
   - telemetry
@@ -20,6 +20,564 @@ Agent observability may be more important than the eyeball UI. A debugging agent
 ## Core stance
 
 Observability is not a dashboard bolted on later. It is part of the workflow contract and data model.
+
+## Current App Status — 2026-06-09
+
+The production app now has a **runtime receipt/audit spine**, but not the full observability/telemetry spine described here.
+
+What exists in `src/app`:
+
+- `WorkflowRunResult.eventLog` records typed safety-envelope state transitions with timestamps, summaries, and artifact refs.
+- The capsule supervisor appends events by `workItemId`, so the Durable Object can preserve run/capsule history.
+- The Cloudflare status projection now mirrors each transition to D1 `workflow_events` keyed by `(run_id, event_index)`. `GET /runs/:runId/events` returns a typed redacted `workflow.event-stream.v1` JSON snapshot, `Accept: text/event-stream` or `?format=sse` returns a Server-Sent Events replay, and `?tail=live` / `?live=1` returns bounded live-tail SSE with `after` or `Last-Event-ID` resume support plus typed `workflow.event-tail-control.v1` close events. This is an event projection/observer route, not a full debugger attach surface.
+- Pi planner/worker/verifier lane receipts record runtime, `realAgent`, sandbox ref, prompt ref, transcript ref, output pins, receipt ref, Artifacts commit SHA, redacted `AgentAuthLease`, redacted `WorkflowTraceContext`, and sandbox accounting cleanup/duration metadata when backed by the Cloudflare Sandbox runtime. Production-mode real-agent receipts are invalid without propagated trace context.
+- Deterministic verification is now a real port path, not a decorative schema branch. `createArtifactEvidenceDeterministicVerifier` runs only for contracts selecting `builtin:artifact-evidence-integrity.v1`; it blocks unknown checks, validates pinned evidence hashes, requires worker evidence and the observability pack, checks declared side effects against capability receipts, and writes `workflow.verification-result.v1` at the contract output path. Default real runs still use Pi verifier lanes unless the plan selects this deterministic source.
+- Capability lease and execution receipts record actor/resource/payload-hash/review-gate/secret-ref boundaries plus redacted `WorkflowTraceContext`; dry-run still leases. Local integration coverage now proves issued leases, broker-recorded execution receipts, and capability structured logs preserve the requested side-effect span.
+- Discord message delivery now has both dry-run and real send paths behind the same `discord.message.send` lease. The real adapter requires a typed `workflow.discord-message-approval.v1` review gate approval, trusted secret ref, adapter-local token materialization, and pinned payload hash verification before calling Discord.
+- Wzrrd review-surface delivery now has both dry-run and real publisher paths behind the same `wzrrd.site.publish` lease. The real adapter requires a typed `workflow.wzrrd-publish-approval.v1` review gate approval, trusted secret ref, adapter-local token materialization, and pinned review-surface hash verification before publishing to Wzrrd.
+- GitHub PR review-surface delivery now has dry-run and real adapter paths behind two explicit operations: `github.branch.commit` and `github.pull-request.create`. The app writes typed `github.branch-commit-payload.v1` plus `github.pull-request-payload.v1` artifacts for `outputTarget.kind === "github-pr"`, requests payload-hash-bound leases, executes `GitHubBranchCommitCapabilityAdapter` before `GitHubPullRequestCapabilityAdapter`, and records both capability receipts through the broker. The real branch adapter requires an approved non-dry-run lease, trusted GitHub branch secret ref, adapter-local token materialization, repository/base/head binding, pinned payload hash verification, per-file content hashes, safe repository paths, and GitHub refs/trees/commits writes. The real PR adapter requires an approved non-dry-run lease, trusted GitHub PR secret ref, adapter-local token materialization, repository/base/head resource binding, and pinned payload hash verification before calling GitHub's create-pull-request API. Live receipt `run-live-github-pr-dryrun-20260609T060703Z-9bba1f11` proved deployed main-app dry-run PR delivery through real Pi planner/worker/verifier lanes before this branch-commit lease was added. Live receipt `run-live-github-branch-pr-20260609T065340Z-f82a6d90` proved deployed non-dry-run branch+PR delivery through real Pi planner/worker/verifier lanes, executed `github.branch.commit`, executed `github.pull-request.create`, committed `2b67364fd7435e64b1916c5a68b768ceb48605ea`, and opened `https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/16`.
+- Linear comment review-surface delivery now has dry-run and real adapter paths behind `linear.comment.create`. The app writes typed `linear.comment-payload.v1` artifacts for `outputTarget.kind === "linear"`, requests payload-hash-bound leases on `linear.issue:<issueRef>`, executes a `LinearCommentCapabilityAdapter`, and records the capability receipt through the broker. The real adapter requires an approved non-dry-run lease, trusted Linear secret ref, adapter-local token materialization, Linear GraphQL issue lookup by id/key, body hash verification, and pinned payload hash/resource binding before calling `commentCreate`. Integration tests cover the adapter, D1 broker persistence, app dry-run path, app approved path, and real planner prompt contract. Live deployed dry-run receipt `run-live-linear-dryrun-20260609T072514Z-fee16d9c` proved this path through real Pi planner/worker/verifier lanes with final review surface kind `linear`, dry-run `linear.comment.create` on `linear.issue:PIWF-123`, a D1 `linear` receipt row, and `31` telemetry rows. Live non-dry-run Linear proof still needs a configured Linear token and target issue.
+- Review summary and review surface artifacts include the event log, plan/machine/harness refs, package refs, lane receipts, verifier result, capability receipts, and redacted artifact refs.
+- `workflow.review-surface.v1` now includes a typed `definitionOfDone.observability` requirement. It makes runtime observability, telemetry, structured high-cardinality logs, trace spans, metrics, token/cost/sandbox accounting, capability-lease receipts, an agent-readable observability pack, and a strict redaction policy machine-readable acceptance evidence.
+- `workflow.review-surface.v1` now also includes `definitionOfDone.workflowChain`, a typed completion-chain audit for the real execution path. It marks intent/policy, capsule, package pinning, real Pi planner, pinned plan artifacts, real Pi worker lanes, capability leases, verifier result, review surface, and captured receipts independently. Verification may be a real Pi verifier lane or a plan-selected deterministic verifier result; integration-test/memory lanes and verifier bypasses stay incomplete.
+- `workflow.review-surface.v1` now also includes `definitionOfDone.reconciliation`, a typed proposal reconciliation audit for configured Wzrrd acceptance refs. It marks package-first primitive, Artifact-backed package pinning, entitlement/trust policy, generated XState workflow, real Pi lanes, capability-leased side effects, receipt-backed review surface, and observability/redaction envelope independently. Local integration proof keeps integration-test lanes `linked` with missing proposal requirements and lets the front-door real-lane-shaped composition reach `reconciled`. Live receipt `run-live-proposal-reconciliation-20260609T085022Z-9810b18a` proved the deployed public review surface reaches `definitionOfDone.reconciliation.status=reconciled`, with eight captured proposal requirements and no missing workflow-chain IDs.
+- `workflow.observability-pack.v1` now exists as a first production-intended artifact written at `run/observability-pack.json` before verifier execution. It is emitted through the required `WorkflowObservabilityRecorderPort`; `createCloudflareArtifactsObservabilityRecorder` is the Artifact-backed production-intended adapter wired by the Cloudflare front door. The pack contains redacted structured log records, required high-cardinality field names, run metrics, artifact refs, lane receipt refs, capability receipt refs, sandbox accounting status/duration metrics when real lane receipts provide them, structured telemetry sink receipts, token/cost accounting status plus aggregate `tokenCount`/`tokenCostEstimate` metrics when lane receipts carry explicit accounting, and trace propagation status plus structured span counts when lane and capability receipts carry propagated trace context.
+- Trace propagation progress: `AgentLaneRuntimeRequest` now carries `traceContext`; Cloudflare Pi planner/worker/verifier adapters derive deterministic trace/span IDs from the run/lane; the Cloudflare Sandbox Pi command exposes `WORKFLOW_TRACE_ID`, `WORKFLOW_SPAN_ID`, and `WORKFLOW_TRACE_CONTEXT_JSON`; committed lane receipts persist that context; and lane structured logs use the receipt span ID instead of a recorder-invented lane span. Capability lease requests, issued leases, and execution receipts now require `traceContext`; `WorkflowApp` derives deterministic side-effect spans for dynamic Discord steps and review-surface delivery operations, and the observability recorder uses those receipt spans in `workflow.capability.receipt` logs. Integration coverage proves front-door real-lane-shaped composition reaches `metrics.tracePropagationStatus=captured` only when included lane and capability receipts are traced. Live receipt `run-live-trace-propagation-20260609T091147Z-7fdc512f` on Worker version `00f9f6fd-426c-42f0-9e24-3860aab144f9` proved the deployed lane-trace path before capability receipt spans were added: public review URL `https://run-live-trace-propagation-20260609t091147z-7fdc512f.wzrrd.sh/`, public JSON includes planner/worker/verifier lane `traceContext`, D1 telemetry has `31` rows, `1` trace, and `31` spans, and the fetched observability pack records `metrics.tracePropagationStatus=captured` plus `metrics.traceSpanCount=31`. Live receipt `run-live-capability-trace-20260609T093229Z-eca60175` on Worker version `5b813670-0b3f-4ec4-8d9f-7a2c6810d3f2` proved capability receipt spans in the deployed path: public URL `https://run-live-capability-trace-20260609t093229z-eca60175.wzrrd.sh/`, public JSON includes the `discord.message.send` capability `traceContext`, D1 telemetry has a `workflow.capability.receipt` row using the Discord capability span, the fetched observability pack records `metrics.tracePropagationStatus=captured`, and the fetched post-verifier Wzrrd capability receipt carries its own propagated span.
+- `AgentLaneReceipt` now supports optional redacted `tokenCostAccounting`. The Cloudflare Sandbox Pi lane adapter parses explicit usage/cost metadata from Pi stdout/stderr into that receipt field, and the observability recorder projects it into per-lane structured log `tokenCount`/`costEstimate` fields. Local integration coverage proves the pack switches to `captured` when every included lane receipt carries token count and cost data. Live proof `run-live-token-cost-accounting-20260609T083009Z-634cb024` on Worker version `7ce6e4ab-1e05-446c-8805-95d0156d8899` captured the deployed path through real Pi planner/worker/verifier lanes, but the fetched observability pack reports `metrics.tokenCostAccountingStatus=not-yet-instrumented`, `metrics.tokenCount=null`, and `metrics.tokenCostEstimate=null` because Pi emitted no numeric usage/cost metadata.
+- `WorkflowTelemetrySinkPort` is now a first-class app port. The Cloudflare front door uses a composite sink: `createCloudflareArtifactsStructuredLogSink` writes `run/telemetry/structured-logs.jsonl`, `createCloudflareD1WorkflowTelemetrySink` writes queryable high-cardinality rows to D1 `workflow_telemetry_logs`, and `createCloudflareAnalyticsEngineWorkflowTelemetrySink` exports bounded Workers Analytics Engine data points when the Worker `WORKFLOW_TELEMETRY` binding exists. Migration `0002_workflow_telemetry_logs.sql` is applied remotely. Live receipt `run-live-analytics-engine-telemetry-20260609T075635Z-ebf7ce3a` proved all three sinks through deployed Worker version `d3e58e38-aaf6-48d0-a74b-58dadff2b97a`: the observability pack contains `31` logs and captured sink receipts for `artifact-jsonl`, `cloudflare-d1-structured-logs`, and `cloudflare-analytics-engine` dataset `pi_cloudflare_sandbox_workflows_telemetry`.
+- Event stream live proof: `run-live-event-stream-capture-20260609T100200Z-ee603257` captured through deployed Worker version `0faf4e33-34d8-4e8b-9169-c93033c62d52` after remote migration `0003_workflow_events.sql`. Event route `https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev/runs/run-live-event-stream-capture-20260609T100200Z-ee603257/events` returned `workflow.event-stream.v1` with `20` events, first state `resolvingCapsule`, final `captured`, and D1 sink metadata. SSE replay returned `text/event-stream` with `workflow.event` and `workflow.snapshot`. Poll receipts prove it advanced during the in-flight POST. Public review URL: `https://run-live-event-stream-capture-20260609t100200z-ee603257.wzrrd.sh/`; Discord message id `1513846203446464604`; D1 telemetry rows `31`, one trace, and `31` spans.
+- Event live-tail proof: `run-live-event-tail-capture-20260609T102116Z-e1db65c8` captured through deployed Worker version `749ae924-c5ed-47df-a772-c86167a7a4be`. Event route `https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev/runs/run-live-event-tail-capture-20260609T102116Z-e1db65c8/events` returned `workflow.event-stream.v1` with `20` events, first state `resolvingCapsule`, final `captured`, and D1 sink metadata. First live-tail SSE receipt `.wrangler/workflow-app/live-runs/run-live-event-tail-capture-20260609T102116Z-e1db65c8-events-live-tail.sse` emitted `workflow.event` ids `1..5` while `POST /runs` was still in flight and then closed with `workflow.tail.closed reason=max-polls`; terminal-tail receipt `.wrangler/workflow-app/live-runs/run-live-event-tail-capture-20260609T102116Z-e1db65c8-events-terminal-tail.sse` resumed after id `5`, emitted ids `6..20`, and closed with `workflow.tail.closed reason=terminal-state`. Public review URL: `https://run-live-event-tail-capture-20260609t102116z-e1db65c8.wzrrd.sh/`; public JSON `https://run-live-event-tail-capture-20260609t102116z-e1db65c8.wzrrd.sh/review-surface.json`; Discord message id `1513851033913393233`; Wzrrd delivery `published`; D1 telemetry rows `31`, one trace, and `31` spans. Preceding proof `run-live-event-tail-20260609T101723Z-bfac4bb6` correctly blocked because the prompt asked the in-run verifier to prove an external observer SSE receipt it could not read; observer proofs should remain external receipts or be pinned as explicit verifier evidence before verification.
+- Live receipt `run-live-completion-audit-20260609T051456Z-ad79438e` proved the audit spine plus real Discord send and public Wzrrd review-surface publication through real Pi planner/worker/verifier lanes, non-dry-run `discord.message.send` and `wzrrd.site.publish` capability receipts, public JSON `definitionOfDone.workflowChain.status=captured`, ten captured workflow-chain requirements, Discord message id `1513773945588027504`, and public URL `https://run-live-completion-audit-20260609t051456z-ad79438e.wzrrd.sh/`.
+- Live receipt `run-live-telemetry-sinks-20260609T053840Z-4ed6621e` proved the structured telemetry sink spine through the deployed Worker version `1dc7d802-7593-4dad-887f-b7b4b60b2437`: public JSON includes `run/telemetry/structured-logs.jsonl`; remote D1 query returned `31` `workflow_telemetry_logs` rows, one trace id, and span rows for workflow state/status projection events; verifier accepted after `telemetrySinks` extraction was added to the Pi verifier prompt evidence.
+- Live receipt `run-live-analytics-engine-telemetry-20260609T075635Z-ebf7ce3a` proved the deployed Workers Analytics Engine sink through Worker version `d3e58e38-aaf6-48d0-a74b-58dadff2b97a`: public review URL `https://run-live-analytics-engine-telemetry-20260609t075635z-ebf7ce3a.wzrrd.sh/`, public JSON `https://run-live-analytics-engine-telemetry-20260609t075635z-ebf7ce3a.wzrrd.sh/review-surface.json`, fetched pack `.wrangler/workflow-app/live-runs/run-live-analytics-engine-telemetry-20260609T075635Z-ebf7ce3a-observability-pack.json`, `31` structured logs, `metrics.structuredLogSinkStatus=captured`, D1 query `31` rows and one trace id, non-dry-run Discord message id `1513814825799520388`, non-dry-run Wzrrd delivery `published`, and telemetry sink receipts for `artifact-jsonl`, `cloudflare-d1-structured-logs`, and `cloudflare-analytics-engine` with dataset `pi_cloudflare_sandbox_workflows_telemetry`.
+- Live receipt `run-live-token-cost-accounting-20260609T083009Z-634cb024` proved the deployed token/cost plumbing path through Worker version `7ce6e4ab-1e05-446c-8805-95d0156d8899`: public review URL `https://run-live-token-cost-accounting-20260609t083009z-634cb024.wzrrd.sh/`, public JSON `https://run-live-token-cost-accounting-20260609t083009z-634cb024.wzrrd.sh/review-surface.json`, fetched pack `.wrangler/workflow-app/live-runs/run-live-token-cost-accounting-20260609T083009Z-634cb024-observability-pack.json`, `31` structured logs, D1 query `31` rows and one trace id, non-dry-run Discord message id `1513823271773274234`, non-dry-run Wzrrd delivery `published`, `metrics.tokenCostAccountingStatus=not-yet-instrumented`, `metrics.tokenCount=null`, and `metrics.tokenCostEstimate=null`. This is an honest live non-capture receipt, not a captured token bill.
+
+What does **not** exist yet:
+
+- deeper child spans inside the broker, review-surface publisher internals, and external telemetry exporters beyond current structured receipt spans
+- live token/cost accounting captured from Pi/provider metadata; retry/cancellation timing; or lane queue latency metrics beyond the current pack status
+- true WebSocket observer, public debugger-agent attach surface, or richer run inspection UI beyond the D1 event snapshot/SSE replay/live-tail route
+- external telemetry sinks beyond Analytics Engine, such as Axiom, Langfuse, OTEL, or equivalent
+- live deployed non-dry-run Linear comment proof and other non-Discord/Wzrrd/GitHub/Linear output adapters
+
+Important framing: the existing receipt chain and `workflowChain` audit are necessary and useful, but they are not enough to call runtime observability “done.” They are replay/audit evidence. The observability spine still needs typed telemetry ports/adapters that let humans and debugging agents inspect a run during execution and after capture.
+
+## Definition Of Done Lock — 2026-06-09
+
+Runtime observability is a definition-of-done gate, not a polish task. A run can have useful receipts and still fail the product DoD if it lacks typed telemetry and structured high-cardinality logs.
+
+The review surface DoD must keep this requirement visible until the app can publish the full observability pack:
+
+```txt
+required signals:
+  structured-high-cardinality-logs
+  runtime-event-log
+  trace-spans
+  metrics
+  cost-token-accounting
+  sandbox-accounting
+  capability-lease-receipts
+  agent-readable-observability-pack
+  redaction-policy
+
+required high-cardinality fields:
+  runId
+  workItemId
+  capsuleId
+  actorId
+  packageId
+  packageVersion
+  artifactRepo
+  artifactRef
+  artifactCommitSha
+  laneId
+  laneKind
+  laneRuntime
+  sandboxRef
+  admissionId
+  stepId
+  stepKind
+  capability
+  leaseId
+  resourceRef
+  payloadHash
+  verifierResultId
+  reviewSurfaceId
+  blockerCode
+  traceId
+  spanId
+  durationMs
+  tokenCount
+  costEstimate
+```
+
+Redaction rule: high cardinality does not mean high leakage. Logs and telemetry must never include raw secrets, raw Pi auth JSON, Discord tokens, claim URLs, token-bearing Artifacts remotes, unredacted private corpus chunks, or broad customer data. Emit stable ids, refs, hashes, and redacted summaries; store bulky or sensitive material only behind explicit artifact refs and policy checks.
+
+## Live Pack Receipt — 2026-06-09
+
+`run-live-observability-pack-20260609T013858-6a3fdb5b` returned `status: captured` through deployed Worker version `ebe8f3bf-8a8a-42c8-89c1-79507887114d`.
+
+Key refs:
+
+```txt
+observability pack:
+artifact://piwf-run-live-observability-pack-20260609t013858-6a3fdb5b/runs/run-live-observability-pack-20260609T013858-6a3fdb5b/run/observability-pack.json
+
+verification result:
+artifact://piwf-run-live-observability-pack-20260609t013858-6a3fdb5b/runs/run-live-observability-pack-20260609T013858-6a3fdb5b/artifacts/verification/result.json
+
+review surface:
+artifact://piwf-run-live-observability-pack-20260609t013858-6a3fdb5b/runs/run-live-observability-pack-20260609T013858-6a3fdb5b/review/surfaces/review-surface:run-live-observability-pack-20260609T013858-6a3fdb5b.json
+```
+
+Public receipt page:
+
+```txt
+https://piwf-observability-pack-20260609.wzrrd.sh/
+```
+
+Lane commits:
+
+```txt
+planner: 33c45c3e41b476f366c4b39365b6cdac17800695
+worker: 88ed58f11a1ee0399a40f4a95be4d0988b385801
+verifier: 32e439f5f71f40396e605a560b4c71391266d20e
+```
+
+Important limitation: the pack is enough to satisfy the live verifier that structured observability evidence exists, and the pack writer is now a real app port/adapter boundary. Token/cost accounting now has a typed lane receipt path and recorder projection, but live capture still depends on Pi/provider usage metadata. The next real observability slices should add trace/span propagation and any external telemetry exports beyond Analytics Engine.
+
+## Live Port-Boundary Receipt — 2026-06-09
+
+`run-live-observability-port-20260609T020344-bb5ac9a3` returned `status: captured` through deployed Worker version `ada7e780-5b5c-498c-9571-04f1f7b8c40a`, after the app moved observability-pack writing behind `WorkflowObservabilityRecorderPort` and `createCloudflareArtifactsObservabilityRecorder`.
+
+Key refs:
+
+```txt
+observability pack:
+artifact://piwf-run-live-observability-port-20260609t020344-bb5ac9a3/runs/run-live-observability-port-20260609T020344-bb5ac9a3/run/observability-pack.json
+
+verification result:
+artifact://piwf-run-live-observability-port-20260609t020344-bb5ac9a3/runs/run-live-observability-port-20260609T020344-bb5ac9a3/artifacts/verification/result.json
+
+review surface:
+artifact://piwf-run-live-observability-port-20260609t020344-bb5ac9a3/runs/run-live-observability-port-20260609T020344-bb5ac9a3/review/surfaces/review-surface:run-live-observability-port-20260609T020344-bb5ac9a3.json
+```
+
+Lane commits:
+
+```txt
+planner: 89986110fdff9d9b30105f145db99aff338a2aad
+worker: 293316ce88730c1c3e916ef7fe118af6dda7d090
+verifier: e9edf3a842ad9f37ffe0fade4ba18e8ee2cb8581
+```
+
+This run proved the deployed port boundary and Artifact-backed pack writer without replacing the prior public Wzrrd receipt; the planner selected an `artifact-review` output target.
+
+## Live Status-Projection Evidence Receipt — 2026-06-09
+
+`run-live-final-evidence-20260609T032557Z-6b294cf1` returned `status: captured` through deployed Worker version `f70faad3-15f5-462d-b26e-68d3e13e93d2`, after the app added D1 `runs` status projection, verifier-visible `statusProjection` evidence inside `workflow.observability-pack.v1`, typed `workflow.research-review-output.v1` worker output, JSON-output normalization for application/json Pi lanes, and `payloadRef` on capability execution receipts.
+
+Key refs:
+
+```txt
+D1 final row:
+status=captured updated_at=2026-06-09T03:28:26.376Z
+
+observability pack:
+artifact://piwf-run-live-final-evidence-20260609t032557z-6b294cf1/runs/run-live-final-evidence-20260609T032557Z-6b294cf1/run/observability-pack.json
+
+review surface:
+artifact://piwf-run-live-final-evidence-20260609t032557z-6b294cf1/runs/run-live-final-evidence-20260609T032557Z-6b294cf1/review/surfaces/review-surface:run-live-final-evidence-20260609T032557Z-6b294cf1.json
+
+public receipt:
+https://piwf-observability-pack-20260609.wzrrd.sh/
+```
+
+Lane commits:
+
+```txt
+worker: 5c0e480aef09f7edbdedf7f5736a67bc4a2f9a53
+verifier: baca6df0bf2e837e19674a58e425c445a0439fed
+```
+
+Important limitation: status projection is now queryable in D1 and represented in the agent-readable observability pack, but live token/cost capture still depends on Pi/provider usage metadata, and external telemetry exports beyond Analytics Engine remain adapter gaps.
+
+## Live Package-Mount Evidence Receipt — 2026-06-09
+
+`run-live-package-mounts-capture-20260609T035524Z-837fa96c` returned `status: captured` through deployed Worker version `2b39a6e9-99cd-4b1c-bcf5-7322aec28080`, after the app added typed package mount indexes, sandbox mount materialization, `packageMounts` lane receipt pins, observability-pack lane receipt evidence, and verifier prompt boundaries for post-verifier artifacts.
+
+Key refs:
+
+```txt
+D1 final row:
+status=captured updated_at=2026-06-09T03:58:06.035Z
+
+package mount artifact:
+artifact://piwf-run-live-package-mounts-capture-20260609t035524z-837fa96c/runs/run-live-package-mounts-capture-20260609T035524Z-837fa96c/packages/pinned-packages.json
+
+package mount hash:
+d574e5a96ecab3a4750e0910c1d2b4e5a2fb34487a8e4c4236c7ef6ef6efae66
+
+review surface:
+artifact://piwf-run-live-package-mounts-capture-20260609t035524z-837fa96c/runs/run-live-package-mounts-capture-20260609T035524Z-837fa96c/review/surfaces/review-surface:run-live-package-mounts-capture-20260609T035524Z-837fa96c.json
+
+public receipt:
+https://piwf-observability-pack-20260609.wzrrd.sh/
+```
+
+Lane commits:
+
+```txt
+planner: c83b7c74a95cee8059282fcdcbd7c84587b90ca5
+worker: a7fbf4eece66fac6a2b05d8f911ef55cb7497f73
+verifier: ba16be69d0f6689568fb182a02e00bb2bb2c021d
+```
+
+## Live Sandbox-Accounting Evidence Receipt — 2026-06-09
+
+`run-live-sandbox-accounting-20260609T041042Z-704116b1` returned `status: captured` through deployed Worker version `17764d26-4541-4717-bcad-9713c2392cd7`, after the app added `sandboxAccounting` to lane receipt schemas, the Cloudflare Sandbox runtime adapter, planner receipt copy-through, and observability-pack metrics.
+
+Key refs:
+
+```txt
+D1 final row:
+status=captured updated_at=2026-06-09T04:13:18.603Z
+
+plan:
+artifact://piwf-run-live-sandbox-accounting-20260609t041042z-704116b1/runs/run-live-sandbox-accounting-20260609T041042Z-704116b1/run/plan.json
+
+observability pack:
+artifact://piwf-run-live-sandbox-accounting-20260609t041042z-704116b1/runs/run-live-sandbox-accounting-20260609T041042Z-704116b1/run/observability-pack.json
+
+review surface:
+artifact://piwf-run-live-sandbox-accounting-20260609t041042z-704116b1/runs/run-live-sandbox-accounting-20260609T041042Z-704116b1/review/surfaces/review-surface:run-live-sandbox-accounting-20260609T041042Z-704116b1.json
+
+public receipt:
+https://piwf-observability-pack-20260609.wzrrd.sh/
+```
+
+Sandbox accounting:
+
+```txt
+planner cleanup: destroy:pa-20260609t041042z-704116b-lane-planner-run-live-sandbo:ok
+planner commandDurationMs: 67884
+
+worker cleanup: destroy:pa-20260609t041042z-704116b-lane-worker-run-live-sandbox:ok
+worker commandDurationMs: 45591
+
+verifier cleanup: destroy:pa-20260609t041042z-704116b-lane-verifier-run-live-sandb:ok
+verifier commandDurationMs: 21721
+```
+
+## Live Real Wzrrd Publication Receipt — 2026-06-09
+
+`run-live-wzrrd-publish-20260609T044127Z-900769e2` returned `status: captured` through deployed Worker version `a94448cf-1267-4377-9a27-e9e7a86ed202`, after the app added the real Wzrrd publisher adapter, `WZRRD_API_TOKEN` Worker binding, and typed `workflow.wzrrd-publish-approval.v1` approval artifact for actors with `wzrrd.publish`.
+
+Key refs:
+
+```txt
+D1 final row:
+status=captured updated_at=2026-06-09T04:44:07.046Z
+
+public review URL:
+https://run-live-wzrrd-publish-20260609t044127z-900769e2.wzrrd.sh/
+
+public review JSON:
+https://run-live-wzrrd-publish-20260609t044127z-900769e2.wzrrd.sh/review-surface.json
+
+wzrrd approval:
+artifact://piwf-run-live-wzrrd-publish-20260609t044127z-900769e2/runs/run-live-wzrrd-publish-20260609T044127Z-900769e2/review/wzrrd-publish-approval.json
+
+wzrrd payload:
+artifact://piwf-run-live-wzrrd-publish-20260609t044127z-900769e2/runs/run-live-wzrrd-publish-20260609T044127Z-900769e2/payloads/wzrrd-publish.json
+
+wzrrd capability receipt:
+artifact://piwf-run-live-wzrrd-publish-20260609t044127z-900769e2/runs/run-live-wzrrd-publish-20260609T044127Z-900769e2/receipts/capability-executions/lease:wzrrd.site.publish:run-live-wzrrd-publish-20260609T044127Z-900769e2.json
+
+observability pack:
+artifact://piwf-run-live-wzrrd-publish-20260609t044127z-900769e2/runs/run-live-wzrrd-publish-20260609T044127Z-900769e2/run/observability-pack.json
+
+review surface:
+artifact://piwf-run-live-wzrrd-publish-20260609t044127z-900769e2/runs/run-live-wzrrd-publish-20260609T044127Z-900769e2/review/surfaces/review-surface:run-live-wzrrd-publish-20260609T044127Z-900769e2.json
+```
+
+Lane commits:
+
+```txt
+planner: f0aafe6713325f1825e8d4821848e5271b5d45e4
+worker: 5c0cee358fdde02d316abd6e07e99f52a8411243
+verifier: 4cc6b25506224b5a0ad607e94a9e1b56eb9e9831
+```
+
+Important limitation: the live Wzrrd public URL is now real, but external telemetry exports beyond Analytics Engine and live token/cost capture from Pi/provider usage metadata remain open observability work.
+
+## Live Real Discord Send Receipt — 2026-06-09
+
+`run-live-discord-send-20260609T045820Z-5191d1c7` returned `status: captured` through deployed Worker version `d418c29e-f6cd-4d6d-b1e7-ce6b4ee6a008`, after the app added typed `workflow.discord-message-approval.v1`, remote `DISCORD_BOT_TOKEN` binding, and the real Discord approval path for actors with `discord.send`.
+
+Key refs:
+
+```txt
+D1 final row:
+status=captured updated_at=2026-06-09T05:01:20.225Z
+
+public review URL:
+https://run-live-discord-send-20260609t045820z-5191d1c7.wzrrd.sh/
+
+public review JSON:
+https://run-live-discord-send-20260609t045820z-5191d1c7.wzrrd.sh/review-surface.json
+
+discord approval:
+artifact://piwf-run-live-discord-send-20260609t045820z-5191d1c7/runs/run-live-discord-send-20260609T045820Z-5191d1c7/review/discord-message-approval.json
+
+discord payload:
+artifact://piwf-run-live-discord-send-20260609t045820z-5191d1c7/runs/run-live-discord-send-20260609T045820Z-5191d1c7/payloads/discord-message.json
+
+discord capability receipt:
+artifact://piwf-run-live-discord-send-20260609t045820z-5191d1c7/runs/run-live-discord-send-20260609T045820Z-5191d1c7/receipts/capability-executions/lease:discord.message.send:run-live-discord-send-20260609T045820Z-5191d1c7.json
+
+observability pack:
+artifact://piwf-run-live-discord-send-20260609t045820z-5191d1c7/runs/run-live-discord-send-20260609T045820Z-5191d1c7/run/observability-pack.json
+
+review surface:
+artifact://piwf-run-live-discord-send-20260609t045820z-5191d1c7/runs/run-live-discord-send-20260609T045820Z-5191d1c7/review/surfaces/review-surface:run-live-discord-send-20260609T045820Z-5191d1c7.json
+```
+
+Capability facts:
+
+```txt
+discord delivery: sent
+discord dryRun: false
+discord message id: 1513769793969459281
+wzrrd delivery: published
+wzrrd dryRun: false
+plan hash: 4129e9fd86925d85dbbea8bdf5e141328d38c0fb87ae3238b8150a96aec5fbf7
+review surface hash: f8e6b988fb3f6b127a6b6730676e3433055537a32fdd2fe4db75fb078eecb526
+```
+
+Lane commits:
+
+```txt
+planner: ab4f9ac0de612d43a620ab23319372edbfa68b69
+worker: c9ce26783fc3f26096aafb6f5ceb801e1872c661
+verifier: d67b240b04fea49f4ad47a2e5b28bc008f91ee1b
+```
+
+Important limitation: real Discord send is now proved, but external telemetry exports beyond Analytics Engine, trace/span propagation, and live token/cost capture from Pi/provider usage metadata remain open observability work.
+
+## Next prototype stance
+
+Joel correction, 2026-06-05: the next observability prototype must be **full realistic end-to-end work**, not a static replay, fake proof, local-only simulation, or hand-authored event fixture.
+
+The prototype must run a real dynamic workflow:
+
+```txt
+real work item
+→ control-plane plan phase
+→ generated/selected workflow machine and harness pinned as artifacts
+→ real Cloudflare Worker + Durable Object + Queue + Sandbox + Artifacts execution
+→ real Pi/tool/model lanes where the work requires them
+→ durable observability pack emitted during/after the run
+→ fresh debugging agent can inspect the pack and explain state/risk/next action
+```
+
+A visualizer or replay surface may consume the pack later, but the pack must be produced by live workflow execution. Static receipts are allowed only as regression fixtures after the real run proves the shape.
+
+Stronger product-shaped target: run a workflow whose actual job is to **build the observability feature**. The workflow should dynamically plan the work, generate/select its machine and harness, launch real implementation/review/verifier lanes, modify prototype code/docs, run validation, and emit an observability pack about itself. The pack is accepted only if a fresh debugging/review agent can use it to understand how the feature was built, what changed, where risk remains, and what the next safe action is.
+
+This makes the prototype self-referential in the useful way:
+
+```txt
+workflow builds observability
+→ observability records workflow
+→ debugger agent inspects observability
+→ verifier checks both feature behavior and run intelligibility
+```
+
+Architecture constraint: use **ports and adapters**. The observability feature should expose core ports like `WorkflowEventSink`, `StatusProjectionStore`, `MetricsRecorder`, `TraceRecorder`, `RedactionPolicy`, and `ObservabilityPackWriter`. Cloudflare Workers, Durable Objects, Artifacts, Analytics Engine, WebSockets, and local filesystem are adapters behind those ports, not concepts leaking through the workflow domain.
+
+The prototype may use Cloudflare adapters for the real proof, but the winning shape should be portable enough to rewrite into `src/` without dragging prototype Worker route glue or vendor-specific calls into the core model.
+
+Locked prototype shape, accepted 2026-06-05:
+
+```txt
+prototypes/workflow-observability-spine-spike/
+  src/core/
+    ports.ts                 # pure interfaces/types
+    events.ts                # event schema + helpers
+    projections.ts           # status/metrics/cost reducers
+    redaction.ts             # redaction policy
+    observability-pack.ts    # pack writer contract
+  src/adapters/
+    artifacts-pack-writer.ts
+    durable-object-status-store.ts
+    worker-event-sink.ts
+    sandbox-metrics-recorder.ts
+    local-fixture-reader.ts  # regression fixtures only, not proof
+  src/workflows/
+    planner.ts               # dynamic workflow generation/selection
+    build-observability.ts   # generated/pinned harness target
+  src/worker.ts              # real Cloudflare route/queue/DO
+```
+
+Acceptance constraint: files under `src/core/` must not import `cloudflare:workers`, the Sandbox SDK, Wrangler, Node filesystem APIs, or local shell helpers. Core emits/consumes typed ports and portable data. Cloudflare, Artifacts, Durable Object, Queue, WebSocket, Analytics Engine, and local fixture behavior live in adapters.
+
+Dynamic generation stance, accepted 2026-06-05: **real generated workflow execution, not receipt-only cosplay**.
+
+The workflow must generate/select and pin its own plan, machine, and harness, then actually execute that generated harness to build the observability feature. A fixed Worker executor pretending to follow a generated machine is not enough for this prototype.
+
+Safety boundary: real does not mean raw `eval` inside the privileged Worker. The generated harness should execute inside an isolated supervisor sandbox or similarly bounded runtime with a declared capability manifest. The Durable Object/Worker control plane owns admission, leases, queues, cancellation, and policy gates; the generated harness can request capabilities through narrow ports/adapters.
+
+Required generated artifacts:
+
+```txt
+run/plan.json
+workflows/machine.json
+workflows/harness.ts or workflows/harness.js
+run/capability-manifest.json
+run/observability-contract.json
+run/verification-contract.json
+```
+
+Execution contract:
+
+```txt
+plan/generate harness
+→ pin plan + machine + harness + capability manifest
+→ validate imports/capabilities/budget/output target/redaction policy
+→ execute generated harness in supervisor sandbox
+→ harness uses declared ports to emit events, enqueue real lanes, write artifacts, request approvals, and deliver output
+→ observability pack records the whole run, including the generated workflow execution itself
+```
+
+Acceptance rejects fake paths:
+
+- no local-only simulation as the main proof
+- no hand-authored event log as the main proof
+- no static replay standing in for live execution
+- no receipt-only generated machine/harness that never runs
+- no Worker-only deterministic script pretending to be dynamic generation
+- no arbitrary generated code with broad secrets or control-plane privileges
+
+Sandbox code-work capability, accepted 2026-06-05: the generated harness must be able to perform real code work inside the sandbox. That means it can clone/fetch the repo or hydrate an Artifacts workspace, edit files, run checks, produce patches, and safely push or publish the result through a declared output target.
+
+Safety rule: “safe push” means capability-scoped Git access, not ambient Joel credentials. For agent-authored GitHub writes in this repo, prefer the ShitRat GitHub App actor (`shitratgit[bot]`) or an equivalent short-lived GitHub App installation token minted by the supervisor. The harness should record the branch/ref, commit SHA, actor, diff stats, validation commands, and output target receipt.
+
+Default code-work flow:
+
+```txt
+hydrate workspace from pinned repo/ref
+→ generated harness edits code/docs through sandbox filesystem
+→ run checks inside sandbox or verifier lane
+→ commit to Artifacts and/or Git branch with scoped credentials
+→ verifier inspects diff + checks + observability pack
+→ output target publishes branch/PR/review URL or blocks
+```
+
+The prototype should prove code mutation as real work, not only research/document generation.
+
+Output target, accepted 2026-06-05: v0 should deliver a **GitHub PR**, not just a branch-only commit. The generated harness should push a scoped branch, open a PR, and include the observability pack, verifier summary, changed files, checks run, risk notes, and next safe action in the PR body. The PR should be produced by the policy-approved GitHub App/ShitRat-style actor, not Joel's ambient credentials.
+
+App progress, 2026-06-09: production `src/app` now has typed leased branch and PR paths (`github.branch.commit` then `github.pull-request.create`) for review-surface delivery. Live deployed dry-run receipt `run-live-github-pr-dryrun-20260609T060703Z-9bba1f11` removed the fake `github-pr` output target hole for the earlier PR-only dry-run path: the real planner selected `github-pr`, real Pi worker/verifier lanes ran, and the app executed a `github.pull-request.create` dry-run lease with a GitHub compare URL. Follow-up live receipt `run-live-github-branch-pr-20260609T065340Z-f82a6d90` proves the full non-dry-run branch+PR path: the real planner selected `github-pr`, real Pi worker/verifier lanes ran, the app committed `workflow-reviews/run-live-github-branch-pr-20260609T065340Z-f82a6d90/review-surface.md` through `github.branch.commit`, then opened `https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/16` through `github.pull-request.create`. D1 recorded both leases as `executed`, and D1 telemetry recorded `24` rows with one trace id. The receipt trail also captured two hardening failures: a verifier prompt boundary bug that demanded post-verifier delivery receipts too early, and a missing Worker `GITHUB_TOKEN` binding.
+
+Credential note: ShitRat GitHub App credentials are available through the local secrets system. The workflow plan should still carry a `secretRef`/capability reference, not plaintext. The supervisor or broker leases the credential only at the point of scoped branch/PR creation, records actor/installation metadata and receipt hashes, and never exposes private keys, installation tokens, or GitHub credentials to public logs, prompts, observer surfaces, or Artifacts.
+
+Scope, accepted 2026-06-05: v0 PR changes should be **prototype-only**. The generated workflow may create and edit `prototypes/workflow-observability-spine-spike/**`, root package scripts for that prototype, and Brain/docs captures. It should not write production `src/` code yet. The later production rewrite absorbs only the winning ports, event schema, adapter boundaries, and receipts.
+
+Topology, accepted 2026-06-05:
+
+```txt
+planner/supervisor sandbox
+  → reads task + repo docs
+  → generates plan/machine/harness/capability manifest
+  → pins artifacts
+  → asks DO/Worker to validate and launch
+
+generated build harness sandbox
+  → hydrates repo workspace
+  → edits prototype files
+  → emits observability events through ports
+  → runs checks
+  → pushes branch / opens PR via ShitRat capability
+
+verifier/debugger lane
+  → reads observabilityPack, diff, checks
+  → writes run diagnosis + next-safe-action
+  → decides PR body is publishable
+```
+
+Parallelization note: design the generated build harness so it can split feature work into independently verifiable lanes instead of one giant sandbox doing everything. Use `joelhooks/swarm-tools` as a planning reference before finalizing the lane topology.
+
+Swarm-tools planning receipts to borrow:
+
+- coordinator orchestrates; workers execute
+- spawn all independent workers in one wave instead of one-by-one
+- workers reserve/own their own files; the coordinator does not pre-reserve worker files
+- use waves/dependencies when file ownership overlaps
+- use worktree isolation for high-risk/broad edit lanes; file reservation is fine for smaller disjoint lanes
+- every lane reports progress, blockers, changed files, checks, and learnings
+- coordinator/verifier reviews worker outputs before completion/PR publication
+- recovery should offer same-plan retry, edited-plan retry, or fresh-start paths
+
+Applied to this prototype: the generated harness should plan a small parallel build swarm, not a single monolithic code lane. Candidate lanes:
+
+```txt
+lane: core-ports-and-events
+  owns: prototypes/workflow-observability-spine-spike/src/core/**
+  builds: portable ports, event schema, redaction/data contracts
+
+lane: cloudflare-adapters
+  owns: prototypes/workflow-observability-spine-spike/src/adapters/**
+  builds: Artifacts pack writer, DO status store, event sink, metrics recorder
+
+lane: dynamic-harness-runtime
+  owns: prototypes/workflow-observability-spine-spike/src/workflows/** and src/worker.ts integration seams
+  builds: generated harness execution path, capability manifest validation, sandbox launch shape
+
+lane: verifier-debugger
+  owns: debugger/verifier artifacts and tests under the prototype
+  builds: debugger-agent pack reader, run diagnosis, next-safe-action contract
+
+lane: docs-and-capture
+  owns: prototype README, Brain capture, package scripts
+  builds: run instructions, delete/absorb rule, acceptance receipt language
+```
+
+The generated supervisor may merge or split these lanes after inspecting the repo, but it must record why the final lane graph differs from this seed topology. Parallelism is useful only when file ownership and dependency boundaries stay explicit.
+
+Isolation decision, accepted 2026-06-05: each generated code lane gets an isolated sandbox/workspace, then merges through Artifacts and the final GitHub PR path. Do not let parallel lanes mutate one shared checkout. Each lane should emit its own diff, checks, artifacts, progress events, failure/cancel receipts, and learning summary. The supervisor fan-in step merges lane outputs intentionally and records conflicts/resolutions in the observability pack.
+
+Generated harness runtime, accepted 2026-06-05: use a TypeScript/JavaScript harness executed inside a supervisor sandbox, likely via `tsx`, with a tiny injected capability SDK. This follows the Pi/Workflow OS dynamic workflow lineage while keeping the generated code outside the privileged Worker/DO runtime.
+
+Harness import rule:
+
+```txt
+workflows/harness.ts may import:
+  ./capabilities.ts
+  zod schemas / typed contracts
+  local pinned workflow artifacts
+
+workflows/harness.ts may not import:
+  cloudflare:workers
+  raw Cloudflare bindings
+  raw secret stores
+  raw GitHub credentials
+  unapproved network clients
+```
+
+Capability SDK shape:
+
+```ts
+capabilities.emitEvent(...)
+capabilities.enqueueLane(...)
+capabilities.readArtifact(...)
+capabilities.writeArtifact(...)
+capabilities.requestSecretLease(secretRef)
+capabilities.openPullRequest(...)
+capabilities.reportProgress(...)
+```
+
+The Worker/DO validates `run/capability-manifest.json`, then starts the supervisor sandbox. The harness can request declared capabilities through the SDK; the control plane decides whether to grant, reject, enqueue, or require human approval.
 
 A workflow run should emit enough structured, high-cardinality telemetry that:
 
@@ -464,3 +1022,163 @@ A first prototype is useful if a human and an agent can both answer these from t
 - What should we do next?
 
 If the visualizer cannot answer those, it is just a fancy log tail with mascara.
+## Proven run receipt — 2026-06-05
+
+Real deployed run succeeded:
+
+- run: `run-workflow-observability-spine-86638042`
+- Worker: `https://pi-workflow-observability-spine-spike.joelhooks.workers.dev`
+- Artifacts repo: `piwfo-run-workflow-observability-spine-86638042`
+- output target: `github_pr`
+- GitHub PR: https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/1
+- PR actor: `shitratgit[bot]`
+- PR branch: `workflow-observability-spine-86638042`
+- verifier status: `verified`
+- total planned lanes: `5`
+- max observed active lanes: `2`
+- generated files in PR: `10`
+
+Acceptance evidence from `prototypes/workflow-observability-spine-spike/out/latest-receipt.json`:
+
+- `generated-harness-executed`: passed
+- `isolated-lanes-generated-files`: passed
+- `debugger-can-explain-run`: passed
+- observability pack refs: `run/events.jsonl`, `run/status.json`, `run/metrics-summary.json`, `run/cost-summary.json`, `run/trace-summary.json`, `run/redaction-policy.json`, `run/agent-observability-summary.md`
+
+Verification receipts:
+
+```bash
+pnpm check
+pnpm typecheck
+pnpm typecheck:tsc
+pnpm verify:workspace
+```
+
+PR/readback checks performed after the run:
+
+- GitHub API readback returned PR `#1` open on `main` from `workflow-observability-spine-86638042`.
+- PR author readback: `shitratgit[bot]`.
+- PR body includes `Run receipt`, `Generated files`, `Observability pack`, and `Debugger diagnosis` sections.
+- PR diff is prototype/Brain scoped and contains no `BRAVE_SEARCH_API_KEY`, `ACCESS_TOKEN`, `PI_AUTH_JSON_B64`, `art_v1_`, `shitrat_github_private_key`, or private-key block text.
+
+Runtime diagnosis learned during dogfood:
+
+- `isomorphic-git.push()` needs `url`, not `remote`; the wrong option caused Worker 1101 on first start.
+- Generated `tsx` harnesses should avoid top-level await unless the sandbox module mode is explicit; wrapping in `async main()` avoided the CJS transform trap.
+- Generated shell/Node heredocs should use `String.raw` or `String.fromCharCode(10)` for embedded newlines; otherwise template rendering can turn `\n` into syntax-breaking literal newlines.
+- Queue failures must update capsule state to `blocked`; silent queue retry loops make observability lie.
+- Lane retry state must re-enqueue the lane message; `retry_queued` without a queue send is boolean-soup cosplay wearing a state-machine hat.
+
+## Next required prototype: Cloud Capability Lease Broker + PR output
+
+Joel correction, 2026-06-05: the observability PR proof was still hybrid. The workflow build ran in Cloudflare, but GitHub PR publication happened from a local ShitRat adapter. That is not acceptable for the real product standard. Secrets are a pillar, but the workflow should not lease raw secrets or broad tokens. It should lease **permission to perform one exact operation** through a trusted broker.
+
+Canonical term: **capability lease**.
+
+
+Ports/adapters requirement: the prototype must code against interfaces. Core capability workflow code defines portable ports such as `CapabilityLeaseBroker`, `CapabilityPolicyAuthorizer`, `SecretMaterialStore`, `PullRequestOutputPort`, and `CapabilityReceiptSink`. Cloudflare Worker/DO/storage, GitHub App/API calls, Artifacts `filesRef` resolution, and observability writes are adapters behind those ports. Core code must not import `cloudflare:workers`, the Sandbox SDK, Wrangler, `@octokit/*`, raw GitHub clients, Node filesystem/shell helpers, or concrete secret storage implementations.
+
+
+Interface-prototyping stance: this prototype is explicitly allowed to focus on the interface shape. The main artifact is the portable core contract plus one real Cloudflare/GitHub adapter path that proves the interface is not fantasy. Do not promote the prototype interfaces into production `src/` by copy/paste; after the proof, rewrite the winning interface names, request/receipt schemas, policy boundaries, and adapter seams into production.
+
+Expected prototype layout:
+
+```txt
+prototypes/cloud-capability-lease-broker-spike/
+  src/core/
+    capability-lease-broker.ts
+    capability-policy-authorizer.ts
+    secret-material-store.ts
+    pull-request-output-port.ts
+    capability-receipt-sink.ts
+    schemas.ts
+  src/adapters/
+    cloudflare-capability-lease-broker.ts
+    cloudflare-secret-material-store.ts
+    github-app-pull-request-output.ts
+    artifacts-files-ref.ts
+    observability-receipt-sink.ts
+  src/worker.ts
+```
+
+Create a new prototype instead of patching this into the observability spike:
+
+```txt
+prototypes/cloud-capability-lease-broker-spike/
+```
+
+Question:
+
+```txt
+Can a deployed Cloudflare Worker/Durable Object broker accept secretRef + payload-bound capability requests, keep root GitHub App material and installation tokens inside the trusted boundary, execute PR publication from Cloudflare, and prove no plaintext secret, broad token, bearer-ish URL, or raw Worker secret name/value leaks into Artifacts, logs, public observers, prompts, PR body, or final receipts?
+```
+
+Required real path:
+
+```txt
+workflow plan carries secretRef + requested capability only
+→ Durable Object broker validates policy, run envelope, capability id, payload hash, repo allowlist, actor, and expiry
+→ broker reads root GitHub App material from Worker secret/Secrets Store binding or encrypted private storage
+→ broker mints any GitHub App installation token only inside the trusted Worker/DO boundary
+→ generated harness/finalizer receives a capabilityRef and operation receipt, not root secret material or installation token
+→ broker performs the exact GitHub API operation: create branch/tree/commit/PR from approved filesRef + payloadHash
+→ receipt records actor, repo, branch, commit, PR URL, capabilityRef, lease expiry, policy id, payload hash, and cleanup/revoke status
+→ public receipts leak no private key, installation token, bearer-ish URL, token-bearing remote, or raw Worker secret name/value
+```
+
+Capability request shape:
+
+```ts
+type CapabilityLeaseRequest = {
+  runId: string;
+  workItemId: string;
+  secretRef: "githubApp:shitrat";
+  capability: "github.openPullRequest";
+  repo: "joelhooks/pi-cloudflare-sandbox-workflows";
+  branch: string;
+  filesRef: string;
+  payloadHash: string;
+  prTitle: string;
+  prBodyHash: string;
+  expiresInSeconds: number;
+};
+```
+
+Acceptance gates:
+
+- local runner may start/poll/verify only; it may not create commits, branches, tokens, or PRs
+- no sandbox, generated harness, Artifacts repo, PR body, Brain note, logs, or public observer sees a GitHub App private key, installation token, token-bearing remote URL, or raw secret value
+- the broker executes only the exact payload-bound operation; branch, repo, filesRef, PR title/body hash, and run id are part of the lease envelope
+- a denied request returns `missing_secret_approval`, `capability_denied`, or `payload_hash_mismatch`, not a retry loop
+- leases have expiry, scope, actor, purpose, run id, capability id, payload hash, and revoke/cleanup receipt
+- verifier proves PR readback from GitHub API shows `shitratgit[bot]` and the expected branch/commit/payload hash
+- failure modes are stateful and visible: blocked states, redacted error, approval URL/ref, no silent queue retry soup
+
+Borrow from existing receipts:
+
+- `prototypes/secret-lease-broker-spike/` for `secretRef -> task-scoped lease -> metadata-only receipt`
+- `docs/kody-secrets-pattern.md` for encrypted storage, metadata discovery, placeholder references, approval errors, rotation doctrine, and derived secret use at a gateway
+- `prototypes/workflow-observability-spine-spike/` for generated harness, isolated lanes, observability pack, verifier/debugger receipt, and the discovered anti-patterns
+
+Hard line: the next proof must produce a PR without local GitHub credentials, local ShitRat API calls, or sandbox-visible GitHub tokens. Local can verify; the cloud broker must execute the output capability.
+
+## Follow-up proof receipt: cloud capability broker
+
+The local-output gap from the observability proof is closed by `prototypes/cloud-capability-lease-broker-spike/`.
+
+Latest successful real run:
+
+- Worker: `https://pi-cloud-capability-lease-broker-spike.joelhooks.workers.dev`
+- run: `run-cloud-capability-lease-4dac021e-eecfdfb5`
+- Artifacts repo: `piclb-run-cloud-capability-lease-4dac021e-eecfdfb5`
+- sandbox receipt commit: `b2efdd6eebb2536114e7cf98d1659d039e6932bf`
+- cloud-created PR: https://github.com/joelhooks/pi-cloudflare-sandbox-workflows/pull/9
+- PR actor/readback: `shitratgit[bot]`
+- PR branch: `cloud-capability-lease-eecfdfb5`
+- PR commit: `2a8e7d648e4e77e467efef09e6e67246e2fb08c0`
+- payload hash: `3be8433a5f04dc173dee3d0c27e91b39a0ca4325f77eef52959e01a3f403813a`
+- denied probes: `capability_denied`, `missing_secret_approval`, `payload_hash_mismatch`
+- leak scan: passed
+- CodeRabbit: `findings: 0`
+
+Macroscope is intentionally excluded from the default review loop after invoice spikes; use CodeRabbit plus targeted local review unless Joel explicitly asks for Macroscope.

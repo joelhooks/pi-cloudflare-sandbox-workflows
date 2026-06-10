@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wzrrd.sh/schema/config.json",
+  "favicon": {
+    "emoji": "🧠"
+  },
+  "site": {
+    "emoji": "🧠",
+    "slug": "dream-sequence-vision",
+    "theme": "tufte-notes",
+    "title": "Dream Sequence Vision"
+  },
+  "template": {
+    "id": "joel/tufte-mdsvx",
+    "source": "local-fixture",
+    "version": "0.1.0"
+  }
+}

@@ -1,0 +1,649 @@
+<script lang="ts">
+  import FlowChart from "$lib/flow-chart.svelte";
+  import MarginNote from "$lib/margin-note.svelte";
+  import PatternCards from "$lib/pattern-cards.svelte";
+  import ReportLayout from "$lib/ReportLayout.svelte";
+  import StatLine from "$lib/stat-line.svelte";
+
+  type Decision = "pending" | "needs_more_evidence";
+
+  interface Candidate {
+    claim: string;
+    confidence: string;
+    decision: Decision;
+    humanAction: string;
+    id: string;
+    joelclawReceipts: number;
+    rating: string;
+    reasoning: string;
+    recommendation: string;
+    reviewerCall: string;
+    summary: string;
+    target: string;
+    title: string;
+    typesenseReceipts: number;
+    type: string;
+  }
+
+  const hitlItems = [
+    {
+      rating: "10/10",
+      reasoning:
+        "The dream found the real boundary. Cloudflare can run the workflow, but it should not hold raw Typesense credentials or private transcript paths.",
+      recommendation: "Accept. Build this next.",
+      receipt: "#candidate-hunt-system-shitrat-deployment-arm",
+      summary:
+        "Build a leased memory adapter. The sandbox asks for search, hydrate, export, and write operations. The trusted relay keeps the scary stuff behind the wall.",
+      title: "Memory lease boundary",
+    },
+    {
+      rating: "9/10",
+      reasoning:
+        "Typesense chunks are good leads, but they are not durable truth. This run had enough hydrated receipts to prove the rule matters.",
+      recommendation: "Accept as policy.",
+      receipt: "#candidate-hunt-system-receipt-hydration-law",
+      summary:
+        "Make hydration the gate. Search can scout broadly, but Brain, prompt, skill, and kernel changes need hydrated JoelClaw receipts.",
+      title: "Hydrate before mutation",
+    },
+    {
+      rating: "9/10",
+      reasoning:
+        "A dream is allowed to notice work. It should not quietly change durable memory or runtime surfaces without rollback and validation.",
+      recommendation: "Accept as a hard gate.",
+      receipt: "#candidate-hunt-system-auto-apply-safety",
+      summary:
+        "No auto-apply from dreams. Accepted items need a forward diff, rollback diff, hash check, validation output, and apply receipt.",
+      title: "Mutation safety",
+    },
+    {
+      rating: "8/10",
+      reasoning:
+        "The page is part of the workflow, not a decorative export. A reusable report node lets any workflow ask for human review without copying UI code.",
+      recommendation: "Accept, but keep publish behind a lease.",
+      receipt: "#template",
+      summary:
+        "Package the HITL report renderer. The workflow renders a review surface; Wzrrd publishing stays a separate capability lease.",
+      title: "HITL report node",
+    },
+    {
+      rating: "6/10",
+      reasoning:
+        "The run assembled lanes from evidence, which is useful. It did not prove that a real planner generated and executed an XState machine for this run.",
+      recommendation: "Hold. Ask the next run for machine config, dynamic plan, hashes, and verifier proof.",
+      receipt: "#proof-requirements",
+      summary:
+        "Do not overclaim generated workflow execution. This run proves dynamic lane assembly, not a generated XState machine.",
+      title: "Generated workflow proof",
+    },
+    {
+      rating: "5/10",
+      reasoning:
+        "Per-item review sounds right, but this run only found Typesense evidence for the policy shape. That is not enough to make it law.",
+      recommendation: "Hold. Keep it as a candidate until a run hydrates real review examples.",
+      receipt: "#candidate-hunt-system-per-item-review",
+      summary:
+        "Park per-item review policy. Good idea, weak evidence. It needs hydrated examples before it becomes the default.",
+      title: "Per-item review",
+    },
+  ];
+
+  const accessPatterns = [
+    {
+      receipts: [
+        { href: "#access", label: "Cloudflare access finding" },
+        { href: "#candidate-hunt-system-shitrat-deployment-arm", label: "deployment-arm candidate" },
+      ],
+      title: "Lease memory access, do not leak substrate",
+      why: "The useful next build is a narrow memory port. The sandbox asks for work. The relay keeps the dangerous stuff behind the wall.",
+    },
+    {
+      receipts: [
+        { href: "#candidate-hunt-system-receipt-hydration-law", label: "hydration-law candidate" },
+      ],
+      title: "Scout broadly, hydrate before durable claims",
+      why: "Search hits are leads, not truth. Durable memory changes need hydrated transcript receipts.",
+    },
+    {
+      receipts: [
+        { href: "#candidate-hunt-system-auto-apply-safety", label: "auto-apply candidate" },
+      ],
+      title: "Review before mutation",
+      why: "The dream can suggest changes. It does not get to quietly rewrite Brain, prompts, skills, or packages.",
+    },
+    {
+      receipts: [
+        { href: "#template", label: "joel/tufte-mdsvx@0.1.0" },
+      ],
+      title: "HITL report is a workflow node",
+      why: "A human review page is part of the workflow, not a decorative artifact stapled on at the end.",
+    },
+  ];
+
+  const generationProof = [
+    {
+      receipts: [
+        { href: "#machine", label: "workflow-plan.json phases" },
+        { href: "#dreams", label: "9 dream cards" },
+      ],
+      title: "Dynamic lane assembly happened",
+      why: "The run discovered machines, expanded focus-specific queries, gathered evidence, hydrated receipts, grouped hits into candidates, and assembled nine review lanes from the resulting candidate set.",
+    },
+    {
+      receipts: [
+        { href: "#proof", label: "410 event receipts" },
+      ],
+      title: "Evidence changed the output",
+      why: "The output contains 176 Typesense query events, 176 result events, 44 local result events, and 9 hydration events before ITEMS_PROPOSED and REVIEW_READY.",
+    },
+    {
+      receipts: [
+        { href: "#proof-gap", label: "src/hunt.ts theme library" },
+      ],
+      title: "Generation proof is incomplete",
+      why: "The current hunt code still has a static theme library and static phase list. This is dynamic evidence-driven assembly, not proof of a generated XState machine.",
+    },
+    {
+      receipts: [
+        { href: "#proof-requirements", label: "next proof contract" },
+      ],
+      title: "Next proof needs pinned machine artifacts",
+      why: "A real proof requires planner evidence, generated machine config, dynamic plan binding, hashes, and verifier acceptance before execution.",
+    },
+  ];
+
+  const candidates: Candidate[] = [
+    {
+      claim:
+        "The workflow deployment rig should access JoelClaw and Typesense through a tailnet runner or narrow authenticated bridge, not by exposing raw Typesense as public infrastructure.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Create the Dream memory port and relay shape. This is the next concrete engineering task.",
+      id: "hunt-system-shitrat-deployment-arm",
+      joelclawReceipts: 1,
+      rating: "10/10",
+      reasoning:
+        "This is the highest-signal dream. It points at the runtime boundary that decides whether Cloudflare becomes useful or becomes a credential leak machine.",
+      recommendation:
+        "Accept. Turn this into the next engineering task: a leased memory port plus trusted relay.",
+      reviewerCall: "accept direction",
+      summary:
+        "Build the memory lease boundary. Cloudflare can run the work, but JoelClaw and Typesense access need to stay behind a trusted relay.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Build the memory lease boundary",
+      typesenseReceipts: 7,
+      type: "brain_patch",
+    },
+    {
+      claim:
+        "System dreams may scout with Typesense chunks, but durable ShitRat/Pi memory claims require JoelClaw transcript hydration with session id, path, machine, runtime, and date receipts.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Turn hydrate-before-mutation into a rule for Dreaming and report-node output.",
+      id: "hunt-system-receipt-hydration-law",
+      joelclawReceipts: 1,
+      rating: "9/10",
+      reasoning:
+        "The dream separates search from truth. Typesense gets us candidates fast, but durable memory updates need hydrated transcript receipts.",
+      recommendation:
+        "Accept. Make hydrate-before-mutation a Dreaming rule and bake it into the report-node contract.",
+      reviewerCall: "accept direction",
+      summary:
+        "Hydration is the gate. Search results can start the work; hydrated JoelClaw receipts decide whether a memory change is real.",
+      target: ".brain/resources/source-maps/memory-system.svx",
+      title: "Require hydrated receipts",
+      typesenseReceipts: 7,
+      type: "brain_patch",
+    },
+    {
+      claim:
+        "System dreams must be explicitly scoped as system, target system Brain, prompts, and skills, and never let project-scoped candidates auto-apply to global memory.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Keep scope on every dream artifact and block cross-scope auto-apply.",
+      id: "hunt-system-scope-boundary",
+      joelclawReceipts: 3,
+      rating: "8/10",
+      reasoning:
+        "This keeps system dreams from spraying project-specific guesses into global memory. Boring boundary, important boundary.",
+      recommendation:
+        "Accept. Every dream artifact should carry scope, and system-scope writes should reject project-scope candidates by default.",
+      reviewerCall: "accept direction",
+      summary:
+        "Keep system dreams scoped. A system dream can propose global memory work, but it cannot let project evidence quietly rewrite global truth.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Keep system dreams scoped",
+      typesenseReceipts: 7,
+      type: "brain_patch",
+    },
+    {
+      claim:
+        "Accepted system dream items may patch Brain, prompts, or skills only when a forward diff, rollback diff, pre-apply hash check, validation output, and apply receipt exist.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Make this the apply gate before any Dreaming workflow can mutate Brain, prompts, skills, or packages.",
+      id: "hunt-system-auto-apply-safety",
+      joelclawReceipts: 1,
+      rating: "9/10",
+      reasoning:
+        "This is the safety envelope. Dreams can notice work, but mutation needs diffs, rollback, hash checks, validation, and receipts.",
+      recommendation:
+        "Accept as a hard gate. No Brain, prompt, skill, or package mutation without this chain.",
+      reviewerCall: "accept direction",
+      summary:
+        "No auto-apply from dreams. A dream can put work on the table; it does not get to silently patch the system.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "No auto-apply without receipts",
+      typesenseReceipts: 8,
+      type: "prompt_patch",
+    },
+    {
+      claim:
+        "The ShitRat operating graph should have versioned snapshot lineage first, then smaller component packs for prompts, skills, extensions, and workflow boundaries.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Keep snapshot lineage in the package model. Do not turn this into a one-off Dreaming patch yet.",
+      id: "hunt-system-shitrat-lineage-packs",
+      joelclawReceipts: 1,
+      rating: "8/10",
+      reasoning:
+        "The package-first direction keeps the operating graph reusable. Snapshot lineage gives us rollback and history before smaller packs start moving around.",
+      recommendation:
+        "Accept as design pressure. Do not turn it into a one-off patch from this run.",
+      reviewerCall: "capture as design pressure",
+      summary:
+        "Keep package lineage first. Start with versioned snapshots, then split prompts, skills, extensions, and workflow boundaries into smaller packs.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Keep package lineage first",
+      typesenseReceipts: 7,
+      type: "snapshot_patch",
+    },
+    {
+      claim:
+        "System dreams should be dynamic workflow assembly surfaces: ranked and classified candidates flow between system memory and active projects, then feed apply, deploy, test, approval, and rollback lanes.",
+      confidence: "45%",
+      decision: "needs_more_evidence",
+      humanAction:
+        "Do not promote this yet. Ask the next run for hydrated receipts and generated machine/plan proof.",
+      id: "hunt-system-dynamic-workflow-surface",
+      joelclawReceipts: 0,
+      rating: "5/10",
+      reasoning:
+        "The idea fits the project, but this run only found Typesense evidence. It does not prove generated machine execution or real apply/deploy/test lanes.",
+      recommendation:
+        "Hold. Ask the next dream for hydrated receipts plus generated machine config, dynamic plan, hashes, and verifier proof.",
+      reviewerCall: "needs evidence",
+      summary:
+        "Dynamic workflow assembly is promising, but not proven here. Treat it as a candidate, not a fact.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Prove dynamic workflow assembly",
+      typesenseReceipts: 8,
+      type: "brain_patch",
+    },
+    {
+      claim:
+        "System dreams should treat repeated operator corrections and agent failure phrases as high-value evidence for Brain, prompt, or skill updates only after repeated hydrated receipts.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Use repeated corrections as search signals. Still require hydration before changing durable memory.",
+      id: "hunt-system-correction-failure-evidence",
+      joelclawReceipts: 1,
+      rating: "8/10",
+      reasoning:
+        "Repeated operator corrections are exactly the kind of pain dreams should surface. The trick is using them as leads, not automatic law.",
+      recommendation:
+        "Accept as a signal rule. Repeated corrections should trigger hydration and review, not immediate edits.",
+      reviewerCall: "accept direction",
+      summary:
+        "Treat repeated corrections as evidence. When the same correction shows up again and again, the system should ask whether Brain, prompts, or skills need work.",
+      target: ".brain/areas/agent-infrastructure.svx",
+      title: "Treat repeated corrections as evidence",
+      typesenseReceipts: 8,
+      type: "agent_failure",
+    },
+    {
+      claim:
+        "System dream review must stay per-item and private; global memory changes need an accept, discard, or edit decision per candidate rather than whole-run approval.",
+      confidence: "45%",
+      decision: "needs_more_evidence",
+      humanAction:
+        "Keep the UI idea, but do not make it policy until the next run hydrates real review examples.",
+      id: "hunt-system-per-item-review",
+      joelclawReceipts: 0,
+      rating: "5/10",
+      reasoning:
+        "The UX shape is probably right, but this dream did not hydrate enough evidence to make it policy.",
+      recommendation:
+        "Hold. Keep the per-item review idea, but require a later run with real review examples before making it default.",
+      reviewerCall: "needs evidence",
+      summary:
+        "Per-item review is not ready. Good idea, weak proof.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Keep review per item",
+      typesenseReceipts: 8,
+      type: "new_memory",
+    },
+    {
+      claim:
+        "System memory distillation artifacts should keep JSON, JSONL, and diffs as canonical agent-readable truth and generate Markdown/SVX only as review surfaces.",
+      confidence: "94%",
+      decision: "pending",
+      humanAction:
+        "Keep machine-readable artifacts canonical. Treat Markdown/SVX as the review surface.",
+      id: "hunt-system-agent-first-artifacts",
+      joelclawReceipts: 1,
+      rating: "8/10",
+      reasoning:
+        "This keeps agents and humans from fighting over the same surface. JSON/JSONL/diffs stay canonical; Markdown and SVX help humans review.",
+      recommendation:
+        "Accept. Keep review prose generated from machine-readable artifacts, not the other way around.",
+      reviewerCall: "accept direction",
+      summary:
+        "Keep artifacts agent-readable. The durable truth should be JSON, JSONL, and diffs; the report is the human surface.",
+      target: ".brain/resources/memory-distillation-dreams.svx",
+      title: "Keep artifacts agent-readable",
+      typesenseReceipts: 8,
+      type: "brain_patch",
+    },
+  ];
+</script>
+
+<svelte:head>
+  <title>System Dream Review</title>
+  <meta
+    name="description"
+    content="A redacted SvelteKit/MDSvX review of a system-scope Dreaming run over recent and mid-term agent session memory."
+  />
+  <meta property="og:title" content="System Dream Review" />
+  <meta
+    property="og:description"
+    content="Nine candidate memory and runtime improvements from a system-scope Dreaming run, with receipt counts and Cloudflare access findings."
+  />
+  <meta property="og:image" content="/og.svg" />
+  <meta property="og:image:type" content="image/svg+xml" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="/og.svg" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap"
+    rel="stylesheet"
+  />
+</svelte:head>
+
+<ReportLayout>
+
+<p class="eyebrow"><span class="mascot" aria-hidden="true">🧠</span> System Dream Review</p>
+
+# This dream found work to do.
+
+<p class="lead">Yes, the dream is actionable. The useful output is not the big pile of receipts. It is six review items: four to accept, two to hold. One accepted item is the obvious next build.</p>
+
+<p class="lead">The immediate move is boring and important: build the leased memory adapter. A sandboxed worker should not receive raw Typesense credentials or private JoelClaw transcript paths. It should ask a trusted relay for narrow memory operations, then publish redacted evidence and signed receipts.<MarginNote id="privacy-boundary" number="1">This published review intentionally omits raw transcript lines, hydrated local session paths, and absolute private artifact paths. The canonical artifact stays local; this page is the human review surface.</MarginNote></p>
+
+<StatLine
+  items={[
+    { label: "Run", value: "dream-hunt-2026-06-09-998d4b" },
+    { label: "Candidates", value: "9 total / 7 pending" },
+    { label: "Receipts", value: "75 locators / 9 hydrated" },
+    { label: "Expiry", value: "24h wzrrd review" },
+  ]}
+/>
+
+<h2 id="dreams">The actual dreams</h2>
+
+These are the nine dream outputs from the run. This is the part that should feel like human review work, not artifact archaeology.
+
+{#each candidates as candidate}
+<section class="hitl-item dream-item" id={`candidate-${candidate.id}`}>
+
+### {candidate.title}
+
+<p class="hitl-summary">{candidate.summary}</p>
+
+<dl class="three-rs">
+  <div>
+    <dt>Reasoning</dt>
+    <dd>{candidate.reasoning}</dd>
+  </div>
+  <div>
+    <dt>Rating</dt>
+    <dd><code>{candidate.rating}</code></dd>
+  </div>
+  <div>
+    <dt>Recommendation</dt>
+    <dd>{candidate.recommendation}</dd>
+  </div>
+</dl>
+
+<p class="artifact-note">
+  Receipt: <code>{candidate.id}</code>. Call: <code>{candidate.reviewerCall}</code>.
+  Evidence: {candidate.typesenseReceipts} Typesense chunk(s), {candidate.joelclawReceipts} hydrated JoelClaw session(s).
+  Target: <code>{candidate.target}</code>.
+</p>
+
+</section>
+{/each}
+
+## What to do with these dreams
+
+Keep the Dreaming workflow. It did the right thing: searched broadly, hydrated enough receipts to separate signal from noise, and stopped at review instead of mutating Brain, prompts, skills, or runtime packages.
+
+The next work is not more report polish. It is ports and adapters: a leased memory adapter Cloudflare can call without importing Joel's private substrate.
+
+Two ideas are not ready yet: dynamic workflow assembly and per-item review policy. They are probably right, but this run only found Typesense evidence for them. Keep them as candidates until another run hydrates better receipts.
+
+<h2 id="line-items">Actionable line items</h2>
+
+{#each hitlItems as item}
+<section class="hitl-item">
+
+### {item.title}
+
+<p class="hitl-summary">{item.summary}</p>
+
+<dl class="three-rs">
+  <div>
+    <dt>Reasoning</dt>
+    <dd>{item.reasoning}</dd>
+  </div>
+  <div>
+    <dt>Rating</dt>
+    <dd><code>{item.rating}</code></dd>
+  </div>
+  <div>
+    <dt>Recommendation</dt>
+    <dd>{item.recommendation} <a href={item.receipt}>Receipt</a></dd>
+  </div>
+</dl>
+
+</section>
+{/each}
+
+## Report node
+
+The report template should be installed as a workflow node, not copied into each workflow as bespoke UI. The workflow asks for a human review surface; the package registry resolves a report renderer; the renderer turns typed artifacts into a SvelteKit/MDSvX static site; the Wzrrd adapter publishes only after the `wzrrd.site.publish` lease is approved.<MarginNote id="node-vs-adapter" number="2">The workflow node renders the review. The capability adapter publishes it. Conflating those is how template code turns into a secret-bearing side-effect surface.</MarginNote>
+
+<PatternCards items={accessPatterns} label="System Dream findings" />
+
+<h2 id="machine">Workflow state machine</h2>
+
+This figure is rendered from the Dream run's pinned `workflow-plan.json` shape and redacted run facts. It is not claiming there was a generated XState machine artifact in this run. The artifact proves a workflow-plan state path and lane assembly; future reports should render the pinned generated XState machine when that artifact exists.
+
+<FlowChart
+  alt="State-machine diagram for the system Dream workflow showing source capture, scout, hydrate, classify, rank, assemble, HITL review, captured output, and gated follow-on apply, deploy-test, approval, rollback, and needs-more-evidence paths."
+  caption="The actual Dream run stopped at REVIEW_READY/CAPTURED with no auto-apply. Accepted item lanes are shown as gated future states because the plan includes apply, deploy-test, approval, and rollback phases, but no item was accepted in this run."
+  src="/figures/dream-workflow-state-machine.svg"
+  title="Dream workflow state path"
+  version="20260609-state-machine-v2"
+/>
+
+<h2 id="proof">Dynamic generation proof</h2>
+
+The honest proof level for this run is **dynamic evidence-driven lane assembly**, not a fully generated workflow machine. That is still useful, but it is not the same claim.
+
+<PatternCards items={generationProof} label="Dynamic generation proof" />
+
+What the receipts prove:
+
+| Receipt | Value |
+| --- | ---: |
+| Event records | 410 |
+| Typesense machine discovery events | 1 |
+| Typesense scout queries | 176 |
+| Typesense scout results | 176 |
+| Local JoelClaw result events | 44 |
+| Hydrated JoelClaw session events | 9 |
+| Proposed items | 9 |
+| Assembled workflow lanes | 9 |
+
+The lane set is task-specific to `recent-system-memory-kernel-improvements`: the workflow plan contains nine item ids from this run, five classifications, three lane patterns, and review targets derived from the selected system scope. The run also discovered four Typesense machines before scouting.
+
+<h3 id="proof-gap">What this does not prove</h3>
+
+This run does not prove that a real Pi planner generated an XState machine from scratch. The current hunt script still contains static ingredients: correction phrases, system/project theme libraries, and a static phase list. The runtime then uses the focus, discovered machines, retrieved hits, hydration results, and confidence/decision rules to assemble candidate lanes.
+
+That means the right label is:
+
+```txt
+dynamic evidence-driven lane assembly over a static theme/pattern library
+```
+
+The wrong label would be:
+
+```txt
+fully generated XState workflow machine
+```
+
+<h3 id="proof-requirements">Required proof for the next report</h3>
+
+The next dynamic-workflow proof needs these pinned artifacts before execution:
+
+1. Planner prompt and transcript receipt from a real Pi or other real agent lane.
+2. Generated `workflow.xstate-machine.v1` config artifact.
+3. Dynamic plan artifact binding step ids to the generated machine.
+4. Verification contract.
+5. Hashes for the machine config, plan, verification contract, and any emitted source or harness artifacts.
+6. Verifier result that checks those hashes and confirms the run executed the generated machine config, not a static fallback.
+7. D2 figure generated from the pinned machine artifact, not hand-authored from prose.
+
+## Run coverage
+
+The dream crossed recent and mid-term memory: April 20 through June 9, 2026. It found `pi`, `claude`, and `codex` sessions across `blaine`, `dark-wizard`, `flagg`, and `panda`, then hydrated nine JoelClaw session receipts behind the local boundary.
+
+| Dimension | Count |
+| --- | ---: |
+| Candidate items | 9 |
+| Pending candidates | 7 |
+| Needs more evidence | 2 |
+| Typesense chunk receipts | 66 |
+| Hydrated JoelClaw session receipts | 9 |
+| Total locator receipts | 75 |
+| Candidate graph nodes | 10 |
+| Candidate graph edges | 9 |
+
+<h2 id="access">Access adapter shape</h2>
+
+Cloudflare should talk to memory through a leased port, not through the raw database. The worker asks for one memory operation envelope. A trusted JoelClaw relay or tailnet runner evaluates policy, executes the search/hydration, redacts evidence, and returns signed receipt locators.
+
+```ts
+type DreamMemoryLease = {
+  actorId: string;
+  scope: "system" | "project" | "support";
+  purpose: string;
+  operations: Array<
+    | "search-sessions"
+    | "hydrate-session"
+    | "export-redacted-evidence"
+    | "write-dream-artifact"
+  >;
+  sourceFilters: {
+    machines?: string[];
+    runtimes?: Array<"pi" | "claude" | "codex">;
+    since?: string;
+  };
+  queryBudget: number;
+  expiresAt: string;
+  policyVersion: string;
+  idempotencyKey: string;
+};
+```
+
+The adapter returns distilled candidates, graph edges, and receipt locators. It does not return raw session transcripts to public review pages, generated prompts, sandbox logs, or long-lived Cloudflare environment variables.
+
+## HITL report node
+
+Treat this template as the seed of a package export, not as one prototype directory:
+
+```ts
+type WzrrdHitlReportNode = {
+  package: "@joelhooks/wzrrd-hitl-report";
+  export: "renderReviewSurface";
+  template: "joel/tufte-mdsvx";
+  input: {
+    runId: string;
+    artifactRefs: string[];
+    reviewKind: "dream" | "support" | "workflow" | "capability";
+    redactionPolicy: "public-redacted" | "private-tailnet" | "operator-only";
+  };
+  output: {
+    buildDir: string;
+    surfaceHash: string;
+    summaryRef: string;
+  };
+};
+```
+
+In workflow terms, this node belongs after synthesis/verification and before external delivery:
+
+```txt
+pin artifacts
+  -> synthesize candidate review data
+  -> invoke installed HITL report node
+  -> write review-surface artifact
+  -> request wzrrd.site.publish lease
+  -> publish expiring Wzrrd page
+  -> wait for human accept/edit/reject
+  -> route to apply, rollback, or needs-more-evidence
+```
+
+That gives us a clean ports-and-adapters split:
+
+| Boundary | Owns |
+| --- | --- |
+| package export | SvelteKit/MDSvX report rendering contract |
+| workflow node | when review is needed, which template to invoke, and where output artifacts land |
+| review gate | accept, edit, reject, or request more evidence |
+| capability lease | permission to publish externally |
+| Wzrrd adapter | actual Wzrrd API call and publish receipt |
+
+<h2 id="template">Report standard</h2>
+
+This report was rewritten from the hand-rolled HTML review into a SvelteKit/MDSvX report initialized from `joel/tufte-mdsvx@0.1.0`, the local Wzrrd Tufte notes template. The same source pattern is already proven in `prototypes/shitrat-brain-proposal-ui`.
+
+Going forward, project reports should use this pattern unless they are intentionally throwaway local scratch:
+
+1. Create or clone a SvelteKit/MDSvX report source.
+2. Keep prose in `.svx`, reusable display primitives in `src/lib`, and generated static output in `build`.
+3. Use margin notes for receipts and caveats, stat lines for run facts, tables/cards for review decisions, and code blocks only for contracts worth reusing.
+4. Publish the built static directory with Wzrrd, defaulting to `noindex` and explicit expiry for review pages.
+5. Capture durable decisions in `.brain/`; do not treat the published page as the long-term memory.
+
+## What did not happen
+
+No support inbox sweep ran. No candidate was accepted. No Brain, prompt, skill, kernel, or package surface was auto-patched from the dream output.
+
+<footer>
+Source template: <code>joel/tufte-mdsvx@0.1.0</code>. Pattern receipt: <code>prototypes/shitrat-brain-proposal-ui</code>. Build source: <code>prototypes/system-dream-review-ui</code>. Published page is an expiring review surface, not the canonical artifact.
+</footer>
+
+</ReportLayout>

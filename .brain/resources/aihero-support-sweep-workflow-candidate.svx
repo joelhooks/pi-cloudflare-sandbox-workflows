@@ -1,0 +1,48 @@
+---
+title: AIHero Support Sweep Workflow Candidate
+status: active
+updated: 2026-06-10
+source: .brain/data/workflow-candidates/aihero-support-sweep-source-profile.json
+---
+
+# AIHero Support Sweep Workflow Candidate
+
+AIHero support sweep is a separate workflow candidate from Dreaming.
+
+Dreaming reviews agent transcripts and the artifacts around agent runs. AIHero support sweep should review support/comms/customer/org signals for AIHero and produce support actions or HITL recommendations under its own leases.
+
+## Saved Source Profile
+
+The candidate source profile is saved in `.brain/data/workflow-candidates/aihero-support-sweep-source-profile.json`.
+
+The candidate source roots are saved in `.brain/data/workflow-candidates/aihero-support-sweep-source-roots.json`.
+
+Current saved roots:
+
+- `source:brain:badass-courses:aihero-support` — AIHero Support Brain.
+- `source:support:badass-courses:aihero-front-snapshot` — local Front snapshot receipts.
+- `source:comms:badass-courses:aihero-internal-comms` — local internal comms archive.
+- `source:people-org-memory:badass-courses:aihero-crm` — AIHero CRM/org memory resources.
+
+## Boundary
+
+- This is not part of Dreamer readiness.
+- The roots are private/customer-private source-pack data, not public report content.
+- Live Front, Slack, Discord, GitHub, or Linear side effects require scoped capability leases and HITL review.
+- The workflow should be packaged as its own cartridge/source pack instead of adding AIHero branches to the core runner or Dream cartridge.
+
+## Candidate Shape
+
+1. Inventory AIHero support Brain, Front snapshots, internal comms archive, and CRM resources.
+2. Check derived-index health and plan recovery-only backfills.
+3. Search recent and all-time support/comms/customer signals by issue, account, person, and course/product context.
+4. Hydrate redacted evidence only for selected receipts.
+5. Emit concise HITL support recommendations with reasoning, rating, and recommendation.
+6. Route side effects through capability leases: draft/reply/tag/escalate in Front, create GitHub/Linear follow-ups, or publish a private Wzrrd review page.
+
+## Open Questions
+
+- Should AIHero support sweep be a scheduled workflow, an on-demand inbox sweep, or both?
+- Which support actions are allowed automatically, which require HITL, and which should remain draft-only?
+- Should internal comms archive SQLite get a dedicated adapter instead of being treated as files?
+- What is the public/private report boundary for customer-private support and comms evidence?

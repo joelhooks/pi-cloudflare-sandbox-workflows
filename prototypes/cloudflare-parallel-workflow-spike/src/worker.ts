@@ -581,7 +581,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/runs") {
       return startRun(request, env);
     }
-    if (request.method === "POST" && url.pathname === "/api/demo") {
+    if (request.method === "POST" && url.pathname === "/api/integration-run") {
       return startRunWithBody(request, env, {
         ...DEFAULT_JOB,
         workItemId: `parallel-cloudflare-patterns-${crypto.randomUUID().slice(0, 8)}`,

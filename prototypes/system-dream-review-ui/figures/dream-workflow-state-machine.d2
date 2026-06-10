@@ -1,0 +1,61 @@
+direction: down
+
+classes: {
+  active: {
+    style.fill: "#e7f3f0"
+    style.stroke: "#0f766e"
+    style.stroke-width: 2
+  }
+  review: {
+    style.fill: "#fff7df"
+    style.stroke: "#9a6a00"
+    style.stroke-width: 2
+  }
+  terminal: {
+    style.fill: "#eeeeea"
+    style.stroke: "#111111"
+    style.stroke-width: 2
+  }
+  gated: {
+    style.fill: "#f6efe8"
+    style.stroke: "#8c8172"
+    style.stroke-dash: 4
+  }
+  gap: {
+    style.fill: "#f8e7e7"
+    style.stroke: "#9f1239"
+    style.stroke-width: 2
+  }
+}
+
+evidence: "EVIDENCE DISCOVERY\nsnapshot + scout + hydrate\n176 queries / 9 hydrations" {
+  class: active
+}
+
+distill: "CANDIDATE DISTILLATION\nclassify + rank + assemble\n9 lanes / 5 classes" {
+  class: active
+}
+
+review: "HITL REVIEW\nreport node renders Wzrrd surface\nper-item decisions" {
+  class: review
+}
+
+captured: "CAPTURED\nartifact commit + Brain receipt\nno auto-apply" {
+  class: terminal
+}
+
+accepted_lane: "ACCEPTED ITEM LANE\napply -> deploy/test -> decide\nrequires diffs + validation" {
+  class: gated
+}
+
+needs_evidence: "NEEDS MORE EVIDENCE\nhydrate missing receipts\nrerun candidate lane" {
+  class: gap
+}
+
+evidence -> distill: "dynamic hits"
+distill -> review: "workflow-plan lanes"
+review -> captured: "actual run"
+review -> accepted_lane: "future accepted item"
+accepted_lane -> captured: "approved or rolled back"
+review -> needs_evidence: "weak item"
+needs_evidence -> evidence: "next pass"

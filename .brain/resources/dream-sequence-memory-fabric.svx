@@ -1,0 +1,1800 @@
+---
+title: Dream Sequence Memory Fabric
+status: active
+updated: 2026-06-10
+---
+
+# Dream Sequence Memory Fabric
+
+Dreaming is not a repo-local search report.
+
+A real dream sequence should inspect the whole system at the right scope, then pull near-term activity, far-term memory, current outputs, and repeated patterns into a reviewable set of dreams. It should be curious enough to find novel work, but bounded enough that private data, customer data, secrets, and raw transcripts do not leak into public artifacts.
+
+## Goal
+
+Build Dreaming as a dynamic workflow that turns the JoelClaw network into a source-backed learning loop for the kernel/package system.
+
+The workflow only counts if it is real and provably run in Cloudflare. A local harness, static branch table, hand-written `if`/`else`/`switch` dispatcher, canned phase list, or deterministic script that merely labels itself "dynamic" fails the definition of done. The run must include the planner prompt/transcript, generated workflow machine config, generated TypeScript source, generated harness source, artifact hashes, Cloudflare run id/event receipts, capability lease receipts, and verifier proof that Cloudflare executed the generated machine artifacts.
+
+The workflow should provision scoped capabilities to inspect and repair the memory fabric across `blaine`, `panda`, `flagg`, Cloudflare, and local machines. It first inventories transcript stores, Brain roots, docs/pdf-brain, Cloudflare artifacts, workflow outputs, GitHub/Slack/Linear/support surfaces, and org/project graphs. It then checks ingest health, backfills missing derived indexes from authoritative sources, and fixes capture paths so backfill becomes recovery, not normal operation.
+
+The dream itself runs T-shaped: wide across the whole timeline and system graph, then deep into selected seams with hydrated receipts. It must cover near-term activity, long-term memory, repeated corrections, prior reports, accepted Brain claims, package manifests, workflow receipts, and runtime outputs. A dream is invalid if it only answers "what happened just now" or if Codex/Claude/Cloudflare coverage is false or missing without saying so.
+
+Cloudflare does not get raw credentials or private paths. It leases memory/search/hydration/backfill/report capabilities through a trusted relay. The relay owns raw transcript access, Typesense/docs credentials, org policy, redaction, and source-specific backfills. Cloudflare gets redacted evidence, hashes, freshness, coverage counts, and follow-up links.
+
+The output is not just a report. It is a refinement mechanism: dreams propose kernel memories, package boundaries, workflow-node plugins, access leases, schema changes, report-node improvements, and dynamic workflow patterns. Each accepted dream should leave receipts, update Brain/package artifacts, and feed the next generated workflow so the system gets sharper instead of accumulating more bullshit.
+
+## Diagnosis
+
+The current dream hunt is useful proof that the idea has legs, but it is still too shallow.
+
+Receipts:
+
+- `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:10` defines a fixed correction phrase list.
+- `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:54` and `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:120` define static project/system theme libraries.
+- `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:285` runs a query loop over those generated queries, direct Typesense, and `joelclaw sessions chunks`.
+- `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:453` defaults local JoelClaw chunk scans to `DREAM_HUNT_LIMIT=4` and `DREAM_HUNT_MAX_FILES=120`.
+- `/Users/joel/Code/joelhooks/pi-cloudflare-dream/src/hunt.ts:573` hydrates only the top grouped targets and caps each group at three transcript targets.
+- The latest captured dream receipt reported `176` Typesense scout queries, `9` hydrated JoelClaw receipts, and `9` candidate items.
+- `joelclaw status` on 2026-06-09 reported server and worker unreachable.
+- Local capture files existed for Pi and Codex, but no Claude capture state/log file appeared under `~/.joelclaw` in the local check.
+- Local transcript inventory found roughly `4704` Pi JSONL files, `250` Codex JSONL files, and `15` Claude JSONL files.
+- A bounded `.brain` inventory found dozens of project Brain folders across `joelhooks`, `badass-courses`, `skillrecordings`, and adjacent workspaces.
+- A bounded `joelclaw sessions signals --source local --since "7 days" --kind any --sample 10 --max-files 80 --format json` run found real friction, correction, decision, and workflow-pattern clusters. It also demonstrated that raw signal examples can include private payloads or secret-looking strings, so dream evidence needs structural redaction before publication.
+- `joelclaw docs search "agent memory retrieval full timeline transcript dream" --semantic --limit 5` failed locally on 2026-06-09 because local Typesense was unreachable from this shell.
+- `joelclaw docs status` returned zero local docs/docs_chunks/docs_chunks_v2 documents and reported `/Volumes/three-body/docs-artifacts` unavailable.
+- `curl https://joelclaw.com/api/docs` returned the live public docs API discovery envelope with `/api/docs/search`, `/api/docs/docs`, and `/api/docs/chunks/<chunkId>` links.
+- `curl https://joelclaw.com/api/documents` returned a 404 on 2026-06-09. Current public route is `/api/docs`; if `/api/documents` is the desired canonical name, add an alias rather than assuming it exists.
+- `curl "https://joelclaw.com/api/docs/search?q=agent%20memory%20retrieval&perPage=3&semantic=false"` returned source-backed docs results including A-Mem and Zep memory papers.
+- Native Codex transcript inventory found `250` local files in `~/.codex/sessions`, spanning `2025-09-03` through `2026-06-08`.
+- `joelclaw sessions search "dream" --source local --runtime codex --limit 5 --extract` searched `250` native Codex files but found `0` hits.
+- `joelclaw sessions chunks "dream" --source local --runtime codex --limit 5 --max-files 250` returned hits, but the shown paths were Pi session paths containing Codex-ish/tool output evidence, not native `~/.codex/sessions` paths. Dreaming must detect and report that false coverage.
+
+The problem is not "Typesense bad." Typesense is a scout layer. The problem is pretending a scout layer plus a handful of hydrated hits is the whole memory system.
+
+## Desired Shape
+
+The dream sequence should run as layered retrieval:
+
+Cartridge boundary:
+
+- The Dream cartridge is deterministic package data: manifest metadata, source profile, allowed workflow-node exports, lease/report contracts, and proof requirements.
+- The Dream cartridge is not the workflow runner and does not own run-specific topology. It may constrain what must be covered, but it must not hardcode the order, branching, loops, or Think lanes.
+- Each Dream run still needs a planner-generated runtime: `workflow.dynamic-plan.v1`, `workflow.xstate-machine.v1`, generated TypeScript source, generated harness source, artifact hashes, and execution proof.
+- The generated-workflow proof should bind the generated plan to the installed source profile and pinned package export, then prove the generated XState/harness artifacts were executed. Binding to a profile is not the same thing as a fixed deterministic phase list.
+
+0. **Generate and prove the workflow**
+   - Ask a real planner lane to generate the task-specific workflow from the source inventory, goal, scopes, and available capability leases.
+   - Emit `workflow.xstate-machine.v1`, generated TypeScript source, generated harness source, artifact hashes, and the planner transcript before execution.
+   - Execute those artifacts in Cloudflare and emit Cloudflare run/event receipts.
+   - Reject local-only, static `if`/`else`/`switch`, or canned deterministic paths as invalid Dreaming.
+
+1. **Inventory**
+   - Enumerate available transcript stores, Brain roots, repo outputs, Cloudflare run artifacts, GitHub surfaces, Slack channels, support inboxes, and org-level sources.
+   - Emit a `dream.source-inventory.v1` artifact before retrieval starts.
+   - Include freshness, scope, privacy tier, adapter health, row/file counts, and known blind spots.
+
+2. **Near-term sweep**
+   - Pull recent 24h/7d activity from Pi, Codex, Claude, Cloudflare lane transcripts, structured logs, review surfaces, PRs, Slack/Discord, support inboxes, and changed Brain pages.
+   - The point is "what just happened?"
+
+3. **Timeline stratification**
+   - Split retrieval into explicit horizons: last 24h, last 7d, last 30d, current quarter, all-time.
+   - Sample each runtime/source family separately before merging.
+   - The point is to stop confusing recency with importance.
+
+4. **Far-term recall**
+   - Query older transcripts, accepted Brain memories, source maps, ADRs, repo docs, previous dream reports, pdf-brain/docs corpus, and org-level knowledge.
+   - The point is "what keeps happening?"
+
+5. **Output investigation**
+   - Inspect artifacts that agents produced: Wzrrd pages, review JSON, observability packs, lane transcripts, GitHub branches/PRs, Linear comments, Slack/Discord messages, support drafts, and applied Brain/code diffs.
+   - The point is "what did the system actually do?"
+
+6. **Runtime coverage audit**
+   - Prove Pi, Codex, Claude, and Cloudflare each contributed native evidence or explicitly report why not.
+   - A Pi transcript that mentions Codex is not Codex coverage.
+   - A recent-only Codex sample is not all-timeline Codex coverage.
+
+7. **Correlation**
+   - Join near-term activity to far-term memory by project, org, person, source, theme, repeated correction, failed workflow, accepted pattern, and unresolved promise.
+   - Emit `dream.correlation-graph.v1` with source-backed edges.
+
+8. **Hydration**
+   - Hydrate the evidence that matters before making durable claims.
+   - Transcript bodies stay private. Review artifacts get redacted excerpts, receipt ids, source class, timestamp, machine/runtime, and hash/locator metadata.
+
+9. **Dream assembly**
+   - Generate dream candidates from correlated evidence, not static theme match alone.
+   - Every dream needs reasoning, rating, recommendation, receipt metadata, and a proposed target.
+
+10. **HITL report**
+   - Render with `docs/dream-report-canon.md`: actual dreams first, proof below.
+
+## Memory Sources
+
+Required source families:
+
+- Agent transcripts: Pi, Codex, Claude, and future runtime agents.
+- Cloudflare runs: planner/worker/verifier lane transcripts, observability packs, event streams, structured logs, capability lease receipts, review surfaces, debugger attach descriptors, and artifact commits.
+- Brain surfaces: all `.brain` roots across system, project, org, support, course, and tool repos.
+- Repo outputs: docs, source maps, ADRs, issue plans, PRs, tests, generated reports, and prototype captures.
+- Docs/pdf-brain: `https://joelclaw.com/api/docs`, `joelclaw docs search`, `joelclaw docs context`, `joelclaw docs markdown`, and `joelclaw docs summary`.
+- Comms: Slack, Discord, DMs, Linear, GitHub, and support inboxes through explicit scoped adapters.
+- People/org memory: person dossiers, team channels, course/support context, customer pain, launch history, and internal decisions.
+
+Org-level dreams, for example `badass-courses`, need org-scoped leases and report boundaries. They should not shove customer support details or paid corpus into a public Wzrrd page.
+
+## JoelClaw Capture Spine
+
+The current JoelClaw Run capture model already points at the right architecture:
+
+```txt
+agent/runtime node
+  -> POST /api/runs with full JSONL + metadata
+  -> raw run blob in user/month partition
+  -> memory/run.captured event
+  -> chunk/extract/embed/index
+  -> runs_dev + run_chunks_dev
+  -> search/forest/descendants/jsonl APIs
+```
+
+Source receipts:
+
+- `/Users/joel/Code/joelhooks/joelclaw/packages/system-bus/src/serve.ts:316` exposes host-worker `POST /api/runs`.
+- `/Users/joel/Code/joelhooks/joelclaw/apps/web/app/api/runs/route.ts:47` exposes the web `POST /api/runs` equivalent.
+- `/Users/joel/Code/joelhooks/joelclaw/packages/memory/src/nas.ts:1` defines the authoritative run blob layout: `<base>/<user_id>/<yyyy-mm>/<run-id>.jsonl` plus `.metadata.json`.
+- `/Users/joel/Code/joelhooks/joelclaw/packages/system-bus/src/inngest/functions/memory/run-captured.ts:73` handles `memory/run.captured`, chunks/embeds/indexes the run, and writes `runs_dev` plus `run_chunks_dev`.
+- `/Users/joel/Code/joelhooks/joelclaw/apps/web/app/api/runs/search/route.ts:80` provides authenticated hybrid search over run chunks.
+- `/Users/joel/Code/joelhooks/joelclaw/apps/web/app/api/runs/forest/route.ts:27` provides a cross-runtime run forest for the caller.
+- `/Users/joel/Code/joelhooks/joelclaw/apps/web/app/api/runs/[id]/jsonl/route.ts:18` streams the full transcript only after a `readable_by` check.
+- `/Users/joel/Code/joelhooks/joelclaw/scripts/backfill-run-typesense.ts:1` rebuilds the derived `runs_dev` / `run_chunks_dev` indexes from raw blobs.
+
+This means Dreaming should stop treating raw transcript paths and Typesense credentials as the integration boundary.
+
+The integration boundary should be a **memory relay**:
+
+- Cloudflare asks the relay for source inventory, search, signal mining, and hydration.
+- The relay owns local/NAS paths, Typesense credentials, raw transcript access, Slack/GitHub/support credentials, and org policy.
+- Cloudflare receives redacted evidence, stable receipt ids, hashes, freshness data, and links to follow-up APIs.
+- Any Cloudflare lane transcript or artifact that should become dreamable is posted back as a captured Run or as a typed artifact source with the same actor/scope/readability model.
+
+## Backfill And Index Health
+
+Dreaming needs a preflight state machine before retrieval:
+
+```txt
+inventory -> health-check -> backfill-plan -> retrieve -> hydrate -> correlate
+```
+
+Rules:
+
+- Raw blobs and source systems are authoritative.
+- `runs_dev`, `run_chunks_dev`, QMD indexes, local SQLite views, and Typesense collections are derived indexes.
+- Derived indexes can be stale or missing without meaning the memory is gone.
+- The dream should report stale indexes as a run finding instead of silently shrinking its world.
+- Backfill should be scoped by actor, org, project, runtime, machine, and time window.
+- Backfill should prefer source-specific controlled scripts over replaying thousands of workflow events.
+- Every backfill emits receipts: source window, count planned, count indexed, skipped reasons, failures, and freshness after the run.
+
+First backfill targets:
+
+- Pi/Codex/Claude run blobs into `runs_dev` and `run_chunks_dev`.
+- Native Codex raw transcript indexing from `~/.codex/sessions/**`, with path/runtime proof that prevents Pi-session proxy hits from counting as Codex coverage.
+- All discovered `.brain` roots into a Brain collection with repo/org/project/source labels.
+- Docs/pdf-brain availability into a source-health artifact that can choose between local `joelclaw docs` and network `https://joelclaw.com/api/docs` retrieval.
+- Cloudflare workflow outputs into an artifact-output collection: review surfaces, observability packs, event streams, lane transcripts, and capability receipts.
+- Wzrrd/PR/Linear/Discord/Slack/support outputs into source-specific collections with redaction and visibility metadata.
+
+## Network Retrieval Contract
+
+Cloudflare should retrieve through capability-shaped APIs, not through direct local substrates.
+
+Minimum relay API shape:
+
+```txt
+POST /memory/inventory
+POST /memory/search
+POST /memory/signals
+POST /memory/hydrate
+POST /memory/correlate
+POST /memory/backfill/plan
+POST /memory/backfill/run
+POST /memory/capture/run
+POST /memory/capture/artifact
+```
+
+Every request carries:
+
+- actor id
+- org/project/person scope
+- purpose
+- allowed source families
+- time window
+- max rows/files/tokens
+- redaction policy
+- idempotency key
+- lease id
+- trace id
+
+Every response carries:
+
+- source inventory refs
+- source freshness
+- source coverage counts
+- missing/unhealthy source list
+- receipt ids and hashes
+- redaction status
+- lease receipt
+- follow-up links
+
+Docs/pdf-brain access should be a first-class retrieval adapter:
+
+```txt
+GET https://joelclaw.com/api/docs
+GET https://joelclaw.com/api/docs/search?q=<query>&perPage=<n>&semantic=<bool>
+GET https://joelclaw.com/api/docs/chunks/<chunkId>?lite=true&includeEmbedding=false
+joelclaw docs search <query>
+joelclaw docs context <chunk-id>
+joelclaw docs markdown <doc-id>
+joelclaw docs summary <doc-id>
+```
+
+If local `joelclaw docs` cannot reach Typesense or docs artifacts, Dreaming should fall back to the network docs API when the policy allows public docs access. It should still record the local failure.
+
+## Whole-Timeline Rule
+
+A system dream is invalid if it only answers "what happened just now."
+
+Required coverage proof:
+
+- per-runtime counts for Pi, Codex, Claude, and Cloudflare
+- per-horizon counts for 24h, 7d, 30d, quarter, and all-time
+- earliest/latest timestamp per runtime
+- native path proof per runtime
+- query count and hit count per runtime/horizon/source
+- hydration count per runtime/horizon/source
+- excluded/skipped reasons
+- index freshness for each derived source
+
+Minimum report language:
+
+```txt
+Codex coverage: native `~/.codex/sessions` indexed, searched, and hydrated.
+Codex coverage: missing. Local files exist, but no native Codex hits were found for this dream.
+Codex coverage: false positive. Results came from Pi session paths that mentioned Codex, not native Codex transcripts.
+```
+
+Dreaming should surface these as proof findings before any recommendation that depends on missing runtime evidence.
+
+## Signal Graph
+
+"Network of one Joel" and "company-wide" should use the same graph shape with different scopes.
+
+Graph nodes:
+
+- actor: Joel, teammate, support agent, system agent, service account
+- org: `joelhooks`, `badass-courses`, `skillrecordings`, customer/account group
+- project: repo, course, product, launch, support queue, workflow pack
+- source: transcript root, Brain root, Slack channel, GitHub repo, Linear team, support inbox, Cloudflare run, Wzrrd page
+- event: run, message, PR, support conversation, release, deploy, review, decision
+- artifact: Brain note, report, observability pack, transcript, code diff, receipt
+- memory: accepted claim, repeated pattern, unresolved promise, known failure, person preference
+
+Graph edges:
+
+- `reported_by`
+- `belongs_to_org`
+- `belongs_to_project`
+- `mentions_person`
+- `produced_artifact`
+- `corrected_by`
+- `repeats_pattern`
+- `contradicts_memory`
+- `supports_dream`
+- `requires_hydration`
+- `eligible_for_backfill`
+
+This keeps company-wide dreaming from becoming voyeuristic bullshit. A dream can ask, "what pattern is emerging across Badass Courses support, Slack, GitHub, and Brain?" without publishing customer transcripts, private messages, or raw team chatter.
+
+## QMD-Style Adapter
+
+Toby's QMD is interesting because it treats local docs, notes, transcripts, and knowledge bases as named collections with local BM25, vector search, query expansion, and reranking.
+
+Useful ideas to steal or wrap:
+
+- collections for Brain roots, transcripts, project docs, meeting notes, and org docs
+- context labels attached to collections so retrieval knows what a source is
+- structured query documents with `lex`, `vec`, `hyde`, and `intent`
+- JSON/files output for agents
+- MCP/HTTP server mode for long-lived local retrieval
+- smart chunking around headings/code/AST nodes instead of dumb token slicing
+
+QMD should be evaluated as a local retrieval adapter, not accepted as the whole memory architecture. It does not replace JoelClaw, Typesense, Cloudflare Artifacts, Brain, or capability leases. It can sit behind a `MemorySearchPort` and feed the dream inventory/near-term/far-term lanes.
+
+Local status on 2026-06-09: `qmd` was not installed on this machine.
+
+## Ports
+
+Dreaming should depend on ports, not direct substrate calls:
+
+- `MemoryInventoryPort`: list sources, scopes, freshness, health, and counts.
+- `MemorySearchPort`: hybrid search over one or more source families.
+- `MemoryHydrationPort`: fetch bounded private evidence for selected receipts.
+- `MemorySignalPort`: mine corrections, failures, decisions, preferences, workflow patterns, and repeated requests.
+- `ArtifactInvestigationPort`: inspect prior outputs, observability packs, lane transcripts, commits, reports, and review surfaces.
+- `OrgCommsPort`: search Slack/Discord/Linear/GitHub/support with org/project/person scope and redaction policy.
+- `CorrelationPort`: turn evidence into graph edges and repeated-pattern clusters.
+- `DreamAssemblyPort`: generate candidate dreams from the graph, not from fixed theme lookup alone.
+- `DreamReportPort`: render canonical HITL output.
+
+## Cloudflare Return Path
+
+Cloudflare dream/workflow lanes must report back into the memory fabric.
+
+Minimum return contract:
+
+```txt
+workflow.run-transcript.v1
+workflow.lane-transcript.v1
+workflow.generated-machine.v1
+workflow.generated-source.v1
+workflow.execution-proof.v1
+workflow.observability-pack.v1
+workflow.structured-log-batch.v1
+workflow.review-surface.v1
+workflow.capability-receipt.v1
+dream.source-inventory.v1
+dream.correlation-graph.v1
+```
+
+Cloudflare should not directly hold raw local transcript paths, Typesense secrets, Slack tokens, GitHub tokens, support tokens, or customer data. It asks a trusted relay for scoped search/hydration/investigation leases and writes redacted return artifacts.
+
+The return path must prove execution, not vibes. Each Dream run needs the Cloudflare deployment/run id, workflow event log, generated machine hash, generated harness hash, lease ids used by each node, and verifier acceptance that the event log followed the generated machine. Without that, the report must say "not proven dynamic" and refuse to present the output as a valid Dream run.
+
+## First Build Slice
+
+Build the next dream sequence as a diagnostic workflow before making it more autonomous.
+
+1. Inventory all available local sources: transcript roots, `.brain` roots, current repo outputs, prior Cloudflare live-run artifacts, and prior dream artifacts.
+2. Emit `dream.source-inventory.v1` and fail the run if major expected sources are missing or unhealthy.
+3. Generate the task-specific XState workflow machine, TypeScript source, and harness from the source inventory and leased capability set.
+4. Hash those generated artifacts, deploy/run them in Cloudflare, and record verifier proof that the Cloudflare event log followed the generated machine instead of static canned control flow.
+5. Add a `signals` lane using `joelclaw sessions signals` for local near-term friction/decision/correction clusters.
+6. Add a `.brain` lane that indexes or searches all discovered Brain roots with scope labels.
+7. Add a Cloudflare outputs lane for `.wrangler/workflow-app/live-runs/**` plus current Artifacts refs when available.
+8. Add a correlation lane that links recent signals to older Brain/source-map/ADR/transcript receipts.
+9. Produce a Dream HITL report using `docs/dream-report-canon.md`.
+
+Success is not "more hits." Success is surprising, source-backed dreams that connect old memory to new behavior and tell Joel what to accept, hold, reject, or turn into work.
+
+## Wzrrd Report Receipt
+
+On 2026-06-09, the Dreaming vision was rendered as a Wzrrd/Tufte review surface:
+
+- Report URL: `https://dream-sequence-memory-fabric-2026-06-09.wzrrd.sh/`
+- Source prototype: `prototypes/dream-sequence-vision-ui`
+- Published source directory: `prototypes/dream-sequence-vision-ui/build`
+- Wzrrd slug: `dream-sequence-memory-fabric-2026-06-09`
+- Indexing: `noindex`
+- Lifecycle: `expiring`
+- Expires at: `2026-06-10T17:31:08.650Z`
+- Delete after: `2026-06-17T17:31:08.650Z`
+- Published bytes/files: `147523` bytes across `16` files
+
+Validation receipts:
+
+- `pnpm --filter dream-sequence-vision-ui check` passed with `0` Svelte diagnostics.
+- `pnpm --filter dream-sequence-vision-ui build` passed and rendered `dream-workflow-state-machine.svg 1224x2386`.
+- `pi-notes brain check` passed with `14` Brain pages.
+- `git diff --check` passed.
+- Playwright desktop smoke at `1280x1600` found the Cloudflare proof sections, D2 figure, no horizontal overflow, and the explicit Cloudflare/dynamic-workflow requirement.
+- Playwright mobile smoke at `390x1200` found the Cloudflare proof section, D2 figure, and no horizontal overflow.
+
+The report is intentionally honest: it states the target proof contract and does not claim that a generated Dreaming machine has already executed in Cloudflare.
+
+## Execution Proof Contract Receipt
+
+On 2026-06-09, the workflow app gained a typed execution-proof contract that makes the Cloudflare/dynamic-workflow requirement mechanically checkable.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` now defines `workflow.execution-proof.v1` with two explicit statuses:
+  - `cloudflare-generated-machine-executed`
+  - `not-proven-local-integration`
+- `src/app/application/workflow-app.ts` captures `run/execution-proof.json` after verification and before final receipt recording.
+- Production capture blocks if Cloudflare proof is missing. A production proof requires the Cloudflare Workers runtime environment, generated machine and harness artifacts, event-log hash, generated state sequence, completed step ids, real lane receipts, capability lease ids, and verification result ref.
+- Integration runs still pass, but their proof artifact says `not-proven-local-integration` instead of pretending to be real Cloudflare execution.
+- `src/app/infrastructure/cloudflare-workflow-front-door.ts` passes `runtimeEnvironment.platform = "cloudflare-workers"` into the app.
+- `src/app/infrastructure/cloudflare-artifacts-review-surface.ts` includes the execution proof artifact in `generatedArtifacts` and adds the `cloudflare-execution-proof` proposal-reconciliation gate.
+- `tests/integration/workflow-app.test.ts` asserts local integration proof is not proven.
+- `tests/integration/cloudflare-workflow-front-door.test.ts` asserts the Cloudflare front-door composition produces `cloudflare-generated-machine-executed`.
+
+Validation receipts:
+
+- `pnpm test:integration` passed: `21` files, `97` tests.
+- `pnpm typecheck` passed.
+- `pnpm check` passed.
+- `git diff --check` passed.
+
+This does not finish Dreaming. It closes the easiest place to lie: a report can no longer treat generated machine artifacts as equivalent to Cloudflare execution proof. The next Dreaming slice should use this contract for `dream.source-inventory.v1`, source-health/backfill planning, and T-shaped memory retrieval lanes.
+
+## Dream Preflight Contract Receipt
+
+On 2026-06-09, the workflow app gained typed Dream memory-fabric preflight contracts.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` defines `dream.source-inventory.v1`, `dream.source-health.v1`, and `dream.backfill-plan.v1` document artifacts for the Dream workflow package/node set.
+- Source inventory must report expected source families, required runtimes, authority sources, derived indexes, source freshness, privacy tier, and runtime coverage.
+- Runtime coverage can no longer smear proxy hits into proof. `captured` coverage requires native source proof. `missing` requires a missing reason. `false-positive` requires a false-positive reason.
+- The dynamic workflow step schema admits Dream preflight work only as `workflow.node.invoke` states with `joelclaw.dream.*` node types. It does not admit Dream-specific runner step kinds.
+- `src/app/application/workflow-app.ts` blocks generated workflow-node steps when no node adapter exists instead of treating package/plugin work as implicit core behavior.
+- `tests/integration/dream-memory-fabric-contract.test.ts` proves source inventory can represent native Pi/Cloudflare capture, false-positive Codex coverage, missing Claude coverage, degraded source health, and recovery-only backfill/capture fixes.
+- `tests/integration/workflow-app.test.ts` proves a generated Dream preflight plan blocks as `adapter_unavailable` without the generic workflow-node adapter and executes when the Dream adapter is installed.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/workflow-app.test.ts` passed: `2` files, `25` tests.
+- `pnpm test:integration` passed: `22` files, `103` tests.
+- `pnpm typecheck` passed.
+- `pnpm check` passed.
+- `git diff --check` passed.
+
+This still does not claim a Dream sequence has run in Cloudflare. It narrows the honest next target: build the Cloudflare-backed Dream source inventory/source health/backfill executor adapters, run a generated machine through those adapters in Workers, and require the resulting `workflow.execution-proof.v1` status to be `cloudflare-generated-machine-executed`.
+
+## Dream Workflow Node Artifact Receipt
+
+On 2026-06-09, Dream preflight execution moved behind the generic workflow-node seam. This supersedes the earlier core-wired `DreamMemoryFabricPort` path.
+
+Decision:
+
+- Dreaming is a workflow cartridge/package, not a runner feature.
+- Workflow cartridges/capsules are Cloudflare artifact-backed data: manifests, generated machine configs, generated harness/source, package exports, contracts, hashes, and receipts can all live in Artifacts and be validated before execution.
+- Code-like exports inside a cartridge are still artifacts. They need entitlement, version pinning, hash verification, package/export contract checks, capability leases for side effects, and execution receipts.
+- The runner executes generated `workflow.node.invoke` states through a generic `WorkflowNodeAdapterPort`; it does not switch on Dream vocabulary.
+- Dream owns `joelclaw.dream.source-inventory`, `joelclaw.dream.source-health`, `joelclaw.dream.backfill-plan`, `joelclaw.dream.memory-search`, `joelclaw.dream.hydrate`, `joelclaw.dream.correlate`, and `joelclaw.dream.hitl-report` node types behind `src/app/workflow-nodes/dream-memory-fabric.ts`.
+
+Changed surfaces:
+
+- `src/app/application/ports.ts` defines the generic `WorkflowNodeAdapterPort`, `WorkflowNodeInvocationStep`, and `WorkflowNodeExecutionResult`.
+- `src/app/application/workflow-app.ts` no longer imports Dream schemas, Dream ports, Dream step kinds, or Dream execution helpers.
+- `src/app/domain/schemas.ts` no longer admits `dream.source-inventory`, `dream.source-health`, or `dream.backfill-plan` as core dynamic workflow step kinds and no longer owns Dream document schemas.
+- Generated Dream preflight steps now appear as `workflow.node.invoke` with package-style `nodeType`, `config`, `packageRefs`, `inputRefs`, dependencies, and output path.
+- Missing node adapter still blocks with `adapter_unavailable`; adapterless workflow cartridge work is not treated as completed work.
+- `src/app/infrastructure/cloudflare-workflow-front-door.ts` accepts an optional `workflowNodeAdapter`, not a Dream-specific dependency.
+- `src/app/infrastructure/memory-adapters.ts` includes an integration-test Dream memory fabric adapter that emits honest local fixture coverage: native Pi/Codex/Cloudflare, missing Claude, degraded health, and recovery-only backfill.
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` adds the Cloudflare-facing HTTP relay adapter. It posts to `/memory/inventory`, `/memory/source-health`, `/memory/backfill/plan`, `/memory/search`, and `/memory/hydrate` with a secret-backed bearer token, parses typed Dream documents, and returns typed blockers on secret or relay failures.
+- `src/app/index.ts` exports the Dream node adapter and Cloudflare-facing relay adapter factory/types as package/plugin-facing surfaces; it does not export trusted local filesystem relay cartridges.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts` passed: `3` files, `30` tests.
+- `pnpm test:integration` passed: `23` files, `108` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+- `pi-notes brain check` passed.
+- `git diff --check` passed.
+
+This is still not the final Dream definition of done. The relay adapter and workflow-node adapter are real seams, but the repo still needs an actual trusted relay deployment/config, leased memory/search/hydration/correlation/backfill capabilities, artifact-backed cartridge install/verification, and a Worker run whose `workflow.execution-proof.v1` status is `cloudflare-generated-machine-executed`.
+
+## Workflow Cartridge Invocation Proof Receipt
+
+On 2026-06-09, the generic workflow-node path gained an artifact-backed cartridge proof contract.
+
+Decision:
+
+- A generated `workflow.node.invoke` state should name a pinned cartridge artifact through `packageRefs`.
+- A package manifest can now export a `workflow-node` with a required `nodeType`.
+- Before node execution, the cartridge adapter verifies `step.packageRefs` against `plan.pinnedPackages`, checks that the pinned package manifest exports the requested `nodeType`, and refuses unpinned or mismatched package refs.
+- After successful node execution, the adapter writes `workflow.cartridge-invocation-proof.v1` as a redacted artifact. The proof records package id/ref/version, manifest hash, export id, contract ref, node type, step id, run/work item ids, and the exact verification booleans.
+- This is still package/cartridge-generic. Dream can use it, but Dream is not baked into the runner.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` now admits `workflow-node` package exports and defines `workflow.cartridge-manifest.v1` plus `workflow.cartridge-invocation-proof.v1`.
+- `src/app/workflow-nodes/artifact-backed-cartridge-adapter.ts` wraps any `WorkflowNodeAdapterPort` with packageRef/export verification and proof-artifact capture.
+- `tests/integration/workflow-app-fixtures.ts` declares a fixture package export for `com.joelclaw.integration-fixture`.
+- `tests/integration/workflow-app.test.ts` proves a generated workflow-node state references the pinned workflow package artifact, executes through the wrapped adapter, and captures a `workflow.cartridge-invocation-proof.v1` artifact.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts` passed: `1` file, `23` tests.
+- `pnpm test:integration` passed: `23` files, `108` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove real Dream execution in Cloudflare. It closes the next local place to lie: generated workflow nodes can now be tied to artifact-backed package exports instead of arbitrary `nodeType` strings floating through the runner.
+
+## Cloudflare Dream Relay Install Path Receipt
+
+On 2026-06-09, the Cloudflare composition path gained an optional Dream relay install path without making Dream a runner primitive.
+
+Decision:
+
+- `createCloudflareWorkflowFrontDoor` now accepts a run-scoped `createWorkflowNodeAdapter` factory. This matters because cartridge adapters need the per-run Artifact store to write node outputs and invocation proofs.
+- The Worker installs workflow cartridge dependencies through the installed-cartridge registry. The Dream cartridge contributes a workflow-node adapter only when its `DREAM_MEMORY_RELAY_BASE_URL` binding is configured.
+- The Dream-installed adapter is `createArtifactBackedWorkflowCartridgeAdapter` wrapping `createDreamMemoryFabricWorkflowNodeAdapter` wrapping `createCloudflareDreamMemoryFabricRelay`, but that wiring now lives in `src/cartridges/dream-memory-fabric/cloudflare-installer.ts`.
+- Cloudflare still does not get raw transcript paths or docs credentials. It gets a relay URL, a scoped relay token binding, package/export verification, redacted Dream documents, and proof artifacts.
+- If the relay is unconfigured, the installed-cartridge registry contributes no workflow-node adapter and the Worker stays generic.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-workflow-front-door.ts` adds `CloudflareWorkflowNodeAdapterFactoryInput` and `createWorkflowNodeAdapter`.
+- `src/cartridges/dream-memory-fabric/cloudflare-installer.ts` owns optional `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_SECRET_REF`, `DREAM_MEMORY_RELAY_TOKEN`, and `DREAM_MEMORY_RELAY_USER_AGENT` bindings.
+- `src/app/infrastructure/cloudflare-worker-route.ts` now consumes installed cartridge dependencies without importing Dream adapters directly.
+- `tests/integration/cloudflare-worker-route.test.ts` proves the Worker route installs no workflow-node adapter without relay config and installs a cartridge adapter factory when relay config exists.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-worker-route.test.ts tests/integration/workflow-app.test.ts` passed: `2` files, `43` tests.
+- `pnpm test:integration` passed: `23` files, `110` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a real Dream run in Cloudflare. It closes the next wiring gap: once a trusted relay URL/token and Dream workflow package are seeded, the deployed Worker can install the Dream node adapter for generated workflows without changing runner code.
+
+## Trusted Dream Memory Relay Contract Receipt
+
+On 2026-06-09, the Dream memory relay boundary gained typed request/response contracts for the full retrieval loop, not just the first preflight calls.
+
+Decision:
+
+- Cloudflare talks to the memory fabric through `dream.memory-relay.request.v1`, not direct local paths, raw transcript stores, or Typesense credentials.
+- Every relay request carries actor, scope, allowed source families, purpose, budget, time window, redaction policy, idempotency key, lease ref, trace context, run id, and work item id.
+- Every relay response carries `dream.memory-relay.response.v1`, operation id, lease receipt, missing sources, source freshness, source inventory refs, follow-up links, and a typed document payload.
+- The full relay endpoint catalog is now explicit: `/memory/inventory`, `/memory/search`, `/memory/signals`, `/memory/hydrate`, `/memory/correlate`, `/memory/backfill/plan`, `/memory/backfill/run`, `/memory/capture/run`, `/memory/capture/artifact`, and `/memory/source-health`.
+- Dream retrieval artifacts now have Zod contracts for search hits, signals, hydration, correlation graph, backfill execution receipts, and capture receipts.
+- Existing Cloudflare relay client calls for inventory/source-health/backfill-plan/search/hydrate/correlate now wrap payloads in the relay request envelope and require the response envelope before accepting documents.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` now defines:
+  - `dream.memory-relay.request.v1`
+  - `dream.memory-relay.response.v1`
+  - `dream.memory-relay.endpoint-catalog.v1`
+  - `dream.memory-search.v1`
+  - `dream.signals.v1`
+  - `dream.hydration.v1`
+  - `dream.correlation-graph.v1`
+  - `dream.backfill-run-receipt.v1`
+  - `dream.capture-receipt.v1`
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` publishes `dreamMemoryRelayEndpointCatalog` and posts typed envelopes with redacted lease/trace/idempotency metadata.
+- `src/app/index.ts` exports the relay schemas, inferred types, response-envelope helper, and endpoint catalog.
+- `tests/integration/dream-memory-fabric-contract.test.ts` covers the full relay document contract.
+- `tests/integration/cloudflare-dream-memory-fabric-relay.test.ts` proves Cloudflare sends envelope-shaped requests, does not leak the relay token, accepts only response-envelope documents, and exposes the full endpoint catalog.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts` passed: `2` files, `9` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes another bullshit gap: the system can no longer hand-wave "the relay" as an untyped HTTP blob. The next real slice is to implement or provision the trusted relay server against this contract, wire actual memory/search/hydration/backfill capabilities behind it, then run the generated Cloudflare workflow against the deployed endpoint.
+
+## Trusted Dream Memory Relay Server Receipt
+
+On 2026-06-09, the app gained a trusted relay server boundary for the Dream memory fabric contract.
+
+Decision:
+
+- The relay server is a port/adapter boundary, not a fake memory implementation.
+- `handleTrustedDreamMemoryRelayRequest` validates method, route, bearer auth, `dream.memory-relay.request.v1`, route/operation match, operation support, and operation-specific payload schemas before calling trusted memory ports.
+- Supported server operations are currently `inventory`, `source-health`, `backfill-plan`, `search`, `hydrate`, and `correlate`, delegated to `DreamMemoryFabricPort`, `DreamMemoryRetrievalPort`, and `DreamMemoryCorrelationPort`.
+- Unsupported operations such as `signals`, `backfill-run`, `capture-run`, and `capture-artifact` return explicit `adapter_unavailable` responses. Search/hydrate/correlate also return `adapter_unavailable` when no trusted retrieval/correlation adapter is installed.
+- Successful responses are wrapped in `dream.memory-relay.response.v1` with redacted lease receipts, source freshness, source inventory refs, and no bearer-token material.
+- The server keeps the same relay contract Cloudflare already posts, so the remaining deploy work is endpoint provisioning and real adapter wiring, not inventing another protocol.
+
+Changed surfaces:
+
+- `src/app/infrastructure/trusted-dream-memory-relay-server.ts` adds `handleTrustedDreamMemoryRelayRequest`, `TrustedDreamMemoryRelayServerConfig`, and `TrustedDreamMemoryRelayRequestInput`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` owns `DreamMemoryFabricPort` and `DreamMemoryRetrievalPort`; infrastructure and cartridges implement those ports.
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds typed payload schemas for inventory, source-health, backfill-plan, search, and hydration relay operations.
+- `src/app/index.ts` exports the trusted relay server handler/config and relay payload schemas/types.
+- `tests/integration/trusted-dream-memory-relay-server.test.ts` proves the supported preflight chain, search/hydrate/correlate through trusted ports, auth-before-port-invocation, redacted response envelope, and honest blocking when retrieval/correlation operations are requested without trusted adapters.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `3` files, `12` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the next implementation gap: there is now a server-side relay boundary that can be deployed or hosted inside the trusted JoelClaw/tailnet side. The next real slice is to attach actual JoelClaw/session/docs/Brain source adapters to this handler and expose it through a provisioned HTTPS endpoint.
+
+## Trusted Local Dream Memory Fabric Adapter Receipt
+
+On 2026-06-09, the trusted relay side gained its first non-fixture memory-fabric adapter for local authority roots.
+
+Decision:
+
+- `createTrustedLocalDreamMemoryFabricAdapter` implements `DreamMemoryFabricPort` for trusted local/NAS-style filesystem roots.
+- This adapter belongs to the Dream workflow cartridge under `src/cartridges/dream-memory-fabric/`, behind the relay server, not in the Cloudflare Worker bundle or core app barrel. It imports `node:fs/promises`, owns raw private paths, and returns only redacted locators plus hashes/counts/freshness.
+- Configured source roots carry `sourceId`, family, privacy tier, optional runtime, authority root, extension filters, and optional derived-index roots or counts.
+- Authority roots are source of truth. Derived QMD/Typesense/view/vector/SQLite indexes are freshness-checked outputs.
+- The adapter emits `dream.source-inventory.v1`, `dream.source-health.v1`, and `dream.backfill-plan.v1` through the same schemas Cloudflare already expects.
+- Missing or stale derived indexes become recovery-only backfill actions. Missing runtime-native capture becomes a capture fix. This keeps backfill as repair, not normal operation.
+- Dream remains a workflow cartridge/node set. This adapter is one installed relay capability, not a Dream-specific runner branch.
+
+Changed surfaces:
+
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts` adds the trusted local adapter.
+- `src/app/index.ts` intentionally does not export the local Dream adapter; cartridge callers import from the cartridge/package surface.
+- `tests/integration/trusted-local-dream-memory-fabric.test.ts` creates temporary Pi, Codex, Brain, and Cloudflare roots; proves redacted inventory; proves no raw authority paths leak; proves Codex/Pi/Cloudflare runtime coverage comes from native roots; proves Claude missing coverage is explicit; and proves stale/missing derived indexes produce recovery backfill actions.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/trusted-local-dream-memory-fabric.test.ts` passed: `1` file, `1` test.
+- `pnpm test:integration` passed: `26` files, `120` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+- Redacted local smoke on 2026-06-09 against configured local Pi, Codex, Claude, project Brain, and workflow-app Cloudflare receipt roots reported `rawPathLeaked: false`, runtime coverage `pi:captured` with capped count `5000`, `codex:captured` count `256`, `claude:captured` count `33`, `cloudflare:captured` count `107`, source health `degraded`, backfill actions `5`, and capture fixes `0`. Degraded health is expected until derived indexes are wired instead of all reporting `missing`.
+
+This still does not prove a live Dream run in Cloudflare. It closes the next relay wiring gap: the trusted relay can now answer inventory/health/backfill-plan from real local authority roots without sending raw transcript paths or private filesystem details back to Cloudflare.
+
+## Trusted Local Dream Relay HTTP Harness Receipt
+
+On 2026-06-09, the trusted local Dream memory relay became runnable as an authenticated HTTP endpoint.
+
+Decision:
+
+- `createTrustedLocalDreamMemoryRelayFetchHandler` composes the existing trusted relay server handler with the trusted local memory-fabric and retrieval adapters from the Dream cartridge.
+- `startTrustedLocalDreamMemoryRelayHttpServer` exposes that handler through Node `http` for local/tailnet/tunnel deployment.
+- `pnpm app:dream:relay` starts the relay from environment config.
+- `DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON` is the local authority-root config. It is intentionally local operator config and must not be sent to Cloudflare.
+- `GET /healthz` is auth-gated with the same bearer token as `/memory/*` and returns `trusted.dream-memory-relay.readiness.v1`.
+- The readiness receipt returns the endpoint catalog, supported operations, source ids/families/privacy tiers/count-of-config-shape, `rawPathsReturned: false`, and `rawCredentialsReturned: false`; it does not return authority roots, token material, or raw transcripts.
+- Search and hydration are cartridge-provided relay operations. They return redacted evidence and receipt refs, not raw transcript bodies.
+- Startup failures emit a redacted `trusted.dream-memory-relay.startup-error.v1` receipt instead of an unbounded stack trace.
+
+Changed surfaces:
+
+- `src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts` adds the HTTP harness, readiness schema, env parser, fetch handler, and Node server starter.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts` adds the trusted local search/hydration/correlation adapter for redacted evidence retrieval and graph assembly.
+- `scripts/trusted-local-dream-memory-relay.ts` adds the runnable CLI entrypoint.
+- `package.json` exposes `pnpm app:dream:relay`.
+- `src/app/index.ts` intentionally does not export the local Dream harness; `src/app/infrastructure/trusted-dream-memory-relay-server.ts` exports only the generic relay host contract and `DreamMemoryRetrievalPort`.
+- `tests/integration/trusted-local-dream-memory-relay-http.test.ts` drives a real localhost HTTP listener through `fetch`, proves auth-gated `/healthz`, proves inventory/source-health/backfill-plan/search/hydrate/correlate over HTTP, proves the readiness endpoint exposes the full relay endpoint catalog, and proves neither raw temp authority paths nor the bearer token are returned.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/trusted-local-dream-memory-relay-http.test.ts` passed: `1` file, `1` test.
+- `pnpm app:dream:relay` without config exits nonzero with a redacted `trusted.dream-memory-relay.startup-error.v1` receipt stating `DREAM_MEMORY_RELAY_SOURCE_ROOTS_JSON is required.`
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the endpoint gap: there is now an actual authenticated relay process Cloudflare can call once it is configured, reachable, and leased through `DREAM_MEMORY_RELAY_BASE_URL` plus `DREAM_MEMORY_RELAY_TOKEN`.
+
+## Trusted Local Dream Relay Real Source Proof
+
+On 2026-06-09, the trusted local Dream relay was exercised against real local authority roots instead of fixture roots.
+
+Decision:
+
+- Local operator source-root config belongs under ignored operational state, not Brain. The active raw-path config is `.wrangler/workflow-app/dream-relay/source-roots.json`.
+- Docs/pdf-brain access is an optional trusted relay adapter, not a direct Worker scrape and not a local path assumption. The proof harness defaults to the public-read JoelClaw docs API discovery/search/chunk surface through `DREAM_DOCS_API_BASE_URL`.
+- Dream memory search is now family-balanced after each adapter ranks its own hits. This prevents docs/pdf-brain, transcripts, Brain, or Cloudflare run receipts from monopolizing a Dream just because one source returns larger numeric scores.
+- The repeatable proof command is `pnpm app:dream:relay:proof`.
+- The proof starts the trusted relay on an ephemeral localhost port with a generated bearer token, calls authenticated `/healthz`, then drives `inventory`, `source-health`, `backfill-plan`, `search`, `hydrate`, and `correlate` through the same HTTP relay contract Cloudflare uses.
+- The proof writes only a redacted receipt to `.wrangler/workflow-app/dream-relay/latest-local-proof.json`; it does not write raw source roots, bearer tokens, or transcript bodies to Brain.
+
+Latest refreshed receipt:
+
+- Command: `pnpm app:dream:relay:proof`
+- Receipt path: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`
+- Receipt schema: `trusted.dream-memory-relay.local-proof.v1`
+- Run id: `run:dream-relay-local-proof:20260609T233204239Z`
+- Receipt time: `2026-06-09T23:32:07.632Z`
+- Source roots configured: `8`
+- Source inventory emitted: `9` sources, because missing `repo-outputs` coverage is synthesized explicitly instead of silently omitted.
+- Native runtime coverage: Pi `4737`, Codex `259`, Claude `15`, Cloudflare `112`
+- Brain authority counts included: project Brain `15`, JoelClaw Brain `2`, AIHero Support Brain `422`
+- Docs/pdf-brain local artifact count: `0`; docs/pdf-brain retrieval was supplied by the trusted docs API adapter as `source:docs-pdf-brain:joelclaw-api`.
+- Relay search/hydration/correlation proof: `12` hits, `12` hydrated redacted receipts, `48` correlation edges, and `33` correlation nodes for the query `agent memory retrieval dream workflow package relay codex cloudflare`
+- Hydrated receipt family mix: `agent-transcripts:3`, `brain:3`, `cloudflare-runs:3`, `docs-pdf-brain:3`
+- Hydrated docs/pdf-brain source proof: `source:docs-pdf-brain:joelclaw-api` returned `3` redacted hydrated receipts.
+- Health status: `degraded`
+- Backfill status: `backfill-required`
+- Backfill action count: `9`
+- Capture fix count: `0`
+- Raw path leaked: `false`
+- Raw paths returned: `false`
+- Raw credentials returned: `false`
+
+Changed surfaces:
+
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts` adds optional docs API search/hydration and family-balanced merging.
+- `src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts` wires `DREAM_DOCS_API_BASE_URL` and `DREAM_DOCS_API_USER_AGENT` into the trusted relay config.
+- `scripts/trusted-local-dream-memory-relay-proof.ts` adds the repeatable local proof harness.
+- `package.json` exposes `pnpm app:dream:relay:proof`.
+- `.wrangler/workflow-app/dream-relay/source-roots.json` stores local raw source-root config and stays ignored by git.
+- `tests/integration/trusted-docs-api-dream-memory-retrieval.test.ts` proves docs API redaction/hydration and proves docs hits cannot monopolize mixed-source retrieval.
+
+Validation receipts:
+
+- `pnpm app:dream:relay:proof` passed and wrote the redacted local proof receipt.
+- `pnpm vitest run tests/integration/trusted-docs-api-dream-memory-retrieval.test.ts` passed: `1` file, `2` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the local relay truth gap: the trusted relay can now prove native Pi, Codex, Claude, and Cloudflare coverage against real sources, search/hydrate/correlate redacted evidence, and honestly report degraded derived indexes. The remaining live gate is network exposure/provisioning of this relay capability for the deployed Worker without leaking private paths or credentials.
+
+## Dream Relay Provisioning Preflight Receipt
+
+On 2026-06-09, the Dream relay network-exposure step gained its own machine-readable preflight.
+
+Decision:
+
+- Local relay proof and live Worker readiness are not enough to open a public or cross-network relay endpoint.
+- `VISION.md` requires owner sign-off before exposing JoelClaw/Typesense/private transcript access over a new network boundary.
+- The provisioning preflight is intentionally non-mutating: it does not start tunnels, create funnels, rotate secrets, edit Worker config, or expose the relay.
+- The preflight reads the latest local relay proof and live Dream preflight, probes available exposure tools, checks the Vision sign-off rule, and writes a redacted operational receipt.
+- A provided `--approval-ref` is provenance only. The receipt is approved only when `--approval-signoff` exactly matches `exposing JoelClaw/Typesense over a new network boundary`.
+- Exact sign-off still does not perform exposure. Actual provisioning remains a separate deliberate step.
+
+Changed surfaces:
+
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` adds `trusted.dream-memory-relay.provisioning-preflight.v1`.
+- `package.json` exposes `pnpm app:dream:relay:provisioning-preflight`.
+- `tests/integration/dream-relay-provisioning-preflight.test.ts` proves the gate blocks without sign-off, rejects `--approval-ref` alone, rejects non-matching sign-off text, can become ready-for-approved-provisioning with the exact sign-off plus local proof/tooling, and blocks if the local relay proof is missing.
+
+Latest receipt:
+
+- Command: `pnpm app:dream:relay:provisioning-preflight`
+- Receipt path: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`
+- Receipt time: `2026-06-09T21:39:36.765Z`
+- Status: `blocked`
+- Approval status: `required`
+- Sign-off phrase: `exposing JoelClaw/Typesense over a new network boundary`
+- Local relay proof status: `passed`
+- Local relay proof source roots: `8`
+- Local relay search/hydration/correlation: `12` hits, `12` hydrated redacted receipts, `48` correlation edges, `33` correlation nodes
+- Local relay hydrated family mix: `agent-transcripts:3`, `brain:3`, `cloudflare-runs:3`, `docs-pdf-brain:3`
+- Live preflight status: `blocked`
+- Missing live checks: `env:DREAM_MEMORY_RELAY_BASE_URL`, `env:DREAM_MEMORY_RELAY_TOKEN`, `wrangler:DREAM_MEMORY_RELAY_BASE_URL`, and `relay:healthz`
+- Tool probes: `ngrok` available, `tailscale` available, `cloudflared` unavailable
+- Recommended next actions: get explicit owner sign-off, provision approved HTTPS relay endpoint, provision `DREAM_MEMORY_RELAY_TOKEN` without printing it, then add `DREAM_MEMORY_RELAY_BASE_URL` to Worker config after approval.
+
+Validation receipts:
+
+- `pnpm app:dream:relay:provisioning-preflight` passed and wrote the redacted blocked receipt.
+- `pnpm vitest run tests/integration/dream-relay-provisioning-preflight.test.ts tests/integration/dream-live-preflight.test.ts` passed: `2` files, `12` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It makes the next risky step explicit: the system can now show that local relay capability is real, network tools exist, and live Worker gates remain, while refusing to imply that a private transcript relay should be exposed without a recorded owner approval.
+
+## Dream Package Seed And Cartridge Proof Receipt
+
+On 2026-06-09, Dream became a seedable workflow package/cartridge instead of only an in-repo adapter.
+
+Decision:
+
+- `workflow/dream-memory-fabric` is the package id for the first Dream workflow cartridge.
+- The package exports seven `workflow-node` entries: `joelclaw.dream.source-inventory`, `joelclaw.dream.source-health`, `joelclaw.dream.backfill-plan`, `joelclaw.dream.memory-search`, `joelclaw.dream.hydrate`, `joelclaw.dream.correlate`, and `joelclaw.dream.hitl-report`.
+- Generated Dream preflight steps now carry `packageRefs` pointing at the Dream workflow package artifact.
+- The positive Dream workflow integration test executes through `createArtifactBackedWorkflowCartridgeAdapter`, not the raw Dream adapter, so every Dream node emits `workflow.cartridge-invocation-proof.v1`.
+- This keeps Dream installable and verifiable while preserving the generic runner boundary.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-package-seeder.ts` default package seeds now include `workflow/dream-memory-fabric`, repo `pkg-workflow-dream-memory-fabric`, and the seven Dream workflow-node exports.
+- `tests/integration/workflow-app-fixtures.ts` adds `integrationTestDreamWorkflowPackageMetadata` plus a Dream-specific run request that includes the Dream package id.
+- `tests/integration/workflow-app.test.ts` updates generated Dream preflight/search/hydration/correlation/report steps to include the Dream package ref and asserts seven cartridge invocation proof artifacts.
+- `tests/integration/cloudflare-package-seeder.test.ts` and `tests/integration/cloudflare-worker-route.test.ts` now expect four default seed packages.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-package-seeder.test.ts` passed: `2` files, `24` tests.
+- `pnpm test:integration` passed: `23` files, `110` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the package-definition gap: the Dream node set can now be seeded as a package manifest, pinned by a generated workflow, verified by cartridge proof, and then executed through the relay-backed adapter path.
+
+## Dream Search And Hydration Cartridge Node Receipt
+
+On 2026-06-09, Dream's generated workflow language gained package-backed search and hydration nodes.
+
+Decision:
+
+- T-shaped Dreaming cannot stop at inventory/health/backfill planning. Generated workflows need explicit retrieval nodes before report assembly.
+- `DreamMemoryRetrievalPort` now lives with the Dream workflow-node contract, next to `DreamMemoryFabricPort`, so infrastructure and cartridges implement ports instead of owning domain contracts.
+- `joelclaw.dream.memory-search` writes `dream.memory-search.v1` from a relay-backed search payload.
+- `joelclaw.dream.hydrate` reads a prior search artifact, selects bounded unique receipt refs, and writes `dream.hydration.v1` with redacted evidence. It blocks if no search artifact or receipts exist.
+- The Cloudflare relay adapter now implements both `DreamMemoryFabricPort` and `DreamMemoryRetrievalPort`; the Dream Cloudflare installer wires the same secret-backed relay adapter into both ports when `DREAM_MEMORY_RELAY_BASE_URL` is configured.
+- `createArtifactBackedWorkflowCartridgeAdapter` now continues across multiple pinned package refs when an earlier package does not export the requested node. This matters once workflows compose multiple cartridges.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric.ts` adds `joelclaw.dream.memory-search`, `joelclaw.dream.hydrate`, and the retrieval-port-driven handlers.
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` posts search/hydrate/correlate relay envelopes and validates response envelopes.
+- `src/app/infrastructure/cloudflare-worker-route.ts` wires the configured Dream relay into both fabric and retrieval ports.
+- `src/app/infrastructure/cloudflare-package-seeder.ts` and `tests/integration/workflow-app-fixtures.ts` add package exports for search/hydration/correlation.
+- `tests/integration/workflow-app.test.ts` proves generated Dream search/hydration/correlation steps run through artifact-backed cartridge proof before normal review work.
+- `tests/integration/cloudflare-dream-memory-fabric-relay.test.ts`, `tests/integration/trusted-dream-memory-relay-server.test.ts`, and `tests/integration/trusted-local-dream-memory-relay-http.test.ts` cover search/hydrate/correlate over the Cloudflare relay client, direct trusted server, and local HTTP relay harness.
+
+CodeRabbit review receipt:
+
+- `coderabbit review --agent` against the whole dirty worktree refused scope because the repo had `283` changed files and the service limit was `150`.
+- Narrowed command `coderabbit review --agent --dir src` completed with `7` findings.
+- Fixed findings relevant to this slice: null checks for Dream backfill artifact refs, package-ref export search continuing across multiple pinned package refs, local retrieval file-cap skip behavior, deterministic hash key comparison, deterministic sandbox id fallback, and missing `BLOCK` transition while resolving a capsule.
+- Deferred finding: `src/app/infrastructure/git-memory-fs.ts` symlink `readFile` semantics are a separate filesystem behavior change and were not touched in this Dream slice.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/cloudflare-package-seeder.test.ts tests/integration/cloudflare-worker-route.test.ts` passed: `7` files, `53` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove the full Dream definition of done. It closes the next expression gap: generated Cloudflare workflows can now ask an installed Dream cartridge to search, hydrate, and correlate redacted evidence through a trusted relay. The remaining proof is a live Worker run with the Dream package re-seeded remotely, reachable relay capabilities, generated machine artifacts, and Wzrrd/Tufte report output.
+
+## Dream Correlation Cartridge Node Receipt
+
+On 2026-06-09, Dream gained an executable package-backed correlation node between hydration and HITL report rendering.
+
+Decision:
+
+- `joelclaw.dream.correlate` is a workflow cartridge node, not core runner logic.
+- The node reads explicit memory-search and hydration artifact refs, calls `DreamMemoryCorrelationPort`, and writes `dream.correlation-graph.v1`.
+- The trusted relay exposes correlation as `POST /memory/correlate` behind the same bearer-auth, lease, idempotency, trace, redaction, and source-family envelope as search and hydration.
+- The HITL report now requires the correlation graph artifact and includes correlation node/edge counts in the Proof section plus the correlation schema in the technical appendix.
+- Live readiness now requires relay `/healthz` to advertise `correlate`, and local relay proof receipts must include non-empty correlation node/edge counts.
+- The local Dream package manifest hash changed to `303a539937b4bb19779a67047591ea973b3a70f76b7cf8a9659e81e45af695e3`; the remote package row must be re-seeded before live Dream readiness can honestly pass.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds the `joelclaw.dream.correlate` node type and `DreamMemoryRelayCorrelationPayloadSchema`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` adds `DreamMemoryCorrelationPort`, the correlation node executor, report correlation refs, and the D2 state-machine edge `hydrate -> correlate -> report`.
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` posts `correlate` relay envelopes to `/memory/correlate`.
+- `src/app/infrastructure/trusted-dream-memory-relay-server.ts` dispatches `correlate` through a trusted correlation port.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts` implements a redacted correlation graph from search/hydration receipts.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports the correlation workflow node from the Dream cartridge package.
+- `scripts/trusted-local-dream-memory-relay-proof.ts` now drives `correlate` and records graph counts in `trusted.dream-memory-relay.local-proof.v1`.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `6` files, `28` tests.
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-workflow-cartridge-installer.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts` passed: `4` files, `40` tests.
+- `pnpm app:dream:relay:proof` passed and wrote `.wrangler/workflow-app/dream-relay/latest-local-proof.json` for `run:dream-relay-local-proof:20260609T233204239Z` with `48` correlation edges, `33` correlation nodes, and all raw path/credential leak flags false.
+- `pnpm app:dream:preflight -- --allow-missing` passed with `status: blocked`; local relay proof passed, remote Dream package hash was stale, and relay URL/token/config/healthz gates remained missing.
+- `pnpm app:dream:run -- --submit` wrote blocked request/receipt files for `run-live-dream-memory-fabric-20260609T233227534Z-9395f352` and did not call the live Worker.
+- `coderabbit review --agent --dir src --dir tests --dir scripts` completed with `0` findings.
+- `pnpm test:integration` passed: `31` files, `143` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pi-notes brain check` passed.
+- `git diff --check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the correlation gap in the generated workflow contract and makes stale relay/package proofs fail until they include the new operation.
+
+## Dream HITL Report Cartridge Node Receipt
+
+On 2026-06-09, Dream gained a package-backed HITL report node.
+
+Decision:
+
+- The Dream report is a workflow cartridge node, not a runner feature.
+- `joelclaw.dream.hitl-report` reads explicit upstream artifact refs for source inventory, source health, recovery backfill plan, memory search, redacted hydration, and the correlation graph. It blocks if any required ref is missing.
+- The node writes `dream.hitl-report.v1`: redacted MDSvX report body, canonical `joel/tufte-mdsvx@0.1.0` template metadata, 24h/noindex defaults, source artifact refs, dream cards, receipt counts, and proof metadata.
+- Dream cards follow the HITL shape: concise summary, reasoning, numeric rating, recommendation, and receipt metadata. Raw transcripts stay behind the relay boundary.
+- The report embeds D2 state-machine source with a readable `4:5` aspect ratio and records the dynamic-generation proof level separately from live Cloudflare execution proof.
+- Wzrrd publishing remains a separate leased side effect. This node renders the report artifact; it does not publish it.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds `DreamHitlReportDocumentSchema`, report template/proof/section schemas, dream cards, and the canonical section order.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` adds `joelclaw.dream.hitl-report`, report artifact loading, report-card assembly from search/hydration/correlation, D2 source generation, and `dream.hitl-report.v1` writing.
+- `src/app/infrastructure/cloudflare-package-seeder.ts` and `tests/integration/workflow-app-fixtures.ts` add the report node export to `workflow/dream-memory-fabric`.
+- `tests/integration/workflow-app.test.ts` inserts `render-dream-hitl-report` after correlation in the generated Dream preflight chain and proves the report node executes through `createArtifactBackedWorkflowCartridgeAdapter`.
+- `tests/integration/dream-memory-fabric-contract.test.ts` locks the report schema as redacted MDSvX with no raw transcript return.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `2` files, `30` tests.
+- `pnpm typecheck` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It closes the report-node gap: the canonical Dream HITL report can now be selected by a generated workflow as an installed cartridge export, verified through package/cartridge proof, and written as a typed artifact without baking Dream report behavior into the generic runner.
+
+## Dream Generated Workflow Proof Receipt
+
+On 2026-06-09, Dream gained an explicit generated-workflow proof contract and a generic post-execution artifact recorder path.
+
+Decision:
+
+- `dream.generated-workflow-proof.v1` is the cartridge-owned proof document for a Dream run's generated plan/machine/harness/execution chain.
+- The proof verifies the pinned dynamic plan hash, generated XState config hash, generated XState TypeScript source hash, generated harness source hash, Dream package ref, source-profile effect coverage, machine step order, execution completed step ids, generated state sequence, planner prompt ref, and planner transcript ref.
+- The proof fails if a workflow tries to pass generic legacy step kinds such as `research.review`, `capability.discord.message`, or `review.summary` off as a Dream generated workflow.
+- The Dream integration helper no longer appends the old generic research/Discord/review suffix after the Dream package nodes. A Dream preflight chain is now seven Dream cartridge nodes: source inventory, source health, backfill plan, memory search, hydration, correlation graph, and HITL report.
+- The runner now has a generic `WorkflowPostExecutionArtifactRecorderPort`. Dream proof capture is one installed recorder, not Dream logic inside the core workflow runner.
+- The Dream recorder writes `dream/generated-workflow-proof.json` after `workflow.execution-proof.v1`; the resulting artifact ref flows into receipt refs, review-gate step artifact refs, captured artifact refs, and review-surface inputs.
+- The installed-cartridge registry installs the Dream proof recorder only when the relay-backed Dream cartridge adapter is installed through the Dream cartridge's `DREAM_MEMORY_RELAY_BASE_URL` binding.
+- This is still a local/integration proof when the execution proof status is `not-proven-local-integration`; it does not claim live Cloudflare execution.
+
+Changed surfaces:
+
+- `src/app/application/ports.ts` adds `WorkflowPostExecutionArtifactRecorderPort`.
+- `src/app/application/workflow-app.ts` records optional post-execution artifacts after execution proof capture and before review summary/surface publication.
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` now owns `DreamMemoryFabricNodeTypeSchema`, `DreamWorkflowEffectSchema`, and `DreamGeneratedWorkflowProofDocumentSchema`.
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` adds `verifyDreamGeneratedWorkflow`, a pure verifier over pinned plan, generated machine, machine source, harness source, execution proof, and expected Dream package ref, plus `createDreamGeneratedWorkflowProofRecorder`.
+- `src/app/infrastructure/cloudflare-workflow-front-door.ts` supports run-store-scoped post-execution recorder factories.
+- `src/app/infrastructure/cloudflare-worker-route.ts` installs the Dream generated-workflow proof recorder alongside the Dream cartridge adapter when the trusted relay is configured.
+- `tests/integration/workflow-app.test.ts` now proves Dream runs are package-backed Dream-effect workflows and reads the redacted generated workflow proof document from `result.artifactRefs`; the test no longer writes the proof manually.
+- `tests/integration/workflow-app.test.ts` also proves the verifier rejects the generic research/Discord/review chain as failed Dream proof instead of letting it masquerade as Dreaming.
+- `tests/integration/cloudflare-worker-route.test.ts` proves relay config installs both the Dream cartridge adapter and Dream proof recorder.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-worker-route.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `3` files, `51` tests.
+- `pnpm test:integration` passed: `29` files, `134` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+- `git diff --check` passed.
+
+This still does not prove the full Dream definition of done. It removes a specific lie: the Dream package path can no longer rely on the old generic deterministic review suffix while claiming the Dream itself was fully generated and package-backed. The remaining proof is a live Cloudflare run that emits the same proof document with `cloudflare-generated-machine-executed`, reachable relay leases, and Wzrrd publication.
+
+## Dream Relay Lease Sidecar Proof Receipt
+
+On 2026-06-10, Dream proof gained per-node relay lease sidecar evidence.
+
+Decision:
+
+- `DreamMemoryFabricResult` can now carry a redacted `dream.memory-relay` lease receipt returned by the trusted relay.
+- Relay-backed Dream workflow nodes write their normal typed document plus `dream/relay-lease-receipts/<stepId>.json` when the relay returns a lease receipt.
+- `workflow.execution-proof.v1` now records generic `workflowNodeOutputRefs`. This is not Dream logic in the runner; it is the runner saying which artifacts the generated workflow emitted.
+- `dream.generated-workflow-proof.v1` now records `relayLeaseReceiptRefs` and checks `execution:relay-lease-sidecars`.
+- If execution claims `cloudflare-generated-machine-executed`, the Dream proof fails unless every relay-backed generated Dream step has a matching relay lease sidecar. Local integration runs may still verify the generated plan/machine/harness chain, but they remain `not-proven-local-integration` and show zero relay sidecars.
+- This closes another fake-proof gap: a live Cloudflare Dream run cannot claim "real relay-backed memory fabric" while emitting only the generated machine proof and primary Dream documents.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` preserves the relay response lease receipt instead of discarding it.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` writes relay lease sidecar artifacts for inventory, source-health, backfill-plan, backfill-run, memory-search, hydrate, and correlate nodes.
+- `src/app/domain/schemas.ts` adds `workflowNodeOutputRefs` to `workflow.execution-proof.v1`.
+- `src/app/application/workflow-app.ts` populates `workflowNodeOutputRefs` from generated workflow execution artifacts.
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` fails Cloudflare Dream proof when relay-backed step sidecars are missing.
+- `tests/integration/cloudflare-dream-memory-fabric-relay.test.ts` proves every relay operation returns a used redacted lease receipt without leaking the bearer token.
+- `tests/integration/workflow-app.test.ts` proves local Dream integration has no relay sidecars and that a proof forged to Cloudflare status fails on `execution:relay-lease-sidecars`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/workflow-app.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `3` files, `35` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm test:integration` passed: `31` files, `148` tests.
+- `pi-notes brain check` passed.
+- `git diff --check` passed.
+- `pnpm verify:workspace` passed.
+
+## Dream Live Preflight Receipt
+
+On 2026-06-09, the workflow app gained a typed live preflight harness for Dream-style workflow cartridges.
+
+Decision:
+
+- Live readiness is a generic workflow-cartridge preflight, not a Dream runner branch.
+- The receipt schema is `workflow.live-preflight.v1` and checks an expected cartridge package, Cloudflare registry state, generated-artifact proof requirements, and side-effect lease prerequisites.
+- The Dream CLI is one instance: it expects `workflow/dream-memory-fabric`, but the schema is cartridge-generic.
+- A skipped remote check still writes a receipt, but it is blocked. The harness must not claim readiness without Cloudflare D1/package proof.
+- Package presence is not enough. Live readiness now records the expected Dream package artifact ref, current manifest hash, and workflow node export set; it blocks if the remote package row is missing or stale.
+- Remote secret names are evidence too. Live readiness now queries `wrangler secret list` and treats required Worker secrets as present when Cloudflare reports the secret name, without exposing secret values.
+- Relay env vars are not enough. Live readiness now requires an authenticated `GET /healthz` against `DREAM_MEMORY_RELAY_BASE_URL` using `DREAM_MEMORY_RELAY_TOKEN`, and the response must parse as `trusted.dream-memory-relay.readiness.v1`.
+- The relay readiness check requires `inventory`, `source-health`, `backfill-plan`, `search`, `hydrate`, and `correlate`, and rejects readiness receipts that are missing required operations, return raw paths, return raw credentials, or fail schema validation.
+- Local relay proof is a separate required gate. A reachable `/healthz` proves endpoint readiness; `.wrangler/workflow-app/dream-relay/latest-local-proof.json` proves the trusted relay has actually searched, hydrated, and correlated real local authority roots without leaking raw paths or credentials.
+- Dream output is a Wzrrd document, so `WZRRD_API_TOKEN` is now required for Dream live readiness. A local artifact-only report is not enough for the Dream definition of done.
+- Workflow cartridges remain artifact-backed data until manifest/export verification, package pinning, hash checks, trust policy, capability leases, and execution proofs allow invocation.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` now defines `WorkflowLivePreflightReceiptSchema`, `WorkflowLivePreflightCheckSchema`, `WorkflowLivePreflightRemotePackageRowSchema`, `WorkflowLivePreflightRemoteRegistrySchema`, `WorkflowLivePreflightRemoteSecretInventorySchema`, and `WorkflowLivePreflightArtifactModelSchema`.
+- `scripts/workflow-app-dream-preflight.ts` reads redacted env/config state, derives the expected Dream package metadata/hash from the Dream cartridge package seed module, queries remote Cloudflare D1 package rows by default, validates the receipt through Zod, writes `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, and exits nonzero unless `--allow-missing` is passed.
+- `scripts/workflow-app-dream-preflight.ts` also queries remote Worker secret names with `wrangler secret list`; secret names may satisfy required secret gates, but secret values are never printed or stored in the receipt.
+- `scripts/workflow-app-dream-preflight.ts` now adds a required `relay:healthz` check that calls the trusted relay readiness endpoint and redacts relay token material from failure messages.
+- `scripts/workflow-app-dream-preflight.ts` now adds a required `relay:local-proof` check that reads a redacted local proof receipt, requires native Pi/Codex/Claude/Cloudflare coverage, requires search and hydration, and blocks if the proof is missing or unsafe.
+- `package.json` exposes `pnpm app:dream:preflight`.
+- `scripts/workflow-app-deploy-and-seed.mjs` now propagates `DREAM_MEMORY_RELAY_TOKEN` through the Worker secret deployment path when provided.
+- `tests/integration/dream-live-preflight.test.ts` proves D1 output parsing, remote package row parsing, remote secret-name parsing, blocked readiness with missing gates, blocked readiness with a stale package manifest, ready readiness only when the package artifact, manifest hash, required remote secrets, Wzrrd capability, local relay proof, and relay readiness are proven, redacted relay health checks, failed relay readiness when `/healthz` is missing/unsafe, failed local proof when native runtime coverage is missing, and blocked receipt output when remote proof is skipped.
+
+Remote Dream package seed receipt:
+
+- Command sequence: generated a fresh in-process admin token, `wrangler secret put WORKFLOW_APP_ADMIN_TOKEN`, `wrangler deploy --config wrangler.jsonc --message "deploy dream correlation package seed"`, then `pnpm app:deploy:seed -- --worker-url=https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev`
+- Worker version: `0e2a5154-8f0e-469d-87f7-325b2ab2a73b`
+- Deploy/seed receipt path: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`
+- Seed status: `completed`
+- Seeded packages: `badass-courses/claw-kernel`, `joelhooks/configured-familiar-kernel`, `workflow/research-review-discord`, and `workflow/dream-memory-fabric`
+- Dream package seed commit: `e2dc01f38535b4bca3ec5a37d2b07f5809a03d75`
+- Dream package manifest hash in the remote seed receipt: `303a539937b4bb19779a67047591ea973b3a70f76b7cf8a9659e81e45af695e3`
+
+Latest live preflight receipt:
+
+- Command: `pnpm app:dream:preflight -- --allow-missing`
+- Receipt path: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`
+- Receipt time: `2026-06-09T23:37:51.825Z`
+- Status: `blocked`
+- Expected cartridge package: `workflow/dream-memory-fabric`
+- Expected package artifact ref: `artifact://cloudflare-artifacts/pkg-workflow-dream-memory-fabric/package.json`
+- Expected package manifest hash: `303a539937b4bb19779a67047591ea973b3a70f76b7cf8a9659e81e45af695e3`
+- Remote package manifest hash found in D1: `303a539937b4bb19779a67047591ea973b3a70f76b7cf8a9659e81e45af695e3`
+- Current expected workflow node exports: `joelclaw.dream.source-inventory`, `joelclaw.dream.source-health`, `joelclaw.dream.backfill-plan`, `joelclaw.dream.memory-search`, `joelclaw.dream.hydrate`, `joelclaw.dream.correlate`, and `joelclaw.dream.hitl-report`
+- Remote Cloudflare D1 package rows found: `badass-courses/claw-kernel`, `joelhooks/configured-familiar-kernel`, `workflow/dream-memory-fabric`, and `workflow/research-review-discord`
+- Dream package remote row matched the expected artifact ref and current expected manifest hash.
+- Remote Worker secrets found: `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`, `PI_AUTH_JSON_B64`, `WORKFLOW_APP_ADMIN_TOKEN`, `WORKFLOW_APP_MODEL`, and `WZRRD_API_TOKEN`
+- Required remote secret gates now passing: admin, Pi auth, app model, and Wzrrd publish token.
+- Local relay proof gate passing: `relay:local-proof` reported `8` source roots, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, and hydrated family mix `agent-transcripts:3`, `brain:3`, `cloudflare-runs:3`, `docs-pdf-brain:3`.
+- Missing required gates after the package re-seed: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, and authenticated relay `/healthz`
+- Passing gate: deploy secret propagation now includes `DREAM_MEMORY_RELAY_TOKEN`
+
+Latest local skip-remote preflight receipt after the relay health gate:
+
+- Command: `pnpm app:dream:preflight -- --allow-missing --skip-remote`
+- Receipt path: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`
+- Receipt time: `2026-06-09T20:45:48.144Z`
+- Status: `blocked`
+- New required relay check: `relay:healthz`
+- Required Wzrrd check: `env:WZRRD_API_TOKEN`, status `missing`
+- Expected package manifest hash for the skipped remote check in that receipt: `902b8d634d1e251d552dc5754708503d0481c4373096cc0be640a1e9038dec42`
+- Relay readiness status: `missing`
+- Relay readiness message: `Dream memory relay readiness was not checked because DREAM_MEMORY_RELAY_BASE_URL is missing.`
+- Required relay action: start or provision the trusted Dream memory relay and verify its authenticated `/healthz` readiness receipt.
+
+Validation receipts:
+
+- `pnpm app:dream:preflight -- --allow-missing` passed with status `blocked` and wrote the updated receipt including `relay:local-proof`.
+- `pnpm vitest run tests/integration/dream-live-preflight.test.ts` passed: `1` file, `9` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+This still does not prove a live Dream run in Cloudflare. It prevents the next lie: the system now separates local trusted relay proof from live Worker reachability. The latest preflight can prove package seed, remote Worker secret inventory, Wzrrd readiness, and local relay search/hydration/correlation only when the corresponding receipts are current, while still blocking until a real relay base URL, relay token, Worker config, and authenticated `/healthz` are provisioned.
+
+## Dream Cartridge Seed Boundary Receipt
+
+On 2026-06-09, Dream package seed ownership moved out of the core package seeder and into the installed Dream cartridge layer.
+
+Decision:
+
+- Core package seeding owns reusable mechanics plus core package defaults only: `badass-courses/claw-kernel`, `joelhooks/configured-familiar-kernel`, and `workflow/research-review-discord`.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` owns the `workflow/dream-memory-fabric` package manifest seed, workflow-node exports, package metadata, and expected artifact ref.
+- `src/cartridges/cloudflare-workflow-cartridges.ts` aggregates installed cartridge package seed templates and combines them with core defaults for the Worker admin seed path.
+- `src/app/infrastructure/cloudflare-worker-route.ts` uses a Worker-specific package seed request schema with installed cartridge defaults. Direct calls to `seedCloudflarePackages` stay generic and do not silently bake Dream into the core seeder.
+- `scripts/workflow-app-dream-preflight.ts` now imports `dreamMemoryFabricPackageMetadata` from the cartridge seed module, so the Dream preflight hash and export checks are tied to the installed cartridge manifest.
+
+Why this matters:
+
+- Dream remains an installed workflow cartridge/package, not an app primitive.
+- The runner still sees generic `workflow.node.invoke` steps and calls a `WorkflowNodeAdapterPort`; it does not grow Dream-specific branches.
+- The live Worker can still seed Dream by default because Dream is an installed cartridge in this deployment.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-package-seeder.test.ts tests/integration/cloudflare-worker-route.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts` passed: `4` files, `34` tests.
+- `pnpm typecheck` passed.
+
+## Workflow Node Boundary Correction
+
+On 2026-06-09, Joel corrected the architecture boundary: Dreaming is a specific workflow/plugin, not the identity of the workflow runner.
+
+Decision:
+
+- Dreaming should be a predefined workflow package/node set that plugs into the runner.
+- The runner should not be built around Dream-specific branches, ports, capabilities, or vocabulary.
+- Dream contracts can exist as package-owned schemas and artifacts, but the core runner should execute generic generated workflow nodes.
+- The generic seam is `workflow.node.invoke`, backed by a `WorkflowNodeAdapterPort`.
+- A Dream package can implement nodes such as inventory, source-health, backfill-plan, retrieval, hydration, correlation, assembly, and report rendering behind that seam.
+- Workflow cartridges/capsules are artifacts in Cloudflare: executable code-like pieces are still data until package/export verification, policy, leases, and receipts allow invocation.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` now admits a generic `workflow.node.invoke` step with `nodeType`, `packageRefs`, `inputRefs`, `config`, and `outputPath`.
+- `src/app/application/ports.ts` now defines `WorkflowNodeAdapterPort`, `WorkflowNodeInvocationStep`, and `WorkflowNodeExecutionResult`.
+- `src/app/application/workflow-app.ts` can execute generated `workflow.node.invoke` steps through the configured node adapter and blocks honestly if no adapter exists.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` implements Dream source inventory, source health, and backfill planning behind that adapter boundary.
+- `tests/integration/workflow-app.test.ts` proves a generated workflow-node step blocks without an adapter and executes through a package-style adapter without the runner knowing the node domain.
+
+Migration target:
+
+- Extract the current in-repo Dream node adapter into a Dream workflow package/cartridge once package install/export execution is ready.
+- Keep Dream schemas and report style with the Dream package/plugin, not as runner-wide primitives.
+- Keep generic leases, receipts, observability, generated-machine proof, package mounts, artifact validation, and review surfaces in core.
+
+## Dream Cartridge Boundary Audit
+
+On 2026-06-09, the current code boundary was rechecked against the package/cartridge rule.
+
+Assessment:
+
+- The generic runner path is correctly package-first at the safety layer: it discovers package metadata, pins packages, loads generated XState machine artifacts, executes `workflow.node.invoke`, verifies `packageRefs` against pinned package exports, and writes `workflow.cartridge-invocation-proof.v1`.
+- The Dream workflow is seedable as `workflow/dream-memory-fabric` and the generated Dream steps use package refs. That is the right cartridge shape.
+- The trusted local relay implementation lives under `src/cartridges/dream-memory-fabric/`, which is the correct home for local filesystem/session/doc access.
+- Worker registration no longer imports Dream adapters directly. `src/app/infrastructure/cloudflare-worker-route.ts` now merges installed-cartridge env schemas and asks a generic cartridge dependency resolver for workflow-node adapters and post-execution artifact recorders.
+- Dream Cloudflare installation now lives with the Dream cartridge in `src/cartridges/dream-memory-fabric/cloudflare-installer.ts`. That installer owns `DREAM_MEMORY_RELAY_*` bindings, the relay-backed Dream adapter, and the generated-workflow proof recorder.
+- `src/cartridges/cloudflare-workflow-cartridges.ts` is the current compiled installer registry. This is still not the final runtime-loaded package export system, but it moves Dream out of the core Worker route and makes future cartridges additive through the registry.
+
+Rule:
+
+- Treat the current installed-cartridge registry as a temporary compiled plugin registry, not as the final package runtime design.
+- Do not add more Dream-specific branches to the core runner.
+- New Dream behavior should land in the Dream cartridge/package surface, schema contracts, package manifest exports, installer, or integration/preflight harnesses.
+- The production target is a workflow-node registry that resolves installed package exports by manifest/export metadata, then dispatches through generic ports with leases and receipts.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-workflow-cartridge-installer.ts` defines the generic Cloudflare workflow cartridge installer/dependency contract.
+- `src/cartridges/dream-memory-fabric/cloudflare-installer.ts` installs the Dream relay-backed workflow-node adapter and generated-workflow proof recorder from the Dream cartridge boundary.
+- `src/cartridges/cloudflare-workflow-cartridges.ts` combines installed cartridge dependencies for the Worker composition root.
+- `src/app/infrastructure/cloudflare-worker-route.ts` now imports the installed-cartridge registry instead of Dream adapters, Dream relay client factories, or Dream package-ref helpers.
+- `tests/integration/cloudflare-worker-route.test.ts` now exercises cartridge dependency resolution through the generic registry hook.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-worker-route.test.ts` passed: `1` file, `20` tests.
+- `pnpm typecheck` passed.
+- `rg -n "Dream|dream|DREAM_MEMORY|createDream|dream-memory" src/app/infrastructure/cloudflare-worker-route.ts` returned no matches.
+
+## Workflow Cartridge Composite Adapter Receipt
+
+On 2026-06-09, the installed-cartridge dependency combiner stopped enforcing a single workflow-node adapter.
+
+Decision:
+
+- Multiple installed cartridges may contribute `WorkflowNodeAdapterPort` factories.
+- The core installer composes those adapters generically instead of forcing callers to write a Dream-specific or one-off composite.
+- `adapter_unavailable` means "try the next installed cartridge adapter."
+- Any non-availability blocker, such as `stale_package`, remains authoritative and stops dispatch. A bad package/export/hash/lease must not be masked by another adapter.
+- Post-execution artifact recorder factories are still aggregated across installed cartridges.
+
+Why this matters:
+
+- Dream is no longer the only shape the Worker composition can realistically support.
+- Future workflow packages can install their own node adapters without changing the core runner or adding `if`/`switch` branches.
+- The current compiled cartridge registry is still temporary, but it now behaves like an additive plugin registry instead of a single-cartridge slot.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-workflow-cartridge-installer.ts` now builds a composite `WorkflowNodeAdapterPort` when more than one installed cartridge contributes an adapter.
+- `tests/integration/cloudflare-workflow-cartridge-installer.test.ts` proves composite dispatch tries the second adapter after `adapter_unavailable`, preserves `stale_package` from a matching adapter, and aggregates post-execution recorders.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-workflow-cartridge-installer.test.ts tests/integration/cloudflare-worker-route.test.ts` passed: `2` files, `23` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+
+## Dream Wzrrd Primary Document Receipt
+
+On 2026-06-09, Dream output moved closer to the actual requested Wzrrd report shape.
+
+Decision:
+
+- A Wzrrd run can now carry an optional `outputTarget.primaryDocument` that points at a redacted text artifact produced by the generated workflow.
+- `wzrrd.publish-payload.v1` pins that primary document by artifact ref, SHA-256 text hash, media type, publish path, and title.
+- The Wzrrd publisher verifies the primary document hash before publication. If present, it publishes a static `index.html` preview from the primary document, the canonical source file at the requested path, and `review-surface.json`.
+- Dream HITL reports now write both `dream/hitl-report.json` and sibling `dream/hitl-report.mdsvx`. The JSON remains the typed machine contract and first output ref; the MDSvX artifact is the publishable report source.
+- The real planner prompt now tells Pi planners to set `outputTarget.primaryDocument` when a generated workflow renders a public report. For Dream HITL reports, the intended artifact path is `dream/hitl-report.mdsvx` and publish path is `report.mdsvx`.
+- This is still not a full SvelteKit/MDSvX build inside the Worker. The current Cloudflare Wzrrd API adapter publishes static files. The source artifact and static preview are now explicit, but a future Wzrrd/template adapter should compile the Tufte/MDSvX report before publication.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` adds `outputTarget.primaryDocument` for Wzrrd targets and `primaryDocument` for `wzrrd.publish-payload.v1`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` writes a sibling `text/mdsvx` artifact for `joelclaw.dream.hitl-report`.
+- `src/app/application/workflow-app.ts` resolves and hashes the generated primary document before requesting a Wzrrd publish lease.
+- `src/app/infrastructure/cloudflare-wzrrd-publish-adapter.ts` verifies and publishes the primary document alongside `review-surface.json`.
+- `src/app/infrastructure/cloudflare-agent-lane-adapters.ts` documents the planner contract for primary Wzrrd documents.
+- `tests/integration/workflow-app.test.ts` proves the generated Dream workflow emits `dream/hitl-report.mdsvx` and pins it into the Wzrrd payload.
+- `tests/integration/cloudflare-wzrrd-publish-adapter.test.ts` proves the real Wzrrd adapter publishes `index.html`, `report.mdsvx`, and `review-surface.json` from a verified primary document.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-wzrrd-publish-adapter.test.ts tests/integration/dream-memory-fabric-contract.test.ts` passed: `3` files, `34` tests.
+- `pnpm test:integration` passed: `29` files, `135` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+## Dream Wzrrd Renderer Port Receipt
+
+On 2026-06-09, the Wzrrd primary-document preview stopped being a hardwired source dump.
+
+Decision:
+
+- Wzrrd publishing remains the leased side-effect adapter. It verifies the publish payload, review surface hash, primary document hash, review approval, leased slug, and Wzrrd API token.
+- Report rendering is now a package-style seam: `primaryDocumentRenderer` receives the hash-pinned primary document, publish payload, and review surface and returns static files such as `index.html` and supporting assets.
+- The default renderer is `joel/static-tufte-mdsvx-preview@0.1.0`. It renders a safe Tufte-ish static preview for `text/mdsvx`/markdown, strips frontmatter, renders headings/lists/prose/code, shows fenced `d2` as a workflow-state-machine figure source, and publishes the canonical report source unchanged beside `review-surface.json`.
+- This is still intentionally not a full SvelteKit/MDSvX/D2 compiler inside the Worker. The renderer id and docs say that plainly. A future `@joelhooks/wzrrd-hitl-report` package can replace the renderer while `wzrrd.site.publish` continues to own only publication.
+
+Changed surfaces:
+
+- `src/app/infrastructure/cloudflare-wzrrd-publish-adapter.ts` adds `WzrrdPrimaryDocumentRenderer`, `WzrrdPrimaryDocumentRenderInput`, `WzrrdPrimaryDocumentRenderResult`, `WzrrdPublishFile`, and `createStaticTufteMdsvxPrimaryDocumentRenderer`.
+- `src/app/index.ts` exports the renderer seam for package/plugin composition.
+- `tests/integration/cloudflare-wzrrd-publish-adapter.test.ts` proves the default renderer renders a real static preview and that an injected package-style renderer can own `index.html` and assets while the publisher still publishes the canonical `report.mdsvx` and `review-surface.json`.
+- `docs/dream-report-canon.md` now records the split between `wzrrd.report.render` and `wzrrd.site.publish`.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/cloudflare-wzrrd-publish-adapter.test.ts` passed: `1` file, `4` tests.
+- `pnpm test:integration` passed: `29` files, `136` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+## Dream Live Readiness Receipt
+
+On 2026-06-09, the live Dream preflight was rerun after refreshing the trusted local relay proof with correlation counts.
+
+Result:
+
+- Local relay proof passed as `run:dream-relay-local-proof:20260609T233204239Z`.
+- The proof covered `8` source roots, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, and `33` correlation nodes.
+- Hydrated receipt families: `agent-transcripts:3`, `brain:3`, `cloudflare-runs:3`, `docs-pdf-brain:3`.
+- The proof reported `rawCredentialsReturned=false`, `rawPathLeaked=false`, and `rawPathsReturned=false`.
+- Remote Cloudflare D1 has `workflow/dream-memory-fabric` seeded with manifest hash `303a539937b4bb19779a67047591ea973b3a70f76b7cf8a9659e81e45af695e3`, matching the current local Dream package manifest hash.
+- Remote Worker secrets present: `WORKFLOW_APP_ADMIN_TOKEN`, `PI_AUTH_JSON_B64`, `WORKFLOW_APP_MODEL`, `DISCORD_BOT_TOKEN`, `GITHUB_TOKEN`, and `WZRRD_API_TOKEN`.
+- Live Dream readiness remains `blocked`.
+
+Current blockers:
+
+- `DREAM_MEMORY_RELAY_BASE_URL` is not configured.
+- `DREAM_MEMORY_RELAY_TOKEN` is not provisioned as a remote Worker secret.
+- `wrangler.jsonc` does not define `DREAM_MEMORY_RELAY_BASE_URL`.
+- Authenticated relay `/healthz` was not checked because no relay URL exists.
+
+Provisioning guardrail:
+
+- `pnpm app:dream:relay:provisioning-preflight` wrote `trusted.dream-memory-relay.provisioning-preflight.v1` with status `blocked` at `2026-06-09T23:41:32.312Z`.
+- Explicit approval is required before exposing the relay over a new network boundary. The required signoff phrase is `exposing JoelClaw/Typesense over a new network boundary`.
+- Available local network tools were `ngrok` and `tailscale`; `cloudflared` was unavailable.
+- The provisioning preflight now rejects stale local relay proofs unless they include correlation graph counts. Current local proof passed with `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, and `33` correlation nodes.
+- No tunnel or new network exposure was started in this run.
+
+Validation receipts:
+
+- `pnpm app:dream:relay:proof` passed and wrote `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- `pnpm app:dream:preflight` wrote `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json` and exited blocked with the four relay gates above.
+- `pnpm app:dream:relay:provisioning-preflight` wrote `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json` and exited blocked pending explicit approval.
+- `pnpm vitest run tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `1` file, `4` tests.
+
+## Dream Live Run Request Harness Receipt
+
+On 2026-06-09, the repo gained a non-exposure live Dream run harness.
+
+Decision:
+
+- `pnpm app:dream:run` prepares a typed `workflow.dream-live-run-request.v1` receipt and a typed `WorkflowRunRequest`.
+- The generated request asks the real Worker `POST /runs` path to run `workflow/dream-memory-fabric` as a Cloudflare-generated dynamic workflow, with Wzrrd publishing approved by actor role `wzrrd.publish`.
+- The request explicitly requires the Dream cartridge node sequence: `joelclaw.dream.source-inventory`, `joelclaw.dream.source-health`, `joelclaw.dream.backfill-plan`, `joelclaw.dream.memory-search`, `joelclaw.dream.hydrate`, `joelclaw.dream.correlate`, and `joelclaw.dream.hitl-report`.
+- The request tells the planner to generate `workflow.xstate-machine.v1` plus harness source before execution, prove Cloudflare executed those artifacts, search 24h/7d/30d/quarter/all-time horizons, require native Pi/Codex/Claude/Cloudflare coverage or explicit missing/false-positive language, and publish `dream/hitl-report.mdsvx` as Wzrrd `report.mdsvx`.
+- `--submit` is guarded by `workflow.live-preflight.v1`. If preflight is blocked, the harness writes the request/receipt but does not call the live Worker.
+- This is not a live Dream execution proof. It is the prepared handoff to live execution once the trusted relay URL/token/config/healthz gates pass.
+
+Current receipt:
+
+- `pnpm app:dream:run --submit` wrote `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260609T233756552Z-f0df7a1c-request.json`.
+- It wrote `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260609T233756552Z-f0df7a1c-receipt.json`.
+- Receipt status was `blocked`.
+- `submit.attempted` was `false`.
+- Blocked reasons matched the current relay gates: missing relay URL, missing relay token, missing Worker relay URL config, and missing authenticated `/healthz`.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` defines `DreamLiveRunRequestReceiptSchema`.
+- `scripts/workflow-app-dream-run.ts` builds the typed live Dream request, reads the live preflight receipt, writes request/receipt files, and submits only when preflight is ready.
+- `package.json` exposes the harness as `pnpm app:dream:run`.
+- `tests/integration/dream-live-run-request.test.ts` proves the request shape, blocked-submit behavior, and ready-preflight submission behavior through an injected fetch.
+
+Validation receipts:
+
+- `pnpm vitest run tests/integration/dream-live-run-request.test.ts tests/integration/dream-live-preflight.test.ts` passed: `2` files, `13` tests.
+- `pnpm test:integration` passed: `30` files, `140` tests.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm check` passed.
+
+## Dream Backfill Run Node Receipt
+
+On 2026-06-09, Dream recovery backfill moved from "planned only" to an executable workflow-node receipt.
+
+Decision:
+
+- `joelclaw.dream.backfill-run` is a Dream cartridge node, not core runner logic.
+- The generated Dream sequence is now source inventory -> source health -> backfill plan -> backfill run receipt -> memory search -> redacted hydration -> correlation graph -> HITL report.
+- `DreamMemoryBackfillPort` is separate from source inventory/health planning. A trusted adapter may execute controlled recovery work, but if no writer is registered it must emit `skipped` or `blocked` action results instead of claiming fake indexed rows.
+- The HITL report now consumes both the recovery plan and the recovery run receipt. The report source refs prove what was planned and what was actually attempted.
+- The relay contract now treats `/memory/backfill/run` as a supported operation for Cloudflare, trusted server, trusted-local HTTP relay, live preflight readiness, local proof, and provisioning preflight.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` adds the `joelclaw.dream.backfill-run` node type and `DreamMemoryRelayBackfillRunPayloadSchema`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` adds `DreamMemoryBackfillPort`, executes `joelclaw.dream.backfill-run`, loads the run receipt in `joelclaw.dream.hitl-report`, and renders the backfill-run state in the D2 proof.
+- `src/app/infrastructure/cloudflare-dream-memory-fabric-relay.ts` implements relay-backed `runBackfill` through `/memory/backfill/run`.
+- `src/app/infrastructure/trusted-dream-memory-relay-server.ts` dispatches `backfill-run` and returns `dream.backfill-run-receipt.v1` envelopes.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts` implements the trusted-local backfill port honestly: no controlled writer means `skipped`; unavailable authority means `blocked`.
+- `src/cartridges/dream-memory-fabric/trusted-local-relay-http.ts` advertises `backfill-run` in authenticated `/healthz`.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports eight Dream workflow nodes, including `joelclaw.dream.backfill-run`.
+
+Live receipts:
+
+- Local Dream package hash: `e12dbc6b47f1908f310aa0056e892c14137fec3dd38538f66ed7164e8d871022`.
+- Deployed Worker version: `9ae36391-4b24-4166-9b5b-87ad7fbf5feb`.
+- Remote package seed commit for `workflow/dream-memory-fabric`: `e8d614a0dae4bc27a9c595a42e76d0a4a3daaaa5`.
+- Local relay proof `run:dream-relay-local-proof:20260609T235802188Z` passed with `8` source roots, `9` backfill action receipts, `0` completed, `8` skipped, `1` blocked, `12` search hits, `12` hydrated receipts, `48` correlation edges, `32` correlation nodes, and no raw path/credential leaks.
+- Live Dream preflight `2026-06-09T23:59:39.712Z` has matching remote package hash and is blocked only on relay URL/token/config/healthz.
+- Live Dream run request `run-live-dream-memory-fabric-20260609T235944505Z-21fff181` was written but not submitted because preflight is blocked.
+- Relay provisioning preflight `2026-06-09T23:59:51.044Z` remains blocked pending explicit signoff phrase `exposing JoelClaw/Typesense over a new network boundary`.
+
+## Dream Relay Capability Preflight Receipt
+
+On 2026-06-10, live Dream preflight started emitting a typed, redacted `relayCapability` contract instead of leaving the relay lease hidden in prose.
+
+Decision:
+
+- `workflow.live-preflight.v1` now includes the exact relay capability envelope Cloudflare is allowed to use: `dream.memory.relay`.
+- The envelope records allowed operations (`inventory`, `source-health`, `backfill-plan`, `backfill-run`, `search`, `hydrate`, `correlate`), allowed source families, budget defaults, idempotency prefix, lease secret binding name, non-secret `secretRef`, readiness booleans/statuses, and the relay redaction policy.
+- `workflow.dream-live-run-request.v1` copies the preflight `relayCapability` into blocked/prepared/submitted run receipts. A Dream request can now prove which relay capability it depended on even when submission is refused.
+- This is not network exposure. The latest receipt still says endpoint configured `false`, token configured `false`, Worker base URL configured `false`, healthz `missing`, local proof `passed`.
+
+Changed surfaces:
+
+- `src/app/domain/schemas.ts` adds `WorkflowLivePreflightRelayCapabilitySchema` and includes it in live preflight and Dream run request receipts.
+- `scripts/workflow-app-dream-preflight.ts` builds the redacted capability contract from current checks, Worker config text, env/remote secret inventory, and fixed Dream relay envelope constraints.
+- `scripts/workflow-app-dream-run.ts` carries the validated preflight relay capability into the run request receipt.
+- `tests/integration/dream-live-preflight.test.ts` and `tests/integration/dream-live-run-request.test.ts` assert no relay token leak and require the capability contract in ready/blocked receipts.
+
+Receipts:
+
+- Preflight regenerated at `2026-06-10T00:41:20.207Z`; remote package hash still matches `e12dbc6b47f1908f310aa0056e892c14137fec3dd38538f66ed7164e8d871022`.
+- New blocked Dream request receipt: `run-live-dream-memory-fabric-20260610T004126737Z-06e2a937`.
+- Relay provisioning preflight regenerated at `2026-06-10T00:41:16.840Z`; still blocked pending explicit signoff phrase `exposing JoelClaw/Typesense over a new network boundary`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/cloudflare-dream-memory-fabric-relay.test.ts tests/integration/trusted-dream-memory-relay-server.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `8` files, `33` tests.
+- `pnpm exec vitest run tests/integration/workflow-app.test.ts` passed: `1` file, `24` tests.
+- `pnpm test:integration` passed: `31` files, `144` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+
+## Dream Refinement Proposal Node Receipt
+
+On 2026-06-10, the Dream workflow gained a refinement-loop node without baking Dream into the core runner.
+
+Decision:
+
+- `joelclaw.dream.refinement-proposals` is a workflow cartridge node exported by `workflow/dream-memory-fabric`, not a core app branch.
+- The generated Dream workflow must invoke the needed cartridge nodes through the generated machine; refinement proposals are a verifier-required effect for current Dream runs, not proof that the runner owns a fixed Dream sequence.
+- The node writes `dream.refinement-proposals.v1` to `dream/refinement-proposals.json`.
+- The proposal artifact is the next-workflow seed: it captures actionable kernel/package/workflow/schema/capability/capture-ingest improvements with concise summary, reasoning, rating, recommendation, next step, and receipt metadata.
+- The HITL report consumes the proposal artifact and surfaces the proposal count/ref/source refs, so the Dream report starts with dreams/work-to-do and keeps proof below.
+- The generated workflow proof and live run request now require the proposal artifact alongside planner transcript, generated XState config, generated harness source, hashes, execution proof, per-node invocation proofs, HITL report, and Wzrrd publish receipt.
+
+Changed surfaces:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` defines `DreamRefinementProposalDocumentSchema` and adds the refinement node type.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` executes the refinement node, writes `dream/refinement-proposals.json`, feeds proposals into the report node, and includes the refinement state in the D2 machine diagram.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `contract://workflow/dream-memory-fabric/refinement-proposals.v1`.
+- `scripts/workflow-app-dream-preflight.ts` and `scripts/workflow-app-dream-run.ts` require the refinement artifact/node in live readiness and blocked run receipts.
+- `tests/integration/workflow-app.test.ts`, `tests/integration/dream-memory-fabric-contract.test.ts`, `tests/integration/dream-live-preflight.test.ts`, and `tests/integration/dream-live-run-request.test.ts` cover the proposal artifact, report integration, package proof, and live request shape.
+
+Live receipts:
+
+- Deployed Worker version after the refinement package seed route update: `4ad26a95-5ad8-47c1-96bf-a0982ccc6417`.
+- Deploy/seed receipt path: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`.
+- Remote package seed status: `completed`.
+- Dream package manifest hash: `96d1539b18ddcb37ab238e612a823d39c4717a0bca89b901b8f7a7f3d8b07d4a`.
+- Dream package seed commit: `f3715799c8380f7f2f607b2be2b0a3c3bd0402b7`.
+- Latest live preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T01:22:08.037Z`, status `blocked`.
+- Preflight package state: remote D1 has `workflow/dream-memory-fabric` with matching artifact ref and manifest hash; expected workflow node types include all nine Dream nodes.
+- Local relay proof gate: passed with `8` source roots, `9` backfill action receipts, `12` search hits, `12` hydrated redacted receipts, and `48` correlation edges across `agent-transcripts`, `brain`, `cloudflare-runs`, and `docs-pdf-brain`.
+- Remaining blocked gates: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, and authenticated relay `/healthz`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T012213201Z-97c02414`, receipt `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T012213201Z-97c02414-receipt.json`, `submit.attempted=false`.
+- No relay tunnel or new network exposure was started.
+
+Validation receipts:
+
+- Focused Dream suite passed before remote seed: `pnpm exec vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/workflow-app.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/cloudflare-package-seeder.test.ts`.
+- `pnpm check`, `pnpm typecheck`, `pnpm typecheck:tsc`, `pnpm test:integration`, and `git diff --check` passed before Brain capture.
+
+## Dream Live Run Fresh Preflight Receipt
+
+On 2026-06-10, the Dream live-run harness stopped trusting stale preflight receipts for submit attempts.
+
+Decision:
+
+- `pnpm app:dream:run --submit` refreshes `workflow.live-preflight.v1` in the same process before it decides whether to call `POST /runs`.
+- The run receipt records `preflight.refreshed` and the refreshed preflight `generatedAt` timestamp.
+- `--skip-preflight-refresh` exists for offline fixture tests and manual receipt inspection, but it should not be used to claim live readiness.
+- This is a non-exposure readiness fix. It does not create a tunnel, set relay URL/token, or expose JoelClaw/Typesense over a new network boundary.
+
+Changed surfaces:
+
+- `scripts/workflow-app-dream-run.ts` imports `runDreamPreflightCli`, refreshes preflight by default for `--submit`, passes `--allow-missing` so blocked receipts still get written, and refuses submission unless the refreshed receipt is ready.
+- `src/app/domain/schemas.ts` adds `preflight.refreshed` and optional `preflight.generatedAt` to `workflow.dream-live-run-request.v1`.
+- `tests/integration/dream-live-run-request.test.ts` proves a stale ready preflight on disk cannot submit when the same invocation refreshes to a blocked preflight.
+
+Receipts:
+
+- Command: `pnpm app:dream:run -- --submit`.
+- Refreshed preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T01:32:17.461Z`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T013215034Z-706b3ae9`.
+- Latest run receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T013215034Z-706b3ae9-receipt.json`.
+- Receipt status: `blocked`.
+- `preflight.refreshed`: `true`.
+- `submit.attempted`: `false`.
+- Remaining blocked gates: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, and authenticated relay `/healthz`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/dream-live-run-request.test.ts` passed: `1` file, `5` tests.
+- `pnpm typecheck` passed after the harness change.
+
+## Dream Machine Coverage Proof Receipt
+
+On 2026-06-10, the trusted local Dream relay proof started reporting required machine coverage explicitly instead of hiding machine identity inside `sourceId` strings.
+
+Decision:
+
+- A system Dream is not ready if it only covers the current local machine plus Cloudflare receipts.
+- The local relay proof now records `inventory.machineCoverage` for required machine ids: `blaine`, `panda`, `flagg`, and `cloudflare`.
+- Live Dream preflight fails `relay:local-proof` when any required machine is missing or has zero source/evidence count.
+- Relay provisioning preflight also rejects local proofs that are missing machine coverage, even if they pass raw-path/raw-credential and correlation checks.
+- This is a non-exposure proof fix. It does not create a tunnel, publish a relay URL, or expose JoelClaw/Typesense.
+
+Changed surfaces:
+
+- `scripts/trusted-local-dream-memory-relay-proof.ts` derives machine coverage from `dream.source-inventory.v1` source scopes and Cloudflare run sources, then writes the redacted `machineCoverage` list into `trusted.dream-memory-relay.local-proof.v1`.
+- `scripts/workflow-app-dream-preflight.ts` requires captured coverage for `blaine`, `panda`, `flagg`, and `cloudflare` before `relay:local-proof` can pass, and emits a specific required action for missing machine roots.
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` carries `machineCoverage`/`missingMachineIds` into the provisioning receipt and blocks approved provisioning when required machine evidence is missing.
+- `tests/integration/dream-live-preflight.test.ts` and `tests/integration/dream-relay-provisioning-preflight.test.ts` cover missing `panda`/`flagg` machine coverage.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof receipt: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T013853437Z`.
+- Machine coverage found: `blaine` captured with `5034` authority records from native Pi/Codex/Claude transcript roots; `cloudflare` captured with `126` authority records from workflow receipts.
+- Machine coverage missing: `panda`, `flagg`.
+- Other proof counts: `8` configured source roots, `9` inventory sources, `9` backfill actions, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `30` correlation nodes.
+- Live preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T01:39:55.413Z`, status `blocked`, `relayCapability.readiness.localProofStatus=failed`.
+- Live preflight required action now includes: `Add or provision trusted Dream source roots for missing machine coverage (panda, flagg) before exposing the relay to Cloudflare.`
+- Provisioning preflight receipt: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T01:39:55.735Z`, status `blocked`, `missingMachineIds=["panda","flagg"]`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T013956135Z-404c9d31`, with `preflight.refreshed=true`, `submit.attempted=false`, and blocked reasons including missing `panda`/`flagg` machine coverage.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `2` files, `14` tests.
+- `pnpm typecheck` passed before receipt regeneration.
+
+## Dream JoelClaw SSH Source Adapter Receipt
+
+On 2026-06-10, the trusted Dream relay gained a real JoelClaw session bridge source adapter for remote machine memory.
+
+Decision:
+
+- `panda` and `flagg` coverage is no longer represented as local placeholder roots.
+- The relay source config can now use `joelclaw+ssh://<machine>` authority roots, which inventory and search through `joelclaw sessions search --source ssh`.
+- This is a source adapter for the Dream memory cartridge, not a hard-coded Dream branch in the workflow runner.
+- Remote session search returns redacted receipts and cached redacted hydration records. It does not return raw transcript bodies, raw private paths, raw credentials, or SSH output paths.
+- The local proof query was tightened to `dream workflow` so the proof demonstrates remote retrieval from the task-relevant session corpus, not only remote reachability.
+- No relay tunnel or new network exposure was started.
+
+Changed surfaces:
+
+- `src/cartridges/dream-memory-fabric/trusted-joelclaw-session-source.ts` defines the generic `joelclaw+ssh` session source adapter and redaction contract.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-fabric.ts` inventories `joelclaw+ssh` roots as real authority evidence.
+- `src/cartridges/dream-memory-fabric/trusted-local-memory-retrieval.ts` searches remote session roots and hydrates cached redacted receipts.
+- `.wrangler/workflow-app/dream-relay/source-roots.json` now includes `panda` and `flagg` JoelClaw SSH source roots as ignored local relay config.
+- `scripts/trusted-local-dream-memory-relay-proof.ts` now uses the task-specific default query `dream workflow`.
+- `tests/integration/trusted-joelclaw-session-dream-memory-source.test.ts` proves inventory, search, redaction, and hydration without requiring live SSH in CI.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T015415861Z`.
+- Local proof receipt: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Query: `dream workflow`.
+- Machine coverage: `blaine` captured with `5034` authority records; `panda` captured with `1`; `flagg` captured with `4`; `cloudflare` captured with `130`.
+- Search proof: `12` search hits and `12` hydrated redacted receipts.
+- Hydrated source counts: `agent-transcripts` from `flagg` `2`, `agent-transcripts` from `panda` `1`, project Brain `3`, Cloudflare run receipts `3`, docs/pdf-brain API `3`.
+- Redaction proof: `rawPathLeaked=false`, `rawCredentialsReturned=false`, `rawPathsReturned=false`.
+- Live preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T01:54:30.007Z`, status `blocked`, `relay:local-proof=passed`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T015428375Z-df3ceb42`, with `preflight.refreshed=true` and `submit.attempted=false`.
+- Remaining blocked gates: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, and authenticated relay `/healthz`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/trusted-joelclaw-session-dream-memory-source.test.ts tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts` passed: `3` files, `4` tests.
+- `pnpm typecheck` passed after the adapter change.
+
+## Dream Relay Exact Sign-Off Gate Receipt
+
+On 2026-06-10, the Dream relay provisioning preflight stopped treating an approval reference as owner sign-off.
+
+Decision:
+
+- `approvalRef` is provenance only. It can point to where approval was recorded, but it cannot by itself approve relay exposure.
+- `approvalSignoff` must exactly equal `exposing JoelClaw/Typesense over a new network boundary` for the receipt to report `approval.status=approved`.
+- Non-matching sign-off text reports `approval.status=invalid`.
+- Missing sign-off text reports `approval.status=required`.
+- The preflight remains non-mutating. It does not start tunnels, create funnels, rotate secrets, edit Worker config, set Worker vars, deploy, or expose the relay.
+
+Changed surfaces:
+
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` now parses `--approval-signoff`, records `approval.signoffProvided`, and only reaches `ready-for-approved-provisioning` with the exact phrase.
+- `tests/integration/dream-relay-provisioning-preflight.test.ts` covers missing sign-off, `approvalRef` without sign-off, invalid sign-off, exact sign-off, missing local proof, stale proof, and missing machine coverage.
+
+Receipts:
+
+- Command: `pnpm app:dream:relay:provisioning-preflight`.
+- Receipt path: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`.
+- Receipt time: `2026-06-10T02:06:50.473Z`.
+- Status: `blocked`.
+- Approval status: `required`.
+- `signoffProvided=false`.
+- Local proof status: `passed`.
+- `missingMachineIds=[]`.
+- Remaining live checks: `env:DREAM_MEMORY_RELAY_BASE_URL`, `env:DREAM_MEMORY_RELAY_TOKEN`, `wrangler:DREAM_MEMORY_RELAY_BASE_URL`, and `relay:healthz`.
+- Available network tools: `ngrok`, `tailscale`; `cloudflared` unavailable.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `1` file, `7` tests.
+- `pnpm typecheck` passed after the sign-off gate change.
+
+## Dream Source-Family Coverage Receipt
+
+On 2026-06-10, the trusted local Dream relay proof started reporting required source-family coverage explicitly.
+
+Decision:
+
+- Required machine coverage is necessary but not enough. A Dream can cover `blaine`, `panda`, `flagg`, and Cloudflare while still failing to prove comms, support, repo-output, or people/org memory coverage.
+- `docs-pdf-brain` can be captured by hydrated API-backed evidence receipts even when the local filesystem docs artifact root has zero local authority records.
+- Missing source families should be explicit in receipts and recommended actions, but they should not be silently treated as local-proof failure when the run is intentionally proving current gaps before provisioning.
+- The preflight remains non-mutating. It does not create a tunnel, publish a relay URL, rotate secrets, or expose JoelClaw/Typesense over a new network boundary.
+
+Changed surfaces:
+
+- `scripts/trusted-local-dream-memory-relay-proof.ts` now writes `inventory.sourceFamilyCoverage` for every required Dream source family and counts hydrated evidence receipts when a family is proven through an API-backed source.
+- `scripts/workflow-app-dream-preflight.ts` rejects stale local relay proofs that omit required source-family coverage and reports explicitly missing families in the `relay:local-proof` message.
+- `scripts/workflow-app-dream-relay-provisioning-preflight.ts` carries `missingSourceFamilies` into the provisioning receipt and recommends scoped adapters or capability leases for missing families.
+- `tests/integration/dream-live-preflight.test.ts` and `tests/integration/dream-relay-provisioning-preflight.test.ts` cover missing explicit source-family coverage and explicit missing-family reporting.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T021559573Z`.
+- Local proof receipt: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Captured source families: `agent-transcripts`, `brain`, `cloudflare-runs`, and `docs-pdf-brain`.
+- Explicitly missing source families: `comms`, `people-org-memory`, `repo-outputs`, and `support`.
+- Hydrated docs/pdf-brain proof: `source:docs-pdf-brain:joelclaw-api` returned `3` redacted evidence receipts, so `docs-pdf-brain` is captured even though the local docs artifact root itself has no authority rows.
+- Machine coverage remains captured for all required machines: `blaine` `5034`, `panda` `1`, `flagg` `4`, Cloudflare `132`.
+- Live preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T02:16:48.345Z`, status `blocked`, `relay:local-proof=passed`.
+- Provisioning preflight receipt: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T02:16:08.629Z`, status `blocked`, `missingMachineIds=[]`, `missingSourceFamilies=["comms","people-org-memory","repo-outputs","support"]`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T021646948Z-5ec9f6b4`, with `preflight.refreshed=true` and `submit.attempted=false`.
+- Remaining live gates: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, and authenticated relay `/healthz`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `2` files, `17` tests.
+- `pnpm typecheck` passed after the source-family coverage change.
+- CodeRabbit review on the full uncommitted diff was refused because the dirty worktree contains `297` changed/untracked files and exceeds the `150` file limit. Narrowed CodeRabbit review for `scripts` raised `0` issues. Narrowed CodeRabbit review for `tests` raised `2` minor temp-directory cleanup issues; both were fixed in `tests/integration/dream-live-preflight.test.ts` and `tests/integration/dream-live-run-request.test.ts`.
+- Final validation after CodeRabbit fixes: `pnpm check`, `pnpm typecheck`, `pnpm typecheck:tsc`, `pnpm test:integration`, `pi-notes brain check`, `git diff --check`, and `pnpm verify:workspace` all passed.
+
+## Dream Repo-Output Source Coverage Receipt
+
+On 2026-06-10, `repo-outputs` moved from an explicit missing source family to a captured trusted relay source family.
+
+Decision:
+
+- Repo outputs are not Dream runner logic. They are a trusted relay source family loaded through the existing Dream cartridge source-root contract.
+- The local repo-output source root points at project output artifacts under `docs/` and is redacted like every other local authority root.
+- A missing repo-output derived index should be reported as recovery work, not hidden. Capturing the authority source is progress; making the derived view fresh is a separate backfill/capture-health task.
+- This did not expose the relay, start a tunnel, publish a relay URL, or hand Cloudflare raw local paths.
+
+Changed surfaces:
+
+- `.wrangler/workflow-app/dream-relay/source-roots.json` now includes `source:repo-outputs:pi-cloudflare-sandbox-workflows` with family `repo-outputs`, authority root `docs/`, and Markdown file matching.
+- `tests/integration/trusted-local-dream-memory-fabric.test.ts` covers a repo-output authority root with redacted locators and fresh derived view proof.
+- `tests/integration/trusted-local-dream-memory-relay-http.test.ts` covers the same family through the authenticated local HTTP relay route and readiness receipt.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T023146100Z`.
+- Source root count: `11`.
+- Captured source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`.
+- `repo-outputs` authority count: `13`.
+- Hydrated repo-output evidence: `2` redacted receipts from `source:repo-outputs:pi-cloudflare-sandbox-workflows`.
+- Explicitly missing source families: `comms`, `people-org-memory`, and `support`.
+- Provisioning preflight receipt: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T02:31:55.612Z`, status `blocked`, `missingMachineIds=[]`, `missingSourceFamilies=["comms","people-org-memory","support"]`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T023156055Z-8a231c26`, with `preflight.refreshed=true` and `submit.attempted=false`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts` passed: `2` files, `2` tests.
+
+## Dream Support Source Coverage Receipt
+
+On 2026-06-10, `support` moved from an explicit missing source family to a captured trusted relay source family.
+
+Decision:
+
+- Support coverage should start from read-only local support receipts, not live Front mutation or broad customer-data scraping.
+- The first support source root is AIHero's local Front snapshot receipt store under `.brain/data/aih-triage-ingest/front-snapshot`.
+- The source is marked `customer-private`. It proves authority/freshness to the trusted relay without exposing raw local paths to Cloudflare or publishing customer content.
+- A missing support derived index remains recovery work. Capturing the authority source is not the same as claiming the support retrieval index is fresh.
+- This did not expose the relay, start a tunnel, publish a relay URL, call live Front, send/archive/assign messages, or hand Cloudflare raw support data.
+
+Changed surfaces:
+
+- `.wrangler/workflow-app/dream-relay/source-roots.json` now includes `source:support:badass-courses:aihero-front-snapshot` with family `support`, privacy tier `customer-private`, and JSON/JSONL file matching.
+- `tests/integration/trusted-local-dream-memory-fabric.test.ts` covers a customer-private support source root with redacted locators and an honest missing-derived-index backfill action.
+- `tests/integration/trusted-local-dream-memory-relay-http.test.ts` covers the same support family through the authenticated local HTTP relay route and readiness receipt.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T023610149Z`.
+- Source root count: `12`.
+- Captured source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, `repo-outputs`, and `support`.
+- `support` authority count: `1523`.
+- Support source id: `source:support:badass-courses:aihero-front-snapshot`.
+- Explicitly missing source families: `comms` and `people-org-memory`.
+- Provisioning preflight receipt: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T02:36:19.139Z`, status `blocked`, `missingMachineIds=[]`, `missingSourceFamilies=["comms","people-org-memory"]`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T023619547Z-2ca8f9cb`, with `preflight.refreshed=true` and `submit.attempted=false`.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts` passed: `2` files, `2` tests.
+
+## Dream Comms And People/Org Coverage Receipt
+
+Superseded by the Dream/AIHero split receipt below. This receipt proved those local source roots can be represented safely through the relay, but they are no longer part of the active Dreamer readiness contract.
+
+On 2026-06-10, `comms` and `people-org-memory` moved from explicit missing source families to captured trusted relay source families.
+
+Decision:
+
+- Comms coverage should start from read-only local archives, not live Slack/Discord mutation or scraping private chat into public artifacts.
+- The first comms source root is AIHero's local internal comms archive under `data/internal-comms-archive`, matched as JSON/JSONL/Markdown/text. The SQLite file in that archive is deliberately not treated as a generic text source; it needs a dedicated adapter if/when the Dream cartridge reads it directly.
+- People/org memory starts from existing Brain-backed people and CRM dossiers: Dark Wizard people dossiers plus AIHero CRM resources.
+- These are trusted relay authority roots. They prove local coverage and backfill need; they do not mean Cloudflare has raw private paths, raw Slack payloads, customer data, or credentials.
+- This did not expose the relay, start a tunnel, publish a relay URL, call live Slack/Discord/Front/GitHub/Linear, or hand Cloudflare raw comms/customer/person data.
+
+Changed surfaces:
+
+- `.wrangler/workflow-app/dream-relay/source-roots.json` now includes `source:comms:badass-courses:aihero-internal-comms`, `source:people-org-memory:joelhooks:dark-wizard-people`, and `source:people-org-memory:badass-courses:aihero-crm`.
+- `tests/integration/trusted-local-dream-memory-fabric.test.ts` covers comms and people/org memory roots with redacted locators and honest missing-derived-index backfill actions.
+- `tests/integration/trusted-local-dream-memory-relay-http.test.ts` covers the same families through the authenticated local HTTP relay boundary and readiness receipt.
+
+Receipts:
+
+- Local proof command: `pnpm app:dream:relay:proof`.
+- Local proof run id: `run:dream-relay-local-proof:20260610T024254414Z`.
+- Source root count: `15`.
+- Captured source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `comms`, `docs-pdf-brain`, `people-org-memory`, `repo-outputs`, and `support`.
+- Explicitly missing source families: none.
+- `comms` authority count: `2577`, source id `source:comms:badass-courses:aihero-internal-comms`.
+- `people-org-memory` authority count: `22`, source ids `source:people-org-memory:joelhooks:dark-wizard-people` and `source:people-org-memory:badass-courses:aihero-crm`.
+- Machine coverage remains captured for all required machines: `blaine` `5034`, `panda` `1`, `flagg` `6`, Cloudflare `138`.
+- Safety flags remain clean: `rawCredentialsReturned=false`, `rawPathLeaked=false`, `rawPathsReturned=false`.
+- Search/hydration proof still hydrated `12` redacted receipts across `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`. Comms/people/support are inventory-proven but not hydrated by the default `dream workflow` proof query yet.
+- Live preflight receipt: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T02:44:35.171Z`, status `blocked`, `relay:local-proof=passed`.
+- Provisioning preflight receipt: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T02:44:39.609Z`, status `blocked`, `missingMachineIds=[]`, `missingSourceFamilies=[]`.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T024432757Z-bea485e6`, with `preflight.refreshed=true` and `submit.attempted=false`.
+- Remaining live gates: `DREAM_MEMORY_RELAY_BASE_URL`, `DREAM_MEMORY_RELAY_TOKEN`, Worker deploy config for `DREAM_MEMORY_RELAY_BASE_URL`, authenticated relay `/healthz`, and exact owner sign-off phrase before any new relay exposure.
+
+Validation receipts:
+
+- `pnpm exec vitest run tests/integration/trusted-local-dream-memory-fabric.test.ts tests/integration/trusted-local-dream-memory-relay-http.test.ts` passed: `2` files, `2` tests.
+- `pnpm app:dream:preflight` wrote the blocked receipt and exited `1`, as expected while relay URL/token/config/healthz are missing.
+- `pnpm app:dream:relay:provisioning-preflight` passed and wrote the blocked non-mutating provisioning receipt.
+
+## Dream Scope Clarification
+
+The active Dreamer goal is agent transcript review.
+
+AIHero support is a strong separate workflow candidate, but it should not be smuggled into Dreamer readiness. The active Dreamer relay proof now covers the transcript-review source set:
+
+- `agent-transcripts`
+- `brain`
+- `cloudflare-runs`
+- `docs-pdf-brain`
+- `repo-outputs`
+
+AIHero source roots were moved out of `.wrangler/workflow-app/dream-relay/source-roots.json` and saved as `.brain/data/workflow-candidates/aihero-support-sweep-source-roots.json`.
+
+Saved AIHero candidate roots:
+
+- `brain`: AIHero Support Brain.
+- `support`: AIHero Front snapshot receipts.
+- `comms`: AIHero internal comms archive.
+- `people-org-memory`: AIHero CRM resources.
+
+Decision:
+
+- Dreamer is a workflow cartridge for reviewing agent transcripts and the artifacts produced around those runs.
+- AIHero support sweep should become another workflow cartridge/source pack with its own capability leases, source policy, report shape, and HITL actions.
+- The generic relay and source-family types can support both workflows, but the Dreamer preflight must not require support/comms/CRM coverage.
+- Treat AIHero roots as installable/replacable source-pack data for a future workflow, not core runner logic and not Dream-specific branches.
+
+What remains for the Dreamer goal:
+
+- Approved relay boundary: exact owner sign-off phrase, HTTPS relay endpoint, Worker relay URL config, `DREAM_MEMORY_RELAY_TOKEN`, and authenticated `/healthz`.
+- Live Cloudflare proof: a generated task-specific XState machine, generated TypeScript/harness artifacts, hashes, Cloudflare event receipts, relay lease sidecars, and verifier proof that Cloudflare executed the generated artifacts.
+- T-shaped transcript retrieval proof: not just inventory coverage, but targeted search/hydration across runtimes, machines, horizons, Brain claims, repo outputs, docs, Cloudflare run artifacts, and prior reports.
+- HITL output: a Wzrrd Dream report using the canonical Tufte/MDSvX style with dreams first, proof below, generated state-machine diagram via D2, and actionable Three-R recommendations.
+- Refinement loop: accepted Dream findings update Brain/package/workflow/schema/capability artifacts and feed the next generated workflow.
+
+Scope check:
+
+- The definition of done is intentionally strict because it guards against fake deterministic Dreaming.
+- The first live Dream run does not need perfect adapters for every future source system. It does need honest coverage, missing-source language, capability leases, and proof that the workflow was dynamically generated and executed in Cloudflare.
+- Treat source packs as leased capabilities. Do not hardcode AIHero, support, comms, or Dream-specific branches into the core runner.
+
+## Dynamic Runtime Boundary
+
+Decision: the Dream cartridge is deterministic at the package contract level, but the Dream workflow runtime is not.
+
+The Dream cartridge may export typed, deterministic pieces:
+
+- source profile contract: `dream.source-profile.v1`
+- workflow-node exports: inventory, health, backfill plan/run, search, hydrate, correlate, refinement proposals, HITL report
+- relay endpoint contracts and redaction rules
+- package manifest metadata and trust policy
+
+Those pieces are the toolbox. They are not the run-specific workflow.
+
+The live Dream run still has to ask a planner lane to generate the task-specific `workflow.xstate-machine.v1` config and generated harness source from the source profile, current inventory, leases, and goal. The generated XState machine may choose order, branching, loops, parallelism, and future Think lanes when justified by the task. The verifier should prove effects and receipts, not rubber-stamp a canned node list.
+
+Implementation receipt:
+
+- `src/cartridges/dream-memory-fabric/source-profile.ts` now owns the Dream transcript-review source profile.
+- `scripts/workflow-app-dream-preflight.ts`, `scripts/workflow-app-dream-relay-provisioning-preflight.ts`, and `scripts/trusted-local-dream-memory-relay-proof.ts` read the Dreamer source-family/machine/runtime policy from that profile instead of duplicating constants.
+- `scripts/workflow-app-dream-run.ts` no longer says "Required Dream node order." It passes the source profile and node palette to the planner and explicitly allows generated order, branching, loops, parallelism, and Think lanes while keeping verifier-required outcomes.
+- `src/cartridges/dream-memory-fabric/package-seed.ts` exports `dream-transcript-review-source-profile` as package metadata so agents discover the profile from the cartridge, not from core runner lore.
+- `src/app/workflow-nodes/dream-generated-workflow-proof.ts` now verifies `plan:profile-effect-coverage` instead of the older `plan:all-dream-nodes` check. The proof records `effectCoverage.requiredEffects` from the installed source profile plus Dream output effects, and `effectCoverage.coveredEffects` from generated step declarations or known cartridge node mappings.
+- `tests/integration/workflow-app.test.ts` proves this is not a fixed phase list by removing the generated backfill-run step and letting the generated backfill-plan step declare both `backfill-plan` and `backfill-run` effects. That combined-effect plan verifies with `8` steps; the same shortened plan without the declared effect fails `plan:profile-effect-coverage`.
+
+Latest corrected receipts:
+
+- Local proof: `run:dream-relay-local-proof:20260610T031052440Z`, `10` source roots, `10` backfill action receipts, `12` search hits, `12` hydrated redacted receipts, `48` correlation edges, `missingSourceFamilies=[]`.
+- Captured Dreamer source families: `agent-transcripts`, `brain`, `cloudflare-runs`, `docs-pdf-brain`, and `repo-outputs`.
+- Worker deploy-only receipt: `.wrangler/workflow-app/latest-deploy-seed-receipt.json`, completed `2026-06-10T03:13:05.546Z`, Worker version `18fd4bf9-99d4-43b2-b7d3-b88e384f2d58`, package seed intentionally skipped.
+- Latest preflight: `.wrangler/workflow-app/dream-preflight/latest-dream-preflight.json`, generated `2026-06-10T03:13:22.721Z`, blocked on relay URL/token/config/healthz and stale remote Dream package manifest hash.
+- Dream cartridge hash after adding the source-profile export: expected `d6f2ca3f72c659f1d6c4e5b17ea6180432d50baec43a5220cf97986eb2f281d1`; remote D1 still reports `96d1539b18ddcb37ab238e612a823d39c4717a0bca89b901b8f7a7f3d8b07d4a`. Admin package seed could not be run because no local `WORKFLOW_APP_ADMIN_TOKEN` lease was available.
+- Latest provisioning preflight: `.wrangler/workflow-app/dream-relay/latest-provisioning-preflight.json`, checked `2026-06-10T03:13:21.214Z`, `missingMachineIds=[]`, `missingSourceFamilies=[]`, approval still required.
+- Latest blocked run request: `run-live-dream-memory-fabric-20260610T031321339Z-e42f731e`, `submit.attempted=false`. The request passes `joelhooks/dream-transcript-review` as source profile input and explicitly allows planner-selected order, branching, loops, parallelism, and Think lanes.
+
+Validation receipts after the dynamic runtime boundary correction:
+
+- `pnpm exec vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/dream-live-run-request.test.ts tests/integration/dream-live-preflight.test.ts tests/integration/dream-relay-provisioning-preflight.test.ts` passed: `4` files, `31` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pnpm test:integration` passed: `32` files, `157` tests.
+- `pnpm verify:workspace` passed.
+- `pi-notes brain check` passed: `16` Brain pages.
+- `git diff --check` passed.
+
+## Open Questions
+
+- Should QMD be installed and dogfooded as the first local Brain/transcript index, or should we implement the same collection/query shape against JoelClaw/Typesense first?
+- Should org dreams be separate scheduled runs per org/project, or one system dream with org-scoped subgraphs?
+- What is the default retention/expiry policy for Cloudflare-returned transcripts and observability packs?
+- Which Slack/GitHub/support scopes are allowed for a system dream versus a `badass-courses` org dream?
+- Does every node in the Joel Hooks system report to the same memory fabric, or do some nodes report only to project/org-local memories with rollup summaries?

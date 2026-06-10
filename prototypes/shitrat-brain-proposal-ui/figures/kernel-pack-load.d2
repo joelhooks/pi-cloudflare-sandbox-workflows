@@ -1,0 +1,74 @@
+direction: down
+
+Default: {
+  label: "badass-courses\nclaw-kernel"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Org: {
+  label: "Organization layer\nroles, defaults, packs"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Personal: {
+  label: "@joelhooks/shitrat-kernel\nidentity + writing law"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Intent: {
+  label: "Workflow intent\nsupport, research, repair"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Entitlement: {
+  label: "Allowed for\nthis actor?"
+  shape: diamond
+  style.fill: "#fffdf1"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Mount: {
+  label: "Mount only\nneeded packs"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Compile: {
+  label: "Compile prompt\nkernel + pack refs"
+  shape: rectangle
+  style.fill: "#fffff8"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Run: {
+  label: "Agent run\nreceipts + trace"
+  shape: rectangle
+  style.fill: "#f7f4ed"
+  style.stroke: "#111111"
+  style.stroke-width: 2
+}
+
+Default -> Org: "inherits"
+Org -> Personal: "overrides"
+Personal -> Intent: "starts job"
+Intent -> Entitlement: "asks for context"
+Entitlement -> Mount: "yes"
+Entitlement -> Intent: "needs approval"
+Mount -> Compile: "pins versions"
+Compile -> Run: "executes"

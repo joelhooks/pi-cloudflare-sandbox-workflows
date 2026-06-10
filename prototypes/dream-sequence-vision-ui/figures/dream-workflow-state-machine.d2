@@ -1,0 +1,100 @@
+direction: down
+
+classes: {
+  active: {
+    style.fill: "#e7f3f0"
+    style.stroke: "#0f766e"
+    style.stroke-width: 2
+  }
+  review: {
+    style.fill: "#fff7df"
+    style.stroke: "#9a6a00"
+    style.stroke-width: 2
+  }
+  terminal: {
+    style.fill: "#eeeeea"
+    style.stroke: "#111111"
+    style.stroke-width: 2
+  }
+  gated: {
+    style.fill: "#f6efe8"
+    style.stroke: "#8c8172"
+    style.stroke-dash: 4
+  }
+  gap: {
+    style.fill: "#f8e7e7"
+    style.stroke: "#9f1239"
+    style.stroke-width: 2
+  }
+}
+
+inventory: "SOURCE INVENTORY\nblaine / panda / flagg / Cloudflare\nBrain / docs / outputs / comms" {
+  class: active
+}
+
+health: "INGEST HEALTH\nfreshness / coverage / blind spots\nbackfill stale indexes, then fix capture" {
+  class: active
+}
+
+leases: "LEASE CAPABILITIES\nmemory / search / hydrate\nbackfill / report" {
+  class: review
+}
+
+plan: "GENERATE MACHINE\nplanner emits task-specific\nmachine + source + harness" {
+  class: review
+}
+
+proof: "HASH + VERIFY\nplanner transcript / artifacts\nhashes before execution" {
+  class: review
+}
+
+cloudflare: "CLOUDFLARE RUN\nexecute generated artifacts\nrecord event log + run id" {
+  class: active
+}
+
+wide: "WIDE TIMELINE\n24h / 7d / 30d / quarter / all-time\nPi / Codex / Claude / Cloudflare" {
+  class: active
+}
+
+deep: "DEEP GRAPH\nBrain / reports / packages\nrepeated corrections / promises" {
+  class: active
+}
+
+correlate: "CORRELATION GRAPH\njoin new behavior to old memory\nwith hydrated receipts" {
+  class: active
+}
+
+dreams: "DREAM ASSEMBLY\ndreams first: summary, reasoning,\nrating, recommendation" {
+  class: review
+}
+
+report: "HITL REPORT NODE\nTufte/MDSvX Wzrrd surface\nproof below the dreams" {
+  class: review
+}
+
+refine: "KERNEL / PACKAGE REFINEMENT\npackages / nodes / ports\nleases / schemas / report canon" {
+  class: terminal
+}
+
+block: "INVALID DREAM\nlocal-only / static branch table\nfalse coverage / missing run proof" {
+  class: gap
+}
+
+inventory -> health: "source map"
+health -> leases: "healthy enough"
+leases -> plan: "scoped access"
+plan -> proof: "generated artifacts"
+proof -> cloudflare: "verified inputs"
+cloudflare -> wide: "near + far lanes"
+cloudflare -> deep: "graph lanes"
+wide -> correlate: "timeline evidence"
+deep -> correlate: "memory evidence"
+correlate -> dreams: "candidate dreams"
+dreams -> report: "review surface"
+report -> refine: "accepted work"
+refine -> inventory: "next dream learns"
+health -> block: "no coverage proof"
+plan -> block: "if/else/switch or canned phases"
+cloudflare -> block: "missing run receipt"
+wide -> block: "recent-only"
+deep -> block: "unhydrated claims"

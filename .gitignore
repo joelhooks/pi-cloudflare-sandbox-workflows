@@ -7,7 +7,10 @@ dist/
 *.log
 .DS_Store
 .pi/
+.wzrrd/
 
 # Prototype outputs are kept only when captured intentionally.
 prototypes/**/out/
 prototypes/**/.tmp/
+prototypes/**/.svelte-kit/
+prototypes/**/build/
