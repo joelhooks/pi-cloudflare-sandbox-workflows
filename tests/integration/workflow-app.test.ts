@@ -3515,6 +3515,7 @@ describe("workflow app integration contract", () => {
       ),
       refinementSourceRefs: refinement.sourceRefs,
       reportDreamCount: report.dreamCount,
+      reportHitlDecisionContract: report.hitlDecisionContract,
       reportMdsvxIncludesAccessAdapter: report.mdsvx.includes(
         "## Access adapter shape"
       ),
@@ -3533,6 +3534,9 @@ describe("workflow app integration contract", () => {
       ),
       reportMdsvxIncludesGeneratedMachineSourceRef: report.mdsvx.includes(
         result.machineArtifact.sourceArtifactRef
+      ),
+      reportMdsvxIncludesHitlDecisionContract: report.mdsvx.includes(
+        "dream.hitl-decision.v1"
       ),
       reportMdsvxIncludesRefinement: report.mdsvx.includes(
         "Refinement proposals emitted: 7."
@@ -3990,6 +3994,24 @@ describe("workflow app integration contract", () => {
         dreamRefs.correlationRef,
       ],
       reportDreamCount: 3,
+      reportHitlDecisionContract: {
+        artifactPath: "dream/hitl-decision.json",
+        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
+        decisionSchemaVersion: "dream.hitl-decision.v1",
+        exportId: "dream-hitl-decision-schema",
+        nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
+        sourceRefs: [
+          dreamRefs.inventoryRef,
+          dreamRefs.healthRef,
+          dreamRefs.backfillRef,
+          dreamRefs.backfillRunRef,
+          dreamRefs.searchRef,
+          dreamRefs.hydrationRef,
+          dreamRefs.correlationRef,
+          dreamRefs.refinementRef,
+        ],
+        targetKinds: ["dream-card", "refinement-proposal"],
+      },
       reportMdsvxIncludesAccessAdapter: true,
       reportMdsvxIncludesD2: true,
       reportMdsvxIncludesDreamsFirst: true,
@@ -3997,6 +4019,7 @@ describe("workflow app integration contract", () => {
       reportMdsvxIncludesGeneratedHarnessRef: true,
       reportMdsvxIncludesGeneratedMachineRef: true,
       reportMdsvxIncludesGeneratedMachineSourceRef: true,
+      reportMdsvxIncludesHitlDecisionContract: true,
       reportMdsvxIncludesRefinement: true,
       reportMdsvxIncludesReportNode: true,
       reportMdsvxIncludesReportStandard: true,

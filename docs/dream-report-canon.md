@@ -126,6 +126,8 @@ dream.hitl-decision.v1
 
 Use this when Joel accepts, holds, rejects, or turns a dream/proposal into work. Do not bury acceptance inside report prose or a Slack reply.
 
+Every `dream.hitl-report.v1` JSON artifact must carry `hitlDecisionContract`. The contract points at the package schema export, suggested decision artifact path, valid decision target kinds, and which decisions must seed the next generated workflow. The MDSvX should also mention the decision contract in the "What to do" section so the human sees the call-to-action before the proof maze.
+
 Each decision records:
 
 ```txt

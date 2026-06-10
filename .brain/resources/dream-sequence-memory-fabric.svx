@@ -2019,6 +2019,33 @@ Validation:
 - `pnpm typecheck:tsc` passed.
 - `pi-notes brain check` passed: `17` Brain pages.
 
+## Dream Report HITL Decision Contract
+
+On 2026-06-10, the Dream HITL report started carrying the decision artifact contract directly.
+
+Decision:
+
+- The Wzrrd report remains review input, not the acceptance record.
+- The report JSON now carries `hitlDecisionContract`, pointing at `dream.hitl-decision.v1`.
+- The MDSvX report includes a "HITL decision receipt" subsection under "What to do with these dreams" so the human sees the next action before proof.
+- Accepted and `turn-into-work` decisions still have to become `dream.hitl-decision.v1` receipts with next-workflow seed constraints. The report does not silently mutate Brain/packages.
+
+Implementation receipt:
+
+- `src/app/workflow-nodes/dream-memory-fabric-schemas.ts` defines `DreamHitlDecisionContractSchema` and requires `DreamHitlReportDocumentSchema.hitlDecisionContract`.
+- `src/app/workflow-nodes/dream-memory-fabric.ts` writes `hitlDecisionContract` into `dream/hitl-report.json` and renders the contract into `dream/hitl-report.mdsvx`.
+- `docs/dream-report-canon.md` now requires every `dream.hitl-report.v1` JSON artifact to carry `hitlDecisionContract`.
+- `tests/integration/dream-memory-fabric-contract.test.ts` proves the report schema carries the decision contract.
+- `tests/integration/workflow-app.test.ts` proves the generated Dream report node emits the decision contract in JSON and MDSvX.
+
+Validation:
+
+- `pnpm vitest run tests/integration/dream-memory-fabric-contract.test.ts tests/integration/workflow-app.test.ts` passed: `2` files, `39` tests.
+- `pnpm check` passed.
+- `pnpm typecheck` passed.
+- `pnpm typecheck:tsc` passed.
+- `pi-notes brain check` passed: `17` Brain pages.
+
 ## Live Dream Run Attempt 2026-06-10T07:02:45Z
 
 Command: `pnpm app:dream:run -- --submit`.

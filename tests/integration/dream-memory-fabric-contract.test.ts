@@ -924,6 +924,23 @@ describe("Dream memory fabric domain contracts", () => {
       ],
       expiresIn: "24h",
       generatedAt: timestamp,
+      hitlDecisionContract: {
+        artifactPath: "dream/hitl-decision.json",
+        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
+        decisionSchemaVersion: "dream.hitl-decision.v1",
+        exportId: "dream-hitl-decision-schema",
+        nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
+        sourceRefs: [
+          "artifact://dream-preflight/run/dream/source-inventory.json",
+          "artifact://dream-preflight/run/dream/source-health.json",
+          "artifact://dream-preflight/run/dream/backfill-plan.json",
+          "artifact://dream-preflight/run/dream/backfill-run-receipt.json",
+          "artifact://dream-preflight/run/dream/memory-search.json",
+          "artifact://dream-preflight/run/dream/hydration.json",
+          "artifact://dream-preflight/run/dream/correlation-graph.json",
+        ],
+        targetKinds: ["dream-card", "refinement-proposal"],
+      },
       mdsvx:
         "# Dream review\n\n## Run context\n\n## The actual dreams\n\n## What to do with these dreams\n\n## Actionable line items\n\n## Proof\n\n```d2\nsource -> report\n```\n\n## Technical appendix",
       noindex: true,
@@ -1008,6 +1025,7 @@ describe("Dream memory fabric domain contracts", () => {
     });
 
     expect({
+      decisionContract: report.hitlDecisionContract,
       dreamCount: report.dreamCount,
       machineRef: report.proof.generatedArtifacts.machine.artifactRef,
       mdsvxHasD2: report.mdsvx.includes("```d2"),
@@ -1017,6 +1035,23 @@ describe("Dream memory fabric domain contracts", () => {
       stateMachineSourceKind: report.proof.stateMachineFigure.sourceKind,
       template: `${report.template.templateId}@${report.template.version}`,
     }).toStrictEqual({
+      decisionContract: {
+        artifactPath: "dream/hitl-decision.json",
+        contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
+        decisionSchemaVersion: "dream.hitl-decision.v1",
+        exportId: "dream-hitl-decision-schema",
+        nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
+        sourceRefs: [
+          "artifact://dream-preflight/run/dream/source-inventory.json",
+          "artifact://dream-preflight/run/dream/source-health.json",
+          "artifact://dream-preflight/run/dream/backfill-plan.json",
+          "artifact://dream-preflight/run/dream/backfill-run-receipt.json",
+          "artifact://dream-preflight/run/dream/memory-search.json",
+          "artifact://dream-preflight/run/dream/hydration.json",
+          "artifact://dream-preflight/run/dream/correlation-graph.json",
+        ],
+        targetKinds: ["dream-card", "refinement-proposal"],
+      },
       dreamCount: 1,
       machineRef:
         "artifact://dream-preflight/runs/run-dream-preflight/workflows/machine.config.json",

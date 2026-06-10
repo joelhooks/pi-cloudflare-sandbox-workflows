@@ -22,6 +22,7 @@ import {
   DreamBackfillRunReceiptDocumentSchema,
   DreamCaptureReceiptDocumentSchema,
   DreamCorrelationGraphDocumentSchema,
+  DreamHitlDecisionContractSchema,
   DreamHitlReportDocumentSchema,
   DreamHitlReportProofLevelSchema,
   DreamHydrationDocumentSchema,
@@ -48,6 +49,7 @@ import type {
   DreamBackfillRunReceiptDocument,
   DreamCaptureReceiptDocument,
   DreamCorrelationGraphDocument,
+  DreamHitlDecisionContract,
   DreamHitlDreamCard,
   DreamHitlReportDocument,
   DreamHitlReportProofLevel,
@@ -1611,10 +1613,24 @@ const runtimeCoverageSectionFor = (
   inventory: DreamSourceInventoryDocument
 ): string => inventory.runtimeCoverage.map(runtimeCoverageLineFor).join("\n");
 
+const hitlDecisionContractFor = (
+  sourceRefs: readonly ArtifactRef[]
+): DreamHitlDecisionContract =>
+  DreamHitlDecisionContractSchema.parse({
+    artifactPath: "dream/hitl-decision.json",
+    contractRef: "contract://workflow/dream-memory-fabric/hitl-decision.v1",
+    decisionSchemaVersion: "dream.hitl-decision.v1",
+    exportId: "dream-hitl-decision-schema",
+    nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
+    sourceRefs,
+    targetKinds: ["dream-card", "refinement-proposal"],
+  });
+
 const reportMdsvxFor = (input: {
   readonly backfill: DreamBackfillPlanDocument;
   readonly backfillRun: DreamBackfillRunReceiptDocument;
   readonly correlation: DreamCorrelationGraphDocument;
+  readonly hitlDecisionContract: DreamHitlDecisionContract;
   readonly dreamCount: number;
   readonly dreams: readonly DreamHitlDreamCard[];
   readonly health: DreamSourceHealthDocument;
@@ -1681,6 +1697,14 @@ const reportMdsvxFor = (input: {
     "Use this as HITL input, not autopilot. Accept a dream only when the receipt trail is good enough to update .brain, create a capture fix, or refine a workflow/package decision.",
     "",
     `Refinement proposals emitted: ${input.refinementProposals.length}. Accepted proposals should become Brain/package changes or constraints for the next generated workflow.`,
+    "",
+    "### HITL decision receipt",
+    "",
+    `Write human decisions as \`${input.hitlDecisionContract.decisionSchemaVersion}\` at \`${input.hitlDecisionContract.artifactPath}\`, backed by this report and its source refs.`,
+    "",
+    `Schema export: \`${input.hitlDecisionContract.exportId}\` from \`${input.hitlDecisionContract.contractRef}\`.`,
+    "",
+    `Decisions that must feed the next generated workflow seed: ${input.hitlDecisionContract.nextWorkflowSeedRequiredFor.join(", ")}.`,
     "",
     "## Actionable line items",
     "",
@@ -2166,6 +2190,19 @@ const executeHitlReportNode = async (
   });
   const receiptCount = uniqueReceiptCountFor(reportInputs.search);
   const stateMachineFigure = dreamReportStateMachineFigureFor(input.machine);
+  const sourceRefs = [
+    requiredRefs.inventoryRef,
+    requiredRefs.healthRef,
+    requiredRefs.backfillPlanRef,
+    requiredRefs.backfillRunRef,
+    requiredRefs.searchRef,
+    requiredRefs.hydrationRef,
+    requiredRefs.correlationRef,
+    ...(refs.refinementProposalRef === null
+      ? []
+      : [refs.refinementProposalRef]),
+  ];
+  const hitlDecisionContract = hitlDecisionContractFor(sourceRefs);
   const mdsvx = reportMdsvxFor({
     backfill: reportInputs.backfill,
     backfillRun: reportInputs.backfillRun,
@@ -2173,6 +2210,7 @@ const executeHitlReportNode = async (
     dreamCount: dreams.length,
     dreams,
     health: reportInputs.health,
+    hitlDecisionContract,
     hydration: reportInputs.hydration,
     inventory: reportInputs.inventory,
     plan: input.plan,
@@ -2188,6 +2226,7 @@ const executeHitlReportNode = async (
     dreams,
     expiresIn: "24h",
     generatedAt: new Date().toISOString(),
+    hitlDecisionContract,
     mdsvx,
     noindex: true,
     proof: {
@@ -2215,18 +2254,7 @@ const executeHitlReportNode = async (
     runId: input.plan.runId,
     schemaVersion: "dream.hitl-report.v1",
     sectionOrder: DREAM_HITL_REPORT_SECTION_ORDER,
-    sourceRefs: [
-      requiredRefs.inventoryRef,
-      requiredRefs.healthRef,
-      requiredRefs.backfillPlanRef,
-      requiredRefs.backfillRunRef,
-      requiredRefs.searchRef,
-      requiredRefs.hydrationRef,
-      requiredRefs.correlationRef,
-      ...(refs.refinementProposalRef === null
-        ? []
-        : [refs.refinementProposalRef]),
-    ],
+    sourceRefs,
     template: {
       defaultExpiresIn: "24h",
       format: "mdsvx",

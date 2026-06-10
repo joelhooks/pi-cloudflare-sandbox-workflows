@@ -950,11 +950,30 @@ export const DreamHitlDreamCardSchema = z.object({
   title: z.string().min(1),
 });
 
+export const DreamHitlDecisionContractSchema = z.object({
+  artifactPath: z.literal("dream/hitl-decision.json"),
+  contractRef: z.literal(
+    "contract://workflow/dream-memory-fabric/hitl-decision.v1"
+  ),
+  decisionSchemaVersion: z.literal("dream.hitl-decision.v1"),
+  exportId: z.literal("dream-hitl-decision-schema"),
+  nextWorkflowSeedRequiredFor: z.tuple([
+    z.literal("accept"),
+    z.literal("turn-into-work"),
+  ]),
+  sourceRefs: z.array(ArtifactRefSchema).min(1),
+  targetKinds: z.tuple([
+    z.literal("dream-card"),
+    z.literal("refinement-proposal"),
+  ]),
+});
+
 export const DreamHitlReportDocumentSchema = z.object({
   dreamCount: z.number().int().min(0),
   dreams: z.array(DreamHitlDreamCardSchema).default([]),
   expiresIn: z.literal("24h"),
   generatedAt: IsoDateTimeSchema,
+  hitlDecisionContract: DreamHitlDecisionContractSchema,
   mdsvx: z.string().min(1),
   noindex: z.literal(true),
   proof: z.object({
@@ -1203,6 +1222,9 @@ export type DreamHydrationDocument = z.infer<
   typeof DreamHydrationDocumentSchema
 >;
 export type DreamHitlDreamCard = z.infer<typeof DreamHitlDreamCardSchema>;
+export type DreamHitlDecisionContract = z.infer<
+  typeof DreamHitlDecisionContractSchema
+>;
 export type DreamHitlReportDocument = z.infer<
   typeof DreamHitlReportDocumentSchema
 >;
