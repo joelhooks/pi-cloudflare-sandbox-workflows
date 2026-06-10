@@ -368,6 +368,46 @@ Build the next dream sequence as a diagnostic workflow before making it more aut
 
 Success is not "more hits." Success is surprising, source-backed dreams that connect old memory to new behavior and tell Joel what to accept, hold, reject, or turn into work.
 
+## Dream Run Receipt — 2026-06-10
+
+Operator command intent: run a Dream without opening a new JoelClaw/Typesense relay network boundary.
+
+Completed proof:
+
+- `pnpm app:dream:relay:proof` completed local trusted relay proof `run:dream-relay-local-proof:20260610T033720376Z`.
+- Receipt: `.wrangler/workflow-app/dream-relay/latest-local-proof.json`.
+- Relay operations proved locally: `inventory`, `source-health`, `backfill-plan`, `backfill-run`, `search`, `hydrate`, and `correlate`.
+- Privacy checks passed: no raw path leak, no raw paths returned, and no raw credentials returned.
+- Inventory covered `10` configured source roots.
+- Runtime inventory coverage: Pi `4737`, Codex `259`, Claude `129`, Cloudflare `147`.
+- Machine inventory coverage: `blaine` `5125`, `panda` `1`, `flagg` `6`, Cloudflare `147`.
+- Source family inventory coverage: agent transcripts `5132`, Brain `19`, Cloudflare runs `147`, docs/pdf-brain `2`, repo outputs `13`.
+- Search/hydration proof: `12` hits, `12` hydrated receipts, source-family hydration across agent transcripts, Brain, Cloudflare runs, docs/pdf-brain, and repo outputs.
+- Correlation proof: `35` nodes and `48` edges.
+
+Important limitation:
+
+- This proof is a trusted local relay/memory-fabric proof. It is useful evidence that the Dream cartridge adapters can inventory, search, hydrate, and correlate T-shaped memory sources without leaking raw local authority.
+- It is not a valid full Dream run by the project definition of done. It did not execute a generated XState Dream workflow in Cloudflare and did not publish a Dream HITL Wzrrd report.
+
+Live Cloudflare Dream attempt:
+
+- `pnpm app:dream:run --submit` prepared run `run-live-dream-memory-fabric-20260610T033720460Z-6bda3e72`.
+- Receipt: `.wrangler/workflow-app/dream-runs/run-live-dream-memory-fabric-20260610T033720460Z-6bda3e72-receipt.json`.
+- Status: `blocked`.
+- `submit.attempted=false`; the live Worker was not called.
+- Preflight was refreshed at `2026-06-10T03:37:22.073Z`.
+
+Blocking gates:
+
+- Set `DREAM_MEMORY_RELAY_BASE_URL` for the trusted memory relay endpoint.
+- Provision `DREAM_MEMORY_RELAY_TOKEN` as a Worker secret for the trusted memory relay.
+- Add `DREAM_MEMORY_RELAY_BASE_URL` to Worker deploy configuration or deploy-time vars.
+- Start or provision the trusted Dream memory relay and verify authenticated `/healthz`.
+- Re-seed `workflow/dream-memory-fabric` so the remote artifact ref and manifest hash match the current Dream cartridge manifest, including `joelclaw.dream.backfill-run`, `joelclaw.dream.correlate`, `joelclaw.dream.refinement-proposals`, and `joelclaw.dream.hitl-report`.
+
+Do not phrase the 2026-06-10 receipt as "the Dreamer ran" unless the context explicitly means the local relay proof. The honest status is: local Dream memory proof completed; live generated Cloudflare Dream remains blocked on relay exposure/config and package re-seed.
+
 ## Wzrrd Report Receipt
 
 On 2026-06-09, the Dreaming vision was rendered as a Wzrrd/Tufte review surface:
