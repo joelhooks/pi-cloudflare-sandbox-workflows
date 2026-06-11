@@ -23,6 +23,7 @@ import type {
   WorkflowDebuggerAttachDocument,
   WorkflowEventStreamDocument,
 } from "../domain/schemas.ts";
+import { timingSafeSecretMatch } from "../domain/secret-compare.ts";
 import {
   createCloudflareDiscordBotTokenResolver,
   createCloudflareDiscordMessageAdapter,
@@ -259,27 +260,6 @@ const bearerToken = (request: Request): null | string => {
   }
 
   return authorization.slice(prefix.length);
-};
-
-const sha256Bytes = async (value: string): Promise<Uint8Array> =>
-  new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
-  );
-
-const timingSafeSecretMatch = async (input: {
-  readonly actual: string;
-  readonly expected: string;
-}): Promise<boolean> => {
-  const [actualHash, expectedHash] = await Promise.all([
-    sha256Bytes(input.actual),
-    sha256Bytes(input.expected),
-  ]);
-  let mismatch = actualHash.length === expectedHash.length ? 0 : 1;
-  for (const [index, actualByte] of actualHash.entries()) {
-    mismatch += actualByte === (expectedHash[index] ?? -1) ? 0 : 1;
-  }
-
-  return mismatch === 0;
 };
 
 const createFrontDoorFromEnv = (env: unknown): WorkerFrontDoorContract => {

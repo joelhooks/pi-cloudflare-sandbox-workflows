@@ -5,6 +5,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import { IsoDateTimeSchema } from "../../app/domain/schemas.ts";
+import { timingSafeSecretMatch } from "../../app/domain/secret-compare.ts";
 import {
   MemoryPrivacyTierSchema,
   MemoryRuntimeSchema,
@@ -297,16 +298,21 @@ export const trustedLocalMemoryRelayReadinessReceipt = (input: {
     ],
   });
 
-const healthResponse = (input: {
+const healthResponse = async (input: {
   readonly config: TrustedLocalMemoryRelayHttpConfig;
   readonly request: Request;
-}): Response => {
+}): Promise<Response> => {
   const token = authorizationToken(input.request);
   if (token === null) {
     return jsonError(401, "missing_auth", "Missing relay bearer token.");
   }
 
-  if (token !== input.config.expectedBearerToken) {
+  if (
+    !(await timingSafeSecretMatch({
+      actual: token,
+      expected: input.config.expectedBearerToken,
+    }))
+  ) {
     return jsonError(403, "secret_denied", "Invalid relay bearer token.");
   }
 
@@ -348,7 +354,7 @@ export const createTrustedLocalMemoryRelayFetchHandler = (
   return (request) => {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/healthz") {
-      return Promise.resolve(healthResponse({ config, request }));
+      return healthResponse({ config, request });
     }
 
     return handleTrustedMemoryRelayRequest({

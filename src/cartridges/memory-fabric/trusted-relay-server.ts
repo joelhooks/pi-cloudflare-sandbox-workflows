@@ -2,6 +2,7 @@
 
 import type { z } from "zod";
 
+import { timingSafeSecretMatch } from "../../app/domain/secret-compare.ts";
 import type { MemoryRelayOperation } from "../../app/domain/source-profile.ts";
 import { memoryRelayEndpointCatalog } from "./cloudflare-relay.ts";
 import {
@@ -320,7 +321,12 @@ export const handleTrustedMemoryRelayRequest = async (
     return jsonError(401, "missing_auth", "Missing relay bearer token.");
   }
 
-  if (token !== input.config.expectedBearerToken) {
+  if (
+    !(await timingSafeSecretMatch({
+      actual: token,
+      expected: input.config.expectedBearerToken,
+    }))
+  ) {
     return jsonError(403, "secret_denied", "Invalid relay bearer token.");
   }
 
