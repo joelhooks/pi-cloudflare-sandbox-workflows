@@ -1,0 +1,47 @@
+---
+title: "Durable Run Execution: DO-Driven, Alarm-Continued, Resumable"
+type: "decision"
+status: "accepted"
+created_at: "2026-06-10"
+tags:
+  - decision
+  - durability
+  - durable-objects
+  - xstate
+  - workflow-app
+---
+
+# Durable Run Execution: DO-Driven, Alarm-Continued, Resumable
+
+## Context
+
+The production spine executes an entire multi-lane run synchronously inside one `POST /runs` fetch: an in-memory XState actor (`createActor` at `workflow-app.ts:1252`), no `getPersistedSnapshot`, zero `alarm()` in `src/app`, no queue or Workflows binding. Isolate eviction mid-run leaves the D1 run row non-terminal forever, lane slots leaked, leases issued — the deep-review concurrency/durability critical (`.brain/resources/deep-review-2026-06-09.svx`). The first live dream (Pilot 001) ran an 11-node generated machine; a full walk across that many sandbox + relay round trips inside one 10-minute Worker fetch is the structural risk.
+
+Three of four ingredients for durable execution already exist and only need wiring: the XState safety-envelope machine, a state-persisting Durable Object (the capsule supervisor, today only an admission ledger), immutable hash-pinned step artifacts in Cloudflare Artifacts, and idempotent step-scoped capability leases (shipped M0).
+
+## Decision
+
+**Execution model: the Durable Object drives the run, not Cloudflare Workflows.** Rejected CF Workflows because it adds a second durable-execution machine on top of the XState envelope that is already *the* model — driving an XState actor inside a Workflows step loop complects two state abstractions. The DO-driver keeps one machine model and reuses the supervisor DO already built.
+
+**Resume driver: `alarm()` self-continuation.** After each generated-machine step the DO persists `getPersistedSnapshot()` + `completedStepIds` + last output refs to `ctx.storage`, then sets `alarm(now)` to run the next step in a fresh invocation. Crash mid-step → the still-scheduled alarm refires → rehydrate and continue. Each step gets a fresh CPU/wall-clock budget, so the 10-minute ceiling resets per step instead of bounding the whole run. No external poker.
+
+**Skip check on resume: `completedStepIds` + output-ref existence (two-factor).** A step is already-done if its id is in the persisted set AND its output artifact ref resolves in Artifacts (content-addressed, immutable). The set is the fast path; the ref is the truth. A step that half-fired before the crash re-runs safely because capability side effects are idempotent via step-scoped leases and Artifacts commits are no-ops by hash. One uniform contract across all node types — no per-node predicates to drift.
+
+**Submit contract: `202 Accepted` + `runId`, caller polls status.** `POST /runs` validates, creates the run in the DO, returns 202 + runId immediately; the caller polls `GET /runs/:runId/status` until terminal. Honest match to the async model; the page already has an events/status read surface; babysitting becomes watching the poll, not holding a connection open.
+
+**Scope: all four durability steps ship before the next live M3 run.** Durable foundation first, then the dream walks on solid ground.
+
+## Build order (each independently valuable)
+
+1. **Reaper** — DO alarm marks any run stuck in a non-terminal state past `WORKFLOW_APP_TIMEOUT_MS` as `failed` and releases its admission slot. Kills wedge-forever / slot-leak.
+2. **Checkpoint** — persist XState persisted snapshot + `completedStepIds` + output refs after each step to DO storage. Run becomes inspectable and resumable-in-principle.
+3. **Resume** — alarm-driven rehydrate-and-continue with the two-factor skip check. Crosses from "doesn't lose state" to "survives eviction."
+4. **DO driver + async contract** — run lives entirely in the DO; `POST /runs` is enqueue-and-return-202; status by poll. Run never lives in a request fetch.
+
+## Consequences
+
+- The capsule supervisor DO (or a sibling run-driver DO) gains an `alarm()` handler and a run-step storage schema; this is the first `alarm()` in `src/app`.
+- The reaper makes a babysat M3 full-walk safe-to-attempt; resume makes unattended/scheduled dreams possible (M4-era, still gated by VISION's no-cron-yet rule).
+- The XState actor must use `getPersistedSnapshot()`/snapshot restore; the generated-machine actor and the envelope actor both need persist/rehydrate.
+- The two-factor skip check depends on every node writing a resolvable output ref; nodes that today produce no output ref need one (even a marker) to be skippable.
+- This precedes the planner-leash fix and the M3 completion in sequence. See [[dreamer-first-run]].

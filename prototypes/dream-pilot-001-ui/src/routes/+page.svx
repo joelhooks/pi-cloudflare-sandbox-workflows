@@ -1,0 +1,194 @@
+<script lang="ts">
+  import FlowChart from "$lib/flow-chart.svelte";
+  import MarginNote from "$lib/margin-note.svelte";
+  import PatternCards from "$lib/pattern-cards.svelte";
+  import ReportLayout from "$lib/ReportLayout.svelte";
+  import StatLine from "$lib/stat-line.svelte";
+
+  const proofItems = [
+    {
+      receipts: [{ href: "#machine", label: "machineHash e55e85e5" }],
+      title: "A planner lane generated a real XState machine",
+      why: "The pi-planner-lane produced workflow.xstate-machine.v1 and committed it to the per-run Artifacts repo. Machine config hash e55e85e5, rendered source hash d101ca31. This is a generated machine, not a static theme library.",
+    },
+    {
+      receipts: [{ href: "#machine", label: "planHash 892804a3" }],
+      title: "The plan bound steps to packages and was pinned before execution",
+      why: "workflow.dynamic-plan.v1 hashed 892804a3, loaded and re-verified against its hash before the first step ran. Execution reads the pinned plan; it cannot float.",
+    },
+    {
+      receipts: [{ href: "#machine", label: "verificationContractHash 3899cbb1" }],
+      title: "A verification contract and harness were pinned too",
+      why: "Harness hash fca987b5, verification contract hash 3899cbb1. The envelope had everything it needed to verify effects after execution. It never got there, because execution blocked first.",
+    },
+    {
+      receipts: [{ href: "#blocked", label: "node 2 schema rejection" }],
+      title: "The envelope blocked a non-conformant node instead of running it",
+      why: "Step 2's generated payload failed the cartridge node schema: query was undefined, signalKinds[3] was outside the allowed enum. The deterministic envelope refused it and went to blocked. The stochastic planner missed; the safety wall held.",
+    },
+  ];
+
+  const designPoints = [
+    {
+      receipts: [{ href: "#architecture", label: "front door" }],
+      title: "Secrets never reach the lanes",
+      why: "The Worker holds tokens. Sandbox lanes get payload-bound capability leases from the broker, never raw credentials. JoelClaw and Typesense stay behind a trusted relay on a tunnel; Cloudflare never sees the index directly.",
+    },
+    {
+      receipts: [{ href: "#machine", label: "safety envelope" }],
+      title: "Stochastic dream, deterministic envelope",
+      why: "The planner is free to design the run-specific machine: order, branching, loops, lanes. The 19-state safety envelope around it is fixed: pin, lease, execute, verify, record, review. Creativity inside a hard shell.",
+    },
+    {
+      receipts: [{ href: "#architecture", label: "Artifacts" }],
+      title: "Every step leaves a hash-pinned receipt",
+      why: "Machine, plan, harness, verification contract, and each lane output commit to a per-run Cloudflare Artifacts git repo. The run is reconstructable from commits and hashes, not vibes.",
+    },
+    {
+      receipts: [{ href: "#substrate", label: "JoelClaw index" }],
+      title: "One index, not per-machine file walking",
+      why: "Transcripts come from the JoelClaw Typesense index: blaine, panda, flagg in one place. Cross-machine coverage is the index's job; the Dreamer reads, correlates, and proposes.",
+    },
+  ];
+</script>
+
+<svelte:head>
+  <title>Dream Pilot 001</title>
+  <meta
+    name="description"
+    content="First live run of the generative Dreamer workflow: a planner-generated XState machine executing in Cloudflare behind a deterministic safety envelope, reading agent transcripts through a leased trusted relay."
+  />
+  <meta property="og:title" content="Dream Pilot 001" />
+  <meta
+    property="og:description"
+    content="The spine proved end to end: capsule, package pinning, a generated XState machine, hash-pinned plan, and lane execution behind capability leases. The run blocked where it should."
+  />
+  <meta property="og:image" content="/og.svg" />
+  <meta property="og:image:type" content="image/svg+xml" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="/og.svg" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap"
+    rel="stylesheet"
+  />
+</svelte:head>
+
+<ReportLayout>
+
+<p class="eyebrow"><span class="mascot" aria-hidden="true">🌀</span> Dream Pilot 001</p>
+
+# The spine works. The planner needs a leash.
+
+<p class="lead">This is the first live run of the generative Dreamer. It is not a report full of dreams. It is proof that the machine that produces dreams is real. A planner lane generated an XState workflow machine, the system pinned it by hash, leased the capabilities, and started executing lanes in a Cloudflare sandbox against the JoelClaw index through a trusted relay.</p>
+
+<p class="lead">It blocked on the second node, and that is the good news. The stochastic planner emitted a node payload that did not match the cartridge schema. The deterministic safety envelope refused it and stopped. Nothing ran on a malformed plan. That is the entire thesis of this system working on its first real outing: <strong>let the dream wander, never let it skip the wall.</strong><MarginNote id="privacy-boundary" number="1">This page omits raw transcript text, local session paths, secret refs, and token-bearing URLs. The relay returns redacted receipts only; the canonical artifacts stay in the per-run Cloudflare Artifacts repo.</MarginNote></p>
+
+<StatLine
+  items={[
+    { label: "Run", value: "run-live-...002529151Z-6e5b0d80" },
+    { label: "Worker", value: "626a5ceb" },
+    { label: "Planner", value: "pi-planner-lane" },
+    { label: "Result", value: "blocked at node 2" },
+  ]}
+/>
+
+<h2 id="architecture">The system design</h2>
+
+The operator submits one request. The Worker front door authenticates it, the deterministic safety envelope drives the run, a planner lane designs the run-specific machine, and worker lanes execute it inside sandboxes. Secrets stay on the Worker; lanes get payload-bound capability leases. Memory comes from the JoelClaw index through a trusted relay on a tunnel, so Cloudflare never touches Typesense directly.
+
+<FlowChart
+  alt="System architecture: operator submits to the Cloudflare Worker front door, which drives a deterministic safety envelope. The envelope pins packages from the registry, asks a planner lane to generate the machine and plan committed to Cloudflare Artifacts, then executes worker lanes that request capability leases from the broker and call the trusted memory relay, which queries the local JoelClaw Typesense index and returns redacted hits. Outputs commit to Artifacts; a leased Wzrrd publish renders the review surface."
+  caption="Secrets stay on the Worker. Lanes receive payload-bound leases, never raw credentials. The JoelClaw index sits behind a trusted relay on a cloudflared tunnel; Cloudflare never holds Typesense access directly."
+  src="/figures/system-architecture.svg"
+  title="Generative Dreamer system architecture"
+  version="pilot-001"
+/>
+
+<PatternCards items={designPoints} label="System design" />
+
+<h2 id="machine">The state machine</h2>
+
+The safety envelope is a fixed 19-state XState machine. It does not change per run. Every dynamic step the planner invents executes inside this shell, and every state has exactly one escape to `blocked` if a capability check, hash check, or schema check fails. This run walked the green path through `executingDynamicWorkflow`, ran one step, then took the `BLOCK` edge.
+
+<FlowChart
+  alt="The 19-state deterministic safety envelope state machine. The walked path is highlighted in green: received, resolvingCapsule, discoveringPackageMetadata, checkingEntitlements, pinningPackages, planningDynamicWorkflow, pinningPlanArtifact, loadingPinnedDynamicWorkflow, executingDynamicWorkflow. From executingDynamicWorkflow a red BLOCK edge leads to the terminal blocked state. The unwalked verify, receipt, and review-delivery states are shown dashed, leading to the terminal captured state."
+  caption="Green is the path this run walked. The dashed states (verify, record receipts, summarize review, deliver) are where a clean run continues to captured. This run took the red BLOCK edge out of executingDynamicWorkflow."
+  src="/figures/safety-envelope-machine.svg"
+  title="Deterministic safety envelope (run path highlighted)"
+  version="pilot-001"
+/>
+
+<p>Worth stating plainly: the planner's <em>generated</em> machine is a separate, per-run artifact that lives inside the <code>executingDynamicWorkflow</code> state. The envelope above is the part that never changes. The generated machine is the part that is allowed to be different every single run.<MarginNote id="two-machines" number="2">Two machines, one run. The envelope is deterministic and hand-authored. The dream machine is stochastic and planner-generated, pinned by hash <code>e55e85e5</code> before a single step executes.</MarginNote></p>
+
+<h3 id="generated">The machine the planner actually generated</h3>
+
+This is the real thing, pulled from the per-run Artifacts repo: an eleven-step machine the `pi-planner-lane` invented for this dream, then committed and hashed before execution. It is a linear `STEP_DONE` chain with a `STEP_BLOCKED` escape from every step to `blocked`. The planner chose this order; nobody wrote it by hand. The run completed `captureRun`, then `mineSignals` hit `STEP_BLOCKED` on the bad config.
+
+<FlowChart
+  alt="The generated dream workflow machine: ready, captureRun done, mineSignals blocked, then searchMemory, hydrateReceipts, correlateEvidence, proposeRefinements, renderHitlReport, captureReportArtifact, seedHitlDecisionWorkflow, draftFollowUpRunRequest, reviewSummary as pending states, ending at terminal done. Every step has a STEP_BLOCKED edge to blocked; mineSignals took it this run."
+  caption="Eleven planner-generated steps: capture, mine signals, search, hydrate, correlate, propose, render report, capture artifact, seed decision, draft follow-up, review. The run finished captureRun and blocked at mineSignals. Pinned by machine hash e55e85e5 before execution."
+  src="/figures/generated-dream-machine.svg"
+  title="Generated dream machine (workflow.xstate-machine.v1, this run)"
+  version="pilot-001"
+/>
+
+<p>That is the whole point on one page: the tall machine above is the wall, identical every run; this machine is the dream, different every run. The planner got nine of eleven step shapes right and missed one enum value on the second, caught, not executed.<MarginNote id="planner-miss" number="3">The miss: <code>signalKinds</code> contained <code>"workflow"</code> instead of <code>"workflow-pattern"</code>, and <code>query</code> was omitted. The fix is a planner leash plus a schema default, already diagnosed and queued for the next run.</MarginNote></p>
+
+<h2 id="proof">What this run actually proved</h2>
+
+The honest proof level for this run is **a real generated XState machine, pinned and partially executed behind capability leases** — the exact claim the earlier conceptual review said it could not yet make. The receipts exist now.
+
+<PatternCards items={proofItems} label="Generated workflow proof" />
+
+The pinned artifacts, by hash:
+
+| Artifact | Hash |
+| --- | --- |
+| Generated machine config | `e55e85e5...c16bbb` |
+| Generated machine source | `d101ca31...3d7b83` |
+| Dynamic plan | `892804a3...1b9a4f` |
+| Execution harness | `fca987b5...51e96e` |
+| Verification contract | `3899cbb1...31ac8d` |
+
+The run walked nine envelope states, pinned three packages (`badass-courses/claw-kernel`, `joelhooks/configured-familiar-kernel`, `workflow/memory-fabric`), and executed one real lane step (`joelclaw.memory.capture-run`) before the second node was rejected.
+
+<h3 id="blocked">Why it blocked</h3>
+
+The planner generated a signals node whose payload failed the cartridge schema in two ways:
+
+```txt
+query: expected string, received undefined
+signalKinds[3]: not one of
+  agent-failure | correction | decision | friction | preference | workflow-pattern
+```
+
+This is the planner — a language model — guessing the node shape and getting it slightly wrong. The fix is a leash on the planner, not a change to the wall: tighten the prompt to enumerate the exact `signalKinds` and require `query`, and give the node schema a default `query` from the profile plus a filter on unknown `signalKinds`. Either way the envelope behaved correctly: it refused to execute a malformed step.
+
+<h2 id="substrate">Run coverage</h2>
+
+Transcripts come from the JoelClaw Typesense index, reached through the trusted relay over a cloudflared tunnel with a timing-safe bearer check. The index is real and cross-machine, though uneven — worth stating in every early dream until ingest is fixed.
+
+| Machine | Indexed runs | Note |
+| --- | ---: | --- |
+| blaine | 12,285 | current, minutes-fresh |
+| panda | 1,187 | index stale since 2026-05-20 |
+| flagg | 711 | yesterday; codex/claude capture thin |
+
+<MarginNote id="ingest" number="4">About 12,000 capture payloads sit in dead-letter across machines with no replay command. First dreams will be blaine-heavy. Fixing JoelClaw ingest is the highest-leverage move for dream quality, and it is JoelClaw's job, not the Dreamer's.</MarginNote>
+
+<h2 id="next">What did not happen, and what is next</h2>
+
+No dreams were produced. No memory was read past the first lane. No kernel proposal exists yet. No Wzrrd page was published by the workflow itself — this page was rendered by hand from the run receipts to show the system design and the state machine, exactly as asked.
+
+The next run needs the planner leash. After that, the same spine should walk all the way to `captured`: lanes search and hydrate the index, the verifier checks effects against the pinned contract, and the workflow renders its own version of this page, with actual dreams in it.
+
+<footer>
+Source template: <code>joel/tufte-mdsvx@0.1.0</code>. Build source: <code>prototypes/dream-pilot-001-ui</code>. Run: <code>run-live-20260611T002529151Z-6e5b0d80</code>, Worker version <code>626a5ceb</code>. Figures rendered from D2 via <code>@terrastruct/d2</code>. Published page is an expiring review surface, not the canonical artifact.
+</footer>
+
+</ReportLayout>

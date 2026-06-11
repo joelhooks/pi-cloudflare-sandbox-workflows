@@ -74,7 +74,15 @@ Remaining should-fixes for the next batch (integrity hardening, none block a bab
 
 Receipts: green provisioning preflight, green `pnpm app:dream:preflight`.
 
-### M3 — First on-demand Dreamer run
+### M2.5 — Durable run execution (decided 2026-06-10, blocks the next live run)
+
+Decision in `.brain/resources/decisions/durable-run-execution.svx`. Joel chose full durability before the next M3 walk. Four steps, in order: (1) reaper — DO alarm marks stuck runs failed past timeout, frees the slot; (2) checkpoint — persist XState snapshot + completedStepIds + output refs after each step; (3) resume — alarm() self-continuation with two-factor skip check (completedStepIds + output-ref existence); (4) DO driver + async contract — POST /runs returns 202 + runId, caller polls GET /runs/:runId/status. Model: DO drives the run, not Cloudflare Workflows (one machine abstraction, reuse the supervisor DO). First alarm() in src/app. Leans on M0's idempotent step-scoped leases + content-addressed Artifacts so resume never double-fires.
+
+Pilot 001 receipts (2026-06-10, run-live-…6e5b0d80): the spine walked nine envelope states, pinned 3 packages, generated a real 11-node XState machine (hash e55e85e5, plan 892804a3, harness fca987b5, verification contract 3899cbb1), executed node 1 (capture-run), blocked node 2 (mineSignals) on a planner-conformance miss — signalKinds had "workflow" not "workflow-pattern", query omitted. Page: https://dream-pilot-001.wzrrd.sh/. The envelope refused the malformed node — safety thesis proven live.
+
+Planner leash (queued, follows M2.5): in src/cartridges/memory-fabric/workflow-node-adapter.ts give MemorySignalsNodeConfigSchema.query and MemorySearchNodeConfigSchema.query a default from the profile defaultQuery, filter signalKinds to valid enum values; add a stochasticNotes line in source-profile.ts enumerating the per-node config contract.
+
+### M3 — First on-demand Dreamer run (in progress — first run done, blocked at node 2)
 
 1. `pnpm app:dream:run`: planner generates the machine (order/branching/loops/parallelism allowed), envelope pins and verifies effect coverage, lanes execute in Cloudflare sandboxes against the bridge.
 2. Babysit it: the run currently executes inside one Worker fetch with no resume path (known deep-review critical); a silent death is expected-possible until durable execution lands.

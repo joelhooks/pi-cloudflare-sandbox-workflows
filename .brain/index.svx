@@ -11,6 +11,7 @@ updated: 2026-06-10
 - [Decision: Dreamer transcript substrate = JoelClaw index](./resources/decisions/dreamer-transcript-substrate)
 - [Decision: kernel package overlays, Artifacts-git source of truth](./resources/decisions/kernel-package-overlays)
 - [Decision: Dreamer scope = read + correlate + propose](./resources/decisions/dreamer-scope-read-propose)
+- [Decision: durable run execution (DO-driven, alarm-continued)](./resources/decisions/durable-run-execution)
 - [Deep review 2026-06-09 (52 findings)](./resources/deep-review-2026-06-09)
 - [JoelClaw Research Swarm Spike](./projects/joelclaw-research-swarm-spike)
 - [ShitRat Dream Workflow Spike](./projects/shitrat-dream-workflow-spike)

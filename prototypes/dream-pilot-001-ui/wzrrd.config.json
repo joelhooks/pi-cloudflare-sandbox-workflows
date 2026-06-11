@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wzrrd.sh/schema/config.json",
+  "favicon": {
+    "emoji": "\ud83e\udde0"
+  },
+  "site": {
+    "emoji": "\ud83e\udde0",
+    "slug": "dream-pilot-001",
+    "theme": "tufte-notes",
+    "title": "Dream Pilot 001"
+  },
+  "template": {
+    "id": "joel/tufte-mdsvx",
+    "source": "local-fixture",
+    "version": "0.1.0"
+  }
+}

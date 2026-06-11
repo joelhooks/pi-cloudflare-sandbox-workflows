@@ -1,0 +1,55 @@
+direction: down
+
+classes: {
+  done: {
+    style.fill: "#e7f3f0"
+    style.stroke: "#0f766e"
+    style.stroke-width: 3
+  }
+  blocked: {
+    style.fill: "#f8e7e7"
+    style.stroke: "#9f1239"
+    style.stroke-width: 3
+  }
+  pending: {
+    style.fill: "#f6f6f3"
+    style.stroke: "#8c8172"
+    style.stroke-dash: 3
+  }
+  terminal: {
+    style.fill: "#eeeeea"
+    style.stroke: "#111111"
+    style.stroke-width: 2
+  }
+}
+
+ready: "ready" { class: done }
+captureRun: "captureRun\njoelclaw.memory.capture-run\nSTEP_DONE" { class: done }
+mineSignals: "mineSignals\njoelclaw.memory.signals\nSTEP_BLOCKED — bad config" { class: blocked }
+
+searchMemory: "searchMemory\njoelclaw.memory.search" { class: pending }
+hydrateReceipts: "hydrateReceipts\njoelclaw.memory.hydrate" { class: pending }
+correlateEvidence: "correlateEvidence\njoelclaw.memory.correlate" { class: pending }
+proposeRefinements: "proposeRefinements\nrefinement-proposals" { class: pending }
+renderHitlReport: "renderHitlReport\nhitl-report" { class: pending }
+captureReportArtifact: "captureReportArtifact" { class: pending }
+seedHitlDecisionWorkflow: "seedHitlDecisionWorkflow" { class: pending }
+draftFollowUpRunRequest: "draftFollowUpRunRequest" { class: pending }
+reviewSummary: "reviewSummary\nreview.summary" { class: pending }
+
+done: "done  (final)" { class: terminal }
+blocked: "blocked  (final)" { class: blocked }
+
+ready -> captureRun: "NEXT"
+captureRun -> mineSignals: "STEP_DONE"
+mineSignals -> searchMemory: "STEP_DONE"
+searchMemory -> hydrateReceipts: "STEP_DONE"
+hydrateReceipts -> correlateEvidence: "STEP_DONE"
+correlateEvidence -> proposeRefinements: "STEP_DONE"
+proposeRefinements -> renderHitlReport: "STEP_DONE"
+renderHitlReport -> captureReportArtifact: "STEP_DONE"
+captureReportArtifact -> seedHitlDecisionWorkflow: "STEP_DONE"
+seedHitlDecisionWorkflow -> draftFollowUpRunRequest: "STEP_DONE"
+draftFollowUpRunRequest -> reviewSummary: "STEP_DONE"
+reviewSummary -> done: "STEP_DONE"
+mineSignals -> blocked: "STEP_BLOCKED (this run)"

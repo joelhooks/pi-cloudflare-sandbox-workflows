@@ -194,7 +194,23 @@ const injectMemoryRelayWorkerVars = (configText, vars) => {
     .map(([key, value]) => `    "${key}": ${JSON.stringify(value)},`)
     .join("\n");
 
-  return configText.replace(varsMarker, `$1${injected}\n`);
+  // The generated config lives under .wrangler/workflow-app/, so repo-relative
+  // paths in wrangler.jsonc must be absolutized or wrangler cannot resolve them.
+  return configText
+    .replace(varsMarker, `$1${injected}\n`)
+    .replaceAll('"./Dockerfile"', JSON.stringify(resolve(repoRoot, "Dockerfile")))
+    .replaceAll(
+      '"main": "src/app/worker.ts"',
+      `"main": ${JSON.stringify(resolve(repoRoot, "src/app/worker.ts"))}`
+    )
+    .replaceAll(
+      '"migrations_dir": "migrations"',
+      `"migrations_dir": ${JSON.stringify(resolve(repoRoot, "migrations"))}`
+    )
+    .replaceAll(
+      '"./node_modules/wrangler/config-schema.json"',
+      JSON.stringify(resolve(repoRoot, "node_modules/wrangler/config-schema.json"))
+    );
 };
 
 const writeMemoryRelayWranglerConfig = async () => {

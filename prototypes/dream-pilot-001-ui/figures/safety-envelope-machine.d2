@@ -1,0 +1,65 @@
+direction: down
+
+classes: {
+  walked: {
+    style.fill: "#e7f3f0"
+    style.stroke: "#0f766e"
+    style.stroke-width: 3
+  }
+  unwalked: {
+    style.fill: "#f6f6f3"
+    style.stroke: "#8c8172"
+    style.stroke-dash: 3
+  }
+  blocked: {
+    style.fill: "#f8e7e7"
+    style.stroke: "#9f1239"
+    style.stroke-width: 3
+  }
+  captured: {
+    style.fill: "#eeeeea"
+    style.stroke: "#111111"
+    style.stroke-width: 2
+  }
+}
+
+received: "received" { class: walked }
+resolvingCapsule: "resolvingCapsule" { class: walked }
+discoveringPackageMetadata: "discoveringPackageMetadata" { class: walked }
+checkingEntitlements: "checkingEntitlements" { class: walked }
+pinningPackages: "pinningPackages" { class: walked }
+planningDynamicWorkflow: "planningDynamicWorkflow" { class: walked }
+pinningPlanArtifact: "pinningPlanArtifact" { class: walked }
+loadingPinnedDynamicWorkflow: "loadingPinnedDynamicWorkflow" { class: walked }
+executingDynamicWorkflow: "executingDynamicWorkflow\n1 step executed, then BLOCK" { class: walked }
+
+requestingCapabilityLease: "requestingCapabilityLease" { class: unwalked }
+executingCapability: "executingCapability" { class: unwalked }
+verifyingDynamicWorkflow: "verifyingDynamicWorkflow" { class: unwalked }
+recordingReceipts: "recordingReceipts" { class: unwalked }
+summarizingReview: "summarizingReview" { class: unwalked }
+requestingReviewSurfaceDeliveryLease: "requestingReviewSurfaceDeliveryLease" { class: unwalked }
+executingReviewSurfaceDelivery: "executingReviewSurfaceDelivery" { class: unwalked }
+
+blocked: "blocked  (final)\nnon-conformant node payload" { class: blocked }
+captured: "captured  (final)" { class: captured }
+
+received -> resolvingCapsule: "START"
+resolvingCapsule -> discoveringPackageMetadata: "CAPSULE_RESOLVED"
+discoveringPackageMetadata -> checkingEntitlements: "PACKAGE_METADATA_DISCOVERED"
+checkingEntitlements -> pinningPackages: "ENTITLEMENTS_ACCEPTED"
+pinningPackages -> planningDynamicWorkflow: "PACKAGES_PINNED"
+planningDynamicWorkflow -> pinningPlanArtifact: "DYNAMIC_WORKFLOW_PLANNED"
+pinningPlanArtifact -> loadingPinnedDynamicWorkflow: "PLAN_PINNED"
+loadingPinnedDynamicWorkflow -> executingDynamicWorkflow: "PINNED_DYNAMIC_WORKFLOW_LOADED"
+executingDynamicWorkflow -> requestingCapabilityLease: "CAPABILITY_LEASE_REQUESTED"
+requestingCapabilityLease -> executingCapability: "LEASE_ISSUED"
+executingCapability -> executingDynamicWorkflow: "CAPABILITY_EXECUTED"
+executingDynamicWorkflow -> verifyingDynamicWorkflow: "DYNAMIC_WORKFLOW_COMPLETED"
+verifyingDynamicWorkflow -> recordingReceipts: "DYNAMIC_WORKFLOW_VERIFIED"
+recordingReceipts -> summarizingReview: "RECEIPTS_RECORDED"
+summarizingReview -> requestingReviewSurfaceDeliveryLease: "CAPABILITY_LEASE_REQUESTED"
+requestingReviewSurfaceDeliveryLease -> executingReviewSurfaceDelivery: "LEASE_ISSUED"
+executingReviewSurfaceDelivery -> summarizingReview: "CAPABILITY_EXECUTED"
+summarizingReview -> captured: "REVIEW_SUMMARIZED"
+executingDynamicWorkflow -> blocked: "BLOCK (this run)"

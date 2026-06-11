@@ -1,0 +1,87 @@
+direction: right
+
+classes: {
+  edge: {
+    style.fill: "#eef2ff"
+    style.stroke: "#3730a3"
+    style.stroke-width: 2
+  }
+  core: {
+    style.fill: "#e7f3f0"
+    style.stroke: "#0f766e"
+    style.stroke-width: 2
+  }
+  sandbox: {
+    style.fill: "#fff7df"
+    style.stroke: "#9a6a00"
+    style.stroke-width: 2
+  }
+  trust: {
+    style.fill: "#f8e7e7"
+    style.stroke: "#9f1239"
+    style.stroke-width: 2
+  }
+  local: {
+    style.fill: "#eeeeea"
+    style.stroke: "#111111"
+    style.stroke-width: 2
+  }
+}
+
+operator: "Operator\napp:dream:run --submit\nbearer + sign-off phrase" {
+  class: edge
+}
+
+worker: "Cloudflare Worker (front door)\nPOST /runs\nWORKFLOW_APP_RUNS_TOKEN gate\nduplicate run-id guard" {
+  class: edge
+}
+
+envelope: "Safety Envelope\ndeterministic XState\n19 states, hash-pinned\ncapability leases only" {
+  class: core
+}
+
+registry: "Package Registry (D1 + Artifacts)\nkernel + cartridge + task packages\nentitlements, manifest hashes" {
+  class: core
+}
+
+broker: "Capability Lease Broker\npayload-bound leases\nno raw secrets to lanes" {
+  class: core
+}
+
+planner: "Planner Lane (Pi, sandbox)\ngenerates workflow.xstate-machine.v1\n+ dynamic plan, hashed" {
+  class: sandbox
+}
+
+lanes: "Worker Lanes (Pi, sandbox)\ncapture / search / hydrate / correlate\nredacted receipts" {
+  class: sandbox
+}
+
+artifacts: "Cloudflare Artifacts (git)\nmachine + plan + outputs\nper-run repo, commit SHAs" {
+  class: core
+}
+
+relay: "Trusted Memory Relay\ncloudflared tunnel\nbearer + timing-safe\nsearch / hydrate / correlate" {
+  class: trust
+}
+
+joelclaw: "JoelClaw index (blaine)\nTypesense run_chunks\npi / claude / codex sessions" {
+  class: local
+}
+
+wzrrd: "Wzrrd review surface\ntufte-mdsvx report\nnoindex + expiry, leased publish" {
+  class: edge
+}
+
+operator -> worker: "submit"
+worker -> envelope: "START"
+envelope -> registry: "pin packages"
+envelope -> planner: "plan run"
+planner -> artifacts: "commit machine + plan"
+envelope -> lanes: "execute pinned steps"
+lanes -> broker: "request capability lease"
+broker -> lanes: "payload-bound lease"
+lanes -> relay: "memory.relay op (leased)"
+relay -> joelclaw: "scoped query"
+joelclaw -> relay: "redacted hits"
+lanes -> artifacts: "commit outputs"
+envelope -> wzrrd: "publish review (leased)"
