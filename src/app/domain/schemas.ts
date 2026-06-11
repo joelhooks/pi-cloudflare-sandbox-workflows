@@ -2003,6 +2003,64 @@ export const LoadRunCheckpointResolutionSchema = z.object({
   checkpoint: RunStepCheckpointSchema.nullable(),
 });
 
+/**
+ * Request for a read-only durability dump of a run's supervisor-DO state (the
+ * monitor's durability view). Keyed by `runId` + `workItemId` because the DO is
+ * sharded by `workItemId` while checkpoints/markers are keyed by `runId`.
+ */
+export const RunDurabilityRequestSchema = z.object({
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+/**
+ * Read-only projection of a run's latest checkpoint for the durability view.
+ * Carries the step index, the count + ids of completed steps, and the output
+ * artifact refs — never the raw XState snapshot bodies (those are opaque and
+ * potentially large). `null` checkpoint means the run has not checkpointed yet.
+ */
+export const RunDurabilityCheckpointSchema = z.object({
+  completedStepCount: z.number().int().min(0),
+  completedStepIds: z.array(z.string().min(1)),
+  outputArtifactRefCount: z.number().int().min(0),
+  outputArtifactRefs: z.array(ArtifactRefSchema),
+  persistedAt: IsoDateTimeSchema,
+  stepIndex: z.number().int().min(0),
+});
+
+/**
+ * Read-only projection of the run's short-lived `driving:<runId>` marker. Present
+ * while a driver is (or was) mid-flight; `stale` is true once the marker is older
+ * than the configured timeout (the prior driver was evicted and the run is
+ * re-drivable). Absent marker => no driver currently parked.
+ */
+export const RunDurabilityDrivingMarkerSchema = z.object({
+  stale: z.boolean(),
+  startedAtMs: z.number().int().min(0),
+});
+
+/**
+ * Full read-only durability dump for a single run, proxied from the supervisor
+ * DO storage. Powers the monitor's "is it wedged, where, and why" durability
+ * view: latest checkpoint, driving marker (with staleness), the reaper's tracked
+ * due time, the current armed alarm, and how many admission lanes this run still
+ * owns. Carries no raw snapshot bodies and no secrets — counts/keys/timestamps
+ * only.
+ */
+export const RunDurabilityDumpSchema = z.object({
+  activeLaneCount: z.number().int().min(0),
+  alarmAtMs: z.number().int().min(0).nullable(),
+  checkpoint: RunDurabilityCheckpointSchema.nullable(),
+  drivingMarker: RunDurabilityDrivingMarkerSchema.nullable(),
+  generatedAt: IsoDateTimeSchema,
+  hasRunStartRecord: z.boolean(),
+  reaperDueAtMs: z.number().int().min(0).nullable(),
+  redacted: z.literal(true),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("workflow.run-durability.v1"),
+  workItemId: z.string().min(1),
+});
+
 export const WorkflowRunRequestSchema = z.object({
   actor: ActorSchema,
   planProposal: PlanProposalSchema,
@@ -2116,6 +2174,8 @@ export type CapabilityLeaseRequest = z.infer<
 export type CapabilityResource = z.infer<typeof CapabilityResourceSchema>;
 export type ContextCapsuleRecord = z.infer<typeof ContextCapsuleRecordSchema>;
 export type RunStepCheckpoint = z.infer<typeof RunStepCheckpointSchema>;
+export type RunDurabilityRequest = z.infer<typeof RunDurabilityRequestSchema>;
+export type RunDurabilityDump = z.infer<typeof RunDurabilityDumpSchema>;
 export type PersistRunCheckpointRequest = z.infer<
   typeof PersistRunCheckpointRequestSchema
 >;

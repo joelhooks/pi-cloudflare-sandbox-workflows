@@ -365,11 +365,11 @@ describe("Capsule supervisor async run driver", () => {
       }),
     };
     const supervisor = createSupervisor(state, {
-      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub; the watchdog only needs a bound D1 to resolve reaper context.
       WORKFLOW_APP_D1: emptyD1 as unknown as NonNullable<
         WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
       >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
     });
     const request = buildIntegrationTestRunRequest();
 

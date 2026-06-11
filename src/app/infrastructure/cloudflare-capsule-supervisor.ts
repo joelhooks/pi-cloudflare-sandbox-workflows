@@ -17,6 +17,8 @@ import {
   LoadRunCheckpointRequestSchema,
   LoadRunCheckpointResolutionSchema,
   PersistRunCheckpointRequestSchema,
+  RunDurabilityDumpSchema,
+  RunDurabilityRequestSchema,
   RunStepCheckpointSchema,
   StartRunRequestSchema,
   WorkflowEventSchema,
@@ -26,6 +28,7 @@ import type {
   AgentLaneAdmissionDecision,
   AgentLaneReleaseReceipt,
   ContextCapsuleRecord,
+  RunDurabilityDump,
   RunStepCheckpoint,
   StartRunRequest,
   WorkflowRunRequest,
@@ -220,6 +223,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     const postRoutes: Record<string, () => Promise<Response>> = {
       "/admit-lane": () => this.admitLane(request),
       "/append-event": () => this.appendEvent(request),
+      "/get-durability": () => this.getDurability(request),
       "/load-latest-checkpoint": () => this.loadLatestCheckpoint(request),
       "/persist-checkpoint": () => this.persistCheckpoint(request),
       "/release-lane": () => this.releaseLane(request),
@@ -397,6 +401,80 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async getRecordResponse(): Promise<Response> {
     return json(await this.getRecord());
+  }
+
+  /**
+   * Read-only durability dump for a single run (the monitor's durability view).
+   * Projects this DO's storage — latest checkpoint, driving marker (with
+   * staleness judged against the configured timeout), the reaper's tracked due
+   * time, the current armed alarm, the run-start record presence, and how many
+   * admission lanes this run still owns — into a redacted document. Never the raw
+   * XState snapshot bodies (counts/keys only) and never mutates storage.
+   */
+  private async getDurability(request: Request): Promise<Response> {
+    const input = RunDurabilityRequestSchema.parse(await request.json());
+    const now = Date.now();
+    const timeoutMs = this.resolveTimeoutMs();
+
+    const stored = await this.ctx.storage.list({
+      prefix: checkpointStoragePrefix(input.runId),
+    });
+    let latest: RunStepCheckpoint | null = null;
+    for (const value of stored.values()) {
+      const checkpoint = RunStepCheckpointSchema.parse(value);
+      if (latest === null || checkpoint.stepIndex > latest.stepIndex) {
+        latest = checkpoint;
+      }
+    }
+
+    const marker = DrivingMarkerSchema.nullable().parse(
+      (await this.ctx.storage.get(drivingMarkerStorageKey(input.runId))) ?? null
+    );
+    const reaperDueAtMs = ReaperDueAtSchema.nullable().parse(
+      (await this.ctx.storage.get(REAPER_DUE_AT_STORAGE_KEY)) ?? null
+    );
+    const alarmAtMs = await this.ctx.storage.getAlarm();
+    const hasRunStartRecord =
+      (await this.ctx.storage.get(runStartStorageKey(input.runId))) !==
+      undefined;
+    const record = await this.getRecord();
+    const activeLaneCount = Object.values(record.activeLaneOwners).filter(
+      (runId) => runId === input.runId
+    ).length;
+
+    const dump: RunDurabilityDump = RunDurabilityDumpSchema.parse({
+      activeLaneCount,
+      alarmAtMs,
+      checkpoint:
+        latest === null
+          ? null
+          : {
+              completedStepCount: latest.completedStepIds.length,
+              completedStepIds: latest.completedStepIds,
+              outputArtifactRefCount: latest.outputArtifactRefs.length,
+              outputArtifactRefs: latest.outputArtifactRefs,
+              persistedAt: latest.persistedAt,
+              stepIndex: latest.stepIndex,
+            },
+      drivingMarker:
+        marker === null
+          ? null
+          : {
+              stale:
+                timeoutMs !== undefined &&
+                now - marker.startedAtMs >= timeoutMs,
+              startedAtMs: marker.startedAtMs,
+            },
+      generatedAt: nowIso(),
+      hasRunStartRecord,
+      reaperDueAtMs,
+      redacted: true,
+      runId: input.runId,
+      schemaVersion: "workflow.run-durability.v1",
+      workItemId: input.workItemId,
+    });
+
+    return json(dump);
   }
 
   /**
@@ -856,4 +934,24 @@ export const enqueueCapsuleSupervisorRun = async (
 ): Promise<void> => {
   const stub = namespace.get(namespace.idFromName(input.workItemId));
   await postJson(stub, "/start-run", StartRunRequestSchema.parse(input));
+};
+
+/**
+ * Read the supervisor DO's read-only durability dump for a run (the monitor's
+ * durability view). Routes to the DO sharded by `workItemId` (where the run's
+ * checkpoints/markers live) and proxies `/get-durability`. Pure read — the DO
+ * route never mutates storage.
+ */
+export const readCapsuleSupervisorRunDurability = async (
+  namespace: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>,
+  input: { readonly runId: string; readonly workItemId: string }
+): Promise<RunDurabilityDump> => {
+  const stub = namespace.get(namespace.idFromName(input.workItemId));
+
+  return RunDurabilityDumpSchema.parse(
+    await postJson(stub, "/get-durability", {
+      runId: input.runId,
+      workItemId: input.workItemId,
+    })
+  );
 };

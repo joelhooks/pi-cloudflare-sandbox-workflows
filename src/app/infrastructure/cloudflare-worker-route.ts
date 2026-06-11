@@ -11,6 +11,7 @@ import {
 } from "../../cartridges/cloudflare-workflow-cartridges.ts";
 import type { WorkerFrontDoorContract } from "../application/ports.ts";
 import {
+  RunDurabilityDumpSchema,
   StartRunRequestSchema,
   WorkflowDebuggerAttachDocumentSchema,
   WorkflowEventTailControlDocumentSchema,
@@ -20,6 +21,7 @@ import {
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type {
+  RunDurabilityDump,
   SafetyEnvelopeState,
   StartRunRequest,
   WorkflowDebuggerAttachDocument,
@@ -56,6 +58,16 @@ import {
 } from "./cloudflare-workflow-event-stream.ts";
 import type { WorkflowRunStatusSnapshot } from "./cloudflare-workflow-event-stream.ts";
 import { createCloudflareWorkflowFrontDoor } from "./cloudflare-workflow-front-door.ts";
+import {
+  createCloudflareWorkflowRunsListReader,
+  createCloudflareWorkflowRunWorkItemReader,
+  WorkflowRunsListDocumentSchema,
+  WorkflowRunsListQuerySchema,
+} from "./cloudflare-workflow-runs-list.ts";
+import type {
+  WorkflowRunsListDocument,
+  WorkflowRunsListQuery,
+} from "./cloudflare-workflow-runs-list.ts";
 import { createCloudflareWzrrdApiTokenResolver } from "./cloudflare-wzrrd-publish-adapter.ts";
 
 export interface WorkflowWorkerHandlerOptions<Environment> {
@@ -65,6 +77,14 @@ export interface WorkflowWorkerHandlerOptions<Environment> {
     input: StartRunRequest
   ) => Promise<void>;
   readonly eventStreamTail?: WorkflowEventStreamTailOptions;
+  readonly listRuns?: (
+    env: Environment,
+    input: WorkflowRunsListQuery
+  ) => Promise<WorkflowRunsListDocument>;
+  readonly readRunDurability?: (
+    env: Environment,
+    input: { readonly runId: string }
+  ) => Promise<RunDurabilityDump | null>;
   readonly seedPackages?: (
     env: Environment,
     input: unknown
@@ -95,6 +115,14 @@ export interface WorkflowWorkerRequestInput<Environment> {
   ) => Promise<void>;
   readonly env: Environment;
   readonly eventStreamTail?: WorkflowEventStreamTailOptions;
+  readonly listRuns?: (
+    env: Environment,
+    input: WorkflowRunsListQuery
+  ) => Promise<WorkflowRunsListDocument>;
+  readonly readRunDurability?: (
+    env: Environment,
+    input: { readonly runId: string }
+  ) => Promise<RunDurabilityDump | null>;
   readonly request: Request;
   readonly seedPackages?: (
     env: Environment,
@@ -676,6 +704,45 @@ const readRunStatusFromEnv = async (
   return await createCloudflareWorkflowRunStatusReader({
     d1: bindings.WORKFLOW_APP_D1,
   }).read(input);
+};
+
+const listRunsFromEnv = async (
+  env: unknown,
+  input: WorkflowRunsListQuery
+): Promise<WorkflowRunsListDocument> => {
+  const bindings = WorkflowEventStreamEnvBindingSchema.parse(env);
+
+  return await createCloudflareWorkflowRunsListReader({
+    d1: bindings.WORKFLOW_APP_D1,
+  }).list(input);
+};
+
+const RunDurabilityEnvBindingSchema = z.object({
+  WORKFLOW_APP_D1:
+    z.custom<CloudflareD1PackageRegistryConfig["d1"]>(objectBinding),
+  WORKFLOW_CAPSULE_SUPERVISOR: z.custom<DurableObjectNamespace>(objectBinding),
+});
+
+const readRunDurabilityFromEnv = async (
+  env: unknown,
+  input: { readonly runId: string }
+): Promise<RunDurabilityDump | null> => {
+  const bindings = RunDurabilityEnvBindingSchema.parse(env);
+  const workItemId = await createCloudflareWorkflowRunWorkItemReader({
+    d1: bindings.WORKFLOW_APP_D1,
+  }).read(input);
+  if (workItemId === null) {
+    return null;
+  }
+
+  const { readCapsuleSupervisorRunDurability } =
+    await import("./cloudflare-capsule-supervisor.ts");
+
+  return await readCapsuleSupervisorRunDurability(
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The runtime binding is the typed supervisor namespace; the schema only proves it is an object.
+    bindings.WORKFLOW_CAPSULE_SUPERVISOR as unknown as DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>,
+    { runId: input.runId, workItemId }
+  );
 };
 
 const enqueueRunFromEnv = async (
@@ -1363,6 +1430,109 @@ const handleWorkflowRunStatusRequest = async <Environment>(
   );
 };
 
+const handleWorkflowRunsListRequest = async <Environment>(
+  input: WorkflowWorkerRequestInput<Environment>,
+  url: URL
+): Promise<Response> => {
+  const methodError = enforceGet(input.request, "/admin/runs");
+  if (methodError !== null) {
+    return methodError;
+  }
+
+  const authError = await requirePackageSeedAuth(input.request, input.env);
+  if (authError !== null) {
+    return authError;
+  }
+
+  let query: WorkflowRunsListQuery;
+  try {
+    query = WorkflowRunsListQuerySchema.parse({
+      ...(url.searchParams.get("limit") === null
+        ? {}
+        : { limit: url.searchParams.get("limit") }),
+      ...(url.searchParams.get("status") === null
+        ? {}
+        : { status: url.searchParams.get("status") }),
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return jsonError(
+        422,
+        "invalid_runs_list_query",
+        "Runs list query parameters are invalid."
+      );
+    }
+
+    throw error;
+  }
+
+  const listRuns = input.listRuns ?? listRunsFromEnv;
+  let document: WorkflowRunsListDocument;
+  try {
+    document = WorkflowRunsListDocumentSchema.parse(
+      await listRuns(input.env, query)
+    );
+  } catch (error) {
+    console.error("workflow runs list read failed", error);
+
+    return jsonError(
+      500,
+      "runs_list_read_failed",
+      "Runs list could not be read."
+    );
+  }
+
+  return Response.json(document, {
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
+};
+
+const handleWorkflowRunDurabilityRequest = async <Environment>(
+  input: WorkflowWorkerRequestInput<Environment>,
+  runIdSegment: string
+): Promise<Response> => {
+  const methodError = enforceGet(input.request, "/runs/:runId/durability");
+  if (methodError !== null) {
+    return methodError;
+  }
+
+  let runId: string;
+  try {
+    runId = decodeURIComponent(runIdSegment);
+  } catch {
+    return jsonError(
+      400,
+      "invalid_run_id",
+      "Run id path segment must be URL encoded."
+    );
+  }
+
+  const readRunDurability = input.readRunDurability ?? readRunDurabilityFromEnv;
+  let dump: RunDurabilityDump | null;
+  try {
+    dump = await readRunDurability(input.env, { runId });
+  } catch (error) {
+    console.error("workflow run durability read failed", error);
+
+    return jsonError(
+      500,
+      "run_durability_read_failed",
+      "Run durability could not be read."
+    );
+  }
+  if (dump === null) {
+    return jsonError(404, "run_not_found", "Run not found.");
+  }
+
+  return Response.json(RunDurabilityDumpSchema.parse(dump), {
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
+};
+
 const handleWorkflowRunSubmissionRequest = async <Environment>(
   input: WorkflowWorkerRequestInput<Environment>,
   url: URL
@@ -1505,6 +1675,20 @@ export const handleWorkflowWorkerRequest = async <Environment>(
     return await handleWorkflowRunStatusRequest(input, runIdSegment);
   }
 
+  const durabilityRoute = /^\/runs\/([^/]+)\/durability$/u.exec(url.pathname);
+  if (durabilityRoute !== null) {
+    const [, runIdSegment] = durabilityRoute;
+    if (runIdSegment === undefined) {
+      return jsonError(404, "not_found", "Route not found.");
+    }
+
+    return await handleWorkflowRunDurabilityRequest(input, runIdSegment);
+  }
+
+  if (url.pathname === "/admin/runs") {
+    return await handleWorkflowRunsListRequest(input, url);
+  }
+
   if (url.pathname === "/admin/packages/prepare-seed") {
     return await handlePackageSeedPreparationRequest(input);
   }
@@ -1540,6 +1724,10 @@ export const createWorkflowWorkerHandler = <Environment = Env>(
       ...(options.eventStreamTail === undefined
         ? {}
         : { eventStreamTail: options.eventStreamTail }),
+      ...(options.listRuns === undefined ? {} : { listRuns: options.listRuns }),
+      ...(options.readRunDurability === undefined
+        ? {}
+        : { readRunDurability: options.readRunDurability }),
       ...(options.seedPackages === undefined
         ? {}
         : { seedPackages: options.seedPackages }),

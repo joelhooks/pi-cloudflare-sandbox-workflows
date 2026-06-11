@@ -3,12 +3,16 @@ import { describe, expect, it } from "vitest";
 import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts";
 import {
   ArtifactRefSchema,
+  RunDurabilityDumpSchema,
   WorkflowDebuggerAttachDocumentSchema,
   WorkflowEventStreamDocumentSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
-import type { StartRunRequest } from "../../src/app/domain/schemas.ts";
+import type {
+  RunDurabilityDump,
+  StartRunRequest,
+} from "../../src/app/domain/schemas.ts";
 import { parseCloudflarePackageArtifactRef } from "../../src/app/infrastructure/cloudflare-package-artifacts-reader.ts";
 import {
   PackageSeedFinalizeRequestSchema,
@@ -22,6 +26,11 @@ import {
 } from "../../src/app/infrastructure/cloudflare-worker-route.ts";
 import { WorkflowRunStatusSnapshotSchema } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
 import type { WorkflowRunStatusSnapshot } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
+import { WorkflowRunsListDocumentSchema } from "../../src/app/infrastructure/cloudflare-workflow-runs-list.ts";
+import type {
+  WorkflowRunsListDocument,
+  WorkflowRunsListQuery,
+} from "../../src/app/infrastructure/cloudflare-workflow-runs-list.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
@@ -1774,6 +1783,289 @@ describe("Cloudflare Worker route", () => {
       },
       calls: [],
       status: 401,
+    });
+  });
+
+  it("lists runs with blocker detail through the admin-gated runs list route", async () => {
+    const queries: WorkflowRunsListQuery[] = [];
+    const listDocument: WorkflowRunsListDocument =
+      WorkflowRunsListDocumentSchema.parse({
+        generatedAt: "2026-06-11T01:00:00.000Z",
+        query: { limit: 50, status: "blocked" },
+        redacted: true,
+        runCount: 1,
+        runs: [
+          {
+            blocker: {
+              code: "capability_denied",
+              message: "Run blocked: capability denied for memory capture.",
+              nodeType: "joelclaw.memory.capture-artifact",
+              redacted: true,
+              stepId: "step-capture-artifact",
+            },
+            createdAt: "2026-06-11 00:00:00",
+            runId: "run-blocked",
+            status: "blocked",
+            updatedAt: "2026-06-11 00:05:00",
+            workItemId: "work-item:one",
+          },
+        ],
+        schemaVersion: "workflow.runs-list.v1",
+      });
+
+    const response = await handleWorkflowWorkerRequest({
+      env: {
+        ...createPackageSeedEnv(),
+        WORKFLOW_APP_RUNS_TOKEN: runsToken,
+      },
+      listRuns(_env, query) {
+        queries.push(query);
+
+        return Promise.resolve(listDocument);
+      },
+      request: new Request(
+        "https://workflow.example.test/admin/runs?limit=50&status=blocked",
+        {
+          headers: { authorization: "Bearer admin-token" },
+          method: "GET",
+        }
+      ),
+    });
+    const json = WorkflowRunsListDocumentSchema.parse(await response.json());
+
+    expect({
+      cacheControl: response.headers.get("Cache-Control"),
+      json,
+      queries,
+      status: response.status,
+    }).toStrictEqual({
+      cacheControl: "no-store",
+      json: listDocument,
+      queries: [{ limit: 50, status: "blocked" }],
+      status: 200,
+    });
+  });
+
+  it("rejects the runs list route without the admin bearer token", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createPackageSeedEnv(),
+      listRuns(_env, query) {
+        calls.push(query);
+
+        return Promise.reject(new Error("list should not run"));
+      },
+      request: new Request("https://workflow.example.test/admin/runs", {
+        method: "GET",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Package seed requires an admin bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("rejects an invalid runs list status filter with 422", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: {
+        ...createPackageSeedEnv(),
+        WORKFLOW_APP_RUNS_TOKEN: runsToken,
+      },
+      listRuns(_env, query) {
+        calls.push(query);
+
+        return Promise.reject(new Error("list should not run"));
+      },
+      request: new Request(
+        "https://workflow.example.test/admin/runs?status=not-a-state",
+        {
+          headers: { authorization: "Bearer admin-token" },
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "invalid_runs_list_query",
+          message: "Runs list query parameters are invalid.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 422,
+    });
+  });
+
+  it("returns the run durability dump behind the runs token", async () => {
+    const calls: { readonly runId: string }[] = [];
+    const dump: RunDurabilityDump = RunDurabilityDumpSchema.parse({
+      activeLaneCount: 2,
+      alarmAtMs: 1_700_000_500_000,
+      checkpoint: {
+        completedStepCount: 2,
+        completedStepIds: ["step-one", "step-two"],
+        outputArtifactRefCount: 1,
+        outputArtifactRefs: ["artifact://workflow-app/runs/run-route-test/cp"],
+        persistedAt: "2026-06-11T00:00:00.000Z",
+        stepIndex: 2,
+      },
+      drivingMarker: { stale: false, startedAtMs: 1_700_000_400_000 },
+      generatedAt: "2026-06-11T01:00:00.000Z",
+      hasRunStartRecord: true,
+      reaperDueAtMs: 1_700_000_900_000,
+      redacted: true,
+      runId: "run-route-test",
+      schemaVersion: "workflow.run-durability.v1",
+      workItemId: "work-item:route-test",
+    });
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunDurability(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(dump);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/durability",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+    const json = RunDurabilityDumpSchema.parse(await response.json());
+
+    expect({
+      cacheControl: response.headers.get("Cache-Control"),
+      calls,
+      json,
+      status: response.status,
+    }).toStrictEqual({
+      cacheControl: "no-store",
+      calls: [{ runId: "run-route-test" }],
+      json: dump,
+      status: 200,
+    });
+  });
+
+  it("returns 404 from the durability route when the run is unknown", async () => {
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunDurability: () => Promise.resolve(null),
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/durability",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          redacted: true,
+        },
+      },
+      status: 404,
+    });
+  });
+
+  it("rejects unauthenticated durability reads before touching the reader", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunDurability(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(null);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/durability",
+        {
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
+    });
+  });
+
+  it("fails closed with 503 on the durability route when the runs token binding is unset", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: {},
+      readRunDurability(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(null);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/durability",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "runs_auth_unconfigured",
+          message: "Run routes are not configured.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 503,
     });
   });
 });
