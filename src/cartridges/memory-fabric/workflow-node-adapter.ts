@@ -150,33 +150,17 @@ const MemoryCapturableArtifactMediaTypeSchema = z.enum(
   }
 );
 
-const MemoryCaptureRunNodeConfigSchema = z.object({
-  capturedRef: ArtifactPinSchema.optional(),
-  readability: z
-    .enum(["actor-private", "org-private", "public"])
-    .default("actor-private"),
-  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
-  sourceSystem: z.string().min(1).default("cloudflare-workflow-run"),
-  targetRunId: z.string().min(1).optional(),
-});
-
-const MemoryCaptureArtifactNodeConfigSchema = z.object({
-  artifactRef: ArtifactRefSchema.optional(),
-  artifactStepId: z.string().min(1).optional(),
-  mediaType:
-    MemoryCapturableArtifactMediaTypeSchema.default("application/json"),
-  readability: z
-    .enum(["actor-private", "org-private", "public"])
-    .default("actor-private"),
-  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
-  sourceSystem: z.string().min(1).default("cloudflare-artifacts"),
-});
-
-// The planner is a stochastic LLM lane. Give the two query-bearing node configs
-// a structural floor so a plan that omits `query` or emits an out-of-enum
-// `signalKinds` value (e.g. "workflow" for "workflow-pattern") conforms instead
-// of blocking the run. The prompt also enumerates this contract; the schema is
-// the guarantee, the prompt is the nudge.
+// The planner is a stochastic LLM lane that is never handed the per-node config
+// schemas, so it guesses each shape. Every node config below gives the planner a
+// structural floor: required strings default to a sensible value, enum arrays
+// drop out-of-enum members instead of blocking, and ref-bearing fields fall back
+// to a resolvable run artifact when the planner omits the concrete ref. The
+// prompt nudges; these schemas guarantee. Leashing only tolerates config SHAPE;
+// it never touches the capability/hash/redaction/review gates downstream.
+//
+// `MEMORY_FABRIC_FALLBACK_QUERY` mirrors the dream-transcript-review source
+// profile `defaultQuery`. It stays a local constant so the adapter does not pull
+// the package-seed graph in through source-profile.ts.
 const MEMORY_FABRIC_FALLBACK_QUERY = "dream workflow";
 
 const filterToValidSignalKinds = (value: unknown): unknown => {
@@ -189,10 +173,51 @@ const filterToValidSignalKinds = (value: unknown): unknown => {
   return valid.length > 0 ? valid : undefined;
 };
 
+// Drop any source family the planner hallucinated (e.g. "github" instead of a
+// real MemorySourceFamily) so a plausible config conforms. An all-invalid array
+// collapses to undefined, which every downstream payload treats as "all
+// expected families", matching omission.
+const filterToValidSourceFamilies = (value: unknown): unknown => {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const valid = value.filter(
+    (family) => MemorySourceFamilySchema.safeParse(family).success
+  );
+  return valid.length > 0 ? valid : undefined;
+};
+
+const LeashedSourceFamiliesSchema = z.preprocess(
+  filterToValidSourceFamilies,
+  z.array(MemorySourceFamilySchema).min(1).optional()
+);
+
+const MemoryReadabilitySchema = z
+  .enum(["actor-private", "org-private", "public"])
+  .default("actor-private");
+
+const MemoryCaptureRunNodeConfigSchema = z.object({
+  capturedRef: ArtifactPinSchema.optional(),
+  readability: MemoryReadabilitySchema,
+  sourceFamilies: LeashedSourceFamiliesSchema,
+  sourceSystem: z.string().min(1).default("cloudflare-workflow-run"),
+  targetRunId: z.string().min(1).optional(),
+});
+
+const MemoryCaptureArtifactNodeConfigSchema = z.object({
+  artifactRef: ArtifactRefSchema.optional(),
+  artifactStepId: z.string().min(1).optional(),
+  mediaType:
+    MemoryCapturableArtifactMediaTypeSchema.default("application/json"),
+  readability: MemoryReadabilitySchema,
+  sourceFamilies: LeashedSourceFamiliesSchema,
+  sourceSystem: z.string().min(1).default("cloudflare-artifacts"),
+});
+
 const MemorySearchNodeConfigSchema = z.object({
   maxHits: z.number().int().min(1).max(100).default(10),
   query: z.string().min(1).default(MEMORY_FABRIC_FALLBACK_QUERY),
-  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
+  sourceFamilies: LeashedSourceFamiliesSchema,
 });
 
 const MemorySignalsNodeConfigSchema = z.object({
@@ -202,7 +227,7 @@ const MemorySignalsNodeConfigSchema = z.object({
     filterToValidSignalKinds,
     z.array(MemorySignalKindSchema).min(1).optional()
   ),
-  sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
+  sourceFamilies: LeashedSourceFamiliesSchema,
 });
 
 const MemoryHydrationNodeConfigSchema = z.object({
@@ -262,6 +287,33 @@ const MemoryHitlFollowUpRunRequestNodeConfigSchema = z.object({
   seedStepId: z.string().min(1).optional(),
   workItemId: z.string().min(1).optional(),
 });
+
+/**
+ * Single source of truth: every memory-fabric workflow-node `nodeType` mapped to
+ * the leashed Zod schema its execute fn parses `step.config` against. The adapter
+ * dispatch, the planner prompt advertiser, and the plan validator must all read
+ * the SAME schemas from here so the contract the planner is told matches the one
+ * the adapter enforces. A coverage test asserts this registry holds an entry for
+ * every nodeType in the memory-fabric package palette.
+ */
+export const MEMORY_FABRIC_NODE_CONFIG_SCHEMAS = {
+  "joelclaw.memory.capture-artifact": MemoryCaptureArtifactNodeConfigSchema,
+  "joelclaw.memory.capture-run": MemoryCaptureRunNodeConfigSchema,
+  "joelclaw.memory.correlate": MemoryCorrelationNodeConfigSchema,
+  "joelclaw.memory.hitl-decision-seed":
+    MemoryHitlDecisionWorkflowSeedNodeConfigSchema,
+  "joelclaw.memory.hitl-follow-up-run-request":
+    MemoryHitlFollowUpRunRequestNodeConfigSchema,
+  "joelclaw.memory.hitl-report": WorkflowHitlReportNodeConfigSchema,
+  "joelclaw.memory.hydrate": MemoryHydrationNodeConfigSchema,
+  "joelclaw.memory.refinement-proposals":
+    MemoryRefinementProposalNodeConfigSchema,
+  "joelclaw.memory.search": MemorySearchNodeConfigSchema,
+  "joelclaw.memory.signals": MemorySignalsNodeConfigSchema,
+} as const satisfies Record<string, z.ZodType>;
+
+export type MemoryFabricNodeType =
+  keyof typeof MEMORY_FABRIC_NODE_CONFIG_SCHEMAS;
 
 const blocker = (
   code: CapabilityBlocker["code"],
@@ -541,15 +593,38 @@ const loadHitlDecisionWorkflowSeed = async (input: {
   }
 };
 
+// Latest dependency artifact ref, ignoring order-insensitive map iteration by
+// taking the last inserted value. Used as a fallback for the capture-artifact
+// node when the planner declared `dependsOn` but never named the concrete ref.
+const latestDependencyArtifactRef = (
+  dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>
+): ArtifactRef | null => {
+  const refs = Object.values(dependencyArtifactRefs);
+  return refs.at(-1) ?? null;
+};
+
+// The planner's capture-artifact intent is "capture the generated machine and
+// harness" (it emits artifactKinds like workflow.xstate-machine.v1 /
+// workflow.generated-harness.v1 and a capturePurpose, both ignored by the strip
+// schema). When it omits the concrete artifactRef/artifactStepId we resolve that
+// intent to the run's pinned generated machine artifact (JSON, matching the
+// default mediaType), then any wired dependency ref, then the pinned harness.
+// This is shape tolerance only: the resolved ref is still hashed, pinned, and
+// leased through captureArtifactPinFor and the relay exactly as before.
 const captureArtifactRefFor = (input: {
   readonly config: z.infer<typeof MemoryCaptureArtifactNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
 }): ArtifactRef | null =>
   input.config.artifactRef ??
   dependencyRefFor({
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.artifactStepId,
-  });
+  }) ??
+  input.plan.machine.artifactRef ??
+  latestDependencyArtifactRef(input.dependencyArtifactRefs) ??
+  input.plan.harness.artifactRef ??
+  null;
 
 const captureArtifactPinFor = async (input: {
   readonly artifactRef: ArtifactRef;
@@ -2337,6 +2412,7 @@ const executeCaptureArtifactNode = async (
   const artifactRef = captureArtifactRefFor({
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
+    plan: input.plan,
   });
   if (artifactRef === null) {
     return blocker(
