@@ -237,6 +237,9 @@ const createAdmissionCapsuleController = (): ContextCapsuleActorContract &
     appendEvent(input) {
       return capsules.appendEvent(input);
     },
+    loadLatestCheckpoint(input) {
+      return capsules.loadLatestCheckpoint(input);
+    },
     persistCheckpoint(input) {
       return capsules.persistCheckpoint(input);
     },

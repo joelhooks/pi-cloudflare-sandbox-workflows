@@ -13,6 +13,8 @@ import {
   AgentLaneReleaseReceiptSchema,
   AgentLaneReleaseRequestSchema,
   ContextCapsuleRecordSchema,
+  LoadRunCheckpointRequestSchema,
+  LoadRunCheckpointResolutionSchema,
   PersistRunCheckpointRequestSchema,
   RunStepCheckpointSchema,
   WorkflowEventSchema,
@@ -21,6 +23,7 @@ import type {
   AgentLaneAdmissionDecision,
   AgentLaneReleaseReceipt,
   ContextCapsuleRecord,
+  RunStepCheckpoint,
 } from "../domain/schemas.ts";
 import type { CloudflareD1PackageRegistryConfig } from "./cloudflare-package-registry.ts";
 import { reapStuckRunsForWorkItem } from "./cloudflare-run-reaper.ts";
@@ -71,6 +74,14 @@ const nowIso = (): string => new Date().toISOString();
 const checkpointStorageKey = (runId: string, stepIndex: number): string =>
   `checkpoint:${runId}:${stepIndex}`;
 
+/**
+ * Storage-key prefix for every checkpoint of a run. `ctx.storage.list({ prefix
+ * })` over this prefix enumerates all persisted steps so resume can select the
+ * highest `stepIndex` (the latest checkpoint).
+ */
+const checkpointStoragePrefix = (runId: string): string =>
+  `checkpoint:${runId}:`;
+
 const createCapsuleRecord = (input: {
   readonly runId: string;
   readonly workItemId: string;
@@ -102,6 +113,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     const postRoutes: Record<string, () => Promise<Response>> = {
       "/admit-lane": () => this.admitLane(request),
       "/append-event": () => this.appendEvent(request),
+      "/load-latest-checkpoint": () => this.loadLatestCheckpoint(request),
       "/persist-checkpoint": () => this.persistCheckpoint(request),
       "/release-lane": () => this.releaseLane(request),
       "/resolve": () => this.resolveCapsule(request),
@@ -222,6 +234,31 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     );
 
     return json({ ok: true });
+  }
+
+  /**
+   * Load the most-recent checkpoint for a run (M2.5 step 3, resume). Lists every
+   * checkpoint slot under the run prefix and returns the one with the highest
+   * `stepIndex`, or a null resolution when the run never checkpointed. This is
+   * the read mirror of `persistCheckpoint`; it drives nothing — the resume
+   * decision (rehydrate vs. fresh start) is made by the application.
+   */
+  private async loadLatestCheckpoint(request: Request): Promise<Response> {
+    const input = LoadRunCheckpointRequestSchema.parse(await request.json());
+    const stored = await this.ctx.storage.list({
+      prefix: checkpointStoragePrefix(input.runId),
+    });
+    let latest: ReturnType<typeof RunStepCheckpointSchema.parse> | null = null;
+    for (const value of stored.values()) {
+      const checkpoint = RunStepCheckpointSchema.parse(value);
+      if (latest === null || checkpoint.stepIndex > latest.stepIndex) {
+        latest = checkpoint;
+      }
+    }
+
+    return json(
+      LoadRunCheckpointResolutionSchema.parse({ checkpoint: latest })
+    );
   }
 
   private async getRecordResponse(): Promise<Response> {
@@ -437,6 +474,17 @@ export const createCloudflareCapsuleSupervisorClient = (
     },
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
+    },
+    async loadLatestCheckpoint(input): Promise<RunStepCheckpoint | null> {
+      const resolution = LoadRunCheckpointResolutionSchema.parse(
+        await postJson(
+          stubFor(input.workItemId),
+          "/load-latest-checkpoint",
+          input
+        )
+      );
+
+      return resolution.checkpoint;
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);

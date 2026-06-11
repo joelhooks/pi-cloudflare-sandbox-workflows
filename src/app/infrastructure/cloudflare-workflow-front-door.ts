@@ -25,6 +25,7 @@ import {
   AgentLaneAdmissionDecisionSchema,
   AgentLaneReleaseReceiptSchema,
   ContextCapsuleRecordSchema,
+  LoadRunCheckpointResolutionSchema,
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type { WorkflowRunRequest } from "../domain/schemas.ts";
@@ -277,6 +278,15 @@ const createCapsuleSupervisorClient = (
     },
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
+    },
+    async loadLatestCheckpoint(input) {
+      return LoadRunCheckpointResolutionSchema.parse(
+        await postJson(
+          stubFor(input.workItemId),
+          "/load-latest-checkpoint",
+          input
+        )
+      ).checkpoint;
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);

@@ -1973,6 +1973,26 @@ export const PersistRunCheckpointRequestSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+/**
+ * Request to load the most-recent persisted checkpoint for a run (M2.5 step 3,
+ * resume). Keyed by `runId`; the supervisor returns the checkpoint with the
+ * highest `stepIndex`, or a null resolution when the run has never checkpointed.
+ */
+export const LoadRunCheckpointRequestSchema = z.object({
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+/**
+ * Resolution of a latest-checkpoint load. `checkpoint` is the highest-indexed
+ * stored checkpoint, or `null` when the run has no checkpoint yet (first ever
+ * invocation). Modeled as a discriminated-free nullable so the resume driver can
+ * branch on presence without a sentinel.
+ */
+export const LoadRunCheckpointResolutionSchema = z.object({
+  checkpoint: RunStepCheckpointSchema.nullable(),
+});
+
 export const WorkflowRunRequestSchema = z.object({
   actor: ActorSchema,
   planProposal: PlanProposalSchema,
@@ -2065,6 +2085,12 @@ export type ContextCapsuleRecord = z.infer<typeof ContextCapsuleRecordSchema>;
 export type RunStepCheckpoint = z.infer<typeof RunStepCheckpointSchema>;
 export type PersistRunCheckpointRequest = z.infer<
   typeof PersistRunCheckpointRequestSchema
+>;
+export type LoadRunCheckpointRequest = z.infer<
+  typeof LoadRunCheckpointRequestSchema
+>;
+export type LoadRunCheckpointResolution = z.infer<
+  typeof LoadRunCheckpointResolutionSchema
 >;
 export type DiscordDeliveryResult = z.infer<typeof DiscordDeliveryResultSchema>;
 export type DiscordMessageApproval = z.infer<

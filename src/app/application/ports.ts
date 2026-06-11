@@ -78,6 +78,11 @@ export interface ContextCapsuleActorContract {
     readonly checkpoint: RunStepCheckpoint;
     readonly workItemId: string;
   }): Promise<void>;
+
+  loadLatestCheckpoint(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<RunStepCheckpoint | null>;
 }
 
 export interface PackageRegistryActorContract {

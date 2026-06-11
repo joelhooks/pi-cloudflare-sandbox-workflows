@@ -63,6 +63,7 @@ import type {
   PlanArtifact,
   ReviewGate,
   ReviewSurfaceArtifact,
+  RunStepCheckpoint,
   SafetyEnvelopeCommand,
   VerificationContractArtifact,
   VerificationContractDocument,
@@ -526,6 +527,25 @@ const resolveCurrentGeneratedWorkflowState = (input: {
   }
 
   return { state, stateValue, status: "step" };
+};
+
+/**
+ * The output path whose committed artifact ref the two-factor resume check
+ * verifies for a completed step. Only `workflow.node.invoke` and
+ * `research.review` steps commit a primary output ref during execution (the
+ * value stored in `artifactRefsByStepId`); a `review.summary` step merely
+ * reserves a path for the later review gate, and the discord capability step
+ * commits no output, so both return `undefined` and rely on the
+ * `completedStepIds` factor alone.
+ */
+const primaryOutputPathForStep = (
+  step: DynamicWorkflowStep
+): string | undefined => {
+  if (step.kind === "workflow.node.invoke" || step.kind === "research.review") {
+    return step.outputPath;
+  }
+
+  return undefined;
 };
 
 const resolveGeneratedWorkflowPlanStep = (input: {
@@ -1497,12 +1517,23 @@ export class WorkflowApp implements WorkflowAppContract {
       }
     );
 
+    // M2.5 step 3 (resume): a checkpoint from a prior, evicted invocation of
+    // this run lets the generated-workflow loop continue from its last trusted
+    // step instead of re-walking. A fresh run has none, so this is `null` and
+    // execution starts from the top — byte-identical to the pre-resume path.
+    const resumeCheckpoint =
+      await this.dependencies.contextCapsules.loadLatestCheckpoint({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      });
+
     const execution = await this.executeDynamicWorkflow({
       block,
       loadedPlan,
       machine: loadedMachine.machine,
       persistCheckpoint,
       request,
+      resumeCheckpoint,
       transition,
     });
     if (execution.status === "blocked") {
@@ -3383,6 +3414,112 @@ export class WorkflowApp implements WorkflowAppContract {
     }
   }
 
+  /**
+   * Decide whether a run can resume from its latest durable checkpoint (M2.5
+   * step 3) using the ADR's two-factor skip check: a completed step is trusted
+   * iff its id is in `completedStepIds` AND its output artifact ref resolves in
+   * Artifacts (content-addressed, immutable). When every completed step that
+   * declares an output passes both factors, the generated-machine actor is
+   * rehydrated at the next step's boundary and the in-memory execution state is
+   * rebuilt. When any completed step half-fired (in the set but its ref is
+   * missing), the checkpoint is not trusted and `null` is returned so the run
+   * re-executes from a fresh actor — safe because capability leases are
+   * step-scoped idempotent and Artifacts commits are content-addressed no-ops.
+   */
+  private async resolveResumableGeneratedWorkflowCheckpoint(input: {
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly request: WorkflowRunRequest;
+    readonly resumeCheckpoint: RunStepCheckpoint | null;
+  }): Promise<null | {
+    readonly artifactRefsByStepId: ReadonlyMap<string, ArtifactRef>;
+    readonly completedStepIds: readonly string[];
+    readonly generatedMachineSnapshot: unknown;
+    readonly nextStepIndex: number;
+    readonly reviewSummaryPath: string | undefined;
+  }> {
+    const checkpoint = input.resumeCheckpoint;
+    if (checkpoint === null) {
+      return null;
+    }
+
+    const stepById = new Map(
+      input.loadedPlan.steps.map((step) => [step.stepId, step])
+    );
+    const artifactRefsByStepId = new Map<string, ArtifactRef>();
+    let reviewSummaryPath: string | undefined;
+
+    for (const stepId of checkpoint.completedStepIds) {
+      const step = stepById.get(stepId);
+      if (step === undefined) {
+        // The checkpoint references a step the current plan no longer pins; the
+        // plan changed under the run, so the checkpoint is not trustable.
+        return null;
+      }
+
+      if (step.kind === "review.summary") {
+        // A `review.summary` step only reserves its output path for the later
+        // review gate; it commits no primary output ref during execution, so it
+        // is skipped on the completedStepIds factor alone.
+        reviewSummaryPath = step.outputPath;
+        continue;
+      }
+
+      const outputPath = primaryOutputPathForStep(step);
+      if (outputPath === undefined) {
+        // Steps without a committed output (e.g. the discord capability step)
+        // carry no resolvable ref; the completedStepIds factor alone governs
+        // their skip, matching today's in-memory accounting.
+        continue;
+      }
+
+      const expectedRef = this.dependencies.artifacts.artifactRef({
+        path: outputPath,
+        runId: input.request.runId,
+      });
+      const resolves = await this.artifactRefResolves(expectedRef);
+      if (!resolves) {
+        // Second factor failed: this step is in the set but its output ref is
+        // missing (half-fired before the crash). Do not trust the checkpoint;
+        // re-run the whole generated workflow from a fresh actor.
+        return null;
+      }
+      artifactRefsByStepId.set(stepId, expectedRef);
+    }
+
+    return {
+      artifactRefsByStepId,
+      completedStepIds: [...checkpoint.completedStepIds],
+      generatedMachineSnapshot: checkpoint.generatedMachineSnapshot,
+      // The persisted checkpoint at index N was written after step N crossed
+      // STEP_DONE, so the next checkpoint this run writes is N + 1.
+      nextStepIndex: checkpoint.stepIndex + 1,
+      reviewSummaryPath,
+    };
+  }
+
+  /**
+   * Two-factor existence probe: does an output artifact ref resolve in the store
+   * today? Tries JSON then text (the only two media the workflow writes); a
+   * rejection from both means the ref is unresolvable (the step half-fired).
+   */
+  private async artifactRefResolves(
+    artifactRef: ArtifactRef
+  ): Promise<boolean> {
+    try {
+      await this.dependencies.artifacts.readJson({ artifactRef });
+
+      return true;
+    } catch {
+      try {
+        await this.dependencies.artifacts.readText({ artifactRef });
+
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
   // oxlint-disable-next-line complexity -- Generated workflow dispatch is explicit until step handlers move behind the workflow-node registry.
   private async executeDynamicWorkflow(input: {
     readonly block: BlockRun;
@@ -3390,6 +3527,7 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly machine: DynamicWorkflowMachineDocument;
     readonly persistCheckpoint: PersistRunCheckpoint;
     readonly request: WorkflowRunRequest;
+    readonly resumeCheckpoint?: RunStepCheckpoint | null;
     readonly transition: SafetyEnvelopeTransition;
   }): Promise<DynamicExecutionResult> {
     const artifactRefs: ArtifactRef[] = [];
@@ -3401,13 +3539,43 @@ export class WorkflowApp implements WorkflowAppContract {
       input.loadedPlan.steps.map((step) => [step.stepId, step])
     );
     const artifactRefsByStepId = new Map<string, ArtifactRef>();
-    const workflowActor = createGeneratedWorkflowActor(input.machine);
-    workflowActor.start();
-    workflowActor.send({ type: "NEXT" });
     const maxTransitions = input.loadedPlan.steps.length + 2;
     let reviewSummaryPath: string | undefined;
     let workflowCompleted = false;
     let checkpointStepIndex = 0;
+
+    // M2.5 step 3 (resume): rehydrate the generated-machine actor from the most
+    // recent durable checkpoint that the two-factor skip check trusts, so an
+    // evicted/re-invoked run continues from its last good boundary instead of
+    // re-walking every step. `null` => no trusted checkpoint, fresh actor.
+    const resumeFrom = await this.resolveResumableGeneratedWorkflowCheckpoint({
+      loadedPlan: input.loadedPlan,
+      request: input.request,
+      resumeCheckpoint: input.resumeCheckpoint ?? null,
+    });
+    const workflowActor =
+      resumeFrom === null
+        ? createGeneratedWorkflowActor(input.machine)
+        : createGeneratedWorkflowActor(input.machine, {
+            snapshot: resumeFrom.generatedMachineSnapshot,
+          });
+    workflowActor.start();
+    if (resumeFrom === null) {
+      workflowActor.send({ type: "NEXT" });
+    } else {
+      for (const stepId of resumeFrom.completedStepIds) {
+        completedStepIds.add(stepId);
+      }
+      for (const [stepId, artifactRef] of resumeFrom.artifactRefsByStepId) {
+        artifactRefsByStepId.set(stepId, artifactRef);
+        artifactRefs.push(artifactRef);
+      }
+      checkpointStepIndex = resumeFrom.nextStepIndex;
+      // A `review.summary` step completed before the crash reserved this path
+      // for the review gate; re-derive it from the plan so the resumed run keeps
+      // the same terminal review surface.
+      reviewSummaryPath = resumeFrom.reviewSummaryPath ?? reviewSummaryPath;
+    }
 
     /**
      * Persist a resumable checkpoint after a generated-machine step lands its

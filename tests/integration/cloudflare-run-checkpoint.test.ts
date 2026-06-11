@@ -1,7 +1,10 @@
 import type * as CloudflareWorkersModule from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 
-import { RunStepCheckpointSchema } from "../../src/app/domain/schemas.ts";
+import {
+  LoadRunCheckpointResolutionSchema,
+  RunStepCheckpointSchema,
+} from "../../src/app/domain/schemas.ts";
 import type { RunStepCheckpoint } from "../../src/app/domain/schemas.ts";
 import type { WorkflowCapsuleSupervisorEnv } from "../../src/app/infrastructure/cloudflare-capsule-supervisor.ts";
 
@@ -35,6 +38,7 @@ interface FakeDurableObjectState {
   readonly store: Map<string, unknown>;
   readonly storage: {
     get(key: string): Promise<unknown>;
+    list(options: { prefix: string }): Promise<Map<string, unknown>>;
     put(key: string, value: unknown): Promise<void>;
   };
 }
@@ -46,6 +50,16 @@ const createFakeDurableObjectState = (): FakeDurableObjectState => {
     storage: {
       get(key: string) {
         return Promise.resolve(store.get(key));
+      },
+      list(options: { prefix: string }) {
+        const matched = new Map<string, unknown>();
+        for (const [key, value] of store) {
+          if (key.startsWith(options.prefix)) {
+            matched.set(key, value);
+          }
+        }
+
+        return Promise.resolve(matched);
       },
       put(key: string, value: unknown) {
         store.set(key, value);
@@ -99,6 +113,21 @@ const persist = (
     })
   );
 
+const loadLatest = async (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  input: { readonly runId: string; readonly workItemId: string }
+): Promise<RunStepCheckpoint | null> => {
+  const response = await supervisor.fetch(
+    new Request("https://supervisor.internal/load-latest-checkpoint", {
+      body: JSON.stringify(input),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+  return LoadRunCheckpointResolutionSchema.parse(await response.json())
+    .checkpoint;
+};
+
 describe("Capsule supervisor run-step checkpoint", () => {
   it("persists a checkpoint to DO storage keyed by runId + stepIndex", async () => {
     const state = createFakeDurableObjectState();
@@ -147,5 +176,60 @@ describe("Capsule supervisor run-step checkpoint", () => {
     expect(
       RunStepCheckpointSchema.parse(state.store.get("checkpoint:run-cp:0"))
     ).toStrictEqual(checkpoint);
+  });
+
+  it("loads the highest-indexed checkpoint as the latest for resume", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state);
+
+    await persist(supervisor, buildCheckpoint({ stepIndex: 0 }));
+    await persist(supervisor, buildCheckpoint({ stepIndex: 2 }));
+    await persist(supervisor, buildCheckpoint({ stepIndex: 1 }));
+
+    const latest = await loadLatest(supervisor, {
+      runId: "run-cp",
+      workItemId: "work-item:checkpoint-test",
+    });
+
+    expect(latest?.stepIndex).toBe(2);
+  });
+
+  it("returns a null resolution when the run never checkpointed", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state);
+
+    const latest = await loadLatest(supervisor, {
+      runId: "run-never-ran",
+      workItemId: "work-item:checkpoint-test",
+    });
+
+    expect(latest).toBeNull();
+  });
+
+  it("scopes the latest checkpoint to its own run id", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state);
+
+    await persist(
+      supervisor,
+      buildCheckpoint({ runId: "run-other", stepIndex: 9 })
+    );
+    await persist(
+      supervisor,
+      buildCheckpoint({ runId: "run-cp", stepIndex: 1 })
+    );
+
+    const latest = await loadLatest(supervisor, {
+      runId: "run-cp",
+      workItemId: "work-item:checkpoint-test",
+    });
+
+    expect({
+      runId: latest?.runId,
+      stepIndex: latest?.stepIndex,
+    }).toStrictEqual({
+      runId: "run-cp",
+      stepIndex: 1,
+    });
   });
 });

@@ -285,6 +285,19 @@ export const createMemoryContextCapsuleActor =
       capsules,
       checkpoints,
       events,
+      loadLatestCheckpoint(input) {
+        let latest: RunStepCheckpoint | null = null;
+        for (const checkpoint of checkpoints.values()) {
+          if (checkpoint.runId !== input.runId) {
+            continue;
+          }
+          if (latest === null || checkpoint.stepIndex > latest.stepIndex) {
+            latest = checkpoint;
+          }
+        }
+
+        return Promise.resolve(latest);
+      },
       persistCheckpoint(input) {
         const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
         checkpoints.set(

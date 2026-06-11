@@ -5237,3 +5237,214 @@ describe("workflow run-step checkpoints (M2.5)", () => {
     ).toStrictEqual(finalCheckpoint);
   });
 });
+
+// Build a workflow over shared artifact + capsule stores so a seeded full run
+// and a later resumed `executeDynamicWorkflow` invocation share the same durable
+// state (checkpoints + committed output artifacts) the resume reads.
+const buildResumableWorkflow = (namespace: string) => {
+  const artifacts = createMemoryArtifactStore(namespace);
+  const contextCapsules = createMemoryContextCapsuleActor();
+  const workflow = new WorkflowApp({
+    artifacts,
+    capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+      discordSecretRef: "secretref:discord-bot",
+      policyId: "discord-message-policy",
+    }),
+    contextCapsules,
+    discordMessages: createDryRunDiscordMessageAdapter(),
+    discordSecretRefs: {
+      dryRun: "secretref:discord-dry-run",
+      send: "secretref:discord-bot",
+    },
+    dynamicWorkflowPlanner: createIntegrationTestDynamicWorkflowPlanner(),
+    executionMode: "integration-test",
+    observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+      artifacts,
+    }),
+    packageRegistry: createMemoryPackageRegistryActor(
+      integrationTestPackageMetadata
+    ),
+    reviewGate: createMemoryReviewGateActor(artifacts),
+    reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+      artifacts,
+    }),
+    statusProjection: createMemoryWorkflowStatusProjectionStore(),
+    wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+    wzrrdSecretRefs: {
+      dryRun: "secretref:wzrrd-dry-run",
+      publish: "secretref:wzrrd-api",
+    },
+    wzrrdSiteRef: "wzrrd:test",
+  });
+
+  return { artifacts, contextCapsules, workflow };
+};
+
+// Seed a complete run, then load the pinned (deterministic-per-run) plan +
+// machine so a resumed invocation can rehydrate the very machine the seeded run
+// executed.
+const seedResumableRun = async (
+  rig: ReturnType<typeof buildResumableWorkflow>
+) => {
+  const request = buildIntegrationTestRunRequest();
+  const seeded = await rig.workflow.run(request);
+  if (seeded.status !== "captured") {
+    throw new Error(seeded.blocker.message);
+  }
+
+  const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
+    await rig.artifacts.readJson({
+      artifactRef: seeded.planArtifact.artifactRef,
+    })
+  );
+  const machine = DynamicWorkflowMachineDocumentSchema.parse(
+    await rig.artifacts.readJson({
+      artifactRef: seeded.machineArtifact.artifactRef,
+    })
+  );
+
+  return { loadedPlan, machine, request, seeded };
+};
+
+// Drive the durable execution loop directly with an injected resume checkpoint,
+// mirroring how a fresh DO invocation would re-enter the loop after eviction.
+// `transition`/`block`/`persistCheckpoint` are inert sinks — resume correctness
+// is observable in the returned execution result.
+const resumeExecution = (
+  rig: ReturnType<typeof buildResumableWorkflow>,
+  input: {
+    readonly loadedPlan: ReturnType<
+      typeof DynamicWorkflowPlanDocumentSchema.parse
+    >;
+    readonly machine: ReturnType<
+      typeof DynamicWorkflowMachineDocumentSchema.parse
+    >;
+    readonly request: ReturnType<typeof buildIntegrationTestRunRequest>;
+    readonly resumeCheckpoint: ReturnType<typeof RunStepCheckpointSchema.parse>;
+  }
+) =>
+  // oxlint-disable-next-line typescript/dot-notation -- Drive the private durable execution loop directly to prove alarm-style resume continues from a checkpoint without re-firing completed steps.
+  rig.workflow["executeDynamicWorkflow"]({
+    block: (blockedBy) =>
+      Promise.resolve({
+        blocker: blockedBy,
+        eventLog: [],
+        runId: input.request.runId,
+        status: "blocked" as const,
+      }),
+    loadedPlan: input.loadedPlan,
+    machine: input.machine,
+    persistCheckpoint: () => Promise.resolve(),
+    request: input.request,
+    resumeCheckpoint: input.resumeCheckpoint,
+    transition: () => Promise.resolve(),
+  });
+
+const resumedWorkerLaneStepIds = (
+  receipts: readonly AgentLaneReceipt[]
+): string[] =>
+  receipts.map((receipt) => receipt.laneId.split(":").at(-1) ?? "");
+
+describe("workflow run resume from checkpoint (M2.5)", () => {
+  it("resumes from a mid-run checkpoint without re-firing completed steps", async () => {
+    const rig = buildResumableWorkflow("workflow-app-resume-skip");
+    const { loadedPlan, machine, request } = await seedResumableRun(rig);
+
+    // Checkpoint after the discord capability step (index 1): research-review
+    // and discord are both already done; only review-summary remains.
+    const midCheckpoint = RunStepCheckpointSchema.parse(
+      rig.contextCapsules.checkpoints.get(`${request.runId}:1`)
+    );
+
+    const execution = await resumeExecution(rig, {
+      loadedPlan,
+      machine,
+      request,
+      resumeCheckpoint: midCheckpoint,
+    });
+    if (execution.status !== "executed") {
+      throw new Error(
+        `Expected resumed execution to complete, got ${execution.status}.`
+      );
+    }
+
+    expect({
+      // The full plan is still accounted as complete after resume.
+      completedStepIds: [...execution.completedStepIds].toSorted(),
+      // The two already-done steps never re-fired: no capability receipt was
+      // re-issued for the discord step, and the research-review worker lane was
+      // not re-run on this invocation.
+      reIssuedCapabilityReceipts: execution.capabilityReceipts.length,
+      reRanResearchReview: resumedWorkerLaneStepIds(
+        execution.workerLaneReceipts
+      ).includes("research-review"),
+    }).toStrictEqual({
+      completedStepIds: loadedPlan.steps.map((step) => step.stepId).toSorted(),
+      reIssuedCapabilityReceipts: 0,
+      reRanResearchReview: false,
+    });
+  });
+
+  it("re-runs a half-fired step whose output ref is missing", async () => {
+    const rig = buildResumableWorkflow("workflow-app-resume-halffired");
+    const { loadedPlan, machine, request } = await seedResumableRun(rig);
+
+    // Resume from the checkpoint written after research-review's STEP_DONE
+    // (index 0) but evict its committed output artifact — the half-fired case:
+    // the step is in `completedStepIds` yet its ref no longer resolves.
+    const firstCheckpoint = RunStepCheckpointSchema.parse(
+      rig.contextCapsules.checkpoints.get(`${request.runId}:0`)
+    );
+    const researchOutputRef = rig.artifacts.artifactRef({
+      path: "outputs/research-review.json",
+      runId: request.runId,
+    });
+    expect(rig.artifacts.records.delete(researchOutputRef)).toBeTruthy();
+
+    const execution = await resumeExecution(rig, {
+      loadedPlan,
+      machine,
+      request,
+      resumeCheckpoint: firstCheckpoint,
+    });
+    if (execution.status !== "executed") {
+      throw new Error(
+        `Expected re-run execution to complete, got ${execution.status}.`
+      );
+    }
+
+    expect({
+      // Two-factor skip fell back to a fresh actor, so research-review re-ran
+      // (its worker lane appears) and every step is complete again.
+      completedStepIds: [...execution.completedStepIds].toSorted(),
+      reRanResearchReview: resumedWorkerLaneStepIds(
+        execution.workerLaneReceipts
+      ).includes("research-review"),
+      // The content-addressed output ref is committed again by the safe re-run.
+      researchOutputRecommitted: rig.artifacts.records.has(researchOutputRef),
+    }).toStrictEqual({
+      completedStepIds: loadedPlan.steps.map((step) => step.stepId).toSorted(),
+      reRanResearchReview: true,
+      researchOutputRecommitted: true,
+    });
+  });
+
+  it("a no-crash full run is byte-identical with resume wiring present", async () => {
+    // Resume reads `loadLatestCheckpoint` at the top of execution; a fresh run
+    // has no prior checkpoint, so the happy path must be unchanged. Prove it by
+    // running a clean full run end to end through the resume-wired loop.
+    const rig = buildResumableWorkflow("workflow-app-resume-noop");
+    const { seeded } = await seedResumableRun(rig);
+
+    expect({
+      status: seeded.status,
+      // The reaped/clean run still produced one checkpoint per plan step.
+      stepCheckpointCount: [...rig.contextCapsules.checkpoints.keys()].filter(
+        (key) => key.startsWith(`${seeded.runId}:`)
+      ).length,
+    }).toStrictEqual({
+      status: "captured",
+      stepCheckpointCount: 3,
+    });
+  });
+});

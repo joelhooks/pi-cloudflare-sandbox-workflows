@@ -1,10 +1,12 @@
 import { createActor, setup } from "xstate";
+import type { Snapshot } from "xstate";
 
 import type { DynamicWorkflowMachineDocument } from "../domain/schemas.ts";
 import { DynamicWorkflowMachineDocumentSchema } from "../domain/schemas.ts";
 
 export const createGeneratedWorkflowActor = (
-  input: DynamicWorkflowMachineDocument
+  input: DynamicWorkflowMachineDocument,
+  options: { readonly snapshot?: unknown } = {}
 ) => {
   const document = DynamicWorkflowMachineDocumentSchema.parse(input);
   const machineSetup = setup({
@@ -27,7 +29,17 @@ export const createGeneratedWorkflowActor = (
   } as Parameters<typeof machineSetup.createMachine>[0];
   const machine = machineSetup.createMachine(machineConfig);
 
-  return createActor(machine);
+  // Rehydrate from a persisted snapshot when resuming a checkpointed run (M2.5
+  // step 3); a fresh actor otherwise. The snapshot is XState-owned and only
+  // round-tripped from `getPersistedSnapshot()`, so it is restored opaquely.
+  if (options.snapshot === undefined) {
+    return createActor(machine);
+  }
+
+  return createActor(machine, {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The persisted snapshot is XState-owned and stored opaque; it is only ever the output of this machine's `getPersistedSnapshot()`.
+    snapshot: options.snapshot as Snapshot<unknown>,
+  });
 };
 
 export const dynamicWorkflowStateValue = (value: unknown): string | null => {

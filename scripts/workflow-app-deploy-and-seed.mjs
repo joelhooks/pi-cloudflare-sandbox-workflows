@@ -198,7 +198,10 @@ const injectMemoryRelayWorkerVars = (configText, vars) => {
   // paths in wrangler.jsonc must be absolutized or wrangler cannot resolve them.
   return configText
     .replace(varsMarker, `$1${injected}\n`)
-    .replaceAll('"./Dockerfile"', JSON.stringify(resolve(repoRoot, "Dockerfile")))
+    .replaceAll(
+      '"./Dockerfile"',
+      JSON.stringify(resolve(repoRoot, "Dockerfile"))
+    )
     .replaceAll(
       '"main": "src/app/worker.ts"',
       `"main": ${JSON.stringify(resolve(repoRoot, "src/app/worker.ts"))}`
@@ -209,7 +212,9 @@ const injectMemoryRelayWorkerVars = (configText, vars) => {
     )
     .replaceAll(
       '"./node_modules/wrangler/config-schema.json"',
-      JSON.stringify(resolve(repoRoot, "node_modules/wrangler/config-schema.json"))
+      JSON.stringify(
+        resolve(repoRoot, "node_modules/wrangler/config-schema.json")
+      )
     );
 };
 
