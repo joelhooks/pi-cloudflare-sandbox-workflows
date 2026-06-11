@@ -99,6 +99,49 @@ export const relativeAge = (value: string, nowMs: number): string => {
 };
 
 /**
+ * Renders a signed relative label from an epoch-ms instant: "in 4s" for the
+ * future, "12s ago" for the past, "now" for within a second. Used by the
+ * durability panel for reaper/alarm timing, which can be either side of now.
+ *
+ * @param atMs The instant in epoch milliseconds.
+ * @param nowMs Reference time in epoch milliseconds.
+ */
+export const relativeFromMs = (atMs: number, nowMs: number): string => {
+  const deltaMs = atMs - nowMs;
+  const absMs = Math.abs(deltaMs);
+  if (absMs < SECOND_MS) {
+    return "now";
+  }
+
+  let magnitude: string;
+  if (absMs < MINUTE_MS) {
+    magnitude = `${Math.floor(absMs / SECOND_MS)}s`;
+  } else if (absMs < HOUR_MS) {
+    magnitude = `${Math.floor(absMs / MINUTE_MS)}m`;
+  } else if (absMs < DAY_MS) {
+    magnitude = `${Math.floor(absMs / HOUR_MS)}h`;
+  } else {
+    magnitude = `${Math.floor(absMs / DAY_MS)}d`;
+  }
+
+  return deltaMs >= 0 ? `in ${magnitude}` : `${magnitude} ago`;
+};
+
+/**
+ * Compact local wall-clock label ("14:03:21") for an epoch-ms instant, for the
+ * durability panel's absolute timestamps.
+ *
+ * @param atMs The instant in epoch milliseconds.
+ */
+export const clockTime = (atMs: number): string =>
+  new Date(atMs).toLocaleTimeString([], {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+/**
  * Whether a run looks stale: in-flight but its last update is older than the
  * threshold. Used to flag a possibly-wedged run on the board.
  *

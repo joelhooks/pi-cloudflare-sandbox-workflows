@@ -243,7 +243,9 @@
           {@const phase = phaseHint(run.status)}
           <tr class:is-stale={stale}>
             <td>
-              <span class="run-id">{run.runId}</span>
+              <a class="run-id" href="/runs/{encodeURIComponent(run.runId)}"
+                >{run.runId}</a
+              >
               <span class="work-item">{run.workItemId}</span>
             </td>
             <td>

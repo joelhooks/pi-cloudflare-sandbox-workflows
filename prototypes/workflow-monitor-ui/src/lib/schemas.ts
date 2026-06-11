@@ -121,10 +121,16 @@ export const WorkflowEventSchema = z.object({
   summary: z.string().min(1),
 });
 
+export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
+
 export const WorkflowEventStreamEntrySchema = z.object({
   event: WorkflowEventSchema,
   eventIndex: z.number().int().min(1),
 });
+
+export type WorkflowEventStreamEntry = z.infer<
+  typeof WorkflowEventStreamEntrySchema
+>;
 
 /**
  * `GET /runs/:runId/events` (JSON form). The events array is ordered by
@@ -138,6 +144,12 @@ export const WorkflowEventStreamDocumentSchema = z.object({
   redacted: z.literal(true),
   runId: z.string().min(1),
   schemaVersion: z.literal("workflow.event-stream.v1"),
+  sink: z.object({
+    description: z.string().min(1),
+    kind: z.literal("cloudflare-d1-workflow-events"),
+    runId: z.string().min(1),
+    table: z.literal("workflow_events"),
+  }),
   workItemId: z.string().min(1),
 });
 
@@ -145,16 +157,29 @@ export type WorkflowEventStreamDocument = z.infer<
   typeof WorkflowEventStreamDocumentSchema
 >;
 
+/** `artifact://…` opaque ref; the Worker never sends raw artifact bodies. */
+const artifactRefSchema = z.string().regex(/^artifact:\/\/.+/u);
+
+/**
+ * Latest persisted resume checkpoint for a run. Counts + step ids + output
+ * artifact refs only — no snapshot bodies cross the boundary.
+ */
 const checkpointSchema = z.object({
   completedStepCount: z.number().int().min(0),
   completedStepIds: z.array(z.string().min(1)),
-  outputRefCount: z.number().int().min(0),
-  snapshotCount: z.number().int().min(0),
+  outputArtifactRefCount: z.number().int().min(0),
+  outputArtifactRefs: z.array(artifactRefSchema),
+  persistedAt: isoDateTime,
   stepIndex: z.number().int().min(0),
 });
 
+/**
+ * The short-lived `driving:<runId>` marker. `stale` flips true once the marker
+ * is older than the driver timeout — the prior driver was evicted and the run
+ * is re-drivable. Absent marker => no driver currently parked.
+ */
 const drivingMarkerSchema = z.object({
-  ageMs: z.number().int().min(0),
+  stale: z.boolean(),
   startedAtMs: z.number().int().min(0),
 });
 
