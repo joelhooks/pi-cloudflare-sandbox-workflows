@@ -808,19 +808,61 @@ const captureArtifactPinFor = async (input: {
   }
 };
 
+// The most recent prior output of a given upstream nodeType. plan.steps are in
+// execution order, so the LAST completed node-invoke step of that type is the
+// input this node should consume. Final fallback when the stochastic planner
+// ordered the run correctly but omitted the explicit ref / stepId / dependsOn.
+const upstreamRefByNodeType = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly nodeType: string;
+  readonly plan: DynamicWorkflowPlanDocument;
+}): ArtifactRef | null => {
+  const completed = input.completedStepArtifactRefs;
+  if (completed === undefined) {
+    return null;
+  }
+  let resolved: ArtifactRef | null = null;
+  for (const step of input.plan.steps) {
+    if (step.kind !== "workflow.node.invoke") {
+      continue;
+    }
+    const ref = completed[step.stepId];
+    if (step.nodeType === input.nodeType && ref !== undefined) {
+      resolved = ref;
+    }
+  }
+
+  return resolved;
+};
+
 const searchRefFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof MemoryHydrationNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
 }): ArtifactRef | null =>
   input.config.searchRef ??
   dependencyRefFor({
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.searchStepId,
+  }) ??
+  upstreamRefByNodeType({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    nodeType: "joelclaw.memory.search",
+    plan: input.plan,
   });
 
 const correlationRefsFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof MemoryCorrelationNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
 }): {
   readonly hydrationRef: ArtifactRef | null;
   readonly searchRef: ArtifactRef | null;
@@ -830,12 +872,22 @@ const correlationRefsFor = (input: {
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.searchStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.search",
+      plan: input.plan,
     });
   const hydrationRef =
     input.config.hydrationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.hydrationStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.hydrate",
+      plan: input.plan,
     });
 
   return {
@@ -845,8 +897,12 @@ const correlationRefsFor = (input: {
 };
 
 const refinementProposalRefsFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof MemoryRefinementProposalNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
 }): {
   readonly correlationRef: ArtifactRef | null;
   readonly hydrationRef: ArtifactRef | null;
@@ -858,30 +914,54 @@ const refinementProposalRefsFor = (input: {
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.correlationStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.correlate",
+      plan: input.plan,
     }),
   hydrationRef:
     input.config.hydrationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.hydrationStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.hydrate",
+      plan: input.plan,
     }),
   searchRef:
     input.config.searchRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.searchStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.search",
+      plan: input.plan,
     }),
   signalsRef:
     input.config.signalsRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.signalsStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.signals",
+      plan: input.plan,
     }),
 });
 
 const reportRefsFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof WorkflowHitlReportNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
 }): {
   readonly correlationRef: ArtifactRef | null;
   readonly hydrationRef: ArtifactRef | null;
@@ -893,24 +973,44 @@ const reportRefsFor = (input: {
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.correlationStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.correlate",
+      plan: input.plan,
     }),
   hydrationRef:
     input.config.hydrationRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.hydrationStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.hydrate",
+      plan: input.plan,
     }),
   refinementProposalRef:
     input.config.refinementProposalRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.refinementProposalStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.refinement-proposals",
+      plan: input.plan,
     }),
   searchRef:
     input.config.searchRef ??
     dependencyRefFor({
       dependencyArtifactRefs: input.dependencyArtifactRefs,
       stepId: input.config.searchStepId,
+    }) ??
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.search",
+      plan: input.plan,
     }),
 });
 
@@ -2097,8 +2197,10 @@ const executeHydrationNode = async (
 
   const nodeConfig = MemoryHydrationNodeConfigSchema.parse(input.step.config);
   const searchRef = searchRefFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
+    plan: input.plan,
   });
   if (searchRef === null) {
     return blocker(
@@ -2159,8 +2261,10 @@ const executeCorrelationNode = async (
 
   const nodeConfig = MemoryCorrelationNodeConfigSchema.parse(input.step.config);
   const refs = correlationRefsFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
+    plan: input.plan,
   });
   if (refs.searchRef === null || refs.hydrationRef === null) {
     return blocker(
@@ -2216,8 +2320,10 @@ const executeRefinementProposalsNode = async (
     input.step.config
   );
   const refs = refinementProposalRefsFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
+    plan: input.plan,
   });
   if (
     refs.correlationRef === null ||
@@ -2290,8 +2396,10 @@ const executeHitlReportNode = async (
     input.step.config
   );
   const refs = reportRefsFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
+    plan: input.plan,
   });
   const requiredRefs = requiredReportRefsFor(refs);
   if ("status" in requiredRefs) {

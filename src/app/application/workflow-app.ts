@@ -3522,6 +3522,9 @@ export class WorkflowApp implements WorkflowAppContract {
     try {
       return await workflowNodeAdapter.execute({
         actor: input.request.actor,
+        completedStepArtifactRefs: Object.fromEntries(
+          input.artifactRefsByStepId
+        ),
         dependencyArtifactRefs,
         machine: input.machine,
         plan: input.loadedPlan,

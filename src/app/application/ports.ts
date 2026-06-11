@@ -241,6 +241,14 @@ export interface WorkflowNodeAdapterPort {
   execute(input: {
     readonly actor: Actor;
     readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+    /**
+     * Every prior step's output artifact ref keyed by stepId, in execution
+     * order — not just the steps this one declared in `dependsOn`. Lets a node
+     * resolve its upstream input (by nodeType, via `plan.steps`) when the
+     * stochastic planner produced a correct order but omitted the explicit
+     * `dependsOn`/ref wiring. Optional for adapters that do not need it.
+     */
+    readonly completedStepArtifactRefs?: Readonly<Record<string, ArtifactRef>>;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly plan: DynamicWorkflowPlanDocument;
     readonly step: WorkflowNodeInvocationStep;
