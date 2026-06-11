@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wzrrd.sh/schema/config.json",
+  "favicon": {
+    "emoji": "🌀"
+  },
+  "site": {
+    "emoji": "🌀",
+    "slug": "dream-report-run13",
+    "theme": "tufte-notes",
+    "title": "This dream found work to do."
+  },
+  "template": {
+    "id": "joel/tufte-mdsvx",
+    "source": "local-fixture",
+    "version": "0.1.0"
+  }
+}

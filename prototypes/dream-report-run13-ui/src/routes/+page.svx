@@ -1,0 +1,279 @@
+<script lang="ts">
+  import FlowChart from "$lib/flow-chart.svelte";
+  import MarginNote from "$lib/margin-note.svelte";
+  import ReportLayout from "$lib/ReportLayout.svelte";
+</script>
+
+<svelte:head>
+  <title>This dream found work to do.</title>
+  <meta
+    name="description"
+    content="Live Dreamer run run-live-20260611T183704995Z-a42c60e7: a human-review HITL report with ten findings, refinement proposals, hash-pinned generation proof, and a definition-of-done audit."
+  />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap"
+    rel="stylesheet"
+  />
+</svelte:head>
+
+<ReportLayout>
+
+<p class="eyebrow"><span class="mascot" aria-hidden="true">🌀</span> Dream Report — Run 13</p>
+
+# This dream found work to do.
+
+<p class="lead">This is a human review surface, not an autopatcher. The report puts findings first, then proof, so the human can decide what to accept, hold, reject, or turn into work.<MarginNote id="operator" number="1">Operator note: this page was rendered from the live run's <code>report/hitl-report.mdsvx</code> artifact and published by hand. The run blocked before reaching the workflow's own <code>wzrrd-publish</code> node, so the workflow did not deliver this page itself. Content below is verbatim from the artifact, including the all-10/10 findings and the not-proven 5/9 definition-of-done audit.</MarginNote></p>
+
+## Run context
+
+Run run-live-20260611T183704995Z-a42c60e7 searched 10 memory hits, hydrated 10 redacted receipts, and produced 10 findings for human review.
+
+Findings: 10. Unique receipts: 10. Expiry: 24h, noindex.
+
+## The actual findings
+
+### Finding 1: repo outputs needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows repo outputs.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- repo-outputs / source:repo-outputs:pi-cloudflare-sandbox-workflows / receipt:source:repo-outputs:pi-cloudflare-sandbox-workflows:68e68e943e50b713
+
+### Finding 2: Brain notes needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows Brain.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- brain / source:brain:pi-cloudflare-sandbox-workflows / receipt:source:brain:pi-cloudflare-sandbox-workflows:ffc8ab29f9c1db4d
+
+### Finding 3: PDF brain needs human review
+
+Matched docs/pdf-brain chunk in The Mom Test  How to talk to customers & l   Rob Fitzpatrick: THE MOM TEST > CHAPTER 1 THE MOM TEST > The Mom Test: > GOOD QUESTION / BAD QUESTION.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- docs-pdf-brain / source:docs-pdf-brain:joelclaw-api / docs-api:the-mom-test-how-to-talk-to-customers-l-rob-fitz-ced62bea841a%3As13%3An0
+
+### Finding 4: repo outputs needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows repo outputs.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- repo-outputs / source:repo-outputs:pi-cloudflare-sandbox-workflows / receipt:source:repo-outputs:pi-cloudflare-sandbox-workflows:5ca4702287a0cd95
+
+### Finding 5: Brain notes needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows Brain.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- brain / source:brain:pi-cloudflare-sandbox-workflows / receipt:source:brain:pi-cloudflare-sandbox-workflows:d88d7877bd403b87
+
+### Finding 6: PDF brain needs human review
+
+Matched docs/pdf-brain chunk in The Mom Test  How to talk to customers & l   Rob Fitzpatrick: THE MOM TEST > CHAPTER 1 THE MOM TEST > The Mom Test: > GOOD QUESTION / BAD QUESTION.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- docs-pdf-brain / source:docs-pdf-brain:joelclaw-api / docs-api:the-mom-test-how-to-talk-to-customers-l-rob-fitz-ced62bea841a%3As13
+
+### Finding 7: repo outputs needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows repo outputs.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- repo-outputs / source:repo-outputs:pi-cloudflare-sandbox-workflows / receipt:source:repo-outputs:pi-cloudflare-sandbox-workflows:d331b877844628b8
+
+### Finding 8: Brain notes needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows Brain.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- brain / source:brain:pi-cloudflare-sandbox-workflows / receipt:source:brain:pi-cloudflare-sandbox-workflows:80cb32463e7fc472
+
+### Finding 9: PDF brain needs human review
+
+Matched docs/pdf-brain chunk in Podcast Outreach: Introduction > I wrote Podcast Outreach for two reasons:.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- docs-pdf-brain / source:docs-pdf-brain:joelclaw-api / docs-api:podcast-outreach-0507ca4aaffd%3As3%3An0
+
+### Finding 10: Brain notes needs human review
+
+Matched 2 term(s) in Pi Cloudflare Sandbox Workflows Brain.
+
+**Reasoning.** The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts.
+
+**Rating.** 10/10
+
+**Recommendation.** Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.
+
+**Receipts.**
+
+- brain / source:brain:pi-cloudflare-sandbox-workflows / receipt:source:brain:pi-cloudflare-sandbox-workflows:caf5d59618554ec5
+
+## What to do with these findings
+
+Use this as HITL input, not autopilot. Accept a finding only when the receipt trail is good enough to update .brain, create a capture fix, or refine a workflow/package decision.
+
+Refinement proposals emitted: 8. Accepted proposals should become Brain/package changes or constraints for the next generated workflow.
+
+### HITL decision receipt
+
+Write human decisions as `memory.hitl-decision.v1` at `report/hitl-decision.json`, backed by this report and its source refs.
+
+Schema export: `memory-hitl-decision-schema` from `contract://workflow/memory-fabric/hitl-decision.v1`.
+
+Decisions that must feed the next generated workflow seed: accept, turn-into-work.
+
+## Actionable line items
+
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows repo outputs.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+- **Refine kernel-memory from correction: Correction language repeated in memory. Source: Pi Cloudflare Sandbox Workflows Brain.** 10/10. turn-into-work: Promote the accepted claim into the appropriate Brain/kernel artifact with receipt refs.
+
+## Report node
+
+`joelclaw.memory.hitl-report` rendered this artifact as an installed workflow cartridge node. The JSON document is the machine contract; this sibling `text/mdsvx` artifact is the publishable HITL source.
+
+## Workflow state machine
+
+The D2 figure below is rendered from the pinned generated `workflow.xstate-machine.v1` config for this run, not from a static node list. It belongs below the findings so proof does not bury the human decision.
+
+<FlowChart
+  alt="The generated 14-state workflow machine for this run: ready, captureRun, mineSignals, searchMemory, hydrateReceipts, correlateEvidence, proposeRefinements, renderHitlReport, captureReportArtifacts, seedHitlDecisionWorkflow, draftFollowUpRunRequest, reviewSummary, then terminal done and blocked states. A NEXT edge leaves ready; every step has a STEP_DONE edge forward and a STEP_BLOCKED edge to the terminal blocked state."
+  caption="The 14-state machine the planner generated for this run, bound to the pinned machine.config.json by hash."
+  src="/figures/generated-machine.svg"
+  title="Generated workflow state machine"
+  version="run13"
+/>
+
+## Dynamic generation proof
+
+Dynamic generation proof level: plan-derived.
+
+Generated machine: artifact://piwf-run-live-20260611t183704995z-a42c60e7/runs/run-live-20260611T183704995Z-a42c60e7/workflows/machine.config.json hash 53d48801463aaebfda529cd41984f083d1447933c5ad34c9f9e5e35062aaafc3.
+
+Generated machine source: artifact://piwf-run-live-20260611t183704995z-a42c60e7/runs/run-live-20260611T183704995Z-a42c60e7/workflows/machine.ts hash 809b569f5e45b2641df0cff9f7321420c92b7b466b618a3710ad4fba7101071c.
+
+Generated harness: artifact://piwf-run-live-20260611t183704995z-a42c60e7/runs/run-live-20260611T183704995Z-a42c60e7/workflows/harness.ts hash 085d5b6b83dea0f3b16fd3bd2bf2fdd35651188653582b9ea7b2883b2af60175.
+
+Verification contract: artifact://piwf-run-live-20260611t183704995z-a42c60e7/runs/run-live-20260611T183704995Z-a42c60e7/run/verification-contract.json hash afe0a35ace88f2e29a0c6dc6079c81427e646cb42bb1e3dd6d179de2b0299683.
+
+D2 figure source hash: 23ad7f5d3d1550d3ff0c12b61d93c9d22982244733542029aa726192f987e388. Binding: bound-to-generated-machine to artifact://piwf-run-live-20260611t183704995z-a42c60e7/runs/run-live-20260611T183704995Z-a42c60e7/workflows/machine.config.json hash 53d48801463aaebfda529cd41984f083d1447933c5ad34c9f9e5e35062aaafc3.
+
+Planner lane: pi-planner-lane, nonce nonce-20260611T183712500Z-9f3b7c1a. Plan plan:run-live-20260611T183704995Z-a42c60e7 has 11 step(s).
+
+The report records report-level generated artifact refs and hashes. Final acceptance still depends on the surrounding `workflow.execution-proof.v1`, cartridge invocation proofs, post-execution `memory.generated-workflow-proof.v1`, and verifier result.
+
+## Definition of done audit
+
+Audit status: not-proven. Captured 4/9; blocked 0; missing 0; not proven 5.
+
+- workflow-cartridge-package: captured -- `joelclaw.memory.hitl-report` produced the JSON/MDSvX report as a cartridge-owned workflow node.
+- worker-facing-relay-capability-lease: not-proven -- This report consumes run artifacts but does not prove relay lease sidecars; `memory.generated-workflow-proof.v1` must verify them.
+- live-cloudflare-execution: not-proven -- The report is not the Cloudflare execution receipt; require `workflow.execution-proof.v1` and verifier acceptance for the surrounding run.
+- generated-machine-and-harness: not-proven -- Report proof level is plan-derived, so generated machine execution is not proven by this report.
+- t-shaped-memory-coverage: captured -- Retrieval produced 10 search hit(s), 10 hydrated receipt(s), and 40 correlation edge(s).
+- findings-and-refinement-proposals: captured -- Report contains 10 finding card(s) and 8 refinement proposal(s).
+- hitl-refinement-loop: not-proven -- The report emits the HITL decision contract; decision seed and follow-up run request artifacts are post-report workflow nodes.
+- workflow-owned-wzrrd-output: not-proven -- The report node renders MDSvX only; leased `wzrrd.site.publish` delivery is a separate post-verifier side effect.
+- public-private-redaction-boundary: captured -- Report and hydration artifacts assert redacted evidence only; raw transcripts were not returned.
+
+## Run coverage
+
+Skipped sources reported as caveats: source:docs-pdf-brain:local-artifacts:unavailable, source:agent-transcripts:joelclaw-index:joelclaw-index-unavailable.
+
+Correlation graph: 27 nodes, 40 source-backed edges.
+
+## Access adapter shape
+
+Memory access goes through the trusted Memory relay contract. Cloudflare receives redacted receipt metadata, source freshness, hashes, coverage counts, and follow-up refs; raw local paths, raw transcripts, and credentials stay behind the relay.
+
+## Report standard
+
+Template: `joel/tufte-mdsvx@0.1.0`. Public Wzrrd publication must remain `noindex` and expiring by default. The canonical source file is this MDSvX artifact, not a rendered preview.
+
+## What did not happen
+
+- Raw transcripts were not returned.
+- This report did not directly publish to Wzrrd; publication remains a separate leased `wzrrd.site.publish` side effect.
+- This report did not mutate Brain, packages, source indexes, or capability policies by itself.
+
+## Technical appendix
+
+Correlation graph: 27 nodes, 40 source-backed edges.
+
+Receipt count: 10. Raw transcripts returned: no.
+
+Correlation graph schema: memory.correlation-graph.v1. Refinement proposal count: 8. Template seed: joel/tufte-mdsvx@0.1.0. Publish policy: noindex and 24h expiry by default.
+
+</ReportLayout>
