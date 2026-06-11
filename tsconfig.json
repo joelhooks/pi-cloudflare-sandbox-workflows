@@ -25,5 +25,8 @@
     "scripts/**/*.ts",
     "worker-configuration.d.ts"
   ],
-  "exclude": ["prototypes/registry-office-ui-spike/**/*"]
+  "exclude": [
+    "prototypes/registry-office-ui-spike/**/*",
+    "prototypes/workflow-monitor-ui/**/*"
+  ]
 }
