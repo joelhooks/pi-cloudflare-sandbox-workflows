@@ -747,6 +747,9 @@ const latestDependencyArtifactRef = (
 // This is shape tolerance only: the resolved ref is still hashed, pinned, and
 // leased through captureArtifactPinFor and the relay exactly as before.
 const captureArtifactRefFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof MemoryCaptureArtifactNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
@@ -755,6 +758,15 @@ const captureArtifactRefFor = (input: {
   dependencyRefFor({
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.artifactStepId,
+  }) ??
+  // A capture node placed AFTER a report renderer (capture-report-artifact)
+  // means to capture the report, not the generated machine. Resolve the
+  // upstream report first; it is null for an early capture-generated-artifacts
+  // node (no report yet), which then correctly falls through to the machine.
+  upstreamRefByNodeType({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    nodeType: "joelclaw.memory.hitl-report",
+    plan: input.plan,
   }) ??
   input.plan.machine.artifactRef ??
   latestDependencyArtifactRef(input.dependencyArtifactRefs) ??
@@ -774,18 +786,24 @@ const captureArtifactPinFor = async (input: {
 > => {
   try {
     if (input.mediaType === "application/json") {
-      const value = await input.artifacts.readJson({
-        artifactRef: input.artifactRef,
-      });
-
-      return {
-        pin: ArtifactPinSchema.parse({
+      try {
+        const value = await input.artifacts.readJson({
           artifactRef: input.artifactRef,
-          hash: hashJson(value),
-          mediaType: input.mediaType,
-        }),
-        status: "loaded",
-      };
+        });
+
+        return {
+          pin: ArtifactPinSchema.parse({
+            artifactRef: input.artifactRef,
+            hash: hashJson(value),
+            mediaType: input.mediaType,
+          }),
+          status: "loaded",
+        };
+      } catch {
+        // The planner often defaults mediaType to application/json even when
+        // the captured artifact is text (a rendered report, the machine
+        // source). Fall through to a text read rather than blocking.
+      }
     }
 
     const value = await input.artifacts.readText({
@@ -2653,6 +2671,7 @@ const executeCaptureArtifactNode = async (
     input.step.config
   );
   const artifactRef = captureArtifactRefFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
