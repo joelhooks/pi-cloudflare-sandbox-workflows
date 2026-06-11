@@ -2,16 +2,18 @@ import { z } from "zod";
 
 import {
   ArtifactRefSchema,
+  CapabilityDenialCodeSchema,
   CapabilityNameSchema,
   IsoDateTimeSchema,
   PackageKindSchema,
   SafetyEnvelopeStateSchema,
   Sha256HexSchema,
   TrustTierSchema,
+  WorkflowNodeTypeSchema,
   WorkflowStructuredLogValueSchema,
 } from "../domain/schemas.ts";
 
-export const APP_D1_SCHEMA_VERSION = "workflow-app-d1.2026-06-09";
+export const APP_D1_SCHEMA_VERSION = "workflow-app-d1.2026-06-11";
 
 export const APP_D1_TABLES = [
   "packages",
@@ -57,6 +59,10 @@ export const APP_D1_SCHEMA_SQL = [
     status text not null,
     plan_ref text,
     plan_hash text,
+    blocker_code text,
+    blocker_message text,
+    blocker_step_id text,
+    blocker_node_type text,
     created_at text not null default CURRENT_TIMESTAMP,
     updated_at text not null default CURRENT_TIMESTAMP
   )`,
@@ -159,6 +165,10 @@ export const D1EntitlementRowSchema = z.object({
 
 export const D1RunRowSchema = z.object({
   actor_id: z.string().min(1),
+  blocker_code: CapabilityDenialCodeSchema.optional(),
+  blocker_message: z.string().min(1).optional(),
+  blocker_node_type: WorkflowNodeTypeSchema.optional(),
+  blocker_step_id: z.string().min(1).optional(),
   capsule_id: z.string().min(1),
   plan_hash: Sha256HexSchema.optional(),
   plan_ref: ArtifactRefSchema.optional(),

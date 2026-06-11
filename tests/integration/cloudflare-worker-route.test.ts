@@ -20,6 +20,7 @@ import {
   __cloudflareWorkerRouteTestHooks,
   handleWorkflowWorkerRequest,
 } from "../../src/app/infrastructure/cloudflare-worker-route.ts";
+import { WorkflowRunStatusSnapshotSchema } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
 import type { WorkflowRunStatusSnapshot } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
@@ -1130,6 +1131,88 @@ describe("Cloudflare Worker route", () => {
         terminal: true,
       },
       terminalStatus: 200,
+    });
+  });
+
+  it("surfaces the terminal blocker code, message, and step for a blocked run", async () => {
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus: (_env, runInput) =>
+        Promise.resolve(
+          WorkflowRunStatusSnapshotSchema.parse({
+            runId: runInput.runId,
+            status: "blocked",
+            terminalBlocker: {
+              code: "capability_denied",
+              message:
+                "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+              nodeType: "joelclaw.memory.capture-artifact",
+              redacted: true,
+              stepId: "step-capture-artifact",
+            },
+          })
+        ),
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/status",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        blocker: {
+          code: "capability_denied",
+          message:
+            "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+          nodeType: "joelclaw.memory.capture-artifact",
+          redacted: true,
+          stepId: "step-capture-artifact",
+        },
+        redacted: true,
+        runId: "run-route-test",
+        status: "blocked",
+        terminal: true,
+      },
+      status: 200,
+    });
+  });
+
+  it("omits the blocker for a captured run status", async () => {
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus: (_env, runInput) =>
+        Promise.resolve(
+          WorkflowRunStatusSnapshotSchema.parse({
+            runId: runInput.runId,
+            status: "captured",
+          })
+        ),
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/status",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        redacted: true,
+        runId: "run-route-test",
+        status: "captured",
+        terminal: true,
+      },
+      status: 200,
     });
   });
 

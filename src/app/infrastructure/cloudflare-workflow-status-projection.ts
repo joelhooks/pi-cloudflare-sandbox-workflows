@@ -41,6 +41,18 @@ export const createCloudflareWorkflowStatusProjection = (
     const projection = WorkflowStatusProjectionSchema.parse(input.projection);
     const row = D1RunRowSchema.parse({
       actor_id: projection.actorId,
+      ...(projection.terminalBlocker === undefined
+        ? {}
+        : {
+            blocker_code: projection.terminalBlocker.code,
+            blocker_message: projection.terminalBlocker.message,
+            ...(projection.terminalBlocker.nodeType === undefined
+              ? {}
+              : { blocker_node_type: projection.terminalBlocker.nodeType }),
+            ...(projection.terminalBlocker.stepId === undefined
+              ? {}
+              : { blocker_step_id: projection.terminalBlocker.stepId }),
+          }),
       capsule_id: projection.capsuleId,
       ...(projection.planArtifact === undefined
         ? {}
@@ -68,8 +80,8 @@ export const createCloudflareWorkflowStatusProjection = (
     await assertD1Write(
       config.d1
         .prepare(
-          `insert into runs (run_id, work_item_id, capsule_id, actor_id, status, plan_ref, plan_hash, updated_at)
-           values (?, ?, ?, ?, ?, ?, ?, ?)
+          `insert into runs (run_id, work_item_id, capsule_id, actor_id, status, plan_ref, plan_hash, blocker_code, blocker_message, blocker_step_id, blocker_node_type, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            on conflict(run_id) do update set
              work_item_id = excluded.work_item_id,
              capsule_id = excluded.capsule_id,
@@ -77,6 +89,10 @@ export const createCloudflareWorkflowStatusProjection = (
              status = excluded.status,
              plan_ref = coalesce(excluded.plan_ref, runs.plan_ref),
              plan_hash = coalesce(excluded.plan_hash, runs.plan_hash),
+             blocker_code = excluded.blocker_code,
+             blocker_message = excluded.blocker_message,
+             blocker_step_id = excluded.blocker_step_id,
+             blocker_node_type = excluded.blocker_node_type,
              updated_at = excluded.updated_at`
         )
         .bind(
@@ -87,6 +103,10 @@ export const createCloudflareWorkflowStatusProjection = (
           row.status,
           row.plan_ref ?? null,
           row.plan_hash ?? null,
+          row.blocker_code ?? null,
+          row.blocker_message ?? null,
+          row.blocker_step_id ?? null,
+          row.blocker_node_type ?? null,
           projection.updatedAt
         ),
       "Workflow status projection row could not be persisted."

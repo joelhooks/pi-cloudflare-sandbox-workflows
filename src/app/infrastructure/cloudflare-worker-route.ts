@@ -1329,13 +1329,31 @@ const handleWorkflowRunStatusRequest = async <Environment>(
   }
 
   const status = WorkflowRunStatusSnapshotSchema.parse(snapshot);
+  const terminal = isTerminalWorkflowState(status.status);
 
   return Response.json(
     {
+      ...(terminal &&
+      status.status === "blocked" &&
+      status.terminalBlocker !== undefined
+        ? {
+            blocker: {
+              code: status.terminalBlocker.code,
+              message: status.terminalBlocker.message,
+              ...(status.terminalBlocker.nodeType === undefined
+                ? {}
+                : { nodeType: status.terminalBlocker.nodeType }),
+              redacted: true,
+              ...(status.terminalBlocker.stepId === undefined
+                ? {}
+                : { stepId: status.terminalBlocker.stepId }),
+            },
+          }
+        : {}),
       redacted: true,
       runId: status.runId,
       status: status.status,
-      terminal: isTerminalWorkflowState(status.status),
+      terminal,
     },
     {
       headers: {

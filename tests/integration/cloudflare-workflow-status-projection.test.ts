@@ -140,7 +140,80 @@ describe("Cloudflare workflow status projection", () => {
         "loadingPinnedDynamicWorkflow",
         planArtifact.artifactRef,
         planArtifact.hash,
+        null,
+        null,
+        null,
+        null,
         secondEvent.at,
+      ],
+    });
+  });
+
+  it("persists the terminal blocker code, message, and step on a blocked run", async () => {
+    const request = buildIntegrationTestRunRequest();
+    const d1 = createFakeD1();
+    const store = createCloudflareWorkflowStatusProjection({ d1: d1.d1 });
+    const blockedEvent = WorkflowEventSchema.parse({
+      at: "2026-06-09T02:47:00.000Z",
+      refs: {},
+      state: "blocked",
+      summary: "Workflow node adapter step failed.",
+    });
+
+    await store.record({
+      projection: WorkflowStatusProjectionSchema.parse({
+        actorId: request.actor.id,
+        capsuleId: `capsule:${request.workItemId}`,
+        currentState: blockedEvent.state,
+        eventCount: 9,
+        lastEvent: blockedEvent,
+        redacted: true,
+        runId: request.runId,
+        schemaVersion: "workflow.status-projection.v1",
+        terminalBlocker: {
+          code: "capability_denied",
+          message:
+            "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+          nodeType: "joelclaw.memory.capture-artifact",
+          redacted: true,
+          stepId: "step-capture-artifact",
+        },
+        updatedAt: blockedEvent.at,
+        workItemId: request.workItemId,
+      }),
+    });
+
+    const runUpsert = d1.operations.find((operation) =>
+      operation.query.includes("insert into runs")
+    );
+
+    const blockerColumns = [
+      "blocker_code",
+      "blocker_message",
+      "blocker_step_id",
+      "blocker_node_type",
+    ];
+
+    expect({
+      includesBlockerColumns: blockerColumns.every(
+        (column) => runUpsert?.query.includes(column) === true
+      ),
+      values: runUpsert?.values,
+    }).toStrictEqual({
+      includesBlockerColumns: true,
+      values: [
+        request.runId,
+        request.workItemId,
+        `capsule:${request.workItemId}`,
+        request.actor.id,
+        "blocked",
+        null,
+        null,
+        "capability_denied",
+        "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+        "step-capture-artifact",
+        "joelclaw.memory.capture-artifact",
+        blockedEvent.at,
       ],
     });
   });

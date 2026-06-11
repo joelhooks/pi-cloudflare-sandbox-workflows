@@ -2633,6 +2633,7 @@ describe("workflow app integration contract", () => {
       "workflow-app-verifier-output-collision"
     );
     const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
     const workflow = new WorkflowApp({
       artifacts,
       capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
@@ -2669,7 +2670,7 @@ describe("workflow app integration contract", () => {
       reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
         artifacts,
       }),
-      statusProjection: createMemoryWorkflowStatusProjectionStore(),
+      statusProjection,
       wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
       wzrrdSecretRefs: {
         dryRun: "secretref:wzrrd-dry-run",
@@ -2679,10 +2680,13 @@ describe("workflow app integration contract", () => {
     });
 
     const result = await workflow.run(buildIntegrationTestRunRequest());
+    const latestProjection = statusProjection.latest.get(result.runId);
 
     expect({
       blocker: result.status === "blocked" ? result.blocker : undefined,
       lastSummary: result.eventLog.at(-1)?.summary,
+      projectionState: latestProjection?.currentState,
+      projectionTerminalBlocker: latestProjection?.terminalBlocker,
       status: result.status,
     }).toStrictEqual({
       blocker: {
@@ -2692,6 +2696,13 @@ describe("workflow app integration contract", () => {
         redacted: true,
       },
       lastSummary: "Planner output failed dynamic workflow validation.",
+      projectionState: "blocked",
+      projectionTerminalBlocker: {
+        code: "capability_denied",
+        message:
+          "Verification contract outputPath must not collide with dynamic step outputPath: review/summary.json.",
+        redacted: true,
+      },
       status: "blocked",
     });
   });

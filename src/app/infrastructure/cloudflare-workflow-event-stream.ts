@@ -5,10 +5,13 @@ import {
   D1WorkflowEventRowSchema,
 } from "../control-plane/d1-schema.ts";
 import {
+  CapabilityDenialCodeSchema,
   SafetyEnvelopeStateSchema,
   WorkflowEventSchema,
   WorkflowEventStreamDocumentSchema,
   WorkflowEventStreamEntrySchema,
+  WorkflowNodeTypeSchema,
+  WorkflowTerminalBlockerSchema,
 } from "../domain/schemas.ts";
 import type { WorkflowEventStreamDocument } from "../domain/schemas.ts";
 
@@ -36,7 +39,17 @@ export interface CloudflareWorkflowRunStatusReaderConfig {
   readonly d1: D1DatabaseLike;
 }
 
+const nullToUndefined = <Output>(schema: z.ZodType<Output>) =>
+  z.preprocess(
+    (value) => (value === null ? undefined : value),
+    schema.optional()
+  );
+
 const D1RunStatusRowSchema = z.object({
+  blocker_code: nullToUndefined(CapabilityDenialCodeSchema),
+  blocker_message: nullToUndefined(z.string().min(1)),
+  blocker_node_type: nullToUndefined(WorkflowNodeTypeSchema),
+  blocker_step_id: nullToUndefined(z.string().min(1)),
   run_id: z.string().min(1),
   status: SafetyEnvelopeStateSchema,
 });
@@ -44,6 +57,7 @@ const D1RunStatusRowSchema = z.object({
 export const WorkflowRunStatusSnapshotSchema = z.object({
   runId: z.string().min(1),
   status: SafetyEnvelopeStateSchema,
+  terminalBlocker: WorkflowTerminalBlockerSchema.optional(),
 });
 
 export type WorkflowRunStatusSnapshot = z.infer<
@@ -150,7 +164,7 @@ export const createCloudflareWorkflowRunStatusReader = (
   }): Promise<WorkflowRunStatusSnapshot | null> {
     const result = await config.d1
       .prepare(
-        `select run_id, status
+        `select run_id, status, blocker_code, blocker_message, blocker_step_id, blocker_node_type
          from runs
          where run_id = ?
          limit 1`
@@ -162,10 +176,27 @@ export const createCloudflareWorkflowRunStatusReader = (
       return null;
     }
     const row = D1RunStatusRowSchema.parse(firstRow);
+    const terminalBlocker =
+      row.status === "blocked" &&
+      row.blocker_code !== undefined &&
+      row.blocker_message !== undefined
+        ? WorkflowTerminalBlockerSchema.parse({
+            code: row.blocker_code,
+            message: row.blocker_message,
+            ...(row.blocker_node_type === undefined
+              ? {}
+              : { nodeType: row.blocker_node_type }),
+            redacted: true,
+            ...(row.blocker_step_id === undefined
+              ? {}
+              : { stepId: row.blocker_step_id }),
+          })
+        : undefined;
 
     return WorkflowRunStatusSnapshotSchema.parse({
       runId: row.run_id,
       status: row.status,
+      ...(terminalBlocker === undefined ? {} : { terminalBlocker }),
     });
   },
 });

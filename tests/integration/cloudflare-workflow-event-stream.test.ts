@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { WorkflowEventStreamDocumentSchema } from "../../src/app/domain/schemas.ts";
-import { createCloudflareWorkflowEventStreamReader } from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
+import {
+  createCloudflareWorkflowEventStreamReader,
+  createCloudflareWorkflowRunStatusReader,
+} from "../../src/app/infrastructure/cloudflare-workflow-event-stream.ts";
 
 type D1QueryValue = null | number | string;
 
@@ -161,5 +164,62 @@ describe("Cloudflare workflow event stream reader", () => {
     });
 
     await expect(reader.read({ runId: "run-missing" })).resolves.toBeNull();
+  });
+});
+
+describe("Cloudflare workflow run status reader", () => {
+  it("maps the persisted terminal blocker for a blocked run", async () => {
+    const d1 = createFakeD1({
+      eventRows: [],
+      runRows: [
+        {
+          blocker_code: "capability_denied",
+          blocker_message:
+            "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+          blocker_node_type: "joelclaw.memory.capture-artifact",
+          blocker_step_id: "step-capture-artifact",
+          run_id: "run-blocked",
+          status: "blocked",
+        },
+      ],
+    });
+    const reader = createCloudflareWorkflowRunStatusReader({ d1: d1.d1 });
+
+    await expect(reader.read({ runId: "run-blocked" })).resolves.toStrictEqual({
+      runId: "run-blocked",
+      status: "blocked",
+      terminalBlocker: {
+        code: "capability_denied",
+        message:
+          "Workflow node joelclaw.memory.capture-artifact requires a generated artifact ref.",
+        nodeType: "joelclaw.memory.capture-artifact",
+        redacted: true,
+        stepId: "step-capture-artifact",
+      },
+    });
+  });
+
+  it("omits the blocker when a non-blocked run has null blocker columns", async () => {
+    const d1 = createFakeD1({
+      eventRows: [],
+      runRows: [
+        {
+          blocker_code: null,
+          blocker_message: null,
+          blocker_node_type: null,
+          blocker_step_id: null,
+          run_id: "run-captured",
+          status: "captured",
+        },
+      ],
+    });
+    const reader = createCloudflareWorkflowRunStatusReader({ d1: d1.d1 });
+
+    await expect(reader.read({ runId: "run-captured" })).resolves.toStrictEqual(
+      {
+        runId: "run-captured",
+        status: "captured",
+      }
+    );
   });
 });

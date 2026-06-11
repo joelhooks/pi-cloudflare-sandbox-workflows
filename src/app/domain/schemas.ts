@@ -1626,6 +1626,14 @@ export const WorkflowEventSchema = z.object({
   summary: z.string().min(1),
 });
 
+export const WorkflowTerminalBlockerSchema = z.object({
+  code: CapabilityDenialCodeSchema,
+  message: z.string().min(1),
+  nodeType: WorkflowNodeTypeSchema.optional(),
+  redacted: z.literal(true),
+  stepId: z.string().min(1).optional(),
+});
+
 export const WorkflowStatusProjectionSchema = z.object({
   actorId: z.string().min(1),
   capsuleId: z.string().min(1),
@@ -1636,6 +1644,7 @@ export const WorkflowStatusProjectionSchema = z.object({
   redacted: z.literal(true),
   runId: z.string().min(1),
   schemaVersion: z.literal("workflow.status-projection.v1"),
+  terminalBlocker: WorkflowTerminalBlockerSchema.optional(),
   updatedAt: IsoDateTimeSchema,
   workItemId: z.string().min(1),
 });
@@ -2350,6 +2359,9 @@ export type WorkflowTelemetrySinkReceipt = z.infer<
 >;
 export type WorkflowStatusProjection = z.infer<
   typeof WorkflowStatusProjectionSchema
+>;
+export type WorkflowTerminalBlocker = z.infer<
+  typeof WorkflowTerminalBlockerSchema
 >;
 export type WorkflowStructuredLogRecord = z.infer<
   typeof WorkflowStructuredLogRecordSchema

@@ -73,9 +73,11 @@ import type {
   WorkflowExecutionProofArtifact,
   WorkflowExecutionProofDocument,
   WorkflowEvent,
+  WorkflowNodeType,
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowStatusProjection,
+  WorkflowTerminalBlocker,
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
 import type { MemorySourceProfile } from "../domain/source-profile.ts";
@@ -171,12 +173,19 @@ interface PinnedDiscordPayload {
 type SafetyEnvelopeTransition = (
   command: SafetyEnvelopeCommand,
   summary: string,
-  refs?: Record<string, string>
+  refs?: Record<string, string>,
+  terminalBlocker?: WorkflowTerminalBlocker
 ) => Promise<void>;
+
+interface TerminalBlockerStepContext {
+  readonly nodeType?: WorkflowNodeType;
+  readonly stepId: string;
+}
 
 type BlockRun = (
   blocker: CapabilityBlocker,
-  summary: string
+  summary: string,
+  stepContext?: TerminalBlockerStepContext
 ) => Promise<WorkflowRunResult>;
 
 /**
@@ -1187,6 +1196,7 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly eventCount: number;
     readonly planArtifact: PlanArtifact | null;
     readonly request: WorkflowRunRequest;
+    readonly terminalBlocker?: WorkflowTerminalBlocker;
   }): Promise<void> {
     const projection: WorkflowStatusProjection =
       WorkflowStatusProjectionSchema.parse({
@@ -1202,6 +1212,9 @@ export class WorkflowApp implements WorkflowAppContract {
         redacted: true,
         runId: input.request.runId,
         schemaVersion: "workflow.status-projection.v1",
+        ...(input.terminalBlocker === undefined
+          ? {}
+          : { terminalBlocker: input.terminalBlocker }),
         updatedAt: input.event.at,
         workItemId: input.request.workItemId,
       });
@@ -1292,14 +1305,15 @@ export class WorkflowApp implements WorkflowAppContract {
     const transition: SafetyEnvelopeTransition = async (
       command,
       summary,
-      refs = {}
+      refs,
+      terminalBlocker
     ) => {
       const parsedCommand = SafetyEnvelopeCommandSchema.parse(command);
       actor.send(parsedCommand);
       const state = SafetyEnvelopeStateSchema.parse(actor.getSnapshot().value);
       const event = WorkflowEventSchema.parse({
         at: new Date().toISOString(),
-        refs,
+        refs: refs ?? {},
         state,
         summary,
       });
@@ -1314,11 +1328,28 @@ export class WorkflowApp implements WorkflowAppContract {
         eventCount: eventLog.length,
         planArtifact: projectionPlanArtifact,
         request,
+        ...(terminalBlocker === undefined ? {} : { terminalBlocker }),
       });
     };
 
-    const block: BlockRun = async (blockedBy, summary) => {
-      await transition({ blocker: blockedBy, type: "BLOCK" }, summary);
+    const block: BlockRun = async (blockedBy, summary, stepContext) => {
+      const terminalBlocker: WorkflowTerminalBlocker = {
+        code: blockedBy.code,
+        message: blockedBy.message,
+        ...(stepContext?.nodeType === undefined
+          ? {}
+          : { nodeType: stepContext.nodeType }),
+        redacted: true,
+        ...(stepContext?.stepId === undefined
+          ? {}
+          : { stepId: stepContext.stepId }),
+      };
+      await transition(
+        { blocker: blockedBy, type: "BLOCK" },
+        summary,
+        {},
+        terminalBlocker
+      );
       return WorkflowRunBlockedSchema.parse({
         blocker: blockedBy,
         eventLog,
@@ -3636,7 +3667,8 @@ export class WorkflowApp implements WorkflowAppContract {
             "capability_denied",
             `Dynamic workflow step has unmet dependencies: ${missingDependencies.join(", ")}.`
           ),
-          "Dynamic workflow step dependency check failed."
+          "Dynamic workflow step dependency check failed.",
+          { stepId: step.stepId }
         );
         return { result, status: "blocked" };
       }
@@ -3653,7 +3685,8 @@ export class WorkflowApp implements WorkflowAppContract {
           workflowActor.send({ type: "STEP_BLOCKED" });
           const result = await input.block(
             nodeResult.blocker,
-            "Workflow node adapter step failed."
+            "Workflow node adapter step failed.",
+            { nodeType: step.nodeType, stepId: step.stepId }
           );
           return { result, status: "blocked" };
         }
@@ -3689,7 +3722,8 @@ export class WorkflowApp implements WorkflowAppContract {
           workflowActor.send({ type: "STEP_BLOCKED" });
           const result = await input.block(
             workerResult.blocker,
-            "Dynamic research/review worker lane failed."
+            "Dynamic research/review worker lane failed.",
+            { stepId: step.stepId }
           );
           return { result, status: "blocked" };
         }
