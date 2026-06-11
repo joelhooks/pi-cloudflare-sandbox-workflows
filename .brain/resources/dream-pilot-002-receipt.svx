@@ -1,0 +1,36 @@
+---
+title: "Dream Pilot 002: Conformance Proven, Durable Driver Wedge Found"
+type: "receipt"
+status: "active"
+created_at: "2026-06-11"
+tags:
+  - dreamer
+  - pilot
+  - conformance
+  - durability
+  - bug
+---
+
+# Dream Pilot 002
+
+Run `run-live-20260611T151350954Z-a4fbef36`, Worker `da620674` (M2.5 durability + planner-conformance batch + planner leash, all live; migration 0004_runs_blocker applied).
+
+## What got proven (big wins)
+
+- **Planner conformance fix works.** The dream walked PAST the capture-artifact block that killed Pilot 001b. Event walk: capture-run ✓, capture-artifact (`capture-artifact-context`) ✓ — the exact node type that blocked last run now executes. The planner received the advertised per-node config contracts (visible in the submitted request's stochasticNotes) and the leash resolved capture-artifact's ref. No config block this run.
+- **Durable async path works.** POST → 202, DO-driven, GET /runs/:runId/status shows live `executingDynamicWorkflow` state (not just terminal). Observability restored.
+
+## The new bug: durable driver wedges after node 2
+
+The run executed the two LOCAL nodes (capture-run, capture-artifact — no relay), then stopped before node 3 (signals/search, the first relay-backed node):
+
+- Event count frozen at 10 for 18+ minutes; status stuck `executingDynamicWorkflow`.
+- The trusted relay log shows only its endpoint catalog — NO incoming signals/search request ever arrived. So the run wedged BEFORE node 3's relay call, not during it.
+- The memory nodes are relay-only HTTP (no sandbox) — verified — so slowness is not the cause; the driver simply stopped advancing.
+- The reaper did NOT sweep it within WORKFLOW_APP_TIMEOUT_MS (600000ms = 10 min); 18 min elapsed, still non-terminal.
+
+Hypothesis: the DO alarm-driven step continuation has a gap in the REAL workerd multi-invocation walk that the M2.5 eviction tests (which used fakes + a single simulated alarm) did not exercise. After node 2 the driver either failed to re-arm the next-step alarm, or the drive invocation died without re-arming, AND the reaper alarm was not pending/firing. The fix-forward (`0e3587a`) addressed evicted-run re-drive with fakes; live multi-step continuation across real Worker invocations is the untested surface.
+
+## Next
+
+Diagnose the DO driver's real multi-step continuation: why does it stop after node 2, is alarm(now) re-armed per step in production, and why didn't the reaper alarm fire at the 10-min mark? `wrangler tail` during a fresh run will show the alarm invocations. This is a focused durability debug, not a batch — and it is the true last blocker between here and a captured dream. The conformance work is done; the driver continuation is the gap.
