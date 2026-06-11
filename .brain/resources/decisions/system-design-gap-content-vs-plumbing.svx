@@ -1,0 +1,44 @@
+---
+title: "System Design Gap: Rigorous Plumbing, No Content Flow"
+type: "decision"
+status: "accepted"
+created_at: "2026-06-11"
+tags:
+  - decision
+  - architecture
+  - kernels
+  - dreamer
+  - critique
+---
+
+# System Design Gap: Rigorous Plumbing, No Content Flow
+
+## Finding (receipt-grounded, 2026-06-11 from Dream Pilot run 13)
+
+The Dreamer ran, generated a real XState machine, executed 8 nodes, and rendered a canon-compliant HITL report — over the WRONG sources, full of template-fill non-findings. Investigation of why exposes a single root cause with three faces.
+
+**Root cause: the system implements references, not content.** Every noun in the vision (kernel, skill, source, capability) exists as a ref that is pinned, hashed, entitlement-checked, leased, and mounted. None exists as content that shapes behavior. The system proves WHO may do WHAT and that it happened with receipts; it cannot think, because nothing reads content into reasoning.
+
+Receipts:
+- `badass-courses/claw-kernel` seed content, in full: `{ packageId, repoName, title: "Claw Kernel", trustTier: "reviewed" }`. No skills, prompts, workflow patterns, or data-access guidance. Kernels are names with permission slips.
+- Planner prompt's entire package treatment: `JSON.stringify(input.pinnedPackages)` under "Pinned Packages" + "copy these refs exactly." No `readText`/`readJson` against any kernel mount path exists in the planner or node code. Nothing opens a kernel.
+- `agent-transcripts` resolves via `execFileSync("joelclaw", ...)`; on failure it appends `skippedSources: [...joelclaw-index-unavailable]` and continues. The CLI fails because it does not self-load `TYPESENSE_URL` from `~/.config/system-bus.env` (hits localhost:8108; Typesense is on panda:8108). Documented in the joelclaw probe.
+
+## The three design flaws
+
+**A. Source availability is a caveat, not a contract.** No primary-vs-supplementary tier on source families. "The one source I exist to read is unreadable" is treated identically to "panda is stale." The "coverage caveats never block" decision (`dreamer-scope-read-propose`) is correct for staleness, catastrophic for absence — it let a CLI env bug silently downgrade a transcript-review dream into a bookshelf-review dream that looked just as confident. Fix: source-family criticality; a dead primary source reframes or blocks the report.
+
+**B. The dream is stochastic only in planning, deterministic in execution.** "Stochastic dream, deterministic envelope" was implemented as: LLM plans the machine shape, deterministic cartridge nodes mechanically fill templates (search hit → "X needs review", 10/10), envelope checks hashes. The analysis — what pattern/friction/change matters — happens nowhere. Gorgeous structure, zero insight. Fix: the analytical nodes (correlate, propose-refinements, report) must BE agent lanes reasoning over hydrated evidence, not template processors.
+
+**C. Kernels are empty tokens with no consumption path.** Even a real "workflow-patterns" or "how to query JoelClaw" skill in a kernel would change nothing — no code reads mounted kernel content into the planner or nodes. The vision's "agents constructed from kernel packages by role, with skills for designing/executing workflows and accessing data" has a registry, a mount, and an entitlement check, and is missing the consumption third entirely.
+
+## What this means for the build (the real M4)
+
+Not "write kernel prompts." Three missing layers, in dependency order:
+1. **Consumption path** — planner and nodes READ mounted kernel skill content into their context (the wire from pinned-ref to shaped-reasoning).
+2. **Real kernel skills** — author workflow-design patterns (fan-out/fan-in, map-reduce over horizons, think-lanes, dream→report→STOP shape), data-access methods, and analysis playbooks as kernel content.
+3. **Agentic analytical nodes** — correlate/propose/report become LLM lanes that reason over evidence, shaped by the skills from (2).
+
+Plus the cheap parallel fix: source-family criticality (flaw A) and the joelclaw CLI env bug so agent-transcripts actually resolves.
+
+Until these land, the spine is proven but pumping water: it can run a dream end to end and prove it with receipts, but the dream has no skill and often no real data. See [[kernel-package-overlays]], [[dreamer-scope-read-propose]], [[dream-pilot-progress-2026-06-11]].
