@@ -1,0 +1,41 @@
+---
+title: "Dream Pilot Progress 2026-06-11: From Node-2 Blocks to a Rendered Report"
+type: "receipt"
+status: "active"
+created_at: "2026-06-11"
+tags:
+  - dreamer
+  - pilot
+  - progress
+  - workflow-shape
+---
+
+# Dream Pilot Progress — 2026-06-11
+
+One session took the Dreamer from "blocks at node 2, wedges forever, reaper-swept with no reason" to "8 nodes executed, report rendered, clean legible block on a design boundary." Every block now reports its exact node + reason via GET /runs/:runId/status (observability shipped).
+
+## The arc of live runs (work-item:memory-fabric)
+
+- Pilot 001/run 8: blocked node 2 (capture-artifact ref). Wedged/orphaned.
+- run 9 (relay timeout): walked 3 nodes incl. relay-backed search/signals; blocked hydrate (needs search ref).
+- run 10 (dependency-ref leash): **8 nodes in 11 seconds**, then a downstream op hung (no timeout) → invocation killed → reaper-swept at 17 min. Proved nodes are FAST; the 20-min wall-clock was 11s work + driver pathology.
+- run 11 (one-step-per-alarm): REGRESSED to 1 node — single-step's post-pause armAlarmAt(now) does not promptly re-fire in live workerd (passes fake-DO tests). Reverted DO to whole-run; single-step stays available via driveMode for later live debugging (wrangler tail).
+- run 12 (whole-run + op-timeouts): 7 nodes; clean block at capture-report-artifact (leash fell to plan.machine ref, JSON read failed).
+- run 13 (report-ref + media-type tolerance): **8 nodes** — capture-run, mine-signals, search-memory, hydrate-receipts, correlate-evidence, propose-refinements, render-hitl-report, capture-report-artifacts. **The report renders.** Clean block at hitl-decision-seed.
+
+## The wall: post-review nodes in the initial dream (DESIGN, not a leash)
+
+run 13's block: hitl-decision-seed needs a `memory.hitl-decision.v1` artifact — a HUMAN's accept/hold/reject decision. The initial dream has no human decision yet (you haven't read the report). The planner generated a linear chain that includes post-review nodes (hitl-decision-seed, hitl-follow-up-run-request) which structurally cannot run before review.
+
+This is the same thing Joel named earlier: the planner produces a fixed LINEAR CHECKLIST including nodes that don't belong in the initial pass, because it has no workflow-DESIGN vocabulary and does not read kernel content. The dream-report-canon wants the dream to produce a DRAFT seed (submitted:false), but the node requires a real decision as input — a contradiction the planner can't resolve without guidance.
+
+## Two ways forward (Joel's call)
+
+1. **Leash hitl-decision-seed to draft-from-proposals** — when no human decision exists, derive a DRAFT decision-workflow-seed from the refinement-proposals/report (per canon "submitted:false, planner input for next run"). A node-behavior change, not just ref-wiring. Gets the initial dream to `captured` mechanically.
+2. **Reshape the workflow (the real fix)** — teach the planner (via a `workflow` skill in the kernel it actually READS) the right dream shape: explore → correlate → propose → report → STOP for review. hitl-decision-seed + follow-up belong in a SEPARATE post-acceptance workflow, not the initial dream. This is the M4 kernel direction: kernels shape how the planner designs, not just ride pinned.
+
+The dream's CORE deliverable — a rendered HITL report from real correlated transcript evidence — now works end to end. The finish line is a workflow-shape decision, not another leash.
+
+## Infra shipped this session (all on m1-memory-fabric-carve)
+
+Auth on /runs, idempotent leases, skip-to-done guard, M2.5 durable execution (checkpoint/resume/reaper/watchdog, async 202+poll), planner conformance (leash+advertise+validate+observe), dependency-ref-by-nodeType resolution, relay + op timeouts, blocker observability, the live monitor UI (board + per-run + live dynamic-workflow D2 chart). single-step-per-alarm exists but is whole-run-by-default pending a live workerd alarm re-fire debug.
