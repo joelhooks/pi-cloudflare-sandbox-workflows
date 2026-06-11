@@ -348,6 +348,63 @@ describe("Capsule supervisor async run driver", () => {
     }
   });
 
+  // Watchdog: a hard workerd kill mid-drive runs no catch/finally, so the only
+  // thing that can recover the run is an alarm armed in storage BEFORE the drive
+  // begins. Clearing the start alarm isolates the watchdog: only the pre-drive
+  // arm can re-set it. Without the watchdog the run orphans (no future alarm).
+  it("arms a watchdog alarm before driving so a hard-killed drive is recovered", async () => {
+    const state = createFakeDurableObjectState();
+    const emptyD1 = {
+      prepare: () => ({
+        all: () => Promise.resolve({ results: [] }),
+        bind: () => ({
+          all: () => Promise.resolve({ results: [] }),
+          run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+        }),
+        run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+      }),
+    };
+    const supervisor = createSupervisor(state, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub; the watchdog only needs a bound D1 to resolve reaper context.
+      WORKFLOW_APP_D1: emptyD1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+    });
+    const request = buildIntegrationTestRunRequest();
+
+    let alarmArmedWhenDriveBegan: boolean | null = null;
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() => ({
+      route: "POST /runs",
+      startRun(input) {
+        WorkflowRunRequestSchema.parse(input);
+        alarmArmedWhenDriveBegan = state.alarmAt !== null;
+        // Simulate the invocation being killed mid-drive: a throw is the closest
+        // observable analogue (driveOneQueuedRun keeps the record either way).
+        throw new Error("simulated workerd eviction mid-drive");
+      },
+    }));
+    try {
+      await startRun(supervisor, request);
+      // Simulate the start alarm having fired and been consumed by the runtime.
+      state.alarmAt = null;
+
+      await supervisor.alarm();
+
+      expect({
+        alarmArmedWhenDriveBegan,
+        futureAlarmArmed: state.alarmAt !== null,
+        runStartKept: state.store.has(runStartKey(request)),
+      }).toStrictEqual({
+        alarmArmedWhenDriveBegan: true,
+        futureAlarmArmed: true,
+        runStartKept: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
   // FIX 1, test (b): the driving marker prevents concurrent double-drive, but a
   // stale marker (the prior driver was evicted) allows the next alarm to
   // re-drive. Both halves are exercised against the same seeded parked run.

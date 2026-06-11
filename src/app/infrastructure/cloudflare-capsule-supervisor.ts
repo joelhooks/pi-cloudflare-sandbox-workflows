@@ -420,6 +420,24 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
+
+    // Arm a watchdog alarm BEFORE the drive, but only while a run-start record
+    // is still queued (a non-terminal run that could be killed mid-drive).
+    // driveQueuedRuns awaits the whole run to a terminal status; if workerd
+    // evicts/kills this invocation mid-run (long multi-node walks exceed a
+    // single invocation budget), every line below — including the reaper re-arm
+    // at the end — never executes, leaving the run orphaned with no future alarm
+    // to reap or re-drive it. Scheduling the watchdog first guarantees a later
+    // alarm fires to resume the run from its latest checkpoint (fresh) or sweep
+    // it (stale), so a killed drive is recovered rather than wedged forever.
+    // Gating on queued records keeps an idle DO from re-arming forever.
+    const queuedBeforeDrive = await this.ctx.storage.list({
+      prefix: runStartStoragePrefix,
+    });
+    if (queuedBeforeDrive.size > 0) {
+      await this.ensureReaperAlarm();
+    }
+
     await this.driveQueuedRuns(now);
 
     const reaperContext = this.resolveReaperContext();
