@@ -30,14 +30,18 @@
   let stream = $state<null | WorkflowEventStreamDocument>(null);
   let durability = $state<null | RunDurabilityDump>(null);
   let diagramSvg = $state<null | string>(null);
+  let dynamicDiagramSvg = $state<null | string>(null);
 
   let statusError = $state<null | string>(null);
   let streamError = $state<null | string>(null);
   let durabilityError = $state<null | string>(null);
   let diagramError = $state<null | string>(null);
+  let dynamicDiagramError = $state<null | string>(null);
 
   let loading = $state(true);
   let paused = $state(false);
+  /** Whether the secondary fixed safety-envelope shell chart is expanded. */
+  let envelopeShellOpen = $state(false);
   let lastUpdatedMs = $state<null | number>(null);
   let nowMs = $state(Date.now());
 
@@ -61,6 +65,39 @@
     return `Request failed with ${statusCode}.`;
   };
 
+  /**
+   * Reads a settled SVG-fetch result into an `{ svg, error }` pair. Keeps the
+   * two inline diagram fetches (dynamic + envelope shell) out of `refresh`'s
+   * branch budget.
+   *
+   * @param settled The settled fetch promise for an SVG endpoint.
+   * @param label Human label for the endpoint, used in the fallback message.
+   */
+  const readSvgResult = async (
+    settled: PromiseSettledResult<Response>,
+    label: string
+  ): Promise<{ error: null | string; svg: null | string }> => {
+    if (settled.status !== "fulfilled") {
+      return { error: `Could not reach the ${label} endpoint.`, svg: null };
+    }
+    try {
+      if (settled.value.ok) {
+        return { error: null, svg: await settled.value.text() };
+      }
+      let message = `${label} failed with ${settled.value.status}.`;
+      try {
+        const body: unknown = await settled.value.json();
+        message = extractError(body, settled.value.status);
+      } catch {
+        // Non-JSON error body; keep the generic message.
+      }
+
+      return { error: message, svg: null };
+    } catch {
+      return { error: `Could not read the ${label} response.`, svg: null };
+    }
+  };
+
   const refresh = async (): Promise<void> => {
     if (inFlight || runId === "") {
       return;
@@ -68,7 +105,7 @@
     inFlight = true;
     const encoded = encodeURIComponent(runId);
 
-    const [statusRes, eventsRes, durabilityRes, diagramRes] =
+    const [statusRes, eventsRes, durabilityRes, dynamicDiagramRes, diagramRes] =
       await Promise.allSettled([
         fetch(`/api/runs/${encoded}/status`, {
           headers: { accept: "application/json" },
@@ -78,6 +115,9 @@
         }),
         fetch(`/api/runs/${encoded}/durability`, {
           headers: { accept: "application/json" },
+        }),
+        fetch(`/api/runs/${encoded}/dynamic-diagram`, {
+          headers: { accept: "image/svg+xml" },
         }),
         fetch(`/api/runs/${encoded}/state-diagram`, {
           headers: { accept: "image/svg+xml" },
@@ -148,27 +188,16 @@
       durabilityError = "Could not reach the durability endpoint.";
     }
 
-    if (diagramRes.status === "fulfilled") {
-      try {
-        if (diagramRes.value.ok) {
-          diagramSvg = await diagramRes.value.text();
-          diagramError = null;
-        } else {
-          let message = `State diagram failed with ${diagramRes.value.status}.`;
-          try {
-            const body: unknown = await diagramRes.value.json();
-            message = extractError(body, diagramRes.value.status);
-          } catch {
-            // Non-JSON error body; keep the generic message.
-          }
-          diagramError = message;
-        }
-      } catch {
-        diagramError = "Could not read the state-diagram response.";
-      }
-    } else {
-      diagramError = "Could not reach the state-diagram endpoint.";
-    }
+    const dynamicResult = await readSvgResult(
+      dynamicDiagramRes,
+      "dynamic-diagram"
+    );
+    dynamicDiagramSvg = dynamicResult.svg ?? dynamicDiagramSvg;
+    dynamicDiagramError = dynamicResult.error;
+
+    const envelopeResult = await readSvgResult(diagramRes, "state-diagram");
+    diagramSvg = envelopeResult.svg ?? diagramSvg;
+    diagramError = envelopeResult.error;
 
     inFlight = false;
     loading = false;
@@ -181,6 +210,10 @@
     if (!paused) {
       void refresh();
     }
+  };
+
+  const toggleEnvelopeShell = (): void => {
+    envelopeShellOpen = !envelopeShellOpen;
   };
 
   onMount(() => {
@@ -272,25 +305,59 @@
     </div>
   </header>
 
-  <section class="diagram-card" class:is-terminal={terminal}>
+  <!-- PRIMARY: the GENERATED DYNAMIC WORKFLOW (different every run). -->
+  <section class="diagram-card primary" class:is-terminal={terminal}>
     <div class="diagram-head">
-      <h2 class="card-title">Safety-envelope state machine</h2>
+      <h2 class="card-title">Generated dynamic workflow</h2>
       <p class="card-hint">
-        Live D2 render. The walked path is filled green, the current state has a
-        heavy accent stroke and pulses, and a blocked run lights its escape edge
-        red.
+        The per-run node chain the planner synthesised, walking inside the fixed
+        safety-envelope shell. Executed nodes fill green, the current node pulses,
+        a blocked node lights red with its reason, and a dashed
+        <code>pending…</code> tail marks the not-yet-walked nodes. Live D2 render
+        from the event stream — the concrete pending node identities aren't shown
+        until the machine reaches them.
       </p>
     </div>
     <div class="diagram-stage">
-      {#if diagramSvg !== null}
+      {#if dynamicDiagramSvg !== null}
         <!-- eslint-disable-next-line svelte/no-at-html-tags -- server-rendered, redaction-safe D2 SVG -->
-        <div class="diagram-svg">{@html diagramSvg}</div>
-      {:else if diagramError !== null}
-        <p class="card-empty">Diagram unavailable: {diagramError}</p>
+        <div class="diagram-svg">{@html dynamicDiagramSvg}</div>
+      {:else if dynamicDiagramError !== null}
+        <p class="card-empty">
+          Dynamic workflow unavailable: {dynamicDiagramError}
+        </p>
       {:else}
-        <p class="card-empty">Rendering state machine…</p>
+        <p class="card-empty">Rendering generated workflow…</p>
       {/if}
     </div>
+  </section>
+
+  <!-- SECONDARY: the fixed safety-envelope shell (collapsible). -->
+  <section class="diagram-card envelope-shell" class:is-terminal={terminal}>
+    <button
+      type="button"
+      class="shell-toggle"
+      aria-expanded={envelopeShellOpen}
+      onclick={toggleEnvelopeShell}
+    >
+      <span class="shell-caret" class:open={envelopeShellOpen}>▸</span>
+      <span class="card-title shell-title">Safety-envelope shell</span>
+      <span class="card-hint shell-hint">
+        the fixed deterministic envelope every run walks inside
+      </span>
+    </button>
+    {#if envelopeShellOpen}
+      <div class="diagram-stage">
+        {#if diagramSvg !== null}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -- server-rendered, redaction-safe D2 SVG -->
+          <div class="diagram-svg">{@html diagramSvg}</div>
+        {:else if diagramError !== null}
+          <p class="card-empty">Diagram unavailable: {diagramError}</p>
+        {:else}
+          <p class="card-empty">Rendering state machine…</p>
+        {/if}
+      </div>
+    {/if}
   </section>
 
   <div class="meta-line">

@@ -344,6 +344,55 @@ a.run-id:hover {
   border-color: var(--border-strong);
 }
 
+/* The generated dynamic workflow is the star: heavier frame, more presence. */
+.diagram-card.primary {
+  border-width: 2px;
+  border-color: var(--border-strong);
+}
+
+/* The fixed envelope shell is secondary scaffolding: muted, collapsible. */
+.diagram-card.envelope-shell {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  padding: 0;
+}
+
+.shell-toggle {
+  align-items: baseline;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px;
+  text-align: left;
+  width: 100%;
+}
+
+.shell-toggle:hover {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.shell-caret {
+  color: var(--text-faint);
+  display: inline-block;
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+
+.shell-caret.open {
+  transform: rotate(90deg);
+}
+
+.shell-title {
+  margin: 0;
+}
+
+.shell-hint {
+  margin: 0;
+  text-transform: none;
+}
+
 .diagram-head {
   margin-bottom: 12px;
 }
