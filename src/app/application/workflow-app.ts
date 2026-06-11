@@ -19,6 +19,7 @@ import {
   DynamicWorkflowPlanDocumentSchema,
   AgentLaneReceiptSchema,
   PlanArtifactSchema,
+  RunStepCheckpointSchema,
   SafetyEnvelopeCommandSchema,
   SafetyEnvelopeStateSchema,
   VerificationContractArtifactSchema,
@@ -176,6 +177,20 @@ type BlockRun = (
   blocker: CapabilityBlocker,
   summary: string
 ) => Promise<WorkflowRunResult>;
+
+/**
+ * Persist a resumable checkpoint after a generated-machine step completes
+ * (M2.5 step 2). The envelope actor's persisted snapshot is captured from the
+ * enclosing `run()` closure; the caller supplies the generated-machine
+ * snapshot, completed step ids, and output artifact refs observed so far.
+ * Idempotent by `runId` + `stepIndex` in the storage layer.
+ */
+type PersistRunCheckpoint = (input: {
+  readonly completedStepIds: readonly string[];
+  readonly generatedMachineSnapshot: unknown;
+  readonly outputArtifactRefs: readonly ArtifactRef[];
+  readonly stepIndex: number;
+}) => Promise<void>;
 
 type WorkflowRuntimeEnvironment =
   | {
@@ -1292,6 +1307,24 @@ export class WorkflowApp implements WorkflowAppContract {
       });
     };
 
+    const persistCheckpoint: PersistRunCheckpoint = async (checkpointInput) => {
+      const checkpoint = RunStepCheckpointSchema.parse({
+        completedStepIds: [...checkpointInput.completedStepIds],
+        envelopeSnapshot: actor.getPersistedSnapshot(),
+        generatedMachineSnapshot: checkpointInput.generatedMachineSnapshot,
+        outputArtifactRefs: [...checkpointInput.outputArtifactRefs],
+        persistedAt: new Date().toISOString(),
+        runId: request.runId,
+        schemaVersion: "workflow.run-step-checkpoint.v1",
+        stepIndex: checkpointInput.stepIndex,
+        workItemId: request.workItemId,
+      });
+      await this.dependencies.contextCapsules.persistCheckpoint({
+        checkpoint,
+        workItemId: request.workItemId,
+      });
+    };
+
     await transition({ type: "START" }, "Run request accepted.");
 
     const capsule = await this.dependencies.contextCapsules.resolve({
@@ -1468,6 +1501,7 @@ export class WorkflowApp implements WorkflowAppContract {
       block,
       loadedPlan,
       machine: loadedMachine.machine,
+      persistCheckpoint,
       request,
       transition,
     });
@@ -3354,6 +3388,7 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly block: BlockRun;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
     readonly machine: DynamicWorkflowMachineDocument;
+    readonly persistCheckpoint: PersistRunCheckpoint;
     readonly request: WorkflowRunRequest;
     readonly transition: SafetyEnvelopeTransition;
   }): Promise<DynamicExecutionResult> {
@@ -3372,6 +3407,23 @@ export class WorkflowApp implements WorkflowAppContract {
     const maxTransitions = input.loadedPlan.steps.length + 2;
     let reviewSummaryPath: string | undefined;
     let workflowCompleted = false;
+    let checkpointStepIndex = 0;
+
+    /**
+     * Persist a resumable checkpoint after a generated-machine step lands its
+     * STEP_DONE transition (M2.5 step 2). Snapshots the generated-machine actor
+     * post-transition, the cumulative completed step ids, and every output
+     * artifact ref observed so far. Idempotent by `runId` + `stepIndex`.
+     */
+    const checkpointAfterStepDone = async (): Promise<void> => {
+      await input.persistCheckpoint({
+        completedStepIds: [...completedStepIds],
+        generatedMachineSnapshot: workflowActor.getPersistedSnapshot(),
+        outputArtifactRefs: [...artifactRefsByStepId.values()],
+        stepIndex: checkpointStepIndex,
+      });
+      checkpointStepIndex += 1;
+    };
 
     for (let count = 0; count < maxTransitions; count += 1) {
       const resolvedState = resolveCurrentGeneratedWorkflowState({
@@ -3454,6 +3506,7 @@ export class WorkflowApp implements WorkflowAppContract {
           }
         );
         workflowActor.send({ type: "STEP_DONE" });
+        await checkpointAfterStepDone();
         continue;
       }
 
@@ -3490,6 +3543,7 @@ export class WorkflowApp implements WorkflowAppContract {
           }
         );
         workflowActor.send({ type: "STEP_DONE" });
+        await checkpointAfterStepDone();
         continue;
       }
 
@@ -3571,6 +3625,7 @@ export class WorkflowApp implements WorkflowAppContract {
           { receiptRef: capabilityReceipt.receiptRef, stepId: step.stepId }
         );
         workflowActor.send({ type: "STEP_DONE" });
+        await checkpointAfterStepDone();
         continue;
       }
 
@@ -3593,6 +3648,7 @@ export class WorkflowApp implements WorkflowAppContract {
           { outputPath: step.outputPath, stepId: step.stepId }
         );
         workflowActor.send({ type: "STEP_DONE" });
+        await checkpointAfterStepDone();
         continue;
       }
 

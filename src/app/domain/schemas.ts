@@ -1947,6 +1947,32 @@ export const ContextCapsuleRecordSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+/**
+ * Resumable checkpoint persisted after each generated-machine step (M2.5 step 2
+ * of the durable-run-execution ADR). Holds both XState actors'
+ * `getPersistedSnapshot()` payloads (opaque, JSON-serializable), the set of
+ * completed step ids, and the output artifact refs observed so far. Keyed by
+ * `runId` + `stepIndex` so a re-persist of the same step overwrites in place
+ * (idempotent). Snapshots are `unknown` because the persisted-snapshot shape is
+ * XState-owned and only round-tripped through `createActor(machine, { snapshot })`.
+ */
+export const RunStepCheckpointSchema = z.object({
+  completedStepIds: z.array(z.string().min(1)).default([]),
+  envelopeSnapshot: z.unknown(),
+  generatedMachineSnapshot: z.unknown(),
+  outputArtifactRefs: z.array(ArtifactRefSchema).default([]),
+  persistedAt: IsoDateTimeSchema,
+  runId: z.string().min(1),
+  schemaVersion: z.literal("workflow.run-step-checkpoint.v1"),
+  stepIndex: z.number().int().min(0),
+  workItemId: z.string().min(1),
+});
+
+export const PersistRunCheckpointRequestSchema = z.object({
+  checkpoint: RunStepCheckpointSchema,
+  workItemId: z.string().min(1),
+});
+
 export const WorkflowRunRequestSchema = z.object({
   actor: ActorSchema,
   planProposal: PlanProposalSchema,
@@ -2036,6 +2062,10 @@ export type CapabilityLeaseRequest = z.infer<
 >;
 export type CapabilityResource = z.infer<typeof CapabilityResourceSchema>;
 export type ContextCapsuleRecord = z.infer<typeof ContextCapsuleRecordSchema>;
+export type RunStepCheckpoint = z.infer<typeof RunStepCheckpointSchema>;
+export type PersistRunCheckpointRequest = z.infer<
+  typeof PersistRunCheckpointRequestSchema
+>;
 export type DiscordDeliveryResult = z.infer<typeof DiscordDeliveryResultSchema>;
 export type DiscordMessageApproval = z.infer<
   typeof DiscordMessageApprovalSchema

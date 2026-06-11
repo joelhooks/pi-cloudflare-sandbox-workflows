@@ -278,6 +278,9 @@ const createCapsuleSupervisorClient = (
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
     },
+    async persistCheckpoint(input): Promise<void> {
+      await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
+    },
     async releaseLane(input) {
       return AgentLaneReleaseReceiptSchema.parse(
         await postJson(stubFor(input.workItemId), "/release-lane", input)

@@ -8,6 +8,7 @@ import type {
   CapabilityLeaseReceipt,
   CapabilityLeaseRequest,
   ContextCapsuleRecord,
+  RunStepCheckpoint,
   DiscordDeliveryResult,
   DiscordMessagePayload,
   DiscordResource,
@@ -70,6 +71,11 @@ export interface ContextCapsuleActorContract {
 
   appendEvent(input: {
     readonly event: WorkflowEvent;
+    readonly workItemId: string;
+  }): Promise<void>;
+
+  persistCheckpoint(input: {
+    readonly checkpoint: RunStepCheckpoint;
     readonly workItemId: string;
   }): Promise<void>;
 }

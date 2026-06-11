@@ -237,6 +237,9 @@ const createAdmissionCapsuleController = (): ContextCapsuleActorContract &
     appendEvent(input) {
       return capsules.appendEvent(input);
     },
+    persistCheckpoint(input) {
+      return capsules.persistCheckpoint(input);
+    },
     releaseLane(input) {
       releases.push(input);
       activeLaneIds.delete(input.laneId);

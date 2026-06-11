@@ -30,6 +30,7 @@ import {
   PackageMetadataSchema,
   PinnedPackageSchema,
   ReviewSummaryDocumentSchema,
+  RunStepCheckpointSchema,
   WzrrdPublishDeliveryResultSchema,
   WzrrdPublishPayloadSchema,
   WorkflowStatusProjectionSchema,
@@ -54,6 +55,7 @@ import type {
   LinearCommentPayload,
   PackageMetadata,
   PinnedPackage,
+  RunStepCheckpoint,
   WorkflowEvent,
   WorkflowStatusProjection,
   WzrrdPublishDeliveryResult,
@@ -79,6 +81,7 @@ export interface MemoryArtifactStore extends ArtifactStoreContract {
 
 export interface MemoryContextCapsuleActor extends ContextCapsuleActorContract {
   readonly capsules: Map<string, ContextCapsuleRecord>;
+  readonly checkpoints: Map<string, RunStepCheckpoint>;
   readonly events: Map<string, WorkflowEvent[]>;
 }
 
@@ -269,6 +272,7 @@ export const createMemoryArtifactStore = (
 export const createMemoryContextCapsuleActor =
   (): MemoryContextCapsuleActor => {
     const capsules = new Map<string, ContextCapsuleRecord>();
+    const checkpoints = new Map<string, RunStepCheckpoint>();
     const events = new Map<string, WorkflowEvent[]>();
 
     return {
@@ -279,7 +283,17 @@ export const createMemoryContextCapsuleActor =
         return Promise.resolve();
       },
       capsules,
+      checkpoints,
       events,
+      persistCheckpoint(input) {
+        const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
+        checkpoints.set(
+          `${checkpoint.runId}:${checkpoint.stepIndex}`,
+          checkpoint
+        );
+
+        return Promise.resolve();
+      },
       resolve(input) {
         const existing = capsules.get(input.workItemId);
         if (existing !== undefined) {

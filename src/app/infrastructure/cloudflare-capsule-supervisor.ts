@@ -13,6 +13,8 @@ import {
   AgentLaneReleaseReceiptSchema,
   AgentLaneReleaseRequestSchema,
   ContextCapsuleRecordSchema,
+  PersistRunCheckpointRequestSchema,
+  RunStepCheckpointSchema,
   WorkflowEventSchema,
 } from "../domain/schemas.ts";
 import type {
@@ -61,6 +63,14 @@ const json = (body: unknown, init?: ResponseInit): Response =>
 
 const nowIso = (): string => new Date().toISOString();
 
+/**
+ * Storage key for a resumable run checkpoint. Keyed by `runId` + `stepIndex` so
+ * a re-persist of the same step overwrites the same slot (idempotent), while
+ * distinct steps each retain their own snapshot for inspection and resume.
+ */
+const checkpointStorageKey = (runId: string, stepIndex: number): string =>
+  `checkpoint:${runId}:${stepIndex}`;
+
 const createCapsuleRecord = (input: {
   readonly runId: string;
   readonly workItemId: string;
@@ -92,6 +102,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     const postRoutes: Record<string, () => Promise<Response>> = {
       "/admit-lane": () => this.admitLane(request),
       "/append-event": () => this.appendEvent(request),
+      "/persist-checkpoint": () => this.persistCheckpoint(request),
       "/release-lane": () => this.releaseLane(request),
       "/resolve": () => this.resolveCapsule(request),
     };
@@ -191,6 +202,23 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         events: [...record.events, input.event],
         workItemId: input.workItemId,
       })
+    );
+
+    return json({ ok: true });
+  }
+
+  /**
+   * Persist a resumable run checkpoint to DO storage (M2.5 step 2). Overwrites
+   * by `runId` + `stepIndex`, so re-persisting the same step is a stable no-op
+   * that yields the same stored snapshot. Does not drive execution — only
+   * durable state.
+   */
+  private async persistCheckpoint(request: Request): Promise<Response> {
+    const input = PersistRunCheckpointRequestSchema.parse(await request.json());
+    const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
+    await this.ctx.storage.put(
+      checkpointStorageKey(checkpoint.runId, checkpoint.stepIndex),
+      checkpoint
     );
 
     return json({ ok: true });
@@ -409,6 +437,9 @@ export const createCloudflareCapsuleSupervisorClient = (
     },
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
+    },
+    async persistCheckpoint(input): Promise<void> {
+      await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
     },
     async releaseLane(input): Promise<AgentLaneReleaseReceipt> {
       return AgentLaneReleaseReceiptSchema.parse(

@@ -21,6 +21,7 @@ import {
   GitHubPullRequestPayloadSchema,
   LinearCommentDeliveryResultSchema,
   LinearCommentPayloadSchema,
+  RunStepCheckpointSchema,
   WorkflowObservabilityPackSchema,
   WorkflowCartridgeInvocationProofDocumentSchema,
   WorkflowExecutionProofDocumentSchema,
@@ -151,6 +152,7 @@ const runWorkflow = async (
       now: () => "2026-06-08T23:59:30.000Z",
     });
   const statusProjection = createMemoryWorkflowStatusProjectionStore();
+  const contextCapsules = createMemoryContextCapsuleActor();
   const observabilityCaptureCalls: {
     readonly runId: string;
     readonly workerLaneCount: number;
@@ -161,7 +163,7 @@ const runWorkflow = async (
       discordSecretRef: "secretref:discord-bot",
       policyId: "discord-message-policy",
     }),
-    contextCapsules: createMemoryContextCapsuleActor(),
+    contextCapsules,
     discordMessages: createDryRunDiscordMessageAdapter(),
     discordSecretRefs: {
       dryRun: "secretref:discord-dry-run",
@@ -216,7 +218,13 @@ const runWorkflow = async (
     throw new Error(result.blocker.message);
   }
 
-  return { artifacts, observabilityCaptureCalls, result, statusProjection };
+  return {
+    artifacts,
+    contextCapsules,
+    observabilityCaptureCalls,
+    result,
+    statusProjection,
+  };
 };
 
 const safeStateName = (value: string): string =>
@@ -3030,6 +3038,7 @@ describe("workflow app integration contract", () => {
       },
       loadedPlan,
       machine: subsetMachine,
+      persistCheckpoint: () => Promise.resolve(),
       request,
       transition: (command) => {
         transitionCommands.push(command.type);
@@ -5148,5 +5157,83 @@ describe("workflow app integration contract", () => {
       lastState: "blocked",
       status: "blocked",
     });
+  });
+});
+
+describe("workflow run-step checkpoints (M2.5)", () => {
+  it("persists one resumable checkpoint per executed generated-machine step", async () => {
+    const { artifacts, contextCapsules, result } = await runWorkflow();
+    const plan = DynamicWorkflowPlanDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: result.planArtifact.artifactRef })
+    );
+    const checkpoints = [...contextCapsules.checkpoints.values()]
+      .map((checkpoint) => RunStepCheckpointSchema.parse(checkpoint))
+      .toSorted((left, right) => left.stepIndex - right.stepIndex);
+
+    expect({
+      // One checkpoint per pinned plan step: the run reached "captured", so every
+      // executable step crossed its STEP_DONE boundary and persisted once.
+      checkpointCount: checkpoints.length,
+      // Each step's checkpoint accretes one more completed step id than the last.
+      completedStepIdCounts: checkpoints.map(
+        (checkpoint) => checkpoint.completedStepIds.length
+      ),
+      // Both XState actors are retained: every checkpoint carries a non-empty
+      // envelope snapshot AND a non-empty generated-machine snapshot.
+      everyCheckpointHasBothSnapshots: checkpoints.every(
+        (checkpoint) =>
+          checkpoint.envelopeSnapshot !== undefined &&
+          checkpoint.generatedMachineSnapshot !== undefined
+      ),
+      identity: checkpoints.map((checkpoint) => ({
+        runId: checkpoint.runId,
+        schemaVersion: checkpoint.schemaVersion,
+        workItemId: checkpoint.workItemId,
+      })),
+      // The two-factor skip check needs resolvable output refs. The fixture's
+      // research/review step is the only one that emits a primary output ref, so
+      // every checkpoint surfaces exactly that one (cumulative) ref.
+      outputRefCounts: checkpoints.map(
+        (checkpoint) => checkpoint.outputArtifactRefs.length
+      ),
+      stepIndexes: checkpoints.map((checkpoint) => checkpoint.stepIndex),
+      uniqueOutputRefCount: new Set(
+        checkpoints.flatMap((checkpoint) => checkpoint.outputArtifactRefs)
+      ).size,
+    }).toStrictEqual({
+      checkpointCount: plan.steps.length,
+      completedStepIdCounts: [1, 2, 3],
+      everyCheckpointHasBothSnapshots: true,
+      identity: checkpoints.map(() => ({
+        runId: result.runId,
+        schemaVersion: "workflow.run-step-checkpoint.v1",
+        workItemId: result.capsule.workItemId,
+      })),
+      outputRefCounts: [1, 1, 1],
+      stepIndexes: [0, 1, 2],
+      uniqueOutputRefCount: 1,
+    });
+  });
+
+  it("re-persisting the same step is a stable idempotent overwrite", async () => {
+    const { contextCapsules, result } = await runWorkflow();
+    const finalCheckpoint = RunStepCheckpointSchema.parse(
+      contextCapsules.checkpoints.get(`${result.runId}:2`)
+    );
+    const before = contextCapsules.checkpoints.size;
+
+    await contextCapsules.persistCheckpoint({
+      checkpoint: finalCheckpoint,
+      workItemId: result.capsule.workItemId,
+    });
+
+    // Overwrite by runId+stepIndex: no new slot, and the stored snapshot is
+    // byte-identical to the original persist.
+    expect(contextCapsules.checkpoints.size).toBe(before);
+    expect(
+      RunStepCheckpointSchema.parse(
+        contextCapsules.checkpoints.get(`${result.runId}:2`)
+      )
+    ).toStrictEqual(finalCheckpoint);
   });
 });
