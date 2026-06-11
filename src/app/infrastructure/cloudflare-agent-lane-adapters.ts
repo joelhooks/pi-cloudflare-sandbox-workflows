@@ -127,6 +127,7 @@ const plannerPromptFor = (input: {
     "If Run Binding notification is not null, include exactly one plan.sideEffects entry matching the notification fields and exactly one capability.discord.message step with the same payloadHash, payloadRef, resource, reviewGate, secretRef, and dryRun.",
     "If Run Binding notification is null, plan.sideEffects must be [] and no capability.discord.message step should exist.",
     "Machine stepOrder must contain every plan.steps[*].stepId exactly once. Each XState state meta.stepId must refer to one of those step ids. The xstate object must contain only id, initial, and states.",
+    "For every plan.steps entry with kind workflow.node.invoke, the config object is governed by that step's nodeType. The blueprint JSON Schema leaves config open, but the per-node config contracts in Run Binding proposal.stochasticNotes (one draft-7 JSON Schema per nodeType) are authoritative: set every required field, choose enum values only from the listed options, point ref/stepId fields at the producing step, and emit no fields the node's schema rejects.",
     "Generated harness source must be TypeScript text that explains the generated execution shape, imports no secrets, and performs no side effects.",
     "",
     "## XState Executor Protocol",

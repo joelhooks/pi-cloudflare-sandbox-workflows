@@ -315,6 +315,87 @@ export const MEMORY_FABRIC_NODE_CONFIG_SCHEMAS = {
 export type MemoryFabricNodeType =
   keyof typeof MEMORY_FABRIC_NODE_CONFIG_SCHEMAS;
 
+/**
+ * Advertised config contract for one workflow-node `nodeType`, derived from the
+ * SAME leashed Zod schema the executor parses `step.config` against. `configJsonSchema`
+ * is the draft-7 JSON Schema for that node's `config` object: it carries the field
+ * names, which are required, enum options (e.g. the exact `signalKinds` subset), and
+ * defaults the executor backfills. Deriving it from the registry guarantees the
+ * contract the planner is told can never drift from the one the adapter enforces.
+ */
+export interface MemoryFabricNodeConfigContract {
+  readonly configJsonSchema: Record<string, unknown>;
+  readonly nodeType: string;
+}
+
+/**
+ * Derive the per-node config contracts the planner must conform to, one entry per
+ * registry `nodeType`, sorted for deterministic prompt output. The planner is a
+ * stochastic LLM lane that is otherwise never handed these schemas, so without this
+ * it guesses each `config` shape and blocks mid-walk. Advertising the registry's
+ * JSON Schemas stops the guessing while keeping the executor as the single source
+ * of truth.
+ */
+export const memoryFabricNodeConfigContracts =
+  (): readonly MemoryFabricNodeConfigContract[] =>
+    Object.entries(MEMORY_FABRIC_NODE_CONFIG_SCHEMAS)
+      .map(([nodeType, schema]) => ({
+        configJsonSchema: z.toJSONSchema(schema, {
+          target: "draft-7",
+        }) as Record<string, unknown>,
+        nodeType,
+      }))
+      .toSorted((left, right) => left.nodeType.localeCompare(right.nodeType));
+
+/**
+ * Render the advertised per-node config contracts plus a worked example as planner
+ * guidance notes. The signals/search note keeps the `query` + valid `signalKinds`
+ * leash explicit, and the capture-artifact example shows pointing `artifactStepId`
+ * at the generated-machine step so the planner stops emitting bare
+ * `artifactKinds`/`capturePurpose` intent the executor cannot resolve to a ref.
+ */
+export const memoryFabricNodeConfigContractNotes = (): readonly string[] => {
+  const contractLines = memoryFabricNodeConfigContracts().map(
+    (contract) =>
+      `- ${contract.nodeType}: ${JSON.stringify(contract.configJsonSchema)}`
+  );
+
+  const workedExample = JSON.stringify({
+    captureGeneratedMachine: {
+      config: {
+        artifactStepId:
+          "<stepId of the generated workflow.xstate-machine.v1 step>",
+        readability: "actor-private",
+      },
+      dependsOn: ["<machine step id>"],
+      kind: "workflow.node.invoke",
+      nodeType: "joelclaw.memory.capture-artifact",
+      outputPath: "dream/capture-artifact.json",
+      packageRefs: ["<workflow/memory-fabric artifactRef>"],
+      stepId: "capture-generated-machine",
+      summary: "Capture the generated machine as durable memory.",
+    },
+    signalsScan: {
+      config: {
+        query: "dream workflow",
+        signalKinds: ["correction", "friction", "workflow-pattern"],
+      },
+      dependsOn: [],
+      kind: "workflow.node.invoke",
+      nodeType: "joelclaw.memory.signals",
+      outputPath: "dream/signals.json",
+      packageRefs: ["<workflow/memory-fabric artifactRef>"],
+      stepId: "mine-signals",
+      summary: "Mine redacted correction/friction/workflow signals.",
+    },
+  });
+
+  return [
+    `Per-node config contract for workflow.node.invoke steps: each Dream cartridge nodeType below is followed by the draft-7 JSON Schema its config object must satisfy. These schemas are derived from the same Zod schemas the executor parses config against. Set every required field, choose enum values only from the listed options, and rely on the documented defaults when unsure. Fields not listed in a node's schema are rejected (additionalProperties:false).\n${contractLines.join("\n")}`,
+    `Worked workflow.node.invoke config examples (copy this shape): ${workedExample}. For capture-artifact, point config.artifactStepId at the generated workflow.xstate-machine.v1 step instead of emitting bare artifactKinds/capturePurpose; the node needs a concrete artifact ref. For signals/search, always set config.query and only use signalKinds from the enum (use "workflow-pattern", never "workflow").`,
+  ];
+};
+
 const blocker = (
   code: CapabilityBlocker["code"],
   message: string
