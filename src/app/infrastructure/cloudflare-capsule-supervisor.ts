@@ -217,13 +217,15 @@ const driveOneQueuedRun = async (
   request: WorkflowRunRequest
 ): Promise<DriveOutcome> => {
   try {
-    // Single-step drive: resolves at a terminal status (captured | blocked) OR a
-    // non-terminal `paused` (one node ran, more remain). An eviction kills the
-    // invocation mid-await, leaving the run-start record and a still-set driving
-    // marker for the next alarm to re-drive.
-    const result = await frontDoor.startRun(request, {
-      driveMode: "single-step",
-    });
+    // Whole-run drive: runs the entire envelope + dynamic loop to a terminal
+    // status in one invocation. The dynamic nodes are fast (a real dream ran 8
+    // in 11s) and every downstream op is now bounded by AbortSignal.timeout, so
+    // a node can no longer hang the invocation — the original reason for
+    // single-step. Single-step remains available via driveMode for genuinely
+    // long runs once its live workerd alarm re-fire is debugged; in workerd the
+    // post-pause armAlarmAt(now) did not promptly re-fire, stalling after one
+    // node. Whole-run is the proven path to a captured dream today.
+    const result = await frontDoor.startRun(request);
 
     return result.status === "paused" ? "paused" : "terminal";
   } catch (error) {
