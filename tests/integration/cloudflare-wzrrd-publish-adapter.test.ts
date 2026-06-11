@@ -716,4 +716,49 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       resolverCount: 0,
     });
   });
+
+  it("blocks with a clean reason when the Wzrrd API does not respond within the timeout", async () => {
+    const fixture = await createReviewSurfaceFixture();
+    const payload = buildPayload(fixture);
+    const lease = buildLease({
+      payload,
+      request: fixture.request,
+    });
+    // A hung wzrrd.sh surfaces as an AbortSignal.timeout TimeoutError; without
+    // the bound the fetch would hang until workerd kills the whole drive
+    // invocation (a wedged run the reaper later sweeps with no reason).
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal fetch stub that always times out.
+    const timeoutFetch = (() => {
+      const error = new Error("The operation timed out.");
+      error.name = "TimeoutError";
+
+      return Promise.reject(error);
+    }) as unknown as typeof fetch;
+    const adapter = createCloudflareWzrrdPublishAdapter({
+      artifacts: fixture.artifacts,
+      fetch: timeoutFetch,
+      secretResolver: createCloudflareWzrrdApiTokenResolver({
+        secret: wzrrdToken,
+        secretRef: "secretref:wzrrd-api",
+      }),
+      timeoutMs: 5000,
+      userAgent: "pi-cloudflare-sandbox-workflows/0.0.0",
+      wzrrdApiBaseUrl: "https://wzrrd.example.invalid",
+      wzrrdPublishSecretRef: "secretref:wzrrd-api",
+    });
+
+    const delivery = await adapter.execute({ lease, payload });
+
+    expect({
+      blocker: delivery.status === "blocked" ? delivery.blocker : undefined,
+      status: delivery.status,
+    }).toStrictEqual({
+      blocker: {
+        code: "adapter_unavailable",
+        message: "Wzrrd API did not respond within 5000ms.",
+        redacted: true,
+      },
+      status: "blocked",
+    });
+  });
 });

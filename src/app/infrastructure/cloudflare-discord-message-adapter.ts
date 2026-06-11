@@ -44,6 +44,13 @@ export interface CloudflareDiscordMessageAdapterConfig {
   readonly fetch?: typeof fetch;
   readonly resolveChannelId?: (resource: DiscordResource) => null | string;
   readonly secretResolver: DiscordBotTokenSecretResolver;
+  /**
+   * Hard ceiling for the Discord create-message round-trip. Without a bound a
+   * stalled Discord API hangs the fetch until workerd kills the whole drive
+   * invocation; on timeout the send returns a clean `adapter_unavailable`
+   * blocker the safety envelope records and surfaces.
+   */
+  readonly timeoutMs?: number;
   readonly userAgent: string;
 }
 
@@ -71,6 +78,8 @@ const blocked = (
   });
 
 const defaultDiscordApiBaseUrl = "https://discord.com/api/v10";
+
+const DEFAULT_DISCORD_TIMEOUT_MS = 30_000;
 
 const snowflakePattern = /^\d{17,20}$/u;
 
@@ -250,18 +259,32 @@ export const createCloudflareDiscordMessageAdapter = (
       );
     }
 
-    const response = await (config.fetch ?? fetch)(
-      `${config.discordApiBaseUrl ?? defaultDiscordApiBaseUrl}/channels/${encodeURIComponent(channelId)}/messages`,
-      {
-        body: jsonBodyFor({ lease, payload }),
-        headers: {
-          Authorization: `Bot ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": config.userAgent,
-        },
-        method: "POST",
-      }
-    );
+    const timeoutMs = config.timeoutMs ?? DEFAULT_DISCORD_TIMEOUT_MS;
+    let response: Response;
+    try {
+      response = await (config.fetch ?? fetch)(
+        `${config.discordApiBaseUrl ?? defaultDiscordApiBaseUrl}/channels/${encodeURIComponent(channelId)}/messages`,
+        {
+          body: jsonBodyFor({ lease, payload }),
+          headers: {
+            Authorization: `Bot ${token}`,
+            "Content-Type": "application/json",
+            "User-Agent": config.userAgent,
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(timeoutMs),
+        }
+      );
+    } catch (error) {
+      return blocked(
+        "adapter_unavailable",
+        error instanceof Error && error.name === "TimeoutError"
+          ? `Discord API did not respond within ${timeoutMs}ms.`
+          : `Discord API request failed: ${
+              error instanceof Error ? error.name : "network error"
+            }.`
+      );
+    }
     if (!response.ok) {
       return blockerForDiscordStatus(response.status);
     }

@@ -49,6 +49,13 @@ export interface CloudflareGitHubPullRequestAdapterConfig {
   readonly githubPullRequestSecretRef: string;
   readonly now?: () => string;
   readonly secretResolver: GitHubTokenSecretResolver;
+  /**
+   * Hard ceiling for the GitHub create-pull-request round-trip. Without a bound
+   * a stalled GitHub API hangs the fetch until workerd kills the whole drive
+   * invocation; on timeout the throw flows into the existing catch and returns
+   * a clean `adapter_unavailable` blocker the safety envelope records.
+   */
+  readonly timeoutMs?: number;
   readonly userAgent: string;
 }
 
@@ -58,6 +65,8 @@ const GitHubCreatePullRequestResponseSchema = z.object({
 });
 
 const defaultGitHubApiBaseUrl = "https://api.github.com";
+
+const DEFAULT_GITHUB_TIMEOUT_MS = 30_000;
 
 const blocked = (
   code: CapabilityDenialCode,
@@ -281,6 +290,9 @@ export const createCloudflareGitHubPullRequestAdapter = (
             "X-GitHub-Api-Version": "2022-11-28",
           },
           method: "POST",
+          signal: AbortSignal.timeout(
+            config.timeoutMs ?? DEFAULT_GITHUB_TIMEOUT_MS
+          ),
         }
       );
     } catch {

@@ -61,6 +61,14 @@ export interface CloudflareWzrrdPublishAdapterConfig {
   readonly now?: () => string;
   readonly primaryDocumentRenderer?: WzrrdPrimaryDocumentRenderer;
   readonly secretResolver: WzrrdApiTokenSecretResolver;
+  /**
+   * Hard ceiling for the Wzrrd publish round-trip. This call runs late in the
+   * finishing envelope; without a bound a stalled wzrrd.sh response hangs the
+   * fetch until workerd kills the whole drive invocation (a wedged run the
+   * reaper later sweeps with no reason). On timeout the publish returns a clean
+   * `adapter_unavailable` blocker the safety envelope records and surfaces.
+   */
+  readonly timeoutMs?: number;
   readonly userAgent: string;
   readonly wzrrdApiBaseUrl?: string;
   readonly wzrrdPublishSecretRef: string;
@@ -102,6 +110,8 @@ const WzrrdApiPublishResponseSchema = z.object({
 });
 
 const defaultWzrrdApiBaseUrl = "https://wzrrd.sh";
+
+const DEFAULT_WZRRD_TIMEOUT_MS = 30_000;
 
 const blocked = (
   code: CapabilityDenialCode,
@@ -1177,6 +1187,57 @@ const coercePublishedAt = (input: {
   return Number.isNaN(date.getTime()) ? input.fallback() : date.toISOString();
 };
 
+const postWzrrdPublish = async (input: {
+  readonly config: CloudflareWzrrdPublishAdapterConfig;
+  readonly files: readonly WzrrdPublishFile[];
+  readonly runId: string;
+  readonly slug: string;
+  readonly token: string;
+}): Promise<
+  | { readonly response: Response; readonly status: "ok" }
+  | { readonly result: WzrrdPublishDeliveryResult; readonly status: "blocked" }
+> => {
+  const apiBaseUrl = (
+    input.config.wzrrdApiBaseUrl ?? defaultWzrrdApiBaseUrl
+  ).replaceAll(/\/+$/gu, "");
+  const timeoutMs = input.config.timeoutMs ?? DEFAULT_WZRRD_TIMEOUT_MS;
+
+  try {
+    const response = await (input.config.fetch ?? fetch)(
+      `${apiBaseUrl}/api/sites`,
+      {
+        body: JSON.stringify({
+          files: input.files,
+          indexing: "noindex",
+          slug: input.slug,
+          source: `pi-cloudflare-sandbox-workflows:${input.runId}`,
+        }),
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+          "Content-Type": "application/json",
+          "User-Agent": input.config.userAgent,
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+      }
+    );
+
+    return { response, status: "ok" };
+  } catch (error) {
+    return {
+      result: blocked(
+        "adapter_unavailable",
+        error instanceof Error && error.name === "TimeoutError"
+          ? `Wzrrd API did not respond within ${timeoutMs}ms.`
+          : `Wzrrd API request failed: ${
+              error instanceof Error ? error.name : "network error"
+            }.`
+      ),
+      status: "blocked",
+    };
+  }
+};
+
 export const createCloudflareWzrrdApiTokenResolver = (
   config: CloudflareWzrrdApiTokenResolverConfig
 ): WzrrdApiTokenSecretResolver => ({
@@ -1281,23 +1342,17 @@ export const createCloudflareWzrrdPublishAdapter = (
       return publishFiles.result;
     }
 
-    const apiBaseUrl = (
-      config.wzrrdApiBaseUrl ?? defaultWzrrdApiBaseUrl
-    ).replaceAll(/\/+$/gu, "");
-    const response = await (config.fetch ?? fetch)(`${apiBaseUrl}/api/sites`, {
-      body: JSON.stringify({
-        files: publishFiles.files,
-        indexing: "noindex",
-        slug: payload.slug,
-        source: `pi-cloudflare-sandbox-workflows:${lease.runId}`,
-      }),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "User-Agent": config.userAgent,
-      },
-      method: "POST",
+    const posted = await postWzrrdPublish({
+      config,
+      files: publishFiles.files,
+      runId: lease.runId,
+      slug: payload.slug,
+      token,
     });
+    if (posted.status === "blocked") {
+      return posted.result;
+    }
+    const { response } = posted;
     if (!response.ok) {
       return blockerForWzrrdStatus(response.status);
     }

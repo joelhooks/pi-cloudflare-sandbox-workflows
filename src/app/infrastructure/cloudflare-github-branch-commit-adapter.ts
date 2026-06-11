@@ -29,6 +29,13 @@ export interface CloudflareGitHubBranchCommitAdapterConfig {
   readonly githubBranchCommitSecretRef: string;
   readonly now?: () => string;
   readonly secretResolver: GitHubTokenSecretResolver;
+  /**
+   * Hard ceiling for each GitHub Git Data round-trip in the multi-step commit
+   * dance. Without a bound a stalled GitHub API hangs a fetch until workerd
+   * kills the whole drive invocation; on timeout the step returns a clean
+   * `adapter_unavailable` blocker the safety envelope records and surfaces.
+   */
+  readonly timeoutMs?: number;
   readonly userAgent: string;
 }
 
@@ -56,6 +63,8 @@ const GitHubCreatedCommitResponseSchema = z.object({
 });
 
 const defaultGitHubApiBaseUrl = "https://api.github.com";
+
+const DEFAULT_GITHUB_TIMEOUT_MS = 30_000;
 
 const blocked = (
   code: CapabilityDenialCode,
@@ -232,6 +241,16 @@ const readJson = async (response: Response): Promise<unknown> => {
   }
 };
 
+const boundedGitHubRequest = (
+  config: CloudflareGitHubBranchCommitAdapterConfig
+): typeof fetch => {
+  const fetcher = config.fetch ?? fetch;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_GITHUB_TIMEOUT_MS;
+
+  return (url, init) =>
+    fetcher(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+};
+
 const executeGitHubBranchCommit = async (input: {
   readonly config: CloudflareGitHubBranchCommitAdapterConfig;
   readonly lease: GitHubBranchCommitLease;
@@ -240,7 +259,7 @@ const executeGitHubBranchCommit = async (input: {
   readonly repository: { readonly owner: string; readonly repo: string };
   readonly token: string;
 }): Promise<GitHubBranchCommitDeliveryResult> => {
-  const request = input.config.fetch ?? fetch;
+  const request = boundedGitHubRequest(input.config);
   const apiBase = `${input.config.githubApiBaseUrl ?? defaultGitHubApiBaseUrl}/repos/${encodeURIComponent(input.repository.owner)}/${encodeURIComponent(input.repository.repo)}`;
   const headers = githubHeaders({
     token: input.token,
@@ -458,14 +477,27 @@ export const createCloudflareGitHubBranchCommitAdapter = (
       );
     }
 
-    return await executeGitHubBranchCommit({
-      config,
-      lease,
-      payload,
-      payloadHash,
-      repository,
-      token,
-    });
+    try {
+      return await executeGitHubBranchCommit({
+        config,
+        lease,
+        payload,
+        payloadHash,
+        repository,
+        token,
+      });
+    } catch (error) {
+      const timeoutMs = config.timeoutMs ?? DEFAULT_GITHUB_TIMEOUT_MS;
+
+      return blocked(
+        "adapter_unavailable",
+        error instanceof Error && error.name === "TimeoutError"
+          ? `GitHub API did not respond within ${timeoutMs}ms.`
+          : `GitHub API request failed: ${
+              error instanceof Error ? error.name : "network error"
+            }.`
+      );
+    }
   },
 });
 

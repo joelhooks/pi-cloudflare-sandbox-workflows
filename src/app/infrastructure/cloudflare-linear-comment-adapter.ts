@@ -50,6 +50,13 @@ export interface CloudflareLinearCommentAdapterConfig {
   readonly linearCommentSecretRef: string;
   readonly now?: () => string;
   readonly secretResolver: LinearApiTokenSecretResolver;
+  /**
+   * Hard ceiling for each Linear GraphQL round-trip (issue lookup + comment
+   * create). Without a bound a stalled Linear API hangs a fetch until workerd
+   * kills the whole drive invocation; on timeout the step returns a clean
+   * `adapter_unavailable` blocker the safety envelope records and surfaces.
+   */
+  readonly timeoutMs?: number;
   readonly userAgent: string;
 }
 
@@ -91,6 +98,8 @@ const LinearCommentCreateResponseSchema = z.object({
 });
 
 const defaultLinearApiBaseUrl = "https://api.linear.app/graphql";
+
+const DEFAULT_LINEAR_TIMEOUT_MS = 30_000;
 
 const blocked = (
   code: CapabilityDenialCode,
@@ -253,6 +262,9 @@ const executeLinearGraphql = async (input: {
       body: JSON.stringify(input.body),
       headers: input.headers,
       method: "POST",
+      signal: AbortSignal.timeout(
+        input.config.timeoutMs ?? DEFAULT_LINEAR_TIMEOUT_MS
+      ),
     }
   );
   if (!response.ok) {
@@ -466,13 +478,26 @@ export const createCloudflareLinearCommentAdapter = (
       );
     }
 
-    return await executeLinearCommentCreate({
-      config,
-      lease,
-      payload,
-      payloadHash,
-      token,
-    });
+    try {
+      return await executeLinearCommentCreate({
+        config,
+        lease,
+        payload,
+        payloadHash,
+        token,
+      });
+    } catch (error) {
+      const timeoutMs = config.timeoutMs ?? DEFAULT_LINEAR_TIMEOUT_MS;
+
+      return blocked(
+        "adapter_unavailable",
+        error instanceof Error && error.name === "TimeoutError"
+          ? `Linear API did not respond within ${timeoutMs}ms.`
+          : `Linear API request failed: ${
+              error instanceof Error ? error.name : "network error"
+            }.`
+      );
+    }
   },
 });
 

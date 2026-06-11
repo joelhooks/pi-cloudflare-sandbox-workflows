@@ -343,4 +343,46 @@ describe("Cloudflare Discord message adapter", () => {
       tokenLeaked: false,
     });
   });
+
+  it("blocks with a clean reason when the Discord API does not respond within the timeout", async () => {
+    const payload = buildPayload();
+    const lease = buildLease({ payload });
+    // A hung Discord API surfaces as an AbortSignal.timeout TimeoutError;
+    // without the bound the fetch would hang until workerd kills the whole
+    // drive invocation (a wedged run the reaper later sweeps with no reason).
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal fetch stub that always times out.
+    const timeoutFetch = (() => {
+      const error = new Error("The operation timed out.");
+      error.name = "TimeoutError";
+
+      return Promise.reject(error);
+    }) as unknown as typeof fetch;
+    const adapter = createCloudflareDiscordMessageAdapter({
+      discordBotSecretRef: "secretref:discord-bot",
+      fetch: timeoutFetch,
+      secretResolver: createCloudflareDiscordBotTokenResolver({
+        secret: discordToken,
+        secretRef: "secretref:discord-bot",
+      }),
+      timeoutMs: 5000,
+      userAgent: "DiscordBot (https://joelclaw.local, 0.0.0)",
+    });
+
+    const delivery = await adapter.execute({ lease, payload });
+
+    expect({
+      delivery,
+      tokenLeaked: JSON.stringify(delivery).includes(discordToken),
+    }).toStrictEqual({
+      delivery: {
+        blocker: {
+          code: "adapter_unavailable",
+          message: "Discord API did not respond within 5000ms.",
+          redacted: true,
+        },
+        status: "blocked",
+      },
+      tokenLeaked: false,
+    });
+  });
 });
