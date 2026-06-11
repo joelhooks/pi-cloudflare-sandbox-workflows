@@ -464,4 +464,49 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
       status: "blocked",
     });
   });
+
+  it("blocks with a clean reason when the relay does not respond within the timeout", async () => {
+    const request = buildIntegrationTestRunRequest();
+    const tokenResolver: MemoryRelayTokenSecretResolver = {
+      resolve: () => Promise.resolve("relay-token"),
+    };
+    // A hung relay surfaces as an AbortSignal.timeout TimeoutError; without the
+    // bound the fetch would hang until workerd kills the whole invocation.
+    const timeoutFetch = (() => {
+      const error = new Error("The operation timed out.");
+      error.name = "TimeoutError";
+
+      return Promise.reject(error);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal fetch stub that always times out.
+    }) as unknown as typeof fetch;
+    const adapter = createCloudflareMemoryFabricRelay({
+      fetch: timeoutFetch,
+      relayBaseUrl: "https://memory-relay.joelclaw.local",
+      relaySecretRef: "secretref:memory-relay",
+      relayTimeoutMs: 5000,
+      secretResolver: tokenResolver,
+      userAgent: "pi-cloudflare-sandbox-workflows-test/0.0.0",
+    });
+
+    const result = await adapter.searchMemories({
+      actor: request.actor,
+      maxHits: 1,
+      query: "dynamic workflow proof",
+      runId: request.runId,
+      sourceFamilies: ["agent-transcripts"],
+      workItemId: request.workItemId,
+    });
+
+    expect({
+      blocker: result.status === "blocked" ? result.blocker : undefined,
+      status: result.status,
+    }).toStrictEqual({
+      blocker: {
+        code: "adapter_unavailable",
+        message: "Memory relay search did not respond within 5000ms.",
+        redacted: true,
+      },
+      status: "blocked",
+    });
+  });
 });

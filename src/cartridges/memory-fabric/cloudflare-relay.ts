@@ -79,9 +79,19 @@ export interface CloudflareMemoryFabricRelayConfig {
   readonly fetch?: typeof fetch;
   readonly relayBaseUrl: string;
   readonly relaySecretRef: string;
+  /**
+   * Hard ceiling for a single relay round-trip. The relay reaches JoelClaw over
+   * a tunnel and an all-time signals/search query can stall; without a bound the
+   * fetch hangs until workerd kills the whole invocation (a wedged run that the
+   * reaper sweeps with no reason). On timeout the operation returns a clean
+   * `adapter_unavailable` blocker the safety envelope can record and surface.
+   */
+  readonly relayTimeoutMs?: number;
   readonly secretResolver: MemoryRelayTokenSecretResolver;
   readonly userAgent: string;
 }
+
+const DEFAULT_RELAY_TIMEOUT_MS = 30_000;
 
 type MemoryRelayPayload =
   | MemoryRelayCaptureArtifactPayload
@@ -275,25 +285,40 @@ export const createCloudflareMemoryFabricRelay = (
       return blocked("secret_denied", "Memory relay token is unavailable.");
     }
 
-    const response = await fetcher(
-      relayUrl(config.relayBaseUrl, operationPath(input.operation)),
-      {
-        body: JSON.stringify(
-          relayRequestEnvelope({
-            budget: config.budget,
-            operation: input.operation,
-            payload: input.body,
-            relaySecretRef: config.relaySecretRef,
-          })
-        ),
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-          "user-agent": config.userAgent,
-        },
-        method: "POST",
-      }
-    );
+    const timeoutMs = config.relayTimeoutMs ?? DEFAULT_RELAY_TIMEOUT_MS;
+    let response: Response;
+    try {
+      response = await fetcher(
+        relayUrl(config.relayBaseUrl, operationPath(input.operation)),
+        {
+          body: JSON.stringify(
+            relayRequestEnvelope({
+              budget: config.budget,
+              operation: input.operation,
+              payload: input.body,
+              relaySecretRef: config.relaySecretRef,
+            })
+          ),
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            "user-agent": config.userAgent,
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(timeoutMs),
+        }
+      );
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.name === "TimeoutError"
+          ? `did not respond within ${timeoutMs}ms`
+          : `failed: ${error instanceof Error ? error.name : "network error"}`;
+
+      return blocked(
+        "adapter_unavailable",
+        `Memory relay ${input.operation} ${reason}.`
+      );
+    }
     if (!response.ok) {
       return blockerForRelayStatus(response.status, input.operation);
     }
