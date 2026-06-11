@@ -39,3 +39,15 @@ The dream's CORE deliverable — a rendered HITL report from real correlated tra
 ## Infra shipped this session (all on m1-memory-fabric-carve)
 
 Auth on /runs, idempotent leases, skip-to-done guard, M2.5 durable execution (checkpoint/resume/reaper/watchdog, async 202+poll), planner conformance (leash+advertise+validate+observe), dependency-ref-by-nodeType resolution, relay + op timeouts, blocker observability, the live monitor UI (board + per-run + live dynamic-workflow D2 chart). single-step-per-alarm exists but is whole-run-by-default pending a live workerd alarm re-fire debug.
+
+## Run 14: the dream thinks, real data breaks the driver (2026-06-11 PM)
+
+The "dream that thinks" pipeline shipped + deployed (worker 2fc9e926): transcript-source env fix (verifier ran the live joelclaw CLI: 152 real hits), deterministic primary-source criticality backstop, kernel-skill consumption path, two real authored kernel skills on claw-kernel, an agentic propose-refinements node (real lane, receipt-bound, hallucination-dropped, agentic/mechanical labeled). Verifier rated all six axes REAL with file:line proof. Commits c1738e6..5324675 on m1-memory-fabric-carve, 315 tests.
+
+Run 14 (run-live-…566a66dd) outcome: REAPED at node 3. capture-run + capture-generated-artifacts ran (local, fast), then node 3 (search/signals against the REAL JoelClaw index, 152 hits + hydration) is too heavy for one Worker invocation, gets killed, parks at checkpoint 2, reaper sweeps before node 3 checkpoints. The empty-fallback runs did 8 nodes in 11s precisely because there was no data to process; real data made the retrieval nodes heavy.
+
+Two bounded infra blockers now clearly identified (NOT architecture — the thinking layers are done):
+1. NODE-BUDGET BOUNDING (new, the real blocker): search/signals/hydrate/correlate must cap their work (maxHits/maxReceipts/correlation edges, and likely stream/paginate) to fit one Worker invocation. 152 hits + per-receipt hydration + correlation exceeds it. The op-timeouts bound a single fetch (30s) but not the cumulative node work. This only surfaced because the dream finally has real data.
+2. SINGLE-STEP DRIVER (known): each node needs its own fresh invocation budget + immediate re-arm so a heavy node is not racing the reaper on the slow whole-run watchdog cadence. single-step exists (driveMode) but its live workerd alarm(now) re-fire stalls — needs wrangler tail to debug, not deploy-and-pray. Whole-run cannot distinguish a long-but-alive drive from a killed one without a long staleness timeout, which is why its resume is slow.
+
+Next session start here: (1) bound the retrieval/correlation nodes to an invocation budget; (2) debug single-step live re-fire via wrangler tail. With both, a heavy real-data dream walks node-by-node to captured and self-publishes. The intelligence is built; the carrier is the remaining work.
