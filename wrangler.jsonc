@@ -84,7 +84,6 @@
     "required": [
       "DISCORD_BOT_TOKEN",
       "GITHUB_TOKEN",
-      "LINEAR_API_TOKEN",
       "MEMORY_RELAY_TOKEN",
       "PI_AUTH_JSON_B64",
       "WORKFLOW_APP_ADMIN_TOKEN",
