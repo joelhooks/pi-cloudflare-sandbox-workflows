@@ -172,16 +172,36 @@ const MemoryCaptureArtifactNodeConfigSchema = z.object({
   sourceSystem: z.string().min(1).default("cloudflare-artifacts"),
 });
 
+// The planner is a stochastic LLM lane. Give the two query-bearing node configs
+// a structural floor so a plan that omits `query` or emits an out-of-enum
+// `signalKinds` value (e.g. "workflow" for "workflow-pattern") conforms instead
+// of blocking the run. The prompt also enumerates this contract; the schema is
+// the guarantee, the prompt is the nudge.
+const MEMORY_FABRIC_FALLBACK_QUERY = "dream workflow";
+
+const filterToValidSignalKinds = (value: unknown): unknown => {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  const valid = value.filter(
+    (kind) => MemorySignalKindSchema.safeParse(kind).success
+  );
+  return valid.length > 0 ? valid : undefined;
+};
+
 const MemorySearchNodeConfigSchema = z.object({
   maxHits: z.number().int().min(1).max(100).default(10),
-  query: z.string().min(1),
+  query: z.string().min(1).default(MEMORY_FABRIC_FALLBACK_QUERY),
   sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
 });
 
 const MemorySignalsNodeConfigSchema = z.object({
   maxSignals: z.number().int().min(1).max(100).default(10),
-  query: z.string().min(1),
-  signalKinds: z.array(MemorySignalKindSchema).min(1).optional(),
+  query: z.string().min(1).default(MEMORY_FABRIC_FALLBACK_QUERY),
+  signalKinds: z.preprocess(
+    filterToValidSignalKinds,
+    z.array(MemorySignalKindSchema).min(1).optional()
+  ),
   sourceFamilies: z.array(MemorySourceFamilySchema).min(1).optional(),
 });
 
