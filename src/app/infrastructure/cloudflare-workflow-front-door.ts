@@ -4,6 +4,7 @@ import type { Sandbox as SandboxDurableObject } from "@cloudflare/sandbox";
 
 import { createAdmittedAgentLaneRuntime } from "../application/admitted-agent-lane-runtime.ts";
 import type {
+  AgentAnalysisReasoningLanePort,
   AgentLaneAdmissionControllerContract,
   AgentLaneRuntimePort,
   ArtifactStoreContract,
@@ -34,6 +35,7 @@ import type {
 } from "../domain/schemas.ts";
 import type { MemorySourceProfile } from "../domain/source-profile.ts";
 import {
+  createCloudflarePiAnalysisReasoningLaneAdapter,
   createCloudflarePiPlannerLaneAdapter,
   createCloudflarePiVerifierLaneAdapter,
   createCloudflarePiWorkerLaneAdapter,
@@ -90,6 +92,14 @@ type CapsuleSupervisorPorts = ContextCapsuleActorContract &
   AgentLaneAdmissionControllerContract;
 
 export interface CloudflareWorkflowNodeAdapterFactoryInput {
+  /**
+   * The run's analysis reasoning lane, built from the same admitted-runtime
+   * lane machinery the planner/worker lanes use. Threaded into cartridge node
+   * adapters so the agentic propose-refinements node REASONS over the
+   * analysis-method kernel skill; absent (injected `workflowNodeAdapter`, no
+   * lane runtime) the node falls back to the deterministic mechanical path.
+   */
+  readonly analysisReasoningLane?: AgentAnalysisReasoningLanePort;
   readonly artifacts: ArtifactStoreContract;
 }
 
@@ -603,7 +613,16 @@ export const createCloudflareWorkflowFrontDoor = (
       statusProjection: createCloudflareWorkflowStatusProjection({
         d1: config.d1,
       }),
-      ...workflowNodeAdapterDependency(config, { artifacts: runStore.store }),
+      ...workflowNodeAdapterDependency(config, {
+        // The "dream thinks" wire: the same admitted-runtime lane machinery the
+        // planner/worker/verifier lanes use, handed to cartridge node adapters
+        // so the agentic propose-refinements node reasons over the analysis
+        // kernel skill. A config that injects its own `workflowNodeAdapter`
+        // short-circuits this in `workflowNodeAdapterDependency`.
+        analysisReasoningLane:
+          createCloudflarePiAnalysisReasoningLaneAdapter(laneAdapterConfig),
+        artifacts: runStore.store,
+      }),
       ...postExecutionArtifactRecordersDependency(config, {
         artifacts: runStore.store,
       }),

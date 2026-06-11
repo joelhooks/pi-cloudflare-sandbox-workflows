@@ -331,6 +331,54 @@ export interface AgentLaneRuntimePort {
   runLane(input: AgentLaneRuntimeRequest): Promise<AgentLaneReceipt>;
 }
 
+/**
+ * Structured result of one agentic analytical reasoning step. The lane runs a
+ * real agent over the prompt the calling node assembled (redacted evidence +
+ * analysis-method kernel skill + run goal) and writes a JSON artifact the node
+ * parses against its own output schema. The node hands back that parsed value
+ * here, plus the lane receipt so the deterministic envelope can hash-pin and
+ * record it like any other lane output. `outputRefs`/`receipt` carry the proof
+ * the reasoning actually ran on a real agent; `parsed` carries the reasoning.
+ */
+export interface AgentAnalysisReasoningResult<TParsed> {
+  readonly outputRefs: readonly ArtifactRef[];
+  readonly parsed: TParsed;
+  readonly receipt: AgentLaneReceipt;
+}
+
+/**
+ * Cartridge-facing seam for the "dream thinks" pattern: an analytical workflow
+ * node (propose-refinements today) calls this with a prompt it built from the
+ * hydrated evidence and the analysis-method kernel skill, plus a Zod schema for
+ * the structured output it expects back. The lane invokes a REAL agent through
+ * the same {@link AgentLaneRuntimePort} machinery the planner/worker lanes use
+ * (no new runtime), reads the pinned JSON output, validates it against the
+ * supplied schema, and returns the parsed reasoning with the lane receipt. The
+ * port is deliberately narrow — the node owns prompt assembly and output shape;
+ * the lane owns running the agent and producing receipts. When this port is not
+ * configured (integration-test runtime, no Pi auth) the node falls back to its
+ * deterministic path and labels the output as mechanical, so a report never
+ * claims reasoning it did not do.
+ */
+export interface AgentAnalysisReasoningLanePort {
+  readonly laneKind: "analysis";
+  readonly runtime: Exclude<AgentLaneRuntime, "integration-test">;
+
+  reason<TParsed>(input: {
+    readonly actor: Actor;
+    readonly laneId: string;
+    readonly outputPath: string;
+    readonly outputSchema: { readonly parse: (value: unknown) => TParsed };
+    readonly packageMounts: readonly PinnedPackage[];
+    readonly prompt: string;
+    readonly promptPath: string;
+    readonly receiptPath: string;
+    readonly runId: string;
+    readonly transcriptPath: string;
+    readonly workItemId: string;
+  }): Promise<AgentAnalysisReasoningResult<TParsed>>;
+}
+
 export interface AgentLaneAdmissionControllerContract {
   admitLane(
     input: AgentLaneAdmissionRequest

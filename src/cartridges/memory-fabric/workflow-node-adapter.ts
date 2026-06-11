@@ -1,12 +1,14 @@
 import { z } from "zod";
 
 import type {
+  AgentAnalysisReasoningLanePort,
   ArtifactStoreContract,
   WorkflowNodeAdapterPort,
   WorkflowNodeExecutionResult,
   WorkflowNodeInvocationStep,
 } from "../../app/application/ports.ts";
 import { hashJson, sha256Hex } from "../../app/domain/hash.ts";
+import type { ResolvedKernelSkill } from "../../app/domain/kernel-skills.ts";
 import {
   ArtifactPinSchema,
   ArtifactRefSchema,
@@ -22,6 +24,7 @@ import { MemorySourceFamilySchema } from "../../app/domain/source-profile.ts";
 import type { MemorySourceFamily } from "../../app/domain/source-profile.ts";
 import {
   WORKFLOW_HITL_REPORT_SECTION_ORDER,
+  MemoryAgenticRefinementOutputSchema,
   MemoryCaptureReceiptDocumentSchema,
   MemoryCorrelationGraphDocumentSchema,
   MemoryHitlDecisionContractSchema,
@@ -45,6 +48,7 @@ import {
   MemorySignalKindSchema,
 } from "./schemas.ts";
 import type {
+  MemoryAgenticRefinementProposal,
   MemoryCaptureReceiptDocument,
   MemoryCorrelationGraphDocument,
   MemoryHitlDecisionContract,
@@ -71,6 +75,7 @@ import type {
   MemoryRefinementProposalDocument,
   MemoryRefinementProposalRecommendation,
   MemoryRefinementProposalTargetKind,
+  MemoryRefinementReasoningMode,
   MemorySignalDocument,
 } from "./schemas.ts";
 
@@ -118,6 +123,15 @@ export interface MemoryCapturePort {
 }
 
 export interface MemoryFabricWorkflowNodeAdapterConfig {
+  /**
+   * The "dream thinks" lane. When present, the propose-refinements node REASONS
+   * over the hydrated evidence and the analysis-method kernel skill through a
+   * real agent lane instead of mechanical template-fill. When absent (the
+   * integration-test runtime, or no Pi auth) the node falls back to the
+   * deterministic path and records the output honestly as `mechanical`, so a
+   * report never claims analysis it did not do.
+   */
+  readonly analysisReasoningLane?: AgentAnalysisReasoningLanePort;
   readonly artifacts: ArtifactStoreContract;
   readonly memoryCapture?: MemoryCapturePort;
   readonly memoryCorrelation?: MemoryCorrelationPort;
@@ -162,6 +176,15 @@ const MemoryCapturableArtifactMediaTypeSchema = z.enum(
 // profile `defaultQuery`. It stays a local constant so the adapter does not pull
 // the package-seed graph in through source-profile.ts.
 const MEMORY_FABRIC_FALLBACK_QUERY = "dream workflow";
+
+// Draft-7 JSON Schema for the agentic propose-refinements output, derived from
+// the production Zod schema so the contract the reasoning lane is told can never
+// drift from the one the node parses its output against. Precomputed once.
+const AGENTIC_REFINEMENT_OUTPUT_JSON_SCHEMA = JSON.stringify(
+  z.toJSONSchema(MemoryAgenticRefinementOutputSchema, { target: "draft-7" }),
+  null,
+  2
+);
 
 const filterToValidSignalKinds = (value: unknown): unknown => {
   if (!Array.isArray(value)) {
@@ -1597,6 +1620,55 @@ const signalProposalFor = (input: {
   };
 };
 
+// Assemble the hash-pinned refinement-proposals document from an already-built,
+// already-sorted proposal list. Shared by BOTH paths: the deterministic
+// template-fill path (reasoningMode "mechanical") and the agentic reasoning
+// path (reasoningMode "agentic"). The deterministic envelope — nextWorkflowSeed,
+// sourceRefs, redaction, the schema parse — is identical regardless of how the
+// proposals were reasoned; only the proposals themselves and the honesty label
+// differ. This is the "stochastic dream, deterministic envelope" boundary made
+// literal: reasoning is upstream, recording is here.
+const refinementProposalDocumentFromProposals = (input: {
+  readonly proposals: readonly MemoryRefinementProposal[];
+  readonly reasoningMode: MemoryRefinementReasoningMode;
+  readonly reasoningNote?: string;
+  readonly runId: string;
+  readonly sourceRefs: readonly ArtifactRef[];
+  readonly workItemId: string;
+}): MemoryRefinementProposalDocument =>
+  MemoryRefinementProposalDocumentSchema.parse({
+    generatedAt: new Date().toISOString(),
+    nextWorkflowSeed: {
+      plannerInstructions: [
+        "Use accepted refinement proposals as constraints for the next generated workflow.",
+        "Do not treat proposal text as proof; follow sourceRefs and receipts before updating Brain or packages.",
+        "Route capture or ingest gaps to the separate memory-fabric repair workflow instead of folding them into this workflow.",
+      ],
+      proposalIds: input.proposals.map((proposal) => proposal.proposalId),
+      requiredCapabilityKinds: [
+        ...new Set(
+          input.proposals.flatMap((proposal) =>
+            proposal.targetKind === "capability-lease"
+              ? ["capability-lease.review"]
+              : []
+          )
+        ),
+      ],
+      sourceRefs: [...input.sourceRefs],
+    },
+    proposalCount: input.proposals.length,
+    proposals: [...input.proposals],
+    reasoningMode: input.reasoningMode,
+    ...(input.reasoningNote === undefined
+      ? {}
+      : { reasoningNote: input.reasoningNote }),
+    redacted: true,
+    runId: input.runId,
+    schemaVersion: "memory.refinement-proposals.v1",
+    sourceRefs: [...input.sourceRefs],
+    workItemId: input.workItemId,
+  });
+
 const refinementProposalDocumentFor = (input: {
   readonly correlation: MemoryCorrelationGraphDocument;
   readonly correlationRef: ArtifactRef;
@@ -1636,34 +1708,228 @@ const refinementProposalDocumentFor = (input: {
     .toSorted((left, right) => right.rating - left.rating)
     .slice(0, input.maxProposals);
 
-  return MemoryRefinementProposalDocumentSchema.parse({
-    generatedAt: new Date().toISOString(),
-    nextWorkflowSeed: {
-      plannerInstructions: [
-        "Use accepted refinement proposals as constraints for the next generated workflow.",
-        "Do not treat proposal text as proof; follow sourceRefs and receipts before updating Brain or packages.",
-        "Route capture or ingest gaps to the separate memory-fabric repair workflow instead of folding them into this workflow.",
-      ],
-      proposalIds: proposals.map((proposal) => proposal.proposalId),
-      requiredCapabilityKinds: [
-        ...new Set(
-          proposals.flatMap((proposal) =>
-            proposal.targetKind === "capability-lease"
-              ? ["capability-lease.review"]
-              : []
-          )
-        ),
-      ],
-      sourceRefs,
-    },
-    proposalCount: proposals.length,
+  return refinementProposalDocumentFromProposals({
     proposals,
-    redacted: true,
+    reasoningMode: "mechanical",
     runId: input.search.runId,
-    schemaVersion: "memory.refinement-proposals.v1",
     sourceRefs,
     workItemId: input.search.workItemId,
   });
+};
+
+// A receipt's stable identity for agentic citation: sourceId:receiptId. The
+// reasoning lane cites receipts by this key (it is given the same keys in the
+// prompt), and the node binds the key back to the REAL loaded receipt object.
+// An agentic finding that cites a key with no match in the evidence cited
+// nothing real and its key is dropped; a finding left with no real receipt is
+// discarded entirely. This is the boundary that stops a reasoning agent from
+// smuggling a fabricated receipt past the hash-pinned recording.
+const evidenceReceiptKey = (receipt: MemoryReceiptRef): string =>
+  `${receipt.sourceId}:${receipt.receiptId}`;
+
+// Build the citation index the reasoning lane is shown and the node binds
+// against: every receipt that appears in a search hit or hydrated item, keyed by
+// evidenceReceiptKey, first occurrence wins. Only these receipts are citable.
+const evidenceReceiptIndexFor = (input: {
+  readonly hydration: MemoryHydrationDocument;
+  readonly search: MemorySearchDocument;
+}): Map<string, MemoryReceiptRef> => {
+  const index = new Map<string, MemoryReceiptRef>();
+  const consider = (receipt: MemoryReceiptRef): void => {
+    const key = evidenceReceiptKey(receipt);
+    if (!index.has(key)) {
+      index.set(key, receipt);
+    }
+  };
+  for (const hit of input.search.hits) {
+    for (const receipt of hit.receipts) {
+      consider(receipt);
+    }
+  }
+  for (const hydrated of input.hydration.hydrated) {
+    consider(hydrated.receipt);
+  }
+
+  return index;
+};
+
+// The body of the analysis-method kernel skill the agentic node reasons WITH.
+// This is the consumption path for nodes: the same `resolveKernelSkills` output
+// the planner reads, filtered to the analysis skill so the lane is shaped by
+// the authored "cluster -> friction -> rate by recurrence+impact -> tie to
+// receipts -> propose a concrete change" guidance instead of guessing. Returns
+// the joined bodies of every resolved skill whose id mentions "analysis", or
+// every resolved skill when none match (a kit without an analysis skill still
+// shapes the lane with whatever guidance it does carry); `null` when no kernel
+// skill resolved at all, which the caller treats as "no skill to reason with".
+const analysisSkillBodyFor = (
+  skills: readonly ResolvedKernelSkill[]
+): string | null => {
+  if (skills.length === 0) {
+    return null;
+  }
+  const analysisSkills = skills.filter((skill) =>
+    skill.skillId.toLowerCase().includes("analysis")
+  );
+  const chosen = analysisSkills.length > 0 ? analysisSkills : skills;
+
+  return chosen
+    .map((skill) => `### ${skill.skillId} — ${skill.title}\n\n${skill.body}`)
+    .join("\n\n");
+};
+
+// Assemble the agentic propose-refinements prompt: the run goal, the analysis
+// skill, the citable receipt-key index, and the REDACTED evidence (search-hit
+// summaries, hydrated redacted excerpts/summaries, correlation edges). No raw
+// transcripts, locators, or credentials cross this boundary — only the redacted
+// fields the relay already returned. The output contract is the agentic
+// refinement schema; the node re-binds receipt keys afterward.
+const agenticRefinementPromptFor = (input: {
+  readonly analysisSkillBody: string;
+  readonly correlation: MemoryCorrelationGraphDocument;
+  readonly hydration: MemoryHydrationDocument;
+  readonly maxProposals: number;
+  readonly outputJsonSchema: string;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly receiptIndex: ReadonlyMap<string, MemoryReceiptRef>;
+  readonly search: MemorySearchDocument;
+  readonly signals: MemorySignalDocument;
+}): string => {
+  const evidenceHits = input.search.hits.map((hit) => ({
+    horizon: hit.horizon,
+    receiptKeys: hit.receipts.map(evidenceReceiptKey),
+    redactedExcerpt: hit.redactedExcerpt,
+    score: hit.score,
+    summary: hit.summary,
+  }));
+  const evidenceHydrated = input.hydration.hydrated.map((hydrated) => ({
+    receiptKey: evidenceReceiptKey(hydrated.receipt),
+    redactedExcerpt: hydrated.redactedExcerpt,
+    summary: hydrated.summary,
+  }));
+  const evidenceSignals = input.signals.signals.map((signal) => ({
+    kind: signal.kind,
+    rating: signal.rating,
+    reasoning: signal.reasoning,
+    receiptKeys: signal.receipts.map(evidenceReceiptKey),
+    summary: signal.summary,
+  }));
+  const evidenceCorrelationEdges = input.correlation.edges.map((edge) => ({
+    receiptKeys: edge.evidence.map(evidenceReceiptKey),
+    relationship: edge.relationship,
+  }));
+
+  return [
+    "# Dream Analysis Lane: propose refinements",
+    "",
+    "You are the analytical reasoning step of a memory-fabric dream. Reason over the REDACTED evidence below and produce refinement proposals a human can act on. Emit only JSON matching the output schema. Do not wrap the JSON in Markdown. Do not call tools or perform side effects. The evidence is already redacted; never ask for raw transcripts.",
+    "",
+    "## Run goal",
+    "",
+    input.plan.proposal.intent,
+    "",
+    "## Analysis method (kernel skill — follow this)",
+    "",
+    input.analysisSkillBody,
+    "",
+    "## Citable receipts",
+    "",
+    "These are the ONLY receipt keys you may cite. Each finding's receiptKeys must be a non-empty subset of these. A finding citing a key not listed here will be dropped; cite only what the evidence proves.",
+    "",
+    JSON.stringify([...input.receiptIndex.keys()], null, 2),
+    "",
+    "## Evidence: search hits (redacted)",
+    "",
+    JSON.stringify(evidenceHits, null, 2),
+    "",
+    "## Evidence: hydrated receipts (redacted)",
+    "",
+    JSON.stringify(evidenceHydrated, null, 2),
+    "",
+    "## Evidence: mined signals (redacted)",
+    "",
+    JSON.stringify(evidenceSignals, null, 2),
+    "",
+    "## Evidence: correlation edges",
+    "",
+    JSON.stringify(evidenceCorrelationEdges, null, 2),
+    "",
+    "## Output requirements",
+    "",
+    `Return at most ${input.maxProposals} findings. Ratings MUST discriminate (do not flatten everything to 8+); derive each rating from recurrence + impact as the analysis method describes. Each finding ties to specific receiptKeys, ends in one concrete proposedChange naming the artifact and edit, and carries a recommendation and targetKind from the allowed enums. Fewer real findings beats a wall of high-rated slop.`,
+    "",
+    "## Output JSON Schema",
+    "",
+    input.outputJsonSchema,
+  ].join("\n");
+};
+
+// Map ONE reasoned finding to a real MemoryRefinementProposal, binding its cited
+// receiptKeys to the actual loaded receipts and dropping unknown keys. Returns
+// null when the finding cites no real receipt — a claim with no receipt is a
+// hallucination and is discarded, exactly as the analysis method demands.
+const proposalFromAgenticFinding = (input: {
+  readonly finding: MemoryAgenticRefinementProposal;
+  readonly index: number;
+  readonly receiptIndex: ReadonlyMap<string, MemoryReceiptRef>;
+  readonly sourceRefs: readonly ArtifactRef[];
+}): MemoryRefinementProposal | null => {
+  const receipts = input.finding.receiptKeys.flatMap((key) => {
+    const receipt = input.receiptIndex.get(key);
+
+    return receipt === undefined ? [] : [receipt];
+  });
+  if (receipts.length === 0) {
+    return null;
+  }
+
+  return {
+    proposalId: `proposal:agentic:${input.finding.targetKind}:${input.index + 1}:${proposalSlugFor(
+      input.finding.summary
+    )}`,
+    proposedNextStep: input.finding.proposedChange,
+    rating: input.finding.rating,
+    reasoning: input.finding.reasoning,
+    receipts,
+    recommendation: input.finding.recommendation,
+    sourceRefs: [...input.sourceRefs],
+    summary: input.finding.summary,
+    targetKind: input.finding.targetKind,
+    title: input.finding.title,
+  };
+};
+
+// Bind a reasoned finding set to real receipts, drop hallucinated/unsupported
+// findings, sort by rating, and cap. Returns the proposals plus the count
+// dropped for the reasoning note, so the recorded document stays honest about
+// how much of the agent's output survived the receipt-binding boundary.
+const agenticProposalsFromReasoning = (input: {
+  readonly findings: readonly MemoryAgenticRefinementProposal[];
+  readonly maxProposals: number;
+  readonly receiptIndex: ReadonlyMap<string, MemoryReceiptRef>;
+  readonly sourceRefs: readonly ArtifactRef[];
+}): {
+  readonly droppedCount: number;
+  readonly proposals: MemoryRefinementProposal[];
+} => {
+  const bound = input.findings.flatMap((finding, index) => {
+    const proposal = proposalFromAgenticFinding({
+      finding,
+      index,
+      receiptIndex: input.receiptIndex,
+      sourceRefs: input.sourceRefs,
+    });
+
+    return proposal === null ? [] : [proposal];
+  });
+  const proposals = bound
+    .toSorted((left, right) => right.rating - left.rating)
+    .slice(0, input.maxProposals);
+
+  return {
+    droppedCount: input.findings.length - bound.length,
+    proposals,
+  };
 };
 
 const actionableHitlDecisionsFor = (
@@ -2068,6 +2334,7 @@ const reportMdsvxFor = (input: {
   readonly proofLevel: WorkflowHitlReportProofLevel;
   readonly receiptCount: number;
   readonly refinementProposals: readonly MemoryRefinementProposal[];
+  readonly refinementReasoningMode: MemoryRefinementReasoningMode;
   readonly search: MemorySearchDocument;
   readonly stateMachineFigure: WorkflowHitlReportDocument["proof"]["stateMachineFigure"];
   readonly title: string;
@@ -2114,6 +2381,10 @@ const reportMdsvxFor = (input: {
     "## What to do with these findings",
     "",
     "Use this as HITL input, not autopilot. Accept a finding only when the receipt trail is good enough to update .brain, create a capture fix, or refine a workflow/package decision.",
+    "",
+    input.refinementReasoningMode === "agentic"
+      ? "Refinement proposals were REASONED by an agent lane over the analysis-method kernel skill and the hydrated evidence; ratings discriminate and each proposal is tied to receipts the agent could actually cite."
+      : "Refinement proposals were produced MECHANICALLY (template-fill), not reasoned by an agent lane. Treat their ratings as structural, not analytical, and verify the receipt trail before acting.",
     "",
     `Refinement proposals emitted: ${input.refinementProposals.length}. Accepted proposals should become Brain/package changes or constraints for the next generated workflow.`,
     "",
@@ -2407,6 +2678,105 @@ const executeCorrelationNode = async (
   });
 };
 
+interface LoadedRefinementInputs {
+  readonly correlation: MemoryCorrelationGraphDocument;
+  readonly hydration: MemoryHydrationDocument;
+  readonly search: MemorySearchDocument;
+  readonly signals: MemorySignalDocument;
+  readonly sourceRefs: readonly ArtifactRef[];
+}
+
+// Try the AGENTIC path: assemble the prompt from the redacted evidence + the
+// analysis-method kernel skill + the run goal, invoke the reasoning lane, bind
+// the reasoned findings back to real receipts, and return a reasoned, hash-
+// pinnable proposal document. Returns null (never throws) when the agentic path
+// cannot be taken or fails — no lane configured, no analysis skill in scope, the
+// lane errored, or nothing the agent said bound to a real receipt — so the
+// caller falls back to the deterministic path and labels the output mechanical.
+const tryAgenticRefinementProposalDocument = async (input: {
+  readonly config: MemoryFabricWorkflowNodeAdapterConfig;
+  readonly execution: MemoryWorkflowNodeExecutionInput;
+  readonly inputs: LoadedRefinementInputs;
+  readonly maxProposals: number;
+}): Promise<MemoryRefinementProposalDocument | null> => {
+  const lane = input.config.analysisReasoningLane;
+  if (lane === undefined) {
+    return null;
+  }
+  const analysisSkillBody = analysisSkillBodyFor(
+    input.execution.resolvedKernelSkills ?? []
+  );
+  if (analysisSkillBody === null) {
+    return null;
+  }
+
+  const receiptIndex = evidenceReceiptIndexFor({
+    hydration: input.inputs.hydration,
+    search: input.inputs.search,
+  });
+  if (receiptIndex.size === 0) {
+    return null;
+  }
+
+  const prompt = agenticRefinementPromptFor({
+    analysisSkillBody,
+    correlation: input.inputs.correlation,
+    hydration: input.inputs.hydration,
+    maxProposals: input.maxProposals,
+    outputJsonSchema: AGENTIC_REFINEMENT_OUTPUT_JSON_SCHEMA,
+    plan: input.execution.plan,
+    receiptIndex,
+    search: input.inputs.search,
+    signals: input.inputs.signals,
+  });
+
+  try {
+    const stepSlug = proposalSlugFor(input.execution.step.stepId);
+    const reasoned = await lane.reason({
+      actor: input.execution.actor,
+      laneId: `lane:analysis:${input.execution.plan.runId}:${input.execution.step.stepId}`,
+      outputPath: `lanes/analysis-${stepSlug}/refinement-output.json`,
+      outputSchema: MemoryAgenticRefinementOutputSchema,
+      packageMounts: input.execution.plan.pinnedPackages,
+      prompt,
+      promptPath: `lanes/analysis-${stepSlug}/prompt.md`,
+      receiptPath: `receipts/analysis-${stepSlug}-lane.json`,
+      runId: input.execution.plan.runId,
+      transcriptPath: `lanes/analysis-${stepSlug}/transcript.md`,
+      workItemId: input.execution.plan.workItemId,
+    });
+    const { droppedCount, proposals } = agenticProposalsFromReasoning({
+      findings: reasoned.parsed.findings,
+      maxProposals: input.maxProposals,
+      receiptIndex,
+      sourceRefs: input.inputs.sourceRefs,
+    });
+    if (proposals.length === 0) {
+      // The lane reasoned but nothing it produced bound to a real receipt.
+      // Falling through to mechanical is the honest move — better a labeled
+      // template than an empty "reasoned" document that proves nothing.
+      return null;
+    }
+
+    return refinementProposalDocumentFromProposals({
+      proposals,
+      reasoningMode: "agentic",
+      reasoningNote:
+        droppedCount > 0
+          ? `Agent lane ${reasoned.receipt.laneId} reasoned over the analysis-method kernel skill; ${droppedCount} finding(s) were dropped for citing receipts not present in the evidence.`
+          : `Agent lane ${reasoned.receipt.laneId} reasoned over the analysis-method kernel skill; all findings bound to real receipts.`,
+      runId: input.inputs.search.runId,
+      sourceRefs: input.inputs.sourceRefs,
+      workItemId: input.inputs.search.workItemId,
+    });
+  } catch {
+    // The reasoning lane is best-effort: any failure (lane unavailable mid-run,
+    // malformed output, lease denied) degrades to the deterministic path rather
+    // than blocking the dream. The output is then honestly labeled mechanical.
+    return null;
+  }
+};
+
 const executeRefinementProposalsNode = async (
   config: MemoryFabricWorkflowNodeAdapterConfig,
   input: MemoryWorkflowNodeExecutionInput
@@ -2464,17 +2834,40 @@ const executeRefinementProposalsNode = async (
     return correlation;
   }
 
-  const document = refinementProposalDocumentFor({
-    correlation: correlation.document,
-    correlationRef: refs.correlationRef,
-    hydration: hydration.document,
-    hydrationRef: refs.hydrationRef,
+  const sourceRefs = [
+    refs.signalsRef,
+    refs.searchRef,
+    refs.hydrationRef,
+    refs.correlationRef,
+  ];
+  // Reason first (the dream thinks), fall back to template-fill (the dream stays
+  // honest). The deterministic envelope — hash-pin, redaction, schema parse —
+  // wraps both paths identically; only the reasoningMode label differs.
+  const agenticDocument = await tryAgenticRefinementProposalDocument({
+    config,
+    execution: input,
+    inputs: {
+      correlation: correlation.document,
+      hydration: hydration.document,
+      search: search.document,
+      signals: signals.document,
+      sourceRefs,
+    },
     maxProposals: nodeConfig.maxProposals,
-    search: search.document,
-    searchRef: refs.searchRef,
-    signals: signals.document,
-    signalsRef: refs.signalsRef,
   });
+  const document =
+    agenticDocument ??
+    refinementProposalDocumentFor({
+      correlation: correlation.document,
+      correlationRef: refs.correlationRef,
+      hydration: hydration.document,
+      hydrationRef: refs.hydrationRef,
+      maxProposals: nodeConfig.maxProposals,
+      search: search.document,
+      searchRef: refs.searchRef,
+      signals: signals.document,
+      signalsRef: refs.signalsRef,
+    });
 
   return await writeDocument({
     artifacts: config.artifacts,
@@ -2538,6 +2931,11 @@ const executeHitlReportNode = async (
     hydration: reportInputs.hydration,
     search: reportInputs.search,
   });
+  // Carry the consumed refinement doc's honesty label through to the report so a
+  // published report never claims reasoned analysis it did not do. No proposals
+  // (or a doc that predates the field) reads as the conservative "mechanical".
+  const refinementReasoningMode: MemoryRefinementReasoningMode =
+    refinementProposals.document?.reasoningMode ?? "mechanical";
   const receiptCount = uniqueReceiptCountFor(reportInputs.search);
   const stateMachineFigure = reportStateMachineFigureFor({
     machine: input.machine,
@@ -2577,6 +2975,7 @@ const executeHitlReportNode = async (
     proofLevel: nodeConfig.dynamicGenerationProofLevel,
     receiptCount,
     refinementProposals: refinementProposals.document?.proposals ?? [],
+    refinementReasoningMode,
     search: reportInputs.search,
     stateMachineFigure,
     title: nodeConfig.title,
@@ -2612,6 +3011,7 @@ const executeHitlReportNode = async (
       ? {}
       : { refinementProposalRef: refs.refinementProposalRef }),
     refinementProposals: refinementProposals.document?.proposals ?? [],
+    refinementReasoningMode,
     runId: input.plan.runId,
     schemaVersion: "workflow.hitl-report.v1",
     sectionOrder: WORKFLOW_HITL_REPORT_SECTION_ORDER,

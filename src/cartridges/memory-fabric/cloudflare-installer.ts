@@ -60,7 +60,7 @@ export const memoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartrid
             }),
           },
         ],
-        createWorkflowNodeAdapter: ({ artifacts }) => {
+        createWorkflowNodeAdapter: ({ analysisReasoningLane, artifacts }) => {
           const memoryRelay = createCloudflareMemoryFabricRelay({
             relayBaseUrl,
             relaySecretRef: bindings.MEMORY_RELAY_SECRET_REF,
@@ -73,7 +73,14 @@ export const memoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartrid
 
           return createArtifactBackedWorkflowCartridgeAdapter({
             artifacts,
+            // Thread the run's reasoning lane through so the propose-refinements
+            // node REASONS over the analysis-method kernel skill when a real
+            // lane is available; absent, it falls back to mechanical template
+            // fill labeled honestly. This is the production "dream thinks" wire.
             delegate: createMemoryFabricWorkflowNodeAdapter({
+              ...(analysisReasoningLane === undefined
+                ? {}
+                : { analysisReasoningLane }),
               artifacts,
               memoryCapture: memoryRelay,
               memoryCorrelation: memoryRelay,

@@ -19,6 +19,7 @@ import type {
 } from "../../src/app/domain/schemas.ts";
 import { workflowTraceContextForLane } from "../../src/app/domain/trace-context.ts";
 import {
+  createCloudflarePiAnalysisReasoningLaneAdapter,
   createCloudflarePiPlannerLaneAdapter,
   createCloudflarePiVerifierLaneAdapter,
   createCloudflarePiWorkerLaneAdapter,
@@ -28,8 +29,10 @@ import {
   createMemoryArtifactStore,
   createMemoryPackageRegistryActor,
 } from "../../src/app/infrastructure/memory-adapters.ts";
+import { MemoryAgenticRefinementOutputSchema } from "../../src/cartridges/memory-fabric/schemas.ts";
 import {
   buildIntegrationTestRunRequest,
+  integrationTestActor,
   integrationTestPackageMetadata,
 } from "./workflow-app-fixtures.ts";
 
@@ -882,5 +885,198 @@ describe("Cloudflare Pi verifier lane adapter", () => {
         runId: fixture.plan.runId,
       }),
     });
+  });
+});
+
+const analysisReasoningOutput = {
+  findings: [
+    {
+      proposedChange: "Add a data-access kernel skill for the typesense env.",
+      rating: 9,
+      reasoning: "Recurring friction across sessions.",
+      receiptKeys: ["source:joelclaw-sessions:receipt:typesense"],
+      recommendation: "turn-into-work",
+      summary: "Typesense env re-derived every session.",
+      targetKind: "kernel-memory",
+      title: "Document the typesense env",
+    },
+  ],
+  schemaVersion: "memory.agentic-refinement-output.v1",
+} as const;
+
+const createAnalysisRuntimeHarness = (input: {
+  readonly artifacts: ReturnType<typeof createMemoryArtifactStore>;
+  readonly realAgent?: boolean;
+  readonly receiptRuntime?: "integration-test" | "pi-agent-cli";
+}) => {
+  const capturedRequests: AgentLaneRuntimeRequest[] = [];
+  const runtime: AgentLaneRuntimePort = {
+    runLane(request) {
+      capturedRequests.push(request);
+      const outputRef = request.artifactRef({
+        path: request.outputPath,
+        runId: request.runId,
+      });
+      const promptRef = request.artifactRef({
+        path: request.promptPath,
+        runId: request.runId,
+      });
+      const transcriptRef = request.artifactRef({
+        path: request.transcriptPath,
+        runId: request.runId,
+      });
+      const receiptRef = request.artifactRef({
+        path: request.receiptPath,
+        runId: request.runId,
+      });
+      const transcript = "real analysis transcript from Cloudflare Sandbox";
+      input.artifacts.setJson(outputRef, analysisReasoningOutput);
+      input.artifacts.setText(transcriptRef, transcript, "text/markdown");
+
+      return Promise.resolve(
+        AgentLaneReceiptSchema.parse({
+          artifactCommitSha: "analysiscommit0000000000000000000000000000000000",
+          authLease: request.authLease,
+          completedAt: "2026-06-08T20:06:01.000Z",
+          kind: "worker",
+          laneId: request.laneId,
+          outputPins: [
+            {
+              artifactRef: outputRef,
+              hash: hashJson(analysisReasoningOutput),
+              mediaType: request.outputMediaType,
+            },
+          ],
+          outputRefs: [outputRef],
+          prompt: {
+            artifactRef: promptRef,
+            hash: sha256Hex(request.prompt),
+            mediaType: "text/markdown",
+          },
+          realAgent: input.realAgent ?? true,
+          receiptRef,
+          redacted: true,
+          runtime: input.receiptRuntime ?? "pi-agent-cli",
+          sandboxRef: "cloudflare-sandbox:analysis-lane-test",
+          startedAt: "2026-06-08T20:06:00.000Z",
+          status: "completed",
+          traceContext: request.traceContext,
+          transcript: {
+            artifactRef: transcriptRef,
+            hash: sha256Hex(transcript),
+            mediaType: "text/markdown",
+          },
+        })
+      );
+    },
+    runtime: "pi-agent-cli",
+  };
+
+  return { capturedRequests, runtime };
+};
+
+const buildAnalysisLaneFixture = async () => {
+  const plannerFixture = await buildPlannerLaneFixture();
+
+  return {
+    artifacts: plannerFixture.artifacts,
+    pinnedPackages: plannerFixture.plannerInput.pinnedPackages,
+    runId: plannerFixture.plannerInput.runId,
+    workItemId: plannerFixture.plannerInput.workItemId,
+  };
+};
+
+describe("Cloudflare Pi analysis reasoning lane adapter", () => {
+  it("runs a worker-kind lane over the node's prompt and returns the schema-validated reasoning", async () => {
+    const fixture = await buildAnalysisLaneFixture();
+    const harness = createAnalysisRuntimeHarness({
+      artifacts: fixture.artifacts,
+    });
+    const adapter = createCloudflarePiAnalysisReasoningLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    const result = await adapter.reason({
+      actor: integrationTestActor,
+      laneId: `lane:analysis:${fixture.runId}:propose-refinements`,
+      outputPath: "lanes/analysis-propose-refinements/refinement-output.json",
+      outputSchema: MemoryAgenticRefinementOutputSchema,
+      packageMounts: fixture.pinnedPackages,
+      prompt: "# Dream Analysis Lane\n\nReason over the evidence.",
+      promptPath: "lanes/analysis-propose-refinements/prompt.md",
+      receiptPath: "receipts/analysis-propose-refinements-lane.json",
+      runId: fixture.runId,
+      transcriptPath: "lanes/analysis-propose-refinements/transcript.md",
+      workItemId: fixture.workItemId,
+    });
+    const request = harness.capturedRequests.at(0);
+
+    expect({
+      laneKind: adapter.laneKind,
+      outputMediaType: request?.outputMediaType,
+      parsedFindingCount: result.parsed.findings.length,
+      parsedFirstRating: result.parsed.findings.at(0)?.rating,
+      requestKind: request?.kind,
+      requestOutputPath: request?.outputPath,
+      runtime: adapter.runtime,
+      traceContext: request?.traceContext,
+    }).toStrictEqual({
+      laneKind: "analysis",
+      outputMediaType: "application/json",
+      parsedFindingCount: 1,
+      parsedFirstRating: 9,
+      requestKind: "worker",
+      requestOutputPath:
+        "lanes/analysis-propose-refinements/refinement-output.json",
+      runtime: "pi-agent-cli",
+      traceContext: workflowTraceContextForLane({
+        laneId: `lane:analysis:${fixture.runId}:propose-refinements`,
+        runId: fixture.runId,
+      }),
+    });
+  });
+
+  it("rejects a non-real-agent receipt so a fake lane can never masquerade as reasoned", async () => {
+    const fixture = await buildAnalysisLaneFixture();
+    const harness = createAnalysisRuntimeHarness({
+      artifacts: fixture.artifacts,
+      realAgent: false,
+      receiptRuntime: "integration-test",
+    });
+    const adapter = createCloudflarePiAnalysisReasoningLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    await expect(
+      adapter.reason({
+        actor: integrationTestActor,
+        laneId: `lane:analysis:${fixture.runId}:propose-refinements`,
+        outputPath: "lanes/analysis-propose-refinements/refinement-output.json",
+        outputSchema: MemoryAgenticRefinementOutputSchema,
+        packageMounts: fixture.pinnedPackages,
+        prompt: "# Dream Analysis Lane",
+        promptPath: "lanes/analysis-propose-refinements/prompt.md",
+        receiptPath: "receipts/analysis-propose-refinements-lane.json",
+        runId: fixture.runId,
+        transcriptPath: "lanes/analysis-propose-refinements/transcript.md",
+        workItemId: fixture.workItemId,
+      })
+    ).rejects.toThrow("completed real-agent receipt");
   });
 });

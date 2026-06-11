@@ -305,6 +305,23 @@ export const MemoryRefinementProposalSchema = z.object({
   title: z.string().min(1),
 });
 
+/**
+ * How a refinement-proposals document was produced. `agentic` means a real
+ * agent lane reasoned over the hydrated evidence and the analysis-method kernel
+ * skill to discriminate findings; `mechanical` means the deterministic
+ * template-fill path ran (the agent lane was unavailable, or its output failed
+ * to bind to real receipts). The report node carries this through verbatim so a
+ * published report can never claim analysis it did not actually do — honesty
+ * about thin reasoning is the whole point of the dream.
+ */
+export const MemoryRefinementReasoningModeSchema = z.enum([
+  "agentic",
+  "mechanical",
+]);
+export type MemoryRefinementReasoningMode = z.infer<
+  typeof MemoryRefinementReasoningModeSchema
+>;
+
 export const MemoryRefinementProposalDocumentSchema = z.object({
   generatedAt: IsoDateTimeSchema,
   nextWorkflowSeed: z.object({
@@ -315,12 +332,50 @@ export const MemoryRefinementProposalDocumentSchema = z.object({
   }),
   proposalCount: z.number().int().min(0),
   proposals: z.array(MemoryRefinementProposalSchema).default([]),
+  reasoningMode: MemoryRefinementReasoningModeSchema.default("mechanical"),
+  reasoningNote: z.string().min(1).optional(),
   redacted: z.literal(true),
   runId: z.string().min(1),
   schemaVersion: z.literal("memory.refinement-proposals.v1"),
   sourceRefs: z.array(ArtifactRefSchema).min(1),
   workItemId: z.string().min(1),
 });
+
+/**
+ * Structured output contract for the AGENTIC propose-refinements lane — the
+ * "dream thinks" payload. The reasoning agent receives the hydrated evidence
+ * and the analysis-method kernel skill and returns this: a small set of
+ * findings it actually reasoned out, each with a DISCRIMINATING rating, the
+ * receipt KEYS it ties the finding to (sourceId:receiptId, drawn only from the
+ * evidence it was shown), a recommendation, a target kind, and one concrete
+ * proposed change. It deliberately omits runId/sourceRefs/proposalId and the
+ * raw receipt objects: those belong to the deterministic envelope. The node
+ * re-binds `receiptKeys` to the real loaded receipts (dropping any the agent
+ * hallucinated) and assembles the hash-pinned MemoryRefinementProposalDocument,
+ * so the agent can cite only evidence that exists and can never smuggle a
+ * fabricated receipt past the recording boundary.
+ */
+export const MemoryAgenticRefinementProposalSchema = z.object({
+  proposedChange: z.string().min(1),
+  rating: z.number().int().min(1).max(10),
+  reasoning: z.string().min(1),
+  receiptKeys: z.array(z.string().min(1)).min(1),
+  recommendation: MemoryRefinementProposalRecommendationSchema,
+  summary: z.string().min(1),
+  targetKind: MemoryRefinementProposalTargetKindSchema,
+  title: z.string().min(1),
+});
+export type MemoryAgenticRefinementProposal = z.infer<
+  typeof MemoryAgenticRefinementProposalSchema
+>;
+
+export const MemoryAgenticRefinementOutputSchema = z.object({
+  findings: z.array(MemoryAgenticRefinementProposalSchema).min(1),
+  schemaVersion: z.literal("memory.agentic-refinement-output.v1"),
+});
+export type MemoryAgenticRefinementOutput = z.infer<
+  typeof MemoryAgenticRefinementOutputSchema
+>;
 
 export const MemoryHitlDecisionTargetKindSchema = z.enum([
   "finding-card",
@@ -763,6 +818,13 @@ export const WorkflowHitlReportDocumentSchema = z.object({
   refinementProposalCount: z.number().int().min(0).default(0),
   refinementProposalRef: ArtifactRefSchema.optional(),
   refinementProposals: z.array(MemoryRefinementProposalSchema).default([]),
+  // Whether the consumed refinement proposals were REASONED by an agent lane
+  // (`agentic`) or produced by the deterministic template path (`mechanical`).
+  // Defaulted to "mechanical" so a run with no refinement proposals — or one
+  // that ran before this field existed — reads as the conservative, honest
+  // default rather than implying analysis. The report prose surfaces this.
+  refinementReasoningMode:
+    MemoryRefinementReasoningModeSchema.default("mechanical"),
   runId: z.string().min(1),
   schemaVersion: z.literal("workflow.hitl-report.v1"),
   sectionOrder: WorkflowHitlReportSectionOrderSchema,

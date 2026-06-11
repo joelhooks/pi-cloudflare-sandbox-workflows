@@ -1,4 +1,5 @@
 import type {
+  AgentAnalysisReasoningLanePort,
   ArtifactStoreContract,
   WorkflowNodeAdapterPort,
   WorkflowNodeExecutionResult,
@@ -7,6 +8,14 @@ import type {
 import type { CapabilityBlocker } from "../domain/schemas.ts";
 
 export interface CloudflareWorkflowCartridgeFactoryInput {
+  /**
+   * The run's analysis reasoning lane, when the front door wired one (real Pi
+   * auth + sandbox/runtime). A cartridge node adapter that has an agentic path
+   * (the propose-refinements "dream thinks" node) consumes it; absent, that
+   * node falls back to the deterministic template path. Optional so a cartridge
+   * that does not reason ignores it, and a run with no lane runs mechanical.
+   */
+  readonly analysisReasoningLane?: AgentAnalysisReasoningLanePort;
   readonly artifacts: ArtifactStoreContract;
 }
 

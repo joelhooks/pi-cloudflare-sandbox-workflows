@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type {
+  AgentAnalysisReasoningLanePort,
   AgentLaneRuntimePort,
   AgentPlannerLanePort,
   AgentVerifierOutputEvidence,
@@ -516,6 +517,87 @@ export const createCloudflarePiWorkerLaneAdapter = (
 
     return {
       outputRefs: receipt.outputRefs,
+      receipt,
+    };
+  },
+  runtime: config.runtime.runtime,
+});
+
+/**
+ * Production analysis reasoning lane: the "dream thinks" seam wired to the same
+ * {@link AgentLaneRuntimePort} the planner and worker lanes use. The calling
+ * analytical node assembles the prompt (redacted evidence + analysis-method
+ * kernel skill + run goal) and the output schema; this adapter runs a REAL
+ * agent over that prompt, reads the pinned JSON output at the lane's commit,
+ * validates it against the node's schema, and returns the parsed reasoning with
+ * the lane receipt. It invents no new runtime — it reuses `runLane`, the
+ * admitted-runtime lease gate, and the artifact store exactly like the other
+ * lanes — so the deterministic envelope (hash-pin, capability/lease gate,
+ * redaction) wraps the reasoning unchanged. The lane runs as a `worker`-kind
+ * AgentLaneKind because it is a per-step reasoning lane, not the run planner.
+ */
+export const createCloudflarePiAnalysisReasoningLaneAdapter = (
+  config: CloudflarePiLaneAdapterConfig
+): AgentAnalysisReasoningLanePort => ({
+  laneKind: "analysis",
+  async reason(input) {
+    const receipt = AgentLaneReceiptSchema.parse(
+      await config.runtime.runLane({
+        artifactRef: (artifactInput) =>
+          config.artifactStore.artifactRef(artifactInput),
+        artifactRemote: config.artifactRemote,
+        artifactTokenSecret: config.artifactTokenSecret,
+        authLease: config.authLease,
+        branchName: `analysis-${safePathSegment(input.laneId)}`,
+        kind: "worker",
+        laneId: input.laneId,
+        leasedPiAuthJsonBase64: config.leasedPiAuthJsonBase64,
+        model: config.model,
+        outputMediaType: "application/json",
+        outputPath: input.outputPath,
+        packageMounts: input.packageMounts,
+        prompt: input.prompt,
+        promptPath: input.promptPath,
+        provider: config.provider,
+        receiptPath: input.receiptPath,
+        runId: input.runId,
+        timeoutMs: config.timeoutMs,
+        traceContext: workflowTraceContextForLane({
+          laneId: input.laneId,
+          runId: input.runId,
+        }),
+        transcriptPath: input.transcriptPath,
+        workItemId: input.workItemId,
+      })
+    );
+    if (
+      receipt.status !== "completed" ||
+      !receipt.realAgent ||
+      receipt.runtime === "integration-test"
+    ) {
+      throw new Error(
+        "Analysis reasoning lane did not return a completed real-agent receipt."
+      );
+    }
+    const artifactCommitSha = requireLaneCommitSha(receipt, "Analysis");
+
+    const outputPin = receipt.outputPins.at(0);
+    if (outputPin === undefined) {
+      throw new Error(
+        "Analysis reasoning lane did not return a pinned reasoning output."
+      );
+    }
+
+    const parsed = input.outputSchema.parse(
+      await config.artifactStore.readJson({
+        artifactCommitSha,
+        artifactRef: outputPin.artifactRef,
+      })
+    );
+
+    return {
+      outputRefs: receipt.outputRefs,
+      parsed,
       receipt,
     };
   },
