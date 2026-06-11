@@ -472,12 +472,12 @@ describe("Cloudflare Dream memory fabric relay adapter", () => {
     };
     // A hung relay surfaces as an AbortSignal.timeout TimeoutError; without the
     // bound the fetch would hang until workerd kills the whole invocation.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal fetch stub that always times out.
     const timeoutFetch = (() => {
       const error = new Error("The operation timed out.");
       error.name = "TimeoutError";
 
       return Promise.reject(error);
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal fetch stub that always times out.
     }) as unknown as typeof fetch;
     const adapter = createCloudflareMemoryFabricRelay({
       fetch: timeoutFetch,
