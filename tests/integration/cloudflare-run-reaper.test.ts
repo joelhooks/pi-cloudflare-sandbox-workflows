@@ -322,13 +322,14 @@ const createSupervisor = (input: {
 };
 
 const RecordSnapshotSchema = z.object({
-  activeLaneIds: z.array(z.string()),
+  activeLaneOwners: z.record(z.string(), z.string()),
   failedLaneIds: z.array(z.string()),
 });
 
 const admit = (
   supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
-  laneId: string
+  laneId: string,
+  runId = "run-reaper-test"
 ): Promise<Response> =>
   supervisor.fetch(
     new Request("https://supervisor.internal/admit-lane", {
@@ -337,7 +338,7 @@ const admit = (
         laneId,
         maxActiveLanes: 3,
         requestedAt: "2026-06-10T00:00:00.000Z",
-        runId: "run-reaper-test",
+        runId,
         workItemId: "work-item:reaper-test",
       }),
       headers: { "content-type": "application/json" },
@@ -345,14 +346,50 @@ const admit = (
     })
   );
 
+const persistCheckpoint = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  input: { readonly persistedAt: string; readonly runId: string }
+): Promise<Response> =>
+  supervisor.fetch(
+    new Request("https://supervisor.internal/persist-checkpoint", {
+      body: JSON.stringify({
+        checkpoint: {
+          completedStepIds: ["step-one"],
+          envelopeSnapshot: { status: "active" },
+          generatedMachineSnapshot: { status: "active" },
+          outputArtifactRefs: [],
+          persistedAt: input.persistedAt,
+          runId: input.runId,
+          schemaVersion: "workflow.run-step-checkpoint.v1",
+          stepIndex: 0,
+          workItemId: "work-item:reaper-test",
+        },
+        workItemId: "work-item:reaper-test",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+interface RecordSnapshot {
+  readonly activeLaneIds: readonly string[];
+  readonly activeLaneOwners: Readonly<Record<string, string>>;
+  readonly failedLaneIds: readonly string[];
+}
+
 const getRecord = async (
   supervisor: CloudflareWorkflowCapsuleSupervisorInstance
-): Promise<z.infer<typeof RecordSnapshotSchema>> => {
+): Promise<RecordSnapshot> => {
   const response = await supervisor.fetch(
     new Request("https://supervisor.internal/record")
   );
+  const record = RecordSnapshotSchema.parse(await response.json());
 
-  return RecordSnapshotSchema.parse(await response.json());
+  return {
+    activeLaneIds: Object.keys(record.activeLaneOwners),
+    activeLaneOwners: record.activeLaneOwners,
+    failedLaneIds: record.failedLaneIds,
+  };
 };
 
 describe("Capsule supervisor reaper alarm", () => {
@@ -411,5 +448,84 @@ describe("Capsule supervisor reaper alarm", () => {
     const record = await getRecord(supervisor);
     expect(record.activeLaneIds).toStrictEqual([]);
     expect(record.failedLaneIds).toStrictEqual(["lane-a"]);
+  });
+
+  // FIX 2: reaping one run on a workItemId shared by two runs must release only
+  // the reaped run's lanes, leaving the healthy concurrent run's lanes active.
+  it("scopes slot release to the reaped run's lanes on a shared work item", async () => {
+    const d1 = createFakeD1({
+      runs: [
+        buildRun({ run_id: "run-stuck" }),
+        buildRun({ run_id: "run-healthy" }),
+      ],
+    });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await admit(supervisor, "lane-stuck", "run-stuck");
+    await admit(supervisor, "lane-healthy", "run-healthy");
+    // A fresh checkpoint keeps the healthy run making forward progress, so the
+    // reaper protects it; only the wedged (checkpointless) run is swept.
+    await persistCheckpoint(supervisor, {
+      persistedAt: new Date().toISOString(),
+      runId: "run-healthy",
+    });
+    await supervisor.alarm();
+
+    const record = await getRecord(supervisor);
+    expect({
+      activeLaneOwners: record.activeLaneOwners,
+      failedLaneIds: record.failedLaneIds,
+      healthyStatus: d1.runs.find((run) => run.run_id === "run-healthy")
+        ?.status,
+      stuckStatus: d1.runs.find((run) => run.run_id === "run-stuck")?.status,
+    }).toStrictEqual({
+      activeLaneOwners: { "lane-healthy": "run-healthy" },
+      failedLaneIds: ["lane-stuck"],
+      healthyStatus: "executingDynamicWorkflow",
+      stuckStatus: REAPER_FAILED_STATE,
+    });
+  });
+
+  // FIX 1 reconciliation: a wedged run whose latest checkpoint is also stale (no
+  // forward progress past the timeout) is still swept; a run with a fresh
+  // checkpoint is protected because the driver still owns its resume.
+  it("sweeps a wedged run with a stale checkpoint but protects one with a fresh checkpoint", async () => {
+    const d1 = createFakeD1({
+      runs: [
+        buildRun({ run_id: "run-wedged" }),
+        buildRun({ run_id: "run-resuming" }),
+      ],
+    });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await admit(supervisor, "lane-wedged", "run-wedged");
+    await admit(supervisor, "lane-resuming", "run-resuming");
+    // Stale checkpoint: persisted long before the cutoff -> wedged, reapable.
+    await persistCheckpoint(supervisor, {
+      persistedAt: "2026-06-10T00:00:00.000Z",
+      runId: "run-wedged",
+    });
+    // Fresh checkpoint: persisted just now -> forward progress, protected.
+    await persistCheckpoint(supervisor, {
+      persistedAt: new Date().toISOString(),
+      runId: "run-resuming",
+    });
+    await supervisor.alarm();
+
+    const record = await getRecord(supervisor);
+    expect({
+      activeLaneOwners: record.activeLaneOwners,
+      failedLaneIds: record.failedLaneIds,
+      resumingStatus: d1.runs.find((run) => run.run_id === "run-resuming")
+        ?.status,
+      wedgedStatus: d1.runs.find((run) => run.run_id === "run-wedged")?.status,
+    }).toStrictEqual({
+      activeLaneOwners: { "lane-resuming": "run-resuming" },
+      failedLaneIds: ["lane-wedged"],
+      resumingStatus: "executingDynamicWorkflow",
+      wedgedStatus: REAPER_FAILED_STATE,
+    });
   });
 });

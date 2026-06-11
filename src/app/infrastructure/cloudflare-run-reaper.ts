@@ -66,6 +66,13 @@ const assertD1Write = async (
 export interface RunReaperConfig {
   readonly d1: D1DatabaseLike;
   readonly now?: () => string;
+  /**
+   * Run ids the reaper must leave alone because they are still making forward
+   * progress (their latest checkpoint is fresh). Reconciles reaper-vs-resume:
+   * a healthy resuming run is owned by the driver, only a wedged run (no fresh
+   * checkpoint) is swept here. Defaults to none.
+   */
+  readonly protectedRunIds?: readonly string[];
   readonly timeoutMs: number;
   readonly workItemId: string;
 }
@@ -124,9 +131,10 @@ export const reapStuckRunsForWorkItem = async (
     .bind(config.workItemId, ...terminalStates, cutoff)
     .all();
 
-  const stuckRows: StuckRunRow[] = (stuckResult.results ?? []).map((row) =>
-    StuckRunRowSchema.parse(row)
-  );
+  const protectedRunIds = new Set(config.protectedRunIds);
+  const stuckRows: StuckRunRow[] = (stuckResult.results ?? [])
+    .map((row) => StuckRunRowSchema.parse(row))
+    .filter((row) => !protectedRunIds.has(row.run_id));
 
   const reapedRunIds: string[] = [];
   for (const row of stuckRows) {

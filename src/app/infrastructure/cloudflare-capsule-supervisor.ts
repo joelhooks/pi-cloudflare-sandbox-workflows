@@ -83,7 +83,12 @@ const AppendCapsuleEventRequestSchema = z.object({
 });
 
 const SupervisorRecordSchema = z.object({
-  activeLaneIds: z.array(z.string().min(1)).default([]),
+  // Active lanes carry their owning `runId` so the reaper can release only the
+  // lanes of the runs it reaped (FIX 2). The DO is keyed by `workItemId`, so
+  // concurrent runs share this record; a bare lane list would let reaping one
+  // run nuke a healthy concurrent run's slots. External admission/release
+  // contracts still surface a flat `activeLaneIds: string[]` (the record keys).
+  activeLaneOwners: z.record(z.string().min(1), z.string().min(1)).default({}),
   capsule: ContextCapsuleRecordSchema.optional(),
   completedLaneIds: z.array(z.string().min(1)).default([]),
   events: z.array(WorkflowEventSchema).default([]),
@@ -96,6 +101,14 @@ const SupervisorRecordSchema = z.object({
 });
 
 type SupervisorRecord = z.infer<typeof SupervisorRecordSchema>;
+
+/**
+ * Flat list of currently-active lane ids, derived from the owner map. The
+ * external admission/release contracts speak in bare lane-id arrays; this is the
+ * single place the owner map is projected back to that shape.
+ */
+const activeLaneIdsOf = (record: SupervisorRecord): string[] =>
+  Object.keys(record.activeLaneOwners);
 
 const json = (body: unknown, init?: ResponseInit): Response =>
   Response.json(body, init);
@@ -128,6 +141,31 @@ const runStartStorageKey = (runId: string): string => `run-start:${runId}`;
 
 const runStartStoragePrefix = "run-start:";
 
+/**
+ * Storage key for the short-lived "driving" marker of a run (FIX 1). Holds the
+ * timestamp the current driver started. A drive begins only when no marker
+ * exists or the existing one is stale (older than `WORKFLOW_APP_TIMEOUT_MS` — the
+ * prior driver was evicted). Set before driving, cleared on terminal completion.
+ * Prevents two alarms from driving the SAME run concurrently while still letting
+ * an evicted run (stale marker) be re-driven by the next alarm.
+ */
+const drivingMarkerStorageKey = (runId: string): string => `driving:${runId}`;
+
+const DrivingMarkerSchema = z.object({
+  startedAtMs: z.number().int().min(0),
+});
+
+/**
+ * Storage key for the reaper's own due time (the cheap note). `startRun`'s
+ * immediate drive alarm would otherwise clobber the pending reaper alarm and let
+ * the sweep deadline drift per enqueue; tracking the deadline separately lets the
+ * alarm be set to `min(now-drive, reaperDueAt)` so a drive never indefinitely
+ * defers the reaper.
+ */
+const REAPER_DUE_AT_STORAGE_KEY = "reaper-due-at";
+
+const ReaperDueAtSchema = z.number().int().min(0);
+
 const createCapsuleRecord = (input: {
   readonly runId: string;
   readonly workItemId: string;
@@ -140,11 +178,6 @@ const createCapsuleRecord = (input: {
     workItemId: input.workItemId,
   });
 
-const omitLaneId = (
-  laneIds: readonly string[],
-  laneIdToOmit: string
-): string[] => laneIds.filter((laneId) => laneId !== laneIdToOmit);
-
 const appendUnique = (
   laneIds: readonly string[],
   laneIdToAppend: string
@@ -155,18 +188,29 @@ const appendUnique = (
 
 /**
  * Drive one queued run through the front door from inside the alarm invocation.
- * Swallows and logs run failures so one failed run does not abort driving the
- * rest of the queue; the run's own terminal state is recorded by its status
- * projection (or swept by the reaper).
+ * `WorkflowApp.run()` (reached via the front door) loads the latest checkpoint
+ * and resumes from it, so a re-drive of an evicted run continues rather than
+ * restarts (FIX 1). Returns `true` when the run reached a terminal status
+ * (captured/blocked) so the caller may retire its run-start record; returns
+ * `false` when the drive threw (e.g. transient adapter failure) so the record is
+ * kept and a later alarm re-drives. Swallows and logs the error so one failed
+ * run does not abort driving the rest of the queue.
  */
 const driveOneQueuedRun = async (
   frontDoor: WorkerFrontDoorContract,
   request: WorkflowRunRequest
-): Promise<void> => {
+): Promise<boolean> => {
   try {
+    // `startRun` resolves only at a terminal status (captured | blocked); an
+    // eviction kills the invocation mid-await, leaving the run-start record and
+    // a still-set driving marker for the next alarm to re-drive.
     await frontDoor.startRun(request);
+
+    return true;
   } catch (error) {
     console.error("queued run driver failed", request.runId, error);
+
+    return false;
   }
 };
 
@@ -196,6 +240,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   private async admitLane(request: Request): Promise<Response> {
     const input = AgentLaneAdmissionRequestSchema.parse(await request.json());
     const record = await this.getRecord();
+    const activeLaneIds = activeLaneIdsOf(record);
 
     if (record.completedLaneIds.includes(input.laneId)) {
       return json(
@@ -209,10 +254,10 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       );
     }
 
-    if (record.activeLaneIds.includes(input.laneId)) {
+    if (activeLaneIds.includes(input.laneId)) {
       return json(
         AgentLaneAdmissionDecisionSchema.parse({
-          activeLaneIds: record.activeLaneIds,
+          activeLaneIds,
           kind: input.kind,
           laneId: input.laneId,
           maxActiveLanes: input.maxActiveLanes,
@@ -225,10 +270,10 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       );
     }
 
-    if (record.activeLaneIds.length >= input.maxActiveLanes) {
+    if (activeLaneIds.length >= input.maxActiveLanes) {
       return json(
         AgentLaneAdmissionDecisionSchema.parse({
-          activeLaneIds: record.activeLaneIds,
+          activeLaneIds,
           kind: input.kind,
           laneId: input.laneId,
           maxActiveLanes: input.maxActiveLanes,
@@ -241,13 +286,16 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       );
     }
 
-    const activeLaneIds = [...record.activeLaneIds, input.laneId];
+    const nextActiveLaneOwners = {
+      ...record.activeLaneOwners,
+      [input.laneId]: input.runId,
+    };
     const nextRecord = SupervisorRecordSchema.parse({
       ...record,
-      activeLaneIds,
+      activeLaneOwners: nextActiveLaneOwners,
       maxObservedActiveLanes: Math.max(
         record.maxObservedActiveLanes,
-        activeLaneIds.length
+        Object.keys(nextActiveLaneOwners).length
       ),
       workItemId: input.workItemId,
     });
@@ -256,7 +304,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
     return json(
       AgentLaneAdmissionDecisionSchema.parse({
-        activeLaneIds,
+        activeLaneIds: Object.keys(nextActiveLaneOwners),
         admissionId: `admission:${input.runId}:${input.laneId}:${crypto.randomUUID()}`,
         admittedAt: nowIso(),
         kind: input.kind,
@@ -297,7 +345,10 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       runStartStorageKey(input.request.runId),
       input.request
     );
-    await this.ctx.storage.setAlarm(Date.now());
+    // Arm an immediate drive without clobbering a pending reaper deadline: set
+    // the alarm to min(now, reaperDueAt) so the sweep deadline never drifts per
+    // enqueue (the cheap note). The reaper's own due time is tracked separately.
+    await this.armAlarmAt(Date.now());
 
     return json({ runId: input.request.runId, status: "accepted" });
   }
@@ -351,18 +402,25 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   /**
    * Durable alarm. Two responsibilities share the single alarm slot:
    *
-   * 1. Run driver (M2.5 step 4) — start any run parked by `/start-run` in this
-   *    fresh DO invocation, so the run never executes inside the submitting
-   *    request fetch.
+   * 1. Run driver (M2.5 step 4 + FIX 1) — drive any run parked by `/start-run`
+   *    in this fresh DO invocation, so the run never executes inside the
+   *    submitting request fetch. A run-start record is retained until the run
+   *    reaches a terminal status, so a refired alarm re-drives an evicted run and
+   *    `WorkflowApp.run()` resumes it from its latest checkpoint.
    * 2. Reaper — mark any run for this work item stuck in a non-terminal D1 state
-   *    past the timeout as failed and release its leaked admission slots.
+   *    past the timeout as failed and release its leaked admission slots. Runs
+   *    whose latest checkpoint is still fresh (forward progress within the
+   *    timeout) are protected: a healthy resuming run is left to the driver, only
+   *    a genuinely wedged run (stale checkpoint) is swept — exactly one owner per
+   *    stuck run.
    *
    * No-op when nothing is queued and no run is stuck (idempotent re-fire) and
    * when D1/timeout are unbound. Re-arms the reaper alarm while admission slots
    * remain so a later crash is still swept.
    */
   override async alarm(): Promise<void> {
-    await this.driveQueuedRuns();
+    const now = Date.now();
+    await this.driveQueuedRuns(now);
 
     const reaperContext = this.resolveReaperContext();
     if (reaperContext === undefined) {
@@ -375,12 +433,17 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     if (record.workItemId !== undefined) {
       const { reapedRunIds } = await reapStuckRunsForWorkItem({
         d1: reaperContext.d1,
+        protectedRunIds: await this.runsWithFreshCheckpoint(
+          record.workItemId,
+          reaperContext.timeoutMs,
+          now
+        ),
         timeoutMs: reaperContext.timeoutMs,
         workItemId: record.workItemId,
       });
 
       if (reapedRunIds.length > 0) {
-        await this.releaseAdmissionSlotsAfterReap(record);
+        await this.releaseAdmissionSlotsAfterReap(record, reapedRunIds);
       }
     }
 
@@ -388,13 +451,21 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   }
 
   /**
-   * Start every run parked by `/start-run` (M2.5 step 4). Deletes each run-start
-   * slot before driving it so a crash mid-run does not re-submit on the next
-   * alarm — durability of an in-flight run is owned by the checkpoint/resume
-   * machinery and the reaper, not by re-running from the front door. Drives runs
-   * sequentially so one fresh wall-clock budget is consumed at a time.
+   * Drive every run parked by `/start-run`. A run-start record is kept until the
+   * run reaches a TERMINAL status (captured/blocked); only then is it deleted
+   * (FIX 1). A refired alarm therefore finds an evicted run's record and re-drives
+   * it, at which point `WorkflowApp.run()` resumes from the latest checkpoint —
+   * the run-start record is what makes resume reachable in production.
+   *
+   * Concurrency is guarded by a short-lived `driving:<runId>` marker carrying the
+   * driver's start timestamp: a drive only begins when no marker exists or the
+   * existing marker is stale (older than `WORKFLOW_APP_TIMEOUT_MS` — the previous
+   * driver was evicted). A normal completion clears its own marker, so two alarms
+   * never double-drive the same run; an evicted run leaves a stale marker that the
+   * next alarm overrides to re-drive. Drives runs sequentially so one fresh
+   * wall-clock budget is consumed at a time.
    */
-  private async driveQueuedRuns(): Promise<void> {
+  private async driveQueuedRuns(now: number): Promise<void> {
     const queued = await this.ctx.storage.list({
       prefix: runStartStoragePrefix,
     });
@@ -402,13 +473,103 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       return;
     }
 
+    const timeoutMs = this.resolveTimeoutMs();
     const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
     const frontDoor = await driver(this.env);
     for (const value of queued.values()) {
       const request = WorkflowRunRequestSchema.parse(value);
-      await this.ctx.storage.delete(runStartStorageKey(request.runId));
-      await driveOneQueuedRun(frontDoor, request);
+      if (await this.driverIsAlreadyRunning(request.runId, now, timeoutMs)) {
+        continue;
+      }
+
+      await this.ctx.storage.put(drivingMarkerStorageKey(request.runId), {
+        startedAtMs: now,
+      });
+      const reachedTerminal = await driveOneQueuedRun(frontDoor, request);
+      if (reachedTerminal) {
+        // Terminal: retire both the run-start record and the marker. A future
+        // alarm finds nothing to re-drive.
+        await this.ctx.storage.delete(runStartStorageKey(request.runId));
+      }
+      // Whether terminal or a transient throw, clear our marker. On eviction the
+      // invocation dies before reaching here, so the marker survives (stale) and
+      // re-drive is gated by staleness rather than re-driven immediately.
+      await this.ctx.storage.delete(drivingMarkerStorageKey(request.runId));
     }
+  }
+
+  /**
+   * True when a fresh `driving:<runId>` marker shows another driver is mid-flight
+   * for this run, so this alarm must not double-drive it. A marker older than the
+   * timeout means the prior driver was evicted; treat it as absent so the run is
+   * re-driven. Without a bound timeout no staleness can be judged, so any existing
+   * marker blocks (conservative).
+   */
+  private async driverIsAlreadyRunning(
+    runId: string,
+    now: number,
+    timeoutMs: number | undefined
+  ): Promise<boolean> {
+    const marker = DrivingMarkerSchema.nullable().parse(
+      (await this.ctx.storage.get(drivingMarkerStorageKey(runId))) ?? null
+    );
+    if (marker === null) {
+      return false;
+    }
+    if (timeoutMs === undefined) {
+      return true;
+    }
+
+    return now - marker.startedAtMs < timeoutMs;
+  }
+
+  /**
+   * Run ids whose latest checkpoint was persisted within the timeout window —
+   * proof of forward progress the reaper must not sweep (FIX 1, reaper-vs-resume
+   * reconciliation). A run with no checkpoint, or only a stale one, is absent and
+   * remains reapable.
+   */
+  private async runsWithFreshCheckpoint(
+    workItemId: string,
+    timeoutMs: number,
+    now: number
+  ): Promise<string[]> {
+    const stored = await this.ctx.storage.list({ prefix: "checkpoint:" });
+    const latestPersistedAtMs = new Map<string, number>();
+    for (const value of stored.values()) {
+      const checkpoint = RunStepCheckpointSchema.parse(value);
+      if (checkpoint.workItemId !== workItemId) {
+        continue;
+      }
+      const persistedAtMs = new Date(checkpoint.persistedAt).getTime();
+      const previous = latestPersistedAtMs.get(checkpoint.runId);
+      if (previous === undefined || persistedAtMs > previous) {
+        latestPersistedAtMs.set(checkpoint.runId, persistedAtMs);
+      }
+    }
+
+    const fresh: string[] = [];
+    for (const [runId, persistedAtMs] of latestPersistedAtMs) {
+      if (now - persistedAtMs < timeoutMs) {
+        fresh.push(runId);
+      }
+    }
+
+    return fresh;
+  }
+
+  /**
+   * The configured run/step timeout, or `undefined` when unbound. Governs both
+   * driving-marker staleness and reaper checkpoint staleness; unlike the reaper
+   * context it does NOT require a D1 binding, so the driver can judge marker
+   * staleness even where the reaper cannot run.
+   */
+  private resolveTimeoutMs(): number | undefined {
+    const timeoutMs = TimeoutMsSchema.safeParse(
+      this.env.WORKFLOW_APP_TIMEOUT_MS
+    );
+
+    return timeoutMs.success ? timeoutMs.data : undefined;
   }
 
   private resolveReaperContext():
@@ -420,36 +581,58 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         readonly timeoutMs: number;
       } {
     const d1 = this.env.WORKFLOW_APP_D1;
-    const timeoutMs = TimeoutMsSchema.safeParse(
-      this.env.WORKFLOW_APP_TIMEOUT_MS
-    );
-    if (d1 === undefined || !timeoutMs.success) {
+    const timeoutMs = this.resolveTimeoutMs();
+    if (d1 === undefined || timeoutMs === undefined) {
       return undefined;
     }
 
-    return { d1, timeoutMs: timeoutMs.data };
+    return { d1, timeoutMs };
   }
 
+  /**
+   * Release ONLY the admission slots whose owning run was reaped (FIX 2). The DO
+   * is keyed by `workItemId`, so concurrent runs share `activeLaneOwners`;
+   * releasing every lane would nuke a healthy concurrent run's slots. Lanes owned
+   * by a reaped run are dropped from the active set and recorded as failed; every
+   * other run's lanes stay active.
+   */
   private async releaseAdmissionSlotsAfterReap(
-    record: SupervisorRecord
+    record: SupervisorRecord,
+    reapedRunIds: readonly string[]
   ): Promise<void> {
-    if (record.activeLaneIds.length === 0) {
+    const reaped = new Set(reapedRunIds);
+    const nextActiveLaneOwners: Record<string, string> = {};
+    const reapedLaneIds: string[] = [];
+    for (const [laneId, runId] of Object.entries(record.activeLaneOwners)) {
+      if (reaped.has(runId)) {
+        reapedLaneIds.push(laneId);
+      } else {
+        nextActiveLaneOwners[laneId] = runId;
+      }
+    }
+    if (reapedLaneIds.length === 0) {
       return;
     }
 
     let { failedLaneIds } = record;
-    for (const laneId of record.activeLaneIds) {
+    for (const laneId of reapedLaneIds) {
       failedLaneIds = appendUnique(failedLaneIds, laneId);
     }
     await this.putRecord(
       SupervisorRecordSchema.parse({
         ...record,
-        activeLaneIds: [],
+        activeLaneOwners: nextActiveLaneOwners,
         failedLaneIds,
       })
     );
   }
 
+  /**
+   * Record (and arm) the reaper's own due time. Tracked in storage separately
+   * from the alarm slot so an immediate drive alarm set by `/start-run` never
+   * clobbers the sweep deadline (the cheap note). Keeps the earliest pending due
+   * time and arms the alarm no later than it.
+   */
   private async ensureReaperAlarm(): Promise<void> {
     const reaperContext = this.resolveReaperContext();
     if (reaperContext === undefined) {
@@ -457,6 +640,25 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     }
 
     const fireAt = Date.now() + reaperContext.timeoutMs;
+    const existing = ReaperDueAtSchema.nullable().parse(
+      (await this.ctx.storage.get(REAPER_DUE_AT_STORAGE_KEY)) ?? null
+    );
+    const reaperDueAt = existing === null ? fireAt : Math.min(existing, fireAt);
+    await this.ctx.storage.put(REAPER_DUE_AT_STORAGE_KEY, reaperDueAt);
+    await this.armAlarmAt(reaperDueAt);
+  }
+
+  /**
+   * Set the durable alarm to `min(at, reaperDueAt, existingAlarm)`. A drive
+   * (`at = now`) and the reaper deadline (`reaperDueAt`) thus share one slot
+   * without either deferring the other: an immediate drive never pushes the sweep
+   * out, and the sweep never delays a drive.
+   */
+  private async armAlarmAt(at: number): Promise<void> {
+    const reaperDueAt = ReaperDueAtSchema.nullable().parse(
+      (await this.ctx.storage.get(REAPER_DUE_AT_STORAGE_KEY)) ?? null
+    );
+    const fireAt = reaperDueAt === null ? at : Math.min(at, reaperDueAt);
     const existing = await this.ctx.storage.getAlarm();
     if (existing === null || existing > fireAt) {
       await this.ctx.storage.setAlarm(fireAt);
@@ -465,7 +667,11 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async rearmReaperAlarmIfSlotsRemain(): Promise<void> {
     const record = await this.getRecord();
-    if (record.activeLaneIds.length === 0) {
+    if (activeLaneIdsOf(record).length === 0) {
+      // No slots to sweep: clear the tracked deadline so a stale due time does
+      // not keep arming alarms after every run has released.
+      await this.ctx.storage.delete(REAPER_DUE_AT_STORAGE_KEY);
+
       return;
     }
 
@@ -475,7 +681,9 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   private async releaseLane(request: Request): Promise<Response> {
     const input = AgentLaneReleaseRequestSchema.parse(await request.json());
     const record = await this.getRecord();
-    const activeLaneIds = omitLaneId(record.activeLaneIds, input.laneId);
+    const { [input.laneId]: _released, ...nextActiveLaneOwners } =
+      record.activeLaneOwners;
+    const activeLaneIds = Object.keys(nextActiveLaneOwners);
     const artifactCommitSha =
       input.artifactCommitSha === undefined
         ? {}
@@ -492,7 +700,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     });
     const nextRecord = SupervisorRecordSchema.parse({
       ...record,
-      activeLaneIds,
+      activeLaneOwners: nextActiveLaneOwners,
       completedLaneIds:
         input.status === "completed"
           ? appendUnique(record.completedLaneIds, input.laneId)

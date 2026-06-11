@@ -3,10 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts";
 import {
+  LoadRunCheckpointResolutionSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
-import type { WorkflowRunRequest } from "../../src/app/domain/schemas.ts";
+import type {
+  RunStepCheckpoint,
+  WorkflowRunRequest,
+} from "../../src/app/domain/schemas.ts";
 import type { WorkflowCapsuleSupervisorEnv } from "../../src/app/infrastructure/cloudflare-capsule-supervisor.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
@@ -93,12 +97,13 @@ const createFakeDurableObjectState = (): FakeDurableObjectState => {
 };
 
 const createSupervisor = (
-  state: FakeDurableObjectState
+  state: FakeDurableObjectState,
+  envOverride: Partial<WorkflowCapsuleSupervisorEnv> = {}
 ): CloudflareWorkflowCapsuleSupervisorInstance => {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Vitest runs in Node; the Worker runtime provides a real DurableObjectState that this fake stands in for.
   const durableState = state as unknown as DurableObjectState;
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The async driver path reads no env bindings under the injected factory; the runtime would inject them.
-  const env = {} as unknown as WorkflowCapsuleSupervisorEnv;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The async driver path reads only WORKFLOW_APP_TIMEOUT_MS (for marker staleness); the runtime would inject the rest.
+  const env = envOverride as unknown as WorkflowCapsuleSupervisorEnv;
 
   return new CloudflareWorkflowCapsuleSupervisor(durableState, env);
 };
@@ -137,6 +142,65 @@ const startRun = (
       method: "POST",
     })
   );
+
+/**
+ * Read the latest persisted checkpoint for a run through the supervisor's own
+ * `/load-latest-checkpoint` route — the exact resume read `WorkflowApp.run()`
+ * performs. Lets a test front door assert it resumed from a checkpoint rather
+ * than restarting from scratch.
+ */
+const loadLatestCheckpoint = async (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest
+): Promise<RunStepCheckpoint | null> => {
+  const response = await supervisor.fetch(
+    new Request("https://supervisor.internal/load-latest-checkpoint", {
+      body: JSON.stringify({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+  return LoadRunCheckpointResolutionSchema.parse(await response.json())
+    .checkpoint;
+};
+
+const persistCheckpoint = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest,
+  overrides: { readonly persistedAt: string; readonly stepIndex: number }
+): Promise<Response> =>
+  supervisor.fetch(
+    new Request("https://supervisor.internal/persist-checkpoint", {
+      body: JSON.stringify({
+        checkpoint: {
+          completedStepIds: ["step-one"],
+          envelopeSnapshot: { status: "active" },
+          generatedMachineSnapshot: { status: "active" },
+          outputArtifactRefs: [],
+          persistedAt: overrides.persistedAt,
+          runId: request.runId,
+          schemaVersion: "workflow.run-step-checkpoint.v1",
+          stepIndex: overrides.stepIndex,
+          workItemId: request.workItemId,
+        },
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+const runStartKey = (request: WorkflowRunRequest): string =>
+  `run-start:${request.runId}`;
+
+const drivingMarkerKey = (request: WorkflowRunRequest): string =>
+  `driving:${request.runId}`;
+
+const TEST_TIMEOUT_MS = 600_000;
 
 describe("Capsule supervisor async run driver", () => {
   it("accepts /start-run by parking the run and arming an immediate alarm without driving it", async () => {
@@ -209,6 +273,131 @@ describe("Capsule supervisor async run driver", () => {
       expect(startedRuns.map((started) => started.runId)).toStrictEqual([
         request.runId,
       ]);
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  // FIX 1, test (a): an evicted mid-run run whose run-start record persists is
+  // re-driven by a subsequent alarm and RESUMES from its checkpoint — it does
+  // NOT restart, and the reaper never touches it. The post-eviction storage
+  // state is seeded directly (run-start kept + a mid-run checkpoint + a stale
+  // driving marker) because a real eviction kills the invocation before any
+  // cleanup runs.
+  it("re-drives an evicted run and resumes it from its latest checkpoint", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const request = buildIntegrationTestRunRequest();
+
+    // Drive 1 progressed one step then was evicted: a checkpoint exists, the
+    // run-start record survives, and a now-stale driving marker is left behind.
+    await persistCheckpoint(supervisor, request, {
+      persistedAt: new Date(Date.now() - 2 * TEST_TIMEOUT_MS).toISOString(),
+      stepIndex: 0,
+    });
+    state.store.set(runStartKey(request), request);
+    state.store.set(drivingMarkerKey(request), {
+      startedAtMs: Date.now() - 2 * TEST_TIMEOUT_MS,
+    });
+
+    const checkpointSeenOnDrive: (RunStepCheckpoint | null)[] = [];
+    const resumeAwareFrontDoor: WorkerFrontDoorContract = {
+      route: "POST /runs",
+      async startRun(input) {
+        const parsed = WorkflowRunRequestSchema.parse(input);
+        // The resume read WorkflowApp.run() performs: a non-null result here is
+        // proof the drive resumed from the prior step rather than restarting.
+        checkpointSeenOnDrive.push(
+          await loadLatestCheckpoint(supervisor, parsed)
+        );
+
+        return WorkflowRunBlockedSchema.parse({
+          blocker: {
+            code: "adapter_unavailable",
+            message: "Resume completed to terminal in test.",
+            redacted: true,
+          },
+          eventLog: [],
+          runId: parsed.runId,
+          status: "blocked",
+        });
+      },
+    };
+    __capsuleSupervisorTestHooks.setRunDriverFactory(
+      () => resumeAwareFrontDoor
+    );
+    try {
+      await supervisor.alarm();
+
+      expect({
+        markerCleared: !state.store.has(drivingMarkerKey(request)),
+        resumeCheckpointStepIndexes: checkpointSeenOnDrive.map(
+          (checkpoint) => checkpoint?.stepIndex ?? null
+        ),
+        runStartClearedAfterTerminal: !state.store.has(runStartKey(request)),
+      }).toStrictEqual({
+        markerCleared: true,
+        // A single re-drive that saw the prior checkpoint = resumed, not reaped.
+        resumeCheckpointStepIndexes: [0],
+        runStartClearedAfterTerminal: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  // FIX 1, test (b): the driving marker prevents concurrent double-drive, but a
+  // stale marker (the prior driver was evicted) allows the next alarm to
+  // re-drive. Both halves are exercised against the same seeded parked run.
+  it("blocks double-drive on a fresh marker yet re-drives on a stale marker", async () => {
+    const freshState = createFakeDurableObjectState();
+    const freshSupervisor = createSupervisor(freshState, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const staleState = createFakeDurableObjectState();
+    const staleSupervisor = createSupervisor(staleState, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const request = buildIntegrationTestRunRequest();
+    const freshStarted: WorkflowRunRequest[] = [];
+    const staleStarted: WorkflowRunRequest[] = [];
+
+    // Fresh marker: another driver is mid-flight, so the alarm must NOT drive.
+    freshState.store.set(runStartKey(request), request);
+    freshState.store.set(drivingMarkerKey(request), {
+      startedAtMs: Date.now(),
+    });
+
+    // Stale marker: the prior driver was evicted, so the alarm MUST re-drive.
+    staleState.store.set(runStartKey(request), request);
+    staleState.store.set(drivingMarkerKey(request), {
+      startedAtMs: Date.now() - 2 * TEST_TIMEOUT_MS,
+    });
+
+    try {
+      __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+        createBlockedFrontDoor(freshStarted)
+      );
+      await freshSupervisor.alarm();
+
+      __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+        createBlockedFrontDoor(staleStarted)
+      );
+      await staleSupervisor.alarm();
+
+      expect({
+        freshDriveCount: freshStarted.length,
+        freshRunStartKept: freshState.store.has(runStartKey(request)),
+        staleDriveCount: staleStarted.length,
+      }).toStrictEqual({
+        // Fresh marker blocked the drive; the parked run is left for later.
+        freshDriveCount: 0,
+        freshRunStartKept: true,
+        // Stale marker allowed the re-drive (one drive to terminal).
+        staleDriveCount: 1,
+      });
     } finally {
       __capsuleSupervisorTestHooks.resetRunDriverFactory();
     }
