@@ -100,9 +100,12 @@ export {
   createCloudflareLinearCommentAdapter,
   createDryRunLinearCommentAdapter,
 } from "./infrastructure/cloudflare-linear-comment-adapter.ts";
+export type { CapsuleSupervisorRunDriverFactory } from "./infrastructure/cloudflare-capsule-supervisor.ts";
 export {
+  __capsuleSupervisorTestHooks,
   CloudflareWorkflowCapsuleSupervisor,
   createCloudflareCapsuleSupervisorClient,
+  enqueueCapsuleSupervisorRun,
 } from "./infrastructure/cloudflare-capsule-supervisor.ts";
 export type { CloudflareWorkflowFrontDoorConfig } from "./infrastructure/cloudflare-workflow-front-door.ts";
 export { createCloudflareWorkflowFrontDoor } from "./infrastructure/cloudflare-workflow-front-door.ts";

@@ -249,9 +249,11 @@ describe("Cloudflare run reaper", () => {
 
 interface FakeDurableObjectState {
   readonly storage: {
+    delete(key: string): Promise<void>;
     deleteAlarm(): Promise<void>;
     get(key: string): Promise<unknown>;
     getAlarm(): Promise<null | number>;
+    list(options: { prefix: string }): Promise<Map<string, unknown>>;
     put(key: string, value: unknown): Promise<void>;
     setAlarm(scheduledTime: number): Promise<void>;
   };
@@ -263,6 +265,11 @@ const createFakeDurableObjectState = (): FakeDurableObjectState => {
 
   return {
     storage: {
+      delete(key: string) {
+        store.delete(key);
+
+        return Promise.resolve();
+      },
       deleteAlarm() {
         alarm = null;
 
@@ -273,6 +280,16 @@ const createFakeDurableObjectState = (): FakeDurableObjectState => {
       },
       getAlarm() {
         return Promise.resolve(alarm);
+      },
+      list(options: { prefix: string }) {
+        const matched = new Map<string, unknown>();
+        for (const [key, value] of store) {
+          if (key.startsWith(options.prefix)) {
+            matched.set(key, value);
+          }
+        }
+
+        return Promise.resolve(matched);
       },
       put(key: string, value: unknown) {
         store.set(key, value);

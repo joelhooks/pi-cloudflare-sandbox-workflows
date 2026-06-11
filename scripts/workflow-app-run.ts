@@ -41,6 +41,8 @@ const requiredRelayCheckIds = [
 interface WorkflowRunArgs {
   readonly approvalSignoff?: string;
   readonly localRelayProofPath?: string;
+  readonly pollIntervalMs?: number;
+  readonly pollTimeoutMs?: number;
   readonly preflightPath: string;
   readonly refreshPreflight: boolean;
   readonly receiptPath?: string;
@@ -50,6 +52,11 @@ interface WorkflowRunArgs {
   readonly submit: boolean;
   readonly workerUrl?: string;
 }
+
+const defaultPollIntervalMs = 5000;
+const defaultPollTimeoutMs = 15 * 60 * 1000;
+
+const terminalRunStates = new Set(["blocked", "captured"]);
 
 interface PreflightLoadResult {
   readonly receipt?: WorkflowLivePreflightReceipt;
@@ -123,6 +130,23 @@ const argValue = (
   return argv[index + 1];
 };
 
+const positiveIntArg = (
+  argv: readonly string[],
+  name: string
+): number | undefined => {
+  const raw = argValue(argv, name);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== raw) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+
+  return parsed;
+};
+
 const parseArgs = (
   argv: readonly string[],
   profile: MemorySourceProfile
@@ -134,6 +158,8 @@ const parseArgs = (
   const responsePath = argValue(argv, "--response-path");
   const workerUrl = argValue(argv, "--worker-url");
   const localRelayProofPath = argValue(argv, "--local-relay-proof-path");
+  const pollIntervalMs = positiveIntArg(argv, "--poll-interval-ms");
+  const pollTimeoutMs = positiveIntArg(argv, "--poll-timeout-ms");
   const submit = argv.includes("--submit");
   const refreshPreflight =
     argv.includes("--refresh-preflight") ||
@@ -142,6 +168,8 @@ const parseArgs = (
   return {
     ...(approvalSignoff === undefined ? {} : { approvalSignoff }),
     ...(localRelayProofPath === undefined ? {} : { localRelayProofPath }),
+    ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
+    ...(pollTimeoutMs === undefined ? {} : { pollTimeoutMs }),
     preflightPath:
       argValue(argv, "--preflight-path") ??
       workflowProfileWorkspacePaths(profile.profileId).preflightReceiptPath,
@@ -406,6 +434,87 @@ const responseBody = async (response: Response): Promise<unknown> => {
   }
 };
 
+const sleep = (durationMs: number): Promise<void> =>
+  // oxlint-disable-next-line promise/avoid-new -- A bounded status poll needs a timer-backed delay between requests.
+  new Promise<void>((_resolve) => {
+    setTimeout(_resolve, durationMs);
+  });
+
+const isTerminalRunStatusBody = (body: unknown): boolean => {
+  if (typeof body !== "object" || body === null) {
+    return false;
+  }
+  if ("terminal" in body && typeof body.terminal === "boolean") {
+    return body.terminal;
+  }
+
+  return (
+    "status" in body &&
+    typeof body.status === "string" &&
+    terminalRunStates.has(body.status)
+  );
+};
+
+/**
+ * Poll `GET /runs/:runId/status` until the run reaches a terminal state
+ * (`captured`/`blocked`) or the bounded budget elapses. Returns the last status
+ * body seen plus whether it was terminal; on timeout, `timedOut` carries a clear
+ * deadline message the receipt/log can surface. The submitting `POST /runs` no
+ * longer blocks on execution, so this is how the CLI follows a run to its end.
+ */
+const pollRunStatusUntilTerminal = async (input: {
+  readonly fetch: typeof fetch;
+  readonly intervalMs: number;
+  readonly now?: () => number;
+  readonly runId: string;
+  readonly runsToken: string | undefined;
+  readonly sleep?: (durationMs: number) => Promise<void>;
+  readonly timeoutMs: number;
+  readonly workerUrl: string;
+}): Promise<{
+  readonly body: unknown;
+  readonly statusCode?: number;
+  readonly terminal: boolean;
+  readonly timedOut?: string;
+}> => {
+  const now = input.now ?? (() => Date.now());
+  const waitFor = input.sleep ?? sleep;
+  const statusUrl = `${input.workerUrl}/runs/${encodeURIComponent(
+    input.runId
+  )}/status`;
+  const headers =
+    input.runsToken === undefined || input.runsToken === ""
+      ? {}
+      : { authorization: `Bearer ${input.runsToken}` };
+  const deadline = now() + input.timeoutMs;
+  let lastBody: unknown = null;
+  let lastStatusCode: number | undefined;
+
+  for (;;) {
+    const response = await input.fetch(statusUrl, { headers, method: "GET" });
+    lastBody = await responseBody(response);
+    lastStatusCode = response.status;
+    if (response.ok && isTerminalRunStatusBody(lastBody)) {
+      return {
+        body: lastBody,
+        statusCode: lastStatusCode,
+        terminal: true,
+      };
+    }
+
+    if (now() + input.intervalMs >= deadline) {
+      return {
+        body: lastBody,
+        statusCode: lastStatusCode,
+        terminal: false,
+        timedOut: `Run ${input.runId} did not reach a terminal state within ${input.timeoutMs}ms; poll ${statusUrl} to keep watching.`,
+      };
+    }
+
+    await waitFor(input.intervalMs);
+  }
+};
+
 const submitLiveRunIfAllowed = async (input: {
   readonly args: WorkflowRunArgs;
   readonly fetch?: typeof fetch;
@@ -416,6 +525,7 @@ const submitLiveRunIfAllowed = async (input: {
   readonly workerUrl: string;
 }): Promise<{
   readonly attempted: boolean;
+  readonly pollTimedOut?: string;
   readonly submitBlockers: readonly string[];
   readonly submitStatusCode?: number;
 }> => {
@@ -434,8 +544,9 @@ const submitLiveRunIfAllowed = async (input: {
     };
   }
 
+  const submitFetch = input.fetch ?? fetch;
   const runsToken = input.processEnv["WORKFLOW_APP_RUNS_TOKEN"];
-  const response = await (input.fetch ?? fetch)(`${input.workerUrl}/runs`, {
+  const response = await submitFetch(`${input.workerUrl}/runs`, {
     body: JSON.stringify(input.request),
     headers: {
       ...(runsToken === undefined || runsToken === ""
@@ -445,10 +556,37 @@ const submitLiveRunIfAllowed = async (input: {
     },
     method: "POST",
   });
-  await writeJson(input.responsePath, await responseBody(response));
+  const acceptBody = await responseBody(response);
+  const accepted = response.status >= 200 && response.status < 300;
+  if (!accepted) {
+    await writeJson(input.responsePath, acceptBody);
+
+    return {
+      attempted: true,
+      submitBlockers,
+      submitStatusCode: response.status,
+    };
+  }
+
+  const poll = await pollRunStatusUntilTerminal({
+    fetch: submitFetch,
+    intervalMs: input.args.pollIntervalMs ?? defaultPollIntervalMs,
+    runId: input.request.runId,
+    runsToken,
+    timeoutMs: input.args.pollTimeoutMs ?? defaultPollTimeoutMs,
+    workerUrl: input.workerUrl,
+  });
+  await writeJson(input.responsePath, {
+    accepted: acceptBody,
+    redacted: true,
+    terminal: poll.terminal,
+    ...(poll.timedOut === undefined ? {} : { timedOut: poll.timedOut }),
+    status: poll.body,
+  });
 
   return {
     attempted: true,
+    ...(poll.timedOut === undefined ? {} : { pollTimedOut: poll.timedOut }),
     submitBlockers,
     submitStatusCode: response.status,
   };
@@ -538,6 +676,9 @@ export const runWorkflowLiveRunCli = async (
   await writeJson(receiptPath, receipt);
   const log = input.log ?? console.log;
   log(JSON.stringify(receipt, null, 2));
+  if (submitResult.pollTimedOut !== undefined) {
+    log(submitResult.pollTimedOut);
+  }
   log(`wrote ${receiptPath}`);
 
   return receipt;

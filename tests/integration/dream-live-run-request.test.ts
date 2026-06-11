@@ -221,9 +221,29 @@ const writePreflight = async (
 };
 
 const PostedResponseSchema = z.object({
-  runId: z.string().min(1),
-  status: z.literal("captured"),
+  accepted: z.object({
+    runId: z.string().min(1),
+    status: z.literal("accepted"),
+  }),
+  redacted: z.literal(true),
+  status: z.object({
+    runId: z.string().min(1),
+    status: z.literal("captured"),
+    terminal: z.literal(true),
+  }),
+  terminal: z.literal(true),
 });
+
+const requestUrlString = (url: Parameters<typeof fetch>[0]): string => {
+  if (typeof url === "string") {
+    return url;
+  }
+  if (url instanceof URL) {
+    return url.href;
+  }
+
+  return url.url;
+};
 
 describe("Dream live run request harness", () => {
   it("builds a typed request that asks for generated Cloudflare Dreaming through the cartridge", () => {
@@ -429,12 +449,14 @@ describe("Dream live run request harness", () => {
     }
   });
 
-  it("submits the typed request only after preflight is ready and relay boundary sign-off is present", async () => {
+  it("accepts the run with 202 then polls status to a terminal result", async () => {
     const repoRoot = await workflowCliTestRepoRoot("dream-live-run-ready-");
 
     try {
       await writePreflight(repoRoot, readyPreflight);
       let postedRequest: unknown;
+      const methods: string[] = [];
+      let statusPolls = 0;
 
       const receipt = await runWorkflowLiveRunCli({
         argv: [
@@ -450,21 +472,54 @@ describe("Dream live run request harness", () => {
           "receipt.json",
           "--response-path",
           "response.json",
+          "--poll-interval-ms",
+          "1",
           "--approval-signoff",
           relayNetworkBoundarySignoff,
           "--skip-preflight-refresh",
         ],
-        fetch(_url, init) {
-          if (typeof init?.body !== "string") {
-            throw new TypeError("Expected request body to be JSON text.");
+        fetch(url, init) {
+          const method = init?.method ?? "GET";
+          methods.push(method);
+          if (method === "POST") {
+            if (typeof init?.body !== "string") {
+              throw new TypeError("Expected request body to be JSON text.");
+            }
+
+            postedRequest = JSON.parse(init.body);
+
+            return Promise.resolve(
+              Response.json(
+                {
+                  runId: "run-live-memory-fabric-ready",
+                  status: "accepted",
+                },
+                { status: 202 }
+              )
+            );
           }
 
-          postedRequest = JSON.parse(init.body);
+          expect(requestUrlString(url)).toContain(
+            "/runs/run-live-memory-fabric-ready/status"
+          );
+          statusPolls += 1;
+          if (statusPolls < 2) {
+            return Promise.resolve(
+              Response.json({
+                redacted: true,
+                runId: "run-live-memory-fabric-ready",
+                status: "executingDynamicWorkflow",
+                terminal: false,
+              })
+            );
+          }
 
           return Promise.resolve(
             Response.json({
+              redacted: true,
               runId: "run-live-memory-fabric-ready",
               status: "captured",
+              terminal: true,
             })
           );
         },
@@ -478,21 +533,29 @@ describe("Dream live run request harness", () => {
       );
 
       expect({
+        firstMethod: methods.at(0),
         noRelayTokenLeak: !JSON.stringify(receipt).includes("relay-secret"),
+        polledToTerminal: response.terminal,
         postedRunId: parsedPostedRequest.runId,
+        receiptStatus: receipt.status,
         relayCapability: receipt.relayCapability,
-        responseStatus: response.status,
-        status: receipt.status,
+        statusPolls,
         submitAttempted: receipt.submit.attempted,
+        submitStatusCode: receipt.submit.statusCode,
         submitUrl: receipt.submit.url,
+        terminalStatus: response.status.status,
       }).toStrictEqual({
+        firstMethod: "POST",
         noRelayTokenLeak: true,
+        polledToTerminal: true,
         postedRunId: "run-live-memory-fabric-ready",
+        receiptStatus: "submitted",
         relayCapability: readyRelayCapability,
-        responseStatus: "captured",
-        status: "submitted",
+        statusPolls: 2,
         submitAttempted: true,
+        submitStatusCode: 202,
         submitUrl: "https://worker.example.test/runs",
+        terminalStatus: "captured",
       });
     } finally {
       await rm(repoRoot, { force: true, recursive: true });

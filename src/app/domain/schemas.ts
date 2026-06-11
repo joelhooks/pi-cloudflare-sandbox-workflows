@@ -2000,6 +2000,29 @@ export const WorkflowRunRequestSchema = z.object({
   workItemId: z.string().min(1),
 });
 
+/**
+ * Request to enqueue a run for asynchronous, Durable-Object-driven execution
+ * (M2.5 step 4). `POST /runs` validates and hands the run to the supervisor DO
+ * via this request; the DO persists it and arms an immediate alarm so the run
+ * is driven in a fresh DO invocation — never inside the submitting request
+ * fetch. Carries the full `WorkflowRunRequest` so the alarm driver can start the
+ * run without re-reading the body.
+ */
+export const StartRunRequestSchema = z.object({
+  request: WorkflowRunRequestSchema,
+  workItemId: z.string().min(1),
+});
+
+/**
+ * Receipt for an accepted asynchronous run submission. Returned with HTTP 202 so
+ * the caller stops holding the connection open and switches to polling
+ * `GET /runs/:runId/status`.
+ */
+export const WorkflowRunAcceptedSchema = z.object({
+  runId: z.string().min(1),
+  status: z.literal("accepted"),
+});
+
 export const WorkflowLiveRunRequestReceiptSchema = z.object({
   blockedReasons: z.array(z.string().min(1)).default([]),
   checkedAt: IsoDateTimeSchema,
@@ -2337,6 +2360,8 @@ export type WzrrdPublishDeliveryResult = z.infer<
 export type WzrrdPublishApproval = z.infer<typeof WzrrdPublishApprovalSchema>;
 export type WzrrdPublishPayload = z.infer<typeof WzrrdPublishPayloadSchema>;
 export type WzrrdResource = z.infer<typeof WzrrdResourceSchema>;
+export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
+export type WorkflowRunAccepted = z.infer<typeof WorkflowRunAcceptedSchema>;
 export type WorkflowRunBlocked = z.infer<typeof WorkflowRunBlockedSchema>;
 export type WorkflowRunReceipt = z.infer<typeof WorkflowRunReceiptSchema>;
 export type WorkflowRunRequest = z.infer<typeof WorkflowRunRequestSchema>;

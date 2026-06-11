@@ -6,6 +6,7 @@ import { z } from "zod";
 import type {
   AgentLaneAdmissionControllerContract,
   ContextCapsuleActorContract,
+  WorkerFrontDoorContract,
 } from "../application/ports.ts";
 import {
   AgentLaneAdmissionDecisionSchema,
@@ -17,13 +18,17 @@ import {
   LoadRunCheckpointResolutionSchema,
   PersistRunCheckpointRequestSchema,
   RunStepCheckpointSchema,
+  StartRunRequestSchema,
   WorkflowEventSchema,
+  WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type {
   AgentLaneAdmissionDecision,
   AgentLaneReleaseReceipt,
   ContextCapsuleRecord,
   RunStepCheckpoint,
+  StartRunRequest,
+  WorkflowRunRequest,
 } from "../domain/schemas.ts";
 import type { CloudflareD1PackageRegistryConfig } from "./cloudflare-package-registry.ts";
 import { reapStuckRunsForWorkItem } from "./cloudflare-run-reaper.ts";
@@ -33,6 +38,37 @@ export interface WorkflowCapsuleSupervisorEnv {
   readonly WORKFLOW_APP_TIMEOUT_MS?: number | string;
   readonly WORKFLOW_CAPSULE_SUPERVISOR: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>;
 }
+
+/**
+ * Builds the front door that drives a run from inside the supervisor DO's
+ * `alarm()` invocation (M2.5 step 4). The DO receives the full Worker `Env` at
+ * runtime, so the default lazily imports `createFrontDoorFromEnv` and constructs
+ * the production front door from its own bindings. Overridable for tests so the
+ * async-contract behavior can be exercised without a live Sandbox/Artifacts.
+ */
+export type CapsuleSupervisorRunDriverFactory = (
+  env: WorkflowCapsuleSupervisorEnv
+) => Promise<WorkerFrontDoorContract> | WorkerFrontDoorContract;
+
+let runDriverFactoryOverride: CapsuleSupervisorRunDriverFactory | undefined;
+
+const defaultRunDriverFactory: CapsuleSupervisorRunDriverFactory = async (
+  env
+) => {
+  const { createFrontDoorFromEnv } =
+    await import("./cloudflare-worker-route.ts");
+
+  return createFrontDoorFromEnv(env);
+};
+
+export const __capsuleSupervisorTestHooks = {
+  resetRunDriverFactory(): void {
+    runDriverFactoryOverride = undefined;
+  },
+  setRunDriverFactory(factory: CapsuleSupervisorRunDriverFactory): void {
+    runDriverFactoryOverride = factory;
+  },
+};
 
 const TimeoutMsSchema = z.coerce.number().int().min(1);
 
@@ -82,6 +118,16 @@ const checkpointStorageKey = (runId: string, stepIndex: number): string =>
 const checkpointStoragePrefix = (runId: string): string =>
   `checkpoint:${runId}:`;
 
+/**
+ * Storage key for a queued run-start (M2.5 step 4). `POST /start-run` parks the
+ * full run request here and arms an immediate alarm; the alarm driver lists this
+ * prefix, starts each pending run in a fresh DO invocation, then deletes the key
+ * so a re-fired alarm does not re-submit a run already in flight.
+ */
+const runStartStorageKey = (runId: string): string => `run-start:${runId}`;
+
+const runStartStoragePrefix = "run-start:";
+
 const createCapsuleRecord = (input: {
   readonly runId: string;
   readonly workItemId: string;
@@ -107,6 +153,23 @@ const appendUnique = (
     ? [...laneIds]
     : [...laneIds, laneIdToAppend];
 
+/**
+ * Drive one queued run through the front door from inside the alarm invocation.
+ * Swallows and logs run failures so one failed run does not abort driving the
+ * rest of the queue; the run's own terminal state is recorded by its status
+ * projection (or swept by the reaper).
+ */
+const driveOneQueuedRun = async (
+  frontDoor: WorkerFrontDoorContract,
+  request: WorkflowRunRequest
+): Promise<void> => {
+  try {
+    await frontDoor.startRun(request);
+  } catch (error) {
+    console.error("queued run driver failed", request.runId, error);
+  }
+};
+
 export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowCapsuleSupervisorEnv> {
   override fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -117,6 +180,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       "/persist-checkpoint": () => this.persistCheckpoint(request),
       "/release-lane": () => this.releaseLane(request),
       "/resolve": () => this.resolveCapsule(request),
+      "/start-run": () => this.startRun(request),
     };
     const getRoutes: Record<string, () => Promise<Response>> = {
       "/record": () => this.getRecordResponse(),
@@ -220,6 +284,25 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   }
 
   /**
+   * Enqueue a run for asynchronous, alarm-driven execution (M2.5 step 4). Parks
+   * the full run request in DO storage and arms an immediate alarm, then returns
+   * — the submitting `POST /runs` fetch returns 202 without ever driving the
+   * run. The alarm (`driveQueuedRuns`) starts the run in a fresh DO invocation,
+   * so the run never lives in a request fetch. Idempotent by `runId`: re-parking
+   * the same run overwrites the same slot rather than queuing a duplicate.
+   */
+  private async startRun(request: Request): Promise<Response> {
+    const input = StartRunRequestSchema.parse(await request.json());
+    await this.ctx.storage.put(
+      runStartStorageKey(input.request.runId),
+      input.request
+    );
+    await this.ctx.storage.setAlarm(Date.now());
+
+    return json({ runId: input.request.runId, status: "accepted" });
+  }
+
+  /**
    * Persist a resumable run checkpoint to DO storage (M2.5 step 2). Overwrites
    * by `runId` + `stepIndex`, so re-persisting the same step is a stable no-op
    * that yields the same stored snapshot. Does not drive execution — only
@@ -266,34 +349,66 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   }
 
   /**
-   * Reaper alarm. Marks any run for this work item stuck in a non-terminal D1
-   * state past the timeout as failed and releases its leaked admission slots.
-   * No-op when no run is stuck (idempotent re-sweep) and when D1/timeout are
-   * unbound. Re-arms itself while admission slots remain so a later crash is
-   * still swept.
+   * Durable alarm. Two responsibilities share the single alarm slot:
+   *
+   * 1. Run driver (M2.5 step 4) — start any run parked by `/start-run` in this
+   *    fresh DO invocation, so the run never executes inside the submitting
+   *    request fetch.
+   * 2. Reaper — mark any run for this work item stuck in a non-terminal D1 state
+   *    past the timeout as failed and release its leaked admission slots.
+   *
+   * No-op when nothing is queued and no run is stuck (idempotent re-fire) and
+   * when D1/timeout are unbound. Re-arms the reaper alarm while admission slots
+   * remain so a later crash is still swept.
    */
   override async alarm(): Promise<void> {
+    await this.driveQueuedRuns();
+
     const reaperContext = this.resolveReaperContext();
     if (reaperContext === undefined) {
+      await this.rearmReaperAlarmIfSlotsRemain();
+
       return;
     }
 
     const record = await this.getRecord();
-    if (record.workItemId === undefined) {
-      return;
-    }
+    if (record.workItemId !== undefined) {
+      const { reapedRunIds } = await reapStuckRunsForWorkItem({
+        d1: reaperContext.d1,
+        timeoutMs: reaperContext.timeoutMs,
+        workItemId: record.workItemId,
+      });
 
-    const { reapedRunIds } = await reapStuckRunsForWorkItem({
-      d1: reaperContext.d1,
-      timeoutMs: reaperContext.timeoutMs,
-      workItemId: record.workItemId,
-    });
-
-    if (reapedRunIds.length > 0) {
-      await this.releaseAdmissionSlotsAfterReap(record);
+      if (reapedRunIds.length > 0) {
+        await this.releaseAdmissionSlotsAfterReap(record);
+      }
     }
 
     await this.rearmReaperAlarmIfSlotsRemain();
+  }
+
+  /**
+   * Start every run parked by `/start-run` (M2.5 step 4). Deletes each run-start
+   * slot before driving it so a crash mid-run does not re-submit on the next
+   * alarm — durability of an in-flight run is owned by the checkpoint/resume
+   * machinery and the reaper, not by re-running from the front door. Drives runs
+   * sequentially so one fresh wall-clock budget is consumed at a time.
+   */
+  private async driveQueuedRuns(): Promise<void> {
+    const queued = await this.ctx.storage.list({
+      prefix: runStartStoragePrefix,
+    });
+    if (queued.size === 0) {
+      return;
+    }
+
+    const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
+    const frontDoor = await driver(this.env);
+    for (const value of queued.values()) {
+      const request = WorkflowRunRequestSchema.parse(value);
+      await this.ctx.storage.delete(runStartStorageKey(request.runId));
+      await driveOneQueuedRun(frontDoor, request);
+    }
   }
 
   private resolveReaperContext():
@@ -500,4 +615,19 @@ export const createCloudflareCapsuleSupervisorClient = (
       );
     },
   };
+};
+
+/**
+ * Enqueue a run on the supervisor DO for asynchronous, alarm-driven execution
+ * (M2.5 step 4). Routes to the DO keyed by `workItemId` (the same key the run's
+ * capsule lives under), parks the run via `/start-run`, and returns — the DO's
+ * alarm drives the run in a fresh invocation. The caller (`POST /runs`) returns
+ * 202 without awaiting execution.
+ */
+export const enqueueCapsuleSupervisorRun = async (
+  namespace: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>,
+  input: StartRunRequest
+): Promise<void> => {
+  const stub = namespace.get(namespace.idFromName(input.workItemId));
+  await postJson(stub, "/start-run", StartRunRequestSchema.parse(input));
 };

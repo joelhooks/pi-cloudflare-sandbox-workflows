@@ -11,19 +11,22 @@ import {
 } from "../../cartridges/cloudflare-workflow-cartridges.ts";
 import type { WorkerFrontDoorContract } from "../application/ports.ts";
 import {
+  StartRunRequestSchema,
   WorkflowDebuggerAttachDocumentSchema,
   WorkflowEventTailControlDocumentSchema,
   WorkflowEventStreamDocumentSchema,
   WorkflowFrontDoorRequestSchema,
+  WorkflowRunAcceptedSchema,
   WorkflowRunRequestSchema,
-  WorkflowRunResultSchema,
 } from "../domain/schemas.ts";
 import type {
   SafetyEnvelopeState,
+  StartRunRequest,
   WorkflowDebuggerAttachDocument,
   WorkflowEventStreamDocument,
 } from "../domain/schemas.ts";
 import { timingSafeSecretMatch } from "../domain/secret-compare.ts";
+import type { CloudflareWorkflowCapsuleSupervisor } from "./cloudflare-capsule-supervisor.ts";
 import {
   createCloudflareDiscordBotTokenResolver,
   createCloudflareDiscordMessageAdapter,
@@ -57,6 +60,10 @@ import { createCloudflareWzrrdApiTokenResolver } from "./cloudflare-wzrrd-publis
 
 export interface WorkflowWorkerHandlerOptions<Environment> {
   readonly createFrontDoor?: (env: Environment) => WorkerFrontDoorContract;
+  readonly enqueueRun?: (
+    env: Environment,
+    input: StartRunRequest
+  ) => Promise<void>;
   readonly eventStreamTail?: WorkflowEventStreamTailOptions;
   readonly seedPackages?: (
     env: Environment,
@@ -82,6 +89,10 @@ export interface WorkflowWorkerHandlerOptions<Environment> {
 
 export interface WorkflowWorkerRequestInput<Environment> {
   readonly createFrontDoor?: (env: Environment) => WorkerFrontDoorContract;
+  readonly enqueueRun?: (
+    env: Environment,
+    input: StartRunRequest
+  ) => Promise<void>;
   readonly env: Environment;
   readonly eventStreamTail?: WorkflowEventStreamTailOptions;
   readonly request: Request;
@@ -213,6 +224,10 @@ const WorkflowEventStreamEnvBindingSchema = z.object({
     z.custom<CloudflareD1PackageRegistryConfig["d1"]>(objectBinding),
 });
 
+const WorkflowRunDriverEnvBindingSchema = z.object({
+  WORKFLOW_CAPSULE_SUPERVISOR: z.custom<DurableObjectNamespace>(objectBinding),
+});
+
 const WorkflowRunsAuthEnvBindingSchema = z.object({
   WORKFLOW_APP_RUNS_TOKEN: z.string().min(1),
 });
@@ -262,7 +277,9 @@ const bearerToken = (request: Request): null | string => {
   return authorization.slice(prefix.length);
 };
 
-const createFrontDoorFromEnv = (env: unknown): WorkerFrontDoorContract => {
+export const createFrontDoorFromEnv = (
+  env: unknown
+): WorkerFrontDoorContract => {
   const bindings = WorkerEnvBindingSchema.parse(env);
   const discordBotSecretRef = bindings.DISCORD_BOT_SECRET_REF;
 
@@ -659,6 +676,20 @@ const readRunStatusFromEnv = async (
   return await createCloudflareWorkflowRunStatusReader({
     d1: bindings.WORKFLOW_APP_D1,
   }).read(input);
+};
+
+const enqueueRunFromEnv = async (
+  env: unknown,
+  input: StartRunRequest
+): Promise<void> => {
+  const bindings = WorkflowRunDriverEnvBindingSchema.parse(env);
+  const { enqueueCapsuleSupervisorRun } =
+    await import("./cloudflare-capsule-supervisor.ts");
+  await enqueueCapsuleSupervisorRun(
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The runtime binding is the typed supervisor namespace; the schema only proves it is an object.
+    bindings.WORKFLOW_CAPSULE_SUPERVISOR as unknown as DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>,
+    input
+  );
 };
 
 const encodeServerSentEvent = (input: {
@@ -1260,6 +1291,60 @@ const handleWorkflowDebuggerAttachRequest = async <Environment>(
   );
 };
 
+const handleWorkflowRunStatusRequest = async <Environment>(
+  input: WorkflowWorkerRequestInput<Environment>,
+  runIdSegment: string
+): Promise<Response> => {
+  const methodError = enforceGet(input.request, "/runs/:runId/status");
+  if (methodError !== null) {
+    return methodError;
+  }
+
+  let runId: string;
+  try {
+    runId = decodeURIComponent(runIdSegment);
+  } catch {
+    return jsonError(
+      400,
+      "invalid_run_id",
+      "Run id path segment must be URL encoded."
+    );
+  }
+
+  const readRunStatus = input.readRunStatus ?? readRunStatusFromEnv;
+  let snapshot: WorkflowRunStatusSnapshot | null;
+  try {
+    snapshot = await readRunStatus(input.env, { runId });
+  } catch (error) {
+    console.error("workflow run status read failed", error);
+
+    return jsonError(
+      500,
+      "run_status_read_failed",
+      "Run status could not be read."
+    );
+  }
+  if (snapshot === null) {
+    return jsonError(404, "run_not_found", "Run not found.");
+  }
+
+  const status = WorkflowRunStatusSnapshotSchema.parse(snapshot);
+
+  return Response.json(
+    {
+      redacted: true,
+      runId: status.runId,
+      status: status.status,
+      terminal: isTerminalWorkflowState(status.status),
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
+};
+
 const handleWorkflowRunSubmissionRequest = async <Environment>(
   input: WorkflowWorkerRequestInput<Environment>,
   url: URL
@@ -1334,28 +1419,29 @@ const handleWorkflowRunSubmissionRequest = async <Environment>(
   }
 
   try {
-    const frontDoor =
-      input.createFrontDoor?.(input.env) ?? createFrontDoorFromEnv(input.env);
-    const result = WorkflowRunResultSchema.parse(
-      await frontDoor.startRun(body)
+    const enqueueRun = input.enqueueRun ?? enqueueRunFromEnv;
+    await enqueueRun(
+      input.env,
+      StartRunRequestSchema.parse({
+        request: body,
+        workItemId: body.workItemId,
+      })
     );
 
-    return Response.json(result);
+    return Response.json(
+      WorkflowRunAcceptedSchema.parse({
+        runId: body.runId,
+        status: "accepted",
+      }),
+      { status: 202 }
+    );
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return jsonError(
-        422,
-        "invalid_workflow_result",
-        "Workflow result did not match the response schema."
-      );
-    }
-
-    console.error("workflow route failed", error);
+    console.error("workflow run enqueue failed", error);
 
     return jsonError(
       500,
-      "workflow_route_failed",
-      "Workflow route failed before a receipt was captured."
+      "workflow_run_enqueue_failed",
+      "Workflow run could not be enqueued for execution."
     );
   }
 };
@@ -1391,6 +1477,16 @@ export const handleWorkflowWorkerRequest = async <Environment>(
     return await handleWorkflowEventStreamRequest(input, runIdSegment);
   }
 
+  const statusRoute = /^\/runs\/([^/]+)\/status$/u.exec(url.pathname);
+  if (statusRoute !== null) {
+    const [, runIdSegment] = statusRoute;
+    if (runIdSegment === undefined) {
+      return jsonError(404, "not_found", "Route not found.");
+    }
+
+    return await handleWorkflowRunStatusRequest(input, runIdSegment);
+  }
+
   if (url.pathname === "/admin/packages/prepare-seed") {
     return await handlePackageSeedPreparationRequest(input);
   }
@@ -1418,6 +1514,9 @@ export const createWorkflowWorkerHandler = <Environment = Env>(
       ...(options.createFrontDoor === undefined
         ? {}
         : { createFrontDoor: options.createFrontDoor }),
+      ...(options.enqueueRun === undefined
+        ? {}
+        : { enqueueRun: options.enqueueRun }),
       env,
       request,
       ...(options.eventStreamTail === undefined

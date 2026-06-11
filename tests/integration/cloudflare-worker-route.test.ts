@@ -8,6 +8,7 @@ import {
   WorkflowRunBlockedSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
+import type { StartRunRequest } from "../../src/app/domain/schemas.ts";
 import { parseCloudflarePackageArtifactRef } from "../../src/app/infrastructure/cloudflare-package-artifacts-reader.ts";
 import {
   PackageSeedFinalizeRequestSchema,
@@ -57,6 +58,10 @@ const runsAuthHeaders = {
 const fetchWithTestFrontDoor = (input: {
   readonly request: Request;
   readonly calls: unknown[];
+  readonly enqueueRun?: (
+    env: Record<string, unknown>,
+    runInput: StartRunRequest
+  ) => Promise<void>;
   readonly env?: Record<string, unknown>;
   readonly readRunStatus?: (
     env: Record<string, unknown>,
@@ -65,6 +70,13 @@ const fetchWithTestFrontDoor = (input: {
 }): Promise<Response> =>
   handleWorkflowWorkerRequest({
     createFrontDoor: () => createBlockedFrontDoor(input.calls),
+    enqueueRun:
+      input.enqueueRun ??
+      ((_env, runInput) => {
+        input.calls.push(runInput);
+
+        return Promise.resolve();
+      }),
     env: input.env ?? createRunsAuthEnv(),
     readRunStatus: input.readRunStatus ?? (() => Promise.resolve(null)),
     request: input.request,
@@ -893,7 +905,7 @@ describe("Cloudflare Worker route", () => {
     });
   });
 
-  it("accepts POST /runs and delegates the typed request to the front door", async () => {
+  it("accepts POST /runs with 202 and enqueues the run without driving it", async () => {
     const body = buildIntegrationTestRunRequest();
     const calls: unknown[] = [];
 
@@ -905,25 +917,19 @@ describe("Cloudflare Worker route", () => {
         method: "POST",
       }),
     });
-    const json = WorkflowRunBlockedSchema.parse(await response.json());
+    const json: unknown = await response.json();
 
     expect({
       calls,
       json,
       status: response.status,
     }).toStrictEqual({
-      calls: [body],
+      calls: [{ request: body, workItemId: body.workItemId }],
       json: {
-        blocker: {
-          code: "adapter_unavailable",
-          message: "Route test blocker.",
-          redacted: true,
-        },
-        eventLog: [],
         runId: body.runId,
-        status: "blocked",
+        status: "accepted",
       },
-      status: 200,
+      status: 202,
     });
   });
 
@@ -1063,6 +1069,130 @@ describe("Cloudflare Worker route", () => {
       calls: [],
       duplicateLookups: [{ runId: body.runId }],
       status: 409,
+    });
+  });
+
+  it("reports a non-terminal then terminal run status across the run", async () => {
+    const statuses = ["executingDynamicWorkflow", "captured"] as const;
+    let pollIndex = 0;
+    const readRunStatus = (
+      _env: Record<string, unknown>,
+      runInput: { readonly runId: string }
+    ): Promise<WorkflowRunStatusSnapshot> => {
+      const status = statuses[Math.min(pollIndex, statuses.length - 1)];
+      pollIndex += 1;
+      if (status === undefined) {
+        throw new Error("Expected a status for the poll.");
+      }
+
+      return Promise.resolve({ runId: runInput.runId, status });
+    };
+
+    const makeStatusRequest = (): Request =>
+      new Request("https://workflow.example.test/runs/run-route-test/status", {
+        headers: runsAuthHeaders,
+        method: "GET",
+      });
+
+    const nonTerminalResponse = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus,
+      request: makeStatusRequest(),
+    });
+    const nonTerminal: unknown = await nonTerminalResponse.json();
+
+    const terminalResponse = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus,
+      request: makeStatusRequest(),
+    });
+    const terminal: unknown = await terminalResponse.json();
+
+    expect({
+      nonTerminal,
+      nonTerminalCacheControl: nonTerminalResponse.headers.get("Cache-Control"),
+      nonTerminalStatus: nonTerminalResponse.status,
+      terminal,
+      terminalStatus: terminalResponse.status,
+    }).toStrictEqual({
+      nonTerminal: {
+        redacted: true,
+        runId: "run-route-test",
+        status: "executingDynamicWorkflow",
+        terminal: false,
+      },
+      nonTerminalCacheControl: "no-store",
+      nonTerminalStatus: 200,
+      terminal: {
+        redacted: true,
+        runId: "run-route-test",
+        status: "captured",
+        terminal: true,
+      },
+      terminalStatus: 200,
+    });
+  });
+
+  it("returns 404 from the run status route when the run is unknown", async () => {
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus: () => Promise.resolve(null),
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/status",
+        {
+          headers: runsAuthHeaders,
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "run_not_found",
+          message: "Run not found.",
+          redacted: true,
+        },
+      },
+      status: 404,
+    });
+  });
+
+  it("rejects unauthenticated run status reads before touching the reader", async () => {
+    const calls: unknown[] = [];
+
+    const response = await handleWorkflowWorkerRequest({
+      env: createRunsAuthEnv(),
+      readRunStatus(_env, input) {
+        calls.push(input);
+
+        return Promise.resolve(null);
+      },
+      request: new Request(
+        "https://workflow.example.test/runs/run-route-test/status",
+        {
+          method: "GET",
+        }
+      ),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        error: {
+          code: "missing_auth",
+          message: "Run routes require a bearer token.",
+          redacted: true,
+        },
+      },
+      calls: [],
+      status: 401,
     });
   });
 
