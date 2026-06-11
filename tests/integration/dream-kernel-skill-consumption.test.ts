@@ -27,7 +27,33 @@ import {
 } from "../../src/app/domain/schemas.ts";
 import { workflowTraceContextForLane } from "../../src/app/domain/trace-context.ts";
 import { plannerPromptFor } from "../../src/app/infrastructure/cloudflare-agent-lane-adapters.ts";
+import {
+  defaultPackageSeedTemplates,
+  packageMetadataForSeedTemplate,
+} from "../../src/app/infrastructure/cloudflare-package-seeder.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
+
+const seededClawKernelMetadata = () => {
+  const template = defaultPackageSeedTemplates.find(
+    (candidate) => candidate.packageId === "badass-courses/claw-kernel"
+  );
+  if (template === undefined) {
+    throw new Error("Expected a seeded badass-courses/claw-kernel template.");
+  }
+  return packageMetadataForSeedTemplate(template);
+};
+
+const pinnedSeededClawKernel = (): PinnedPackage => {
+  const metadata = seededClawKernelMetadata();
+  return PinnedPackageSchema.parse({
+    artifactRef: metadata.latestArtifactRef,
+    fileHashes: { "package.json": sha256Hex("seeded-claw-kernel@1.0.0") },
+    manifestHash: sha256Hex("seeded-claw-kernel-manifest"),
+    metadata,
+    pinnedAt: "2026-06-11T00:00:00.000Z",
+    version: metadata.latestVersion,
+  });
+};
 
 const KERNEL_SKILL_BODY = [
   "# Dream Workflow Shape",
@@ -395,5 +421,67 @@ describe("node-adapter kernel-skill exposure", () => {
     expect(capturedSkills).toHaveLength(1);
     expect(capturedSkills?.[0]?.skillId).toBe("dream.workflow-shape");
     expect(capturedSkills?.[0]?.body).toContain(SKILL_BODY_MARKER);
+  });
+});
+
+describe("seeded claw-kernel carries real authored skills", () => {
+  it("exports two skills (workflow-design and analysis-method) with parseable inline bodies", () => {
+    const metadata = seededClawKernelMetadata();
+    const skillExports = metadata.exports.filter(
+      (packageExport) => packageExport.kind === "skill"
+    );
+
+    expect(skillExports).toHaveLength(2);
+    expect(
+      skillExports.map((packageExport) => packageExport.skill?.skillId)
+    ).toStrictEqual(["dream.workflow-design", "dream.analysis-method"]);
+    for (const packageExport of skillExports) {
+      expect(packageExport.skill?.body.length ?? 0).toBeGreaterThan(0);
+      expect(packageExport.skill?.body.length ?? 0).toBeLessThanOrEqual(
+        KERNEL_SKILL_BODY_MAX_CHARS
+      );
+    }
+  });
+
+  it("resolves both seeded skills with claw-kernel provenance", () => {
+    const resolved = resolveKernelSkills([pinnedSeededClawKernel()]);
+
+    expect(resolved.map((skill) => skill.skillId)).toStrictEqual([
+      "dream.workflow-design",
+      "dream.analysis-method",
+    ]);
+    for (const skill of resolved) {
+      expect(skill.packageId).toBe("badass-courses/claw-kernel");
+      expect(skill.trustTier).toBe("reviewed");
+    }
+  });
+
+  it("injects the workflow-design skill's named patterns into the planner prompt", () => {
+    const prompt = plannerPromptFor(
+      plannerInputFor([pinnedSeededClawKernel()])
+    );
+
+    expect(prompt).toContain(
+      "## Kernel Skills (use these to design the workflow)"
+    );
+    expect(prompt).toContain(
+      "dream.workflow-design — Workflow Design: Shaping the Dream Machine"
+    );
+    expect(prompt).toContain("Pattern: fan-out search, fan-in correlate");
+    expect(prompt).toContain(
+      "the post-acceptance node belongs to a DIFFERENT workflow"
+    );
+  });
+
+  it("injects the analysis-method skill's discriminating-rating guidance into the planner prompt", () => {
+    const prompt = plannerPromptFor(
+      plannerInputFor([pinnedSeededClawKernel()])
+    );
+
+    expect(prompt).toContain(
+      "dream.analysis-method — Analysis Method: Evidence to Findings"
+    );
+    expect(prompt).toContain("rate by recurrence x impact");
+    expect(prompt).toContain("rating = recurrence + impact");
   });
 });

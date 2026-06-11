@@ -69,6 +69,167 @@ const defaultPackageBranch = "main";
 const packageManifestPath = "package.json";
 const repoNamePattern = /^[A-Za-z0-9._-]+$/u;
 
+/**
+ * Real kernel skill: WORKFLOW-DESIGN patterns the planner reads to shape the
+ * generated machine. This is authored content (not a fixture); the kernel
+ * consumption path injects this body verbatim into the planner prompt's
+ * "## Kernel Skills" section. It names the patterns the planner should reach
+ * for and the anti-patterns that produced the linear-checklist, post-review-node
+ * dreams that flaw B of the system-design gap diagnosed. Kept under
+ * KERNEL_SKILL_BODY_MAX_CHARS (16k); the schema rejects it otherwise.
+ */
+const dreamWorkflowDesignSkillBody = [
+  "# Workflow Design: Shaping the Dream Machine",
+  "",
+  "You are designing an XState machine for a transcript-review dream. The dream is",
+  "stochastic in HOW it reasons and deterministic in its ENVELOPE: explore real",
+  "evidence, correlate it, propose changes, report, then STOP for a human. Use the",
+  "patterns below by name. They exist because earlier dreams degraded into linear",
+  "checklists that mechanically ran one node per source and stapled post-review",
+  "work onto the end of the same machine.",
+  "",
+  "## Pattern: fan-out search, fan-in correlate",
+  "",
+  "Do NOT search one source, then the next, then the next in a single chain. Fan",
+  "OUT: emit one search step per source family / horizon / machine you intend to",
+  "cover, with no dependsOn between them, so they are independent and the executor",
+  "can run them as parallel siblings. Then fan IN: a single correlate step that",
+  "dependsOn every search/hydrate step, taking all of their outputs as input. The",
+  "shape is map (search per source) -> reduce (correlate across all). A correlate",
+  "step that dependsOn only one search is a smell — it means you collapsed the",
+  "fan-out and the dream will only ever see one source at a time.",
+  "",
+  "Concretely, for a dream over agent transcripts across several sessions:",
+  "- search-transcripts-recent  (dependsOn: [])",
+  "- search-transcripts-archive (dependsOn: [])",
+  "- search-brain-decisions     (dependsOn: [])",
+  "- hydrate-transcripts        (dependsOn: [search-transcripts-recent, search-transcripts-archive])",
+  "- correlate                  (dependsOn: [hydrate-transcripts, search-brain-decisions])",
+  "",
+  "## Pattern: explore -> correlate -> propose -> report -> STOP",
+  "",
+  "Every dream machine is exactly these five phases and ends. There is NO sixth",
+  "phase. The terminal report is a HITL report: a human reads it and decides. The",
+  "machine's job is to produce that report and reach `done`. It does not act on",
+  "its own findings.",
+  "",
+  "1. explore  — fan-out search + redacted hydrate. Pull REAL receipts.",
+  "2. correlate — fan-in. Cluster evidence into themes (see the analysis skill).",
+  "3. propose  — turn clusters into concrete kernel/workflow/schema change proposals.",
+  "4. report   — render the HITL report card surface. Tie every claim to receipts.",
+  "5. STOP     — reach the `done` final state. Hand control to the human.",
+  "",
+  "## Anti-pattern: the post-acceptance node belongs to a DIFFERENT workflow",
+  "",
+  "Do NOT put hitl-decision-seed, hitl-follow-up-run-request, or any 'apply the",
+  "accepted finding' node into the dream machine. Those nodes run AFTER a human",
+  "accepts a finding — they belong to a separate, post-acceptance workflow that a",
+  "human (or the app) triggers once the report is reviewed. Stapling them onto the",
+  "dream machine makes the dream act on findings it only just proposed, with no",
+  "human in the loop. The dream proposes; a second workflow disposes. If the run",
+  "binding explicitly asks you to also model the post-acceptance seed, model it as",
+  "its OWN machine with its own runId — never as trailing states after `report`.",
+  "",
+  "## Pattern: add a think-lane when a node needs judgment, not a template",
+  "",
+  "The analytical nodes (correlate, propose-refinements, report) must REASON over",
+  "the hydrated evidence, not fill a template. When a step's job is 'decide what",
+  "matters here' rather than 'transform this shape into that shape', mark it as a",
+  "node whose config carries the analysis intent so the executor runs it as an",
+  "agent (think) lane with the analysis-method skill in scope. A correlate step",
+  "that just buckets search hits by score, or a report step that rates every",
+  "finding 10/10, is a template-filler masquerading as analysis — that is the",
+  "exact failure this design is meant to kill. Reserve think-lanes for the three",
+  "analytical nodes; keep the search/hydrate/capture nodes deterministic.",
+  "",
+  "## Envelope invariants (never violate)",
+  "",
+  "- A primary source that resolved ZERO receipts blocks the report. Never render",
+  "  a confident review over a source the dream could not actually read.",
+  "- Capture the generated machine and its plan as durable memory before the",
+  "  report, so the dream that produced a finding is itself reviewable.",
+  "- Every external apply/send is a capability step behind a lease + review gate,",
+  "  never direct tool access. The dream reports; it does not deploy.",
+].join("\n");
+
+/**
+ * Real kernel skill: ANALYSIS-METHOD the agentic correlate/propose/report nodes
+ * read to turn hydrated transcript evidence into discriminating findings. This
+ * is the antidote to the "every search hit -> 'X needs review', rating
+ * round(score*10), every finding 10/10" template slop that flaw B diagnosed.
+ * Authored content, injected verbatim by the consumption path.
+ */
+const dreamAnalysisMethodSkillBody = [
+  "# Analysis Method: Evidence to Findings",
+  "",
+  "You are reasoning over hydrated transcript receipts — real session evidence,",
+  "not search-result metadata. Your job is to produce findings a human can act on.",
+  "A finding is a claim about a recurring problem, tied to specific receipts, with",
+  "a rating that means something and a concrete proposed change. The failure mode",
+  "you are replacing rated every search hit 'needs review' at 10/10 by multiplying",
+  "a similarity score by ten. Do none of that. Reason.",
+  "",
+  "## Step 1: cluster by theme, not by source",
+  "",
+  "Read the hydrated receipts and group them by the SAME underlying problem, even",
+  "when they come from different sessions, sources, or horizons. A theme is 'the",
+  "agent kept re-deriving the typesense env each session' or 'the planner kept",
+  "emitting post-review nodes'. One receipt is an anecdote; a theme is a cluster.",
+  "Discard singletons unless the single instance is high-impact on its own.",
+  "",
+  "## Step 2: identify repeated friction and corrections",
+  "",
+  "Within each cluster, look for the signals that mark a real problem:",
+  "- friction: the same workaround, retry, or dead-end appears across sessions.",
+  "- correction: the human corrected the agent the same way more than once.",
+  "- abandonment: a path was started repeatedly and dropped.",
+  "- contradiction: receipts disagree about how something works.",
+  "A cluster with none of these is noise — say so and drop it. Do not invent a",
+  "finding to fill a slot.",
+  "",
+  "## Step 3: rate by recurrence x impact (ratings MUST discriminate)",
+  "",
+  "Rating is on 1-10 and it must SPREAD. If every finding is 8+, your ratings are",
+  "useless and you have not done the work. Derive the rating, do not assert it:",
+  "",
+  "  recurrence: 1 (one session) .. 5 (pervasive, most sessions)",
+  "  impact:     1 (cosmetic)     .. 5 (blocks real work / corrupts output)",
+  "  rating = recurrence + impact   (range 2..10)",
+  "",
+  "A one-off cosmetic nit is a 2-3. A pervasive nit, or a one-off that blocked a",
+  "run, is a 5-6. A recurring problem that actively corrupts output or wastes the",
+  "human's time every session is a 9-10 — those should be RARE. If you produce",
+  "five findings and they are not spread across at least a 4-point range, re-rate:",
+  "you have flattened real differences. The point of the rating is to tell the",
+  "human what to fix FIRST.",
+  "",
+  "## Step 4: tie every finding to specific receipts",
+  "",
+  "Every finding cites the receipt refs that prove it — the actual hydrated",
+  "session/artifact references, not 'the transcripts'. A claim with no receipt is",
+  "a hallucination and must be dropped. The receipts are the difference between a",
+  "finding and an opinion. If the strongest evidence for a cluster is weak, lower",
+  "the recurrence score accordingly rather than overstating it.",
+  "",
+  "## Step 5: propose a concrete change",
+  "",
+  "Each finding ends in ONE concrete proposed change, named at the right altitude:",
+  "- kernel-skill change: 'add a data-access skill documenting the typesense env'.",
+  "- workflow change: 'planner should emit post-review nodes as a separate machine'.",
+  "- schema change: 'source-profile needs a primary/supplementary tier'.",
+  "- access change: 'the joelclaw CLI must self-load system-bus.env'.",
+  "- report change: 'rating must derive from recurrence+impact, not score*10'.",
+  "Vague proposals ('improve X', 'review Y') are not proposals. Name the artifact",
+  "and the edit. The proposal's own rating inherits the finding's: do not inflate.",
+  "",
+  "## What a good finding set looks like",
+  "",
+  "Three to seven findings, ratings spread across the range, each clustered from",
+  "multiple receipts, each ending in a named change. Fewer real findings beats a",
+  "wall of 10/10 'needs review' cards. If the evidence only supports two findings,",
+  "emit two. Honesty about thin evidence is the whole point of the dream.",
+].join("\n");
+
 export const PackageSeedSubjectSchema = z.object({
   canDiscover: z.boolean().default(true),
   canInvoke: z.boolean().default(false),
@@ -93,7 +254,7 @@ export const defaultPackageSeedTemplates =
   DefaultPackageSeedTemplatesSchema.parse([
     {
       description:
-        "Default operating law, receipt-first behavior, package mount rules, and capability lease vocabulary.",
+        "Default operating law plus real authored kernel skills: a workflow-design skill that shapes the dream machine (fan-out/fan-in, explore->correlate->propose->report->STOP, post-acceptance as a separate workflow, think-lanes) and an analysis-method skill that turns hydrated evidence into discriminating, receipt-tied findings.",
       exports: [
         {
           contractRef: "contract://claw-kernel/operator-law.v1",
@@ -101,27 +262,33 @@ export const defaultPackageSeedTemplates =
           kind: "prompt",
         },
         {
-          // Fixture kernel skill proving the kernel-consumption wire end to end.
-          // The planner prompt builder reads this body into a real "Kernel
-          // Skills" section and the agentic node-adapter input carries it; the
-          // next stage replaces this placeholder with authored workflow-design /
-          // analysis skills. Keep it minimal but real so a pinned claw-kernel
-          // always exercises the consumption path.
-          contractRef: "contract://claw-kernel/workflow-shape-skill.v1",
-          exportId: "workflow-shape-skill",
+          // Real WORKFLOW-DESIGN kernel skill. The planner reads this body (via
+          // the kernel-consumption path) to shape the generated machine:
+          // fan-out/fan-in, the explore->correlate->propose->report->STOP shape,
+          // post-acceptance nodes belonging to a separate workflow, and when to
+          // add a think-lane. Authored content, not a fixture.
+          contractRef: "contract://claw-kernel/workflow-design-skill.v1",
+          exportId: "workflow-design-skill",
           kind: "skill",
           skill: {
-            body: [
-              "# Dream Workflow Shape",
-              "",
-              "Shape a transcript-review dream as a deterministic envelope around stochastic reasoning:",
-              "search -> hydrate -> correlate -> propose-refinements -> hitl-report -> STOP.",
-              "Fan out source families in the search node; fan in receipts at hydrate.",
-              "Never render a confident review over a primary source that resolved zero receipts;",
-              "block instead. Capture the generated machine as durable memory before the report.",
-            ].join("\n"),
-            skillId: "dream.workflow-shape",
-            title: "Dream Workflow Shape",
+            body: dreamWorkflowDesignSkillBody,
+            skillId: "dream.workflow-design",
+            title: "Workflow Design: Shaping the Dream Machine",
+          },
+        },
+        {
+          // Real ANALYSIS-METHOD kernel skill. The agentic correlate/propose/
+          // report nodes read this body to turn hydrated transcript evidence
+          // into discriminating findings (cluster -> friction -> rate by
+          // recurrence+impact -> tie to receipts -> propose a concrete change),
+          // the antidote to the "X needs review, 10/10" template slop.
+          contractRef: "contract://claw-kernel/analysis-method-skill.v1",
+          exportId: "analysis-method-skill",
+          kind: "skill",
+          skill: {
+            body: dreamAnalysisMethodSkillBody,
+            skillId: "dream.analysis-method",
+            title: "Analysis Method: Evidence to Findings",
           },
         },
       ],
