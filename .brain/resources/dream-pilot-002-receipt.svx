@@ -31,6 +31,17 @@ The run executed the two LOCAL nodes (capture-run, capture-artifact — no relay
 
 Hypothesis: the DO alarm-driven step continuation has a gap in the REAL workerd multi-invocation walk that the M2.5 eviction tests (which used fakes + a single simulated alarm) did not exercise. After node 2 the driver either failed to re-arm the next-step alarm, or the drive invocation died without re-arming, AND the reaper alarm was not pending/firing. The fix-forward (`0e3587a`) addressed evicted-run re-drive with fakes; live multi-step continuation across real Worker invocations is the untested surface.
 
-## Next
+## Root cause found + fixed (watchdog), validated live
 
-Diagnose the DO driver's real multi-step continuation: why does it stop after node 2, is alarm(now) re-armed per step in production, and why didn't the reaper alarm fire at the 10-min mark? `wrangler tail` during a fresh run will show the alarm invocations. This is a focused durability debug, not a batch — and it is the true last blocker between here and a captured dream. The conformance work is done; the driver continuation is the gap.
+Read of `cloudflare-capsule-supervisor.ts` alarm() found it: `await driveQueuedRuns(now)` (runs the WHOLE workflow to terminal in one invocation via `frontDoor.startRun`) ran FIRST, and `rearmReaperAlarmIfSlotsRemain()` was at the END. A workerd eviction mid-drive (long multi-node walk exceeds one invocation budget) skipped the re-arm entirely — no future alarm to reap OR re-drive. `driveOneQueuedRun` catches THROWN errors (so a throw re-arms fine); the orphan is HARD-KILL only, which is exactly what wedged runs 6 and 7 (both reproduced the wedge at executingDynamicWorkflow).
+
+Fix (`858333e`): arm a watchdog alarm (the reaper deadline) BEFORE `driveQueuedRuns`, gated on a queued run-start record so an idle DO does not re-arm forever. A killed drive now leaves a committed alarm; on fire, driveQueuedRuns runs first and re-drives from the latest checkpoint (resume), with the reaper as backstop. Test `arms a watchdog alarm before driving...` isolates it by clearing the start alarm so only the pre-drive watchdog can re-set it (255 tests green). Deployed as Worker `1e10ee88`.
+
+**Validated live:** run 6 (`a4fbef36`), orphaned/wedged-forever on the old worker, recovered to terminal `blocked` once the new worker's alarm fired (a fresh submit to the same workItemId DO triggered it). Orphan bug retired in production.
+
+## Remaining (next session, not blockers)
+
+1. **Recovery is reap-or-resume on a 10-min watchdog cadence** — correct but slow. The clean improvement is true one-step-per-alarm (ADR step 4): drive ONE node per alarm, re-arm alarm(now) between nodes, so each node gets a fresh budget and resume is immediate, not 10 min later. That makes a long dream complete fast instead of across slow watchdog cycles.
+2. **Possible relay-call hang** — both wedges happened entering executingDynamicWorkflow's relay-backed nodes; the relay log showed no incoming signals/search request for run 6. If the Worker→tunnel fetch can hang (no timeout on the relay client), each drive hangs on node 3 until killed. Add a fetch timeout to the relay client so a slow/hung relay surfaces as a clean blocker, not an invocation kill.
+3. **Let a run complete** — with the watchdog, a run should now reach terminal (captured or blocked-with-reason) on its own. Submit and check back rather than babysitting; GET /runs/:runId/status now carries the blocker reason if it blocks.
+4. **Tunnel is an ephemeral quick-tunnel** — fine for pilots; a named cloudflared tunnel is the durable answer before any unattended/scheduled dream.
