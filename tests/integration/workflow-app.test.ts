@@ -5169,6 +5169,223 @@ describe("workflow app integration contract", () => {
       status: "blocked",
     });
   });
+
+  const buildDreamValidationWorkflow = (input: {
+    readonly artifactStore: string;
+    readonly mutateStepConfig?: (step: {
+      readonly config: Record<string, unknown>;
+      readonly nodeType: string;
+      readonly stepId: string;
+    }) => Record<string, unknown> | null;
+  }) => {
+    const artifacts = createMemoryArtifactStore(input.artifactStore);
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const request = buildIntegrationTestDreamRunRequest();
+    const hitlDecisionInputRef = artifacts.artifactRef({
+      path: "report/hitl-decision.json",
+      runId: request.runId,
+    });
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
+    const writeHitlDecision = artifacts.writeJson({
+      path: "report/hitl-decision.json",
+      redacted: true,
+      runId: request.runId,
+      value: integrationTestMemoryHitlDecisionDocument({
+        captureRunRef: artifacts.artifactRef({
+          path: "dream/capture-run.json",
+          runId: request.runId,
+        }),
+        refinementProposalRef: artifacts.artifactRef({
+          path: "dream/refinement-proposals.json",
+          runId: request.runId,
+        }),
+        reportRef: artifacts.artifactRef({
+          path: "report/hitl-report.json",
+          runId: request.runId,
+        }),
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+    });
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        async proposePlan(plannerInput) {
+          const blueprint = addDreamPreflightToBlueprint(
+            await planner.proposePlan(plannerInput),
+            { hitlDecisionInputRef }
+          );
+          if (input.mutateStepConfig === undefined) {
+            return blueprint;
+          }
+
+          return DynamicWorkflowBlueprintSchema.parse({
+            ...blueprint,
+            plan: {
+              ...blueprint.plan,
+              steps: blueprint.plan.steps.map((step) => {
+                if (step.kind !== "workflow.node.invoke") {
+                  return step;
+                }
+                const nextConfig = input.mutateStepConfig?.({
+                  config: step.config,
+                  nodeType: step.nodeType,
+                  stepId: step.stepId,
+                });
+
+                return nextConfig === null || nextConfig === undefined
+                  ? step
+                  : { ...step, config: nextConfig };
+              }),
+            },
+          });
+        },
+      },
+      executionMode: "integration-test",
+      installedSourceProfiles: [dreamTranscriptReviewSourceProfile],
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        dreamIntegrationPackages
+      ),
+      postExecutionArtifactRecorders: [
+        {
+          binding: {
+            kind: "profile-id",
+            packageId: dreamTranscriptReviewSourceProfile.packageId,
+            profileId: dreamTranscriptReviewSourceProfile.profileId,
+          },
+          recorder: createMemoryGeneratedWorkflowProofRecorder({
+            artifacts,
+            buildAdditionalProofChecks: async ({ executionProof }) => [
+              await buildWorkflowHitlReportAuditProofCheck({
+                artifacts,
+                executionProof,
+              }),
+            ],
+            expectedPackageRef: memoryWorkflowPackageRef,
+            expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+            expectedSourceProfileExportId:
+              "dream-transcript-review-source-profile",
+            now: () => "2026-06-10T10:30:00.000Z",
+          }),
+        },
+      ],
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection,
+      workflowNodeAdapter: createArtifactBackedWorkflowCartridgeAdapter({
+        artifacts,
+        delegate: createMemoryFabricWorkflowNodeAdapter({
+          artifacts,
+          memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+          memoryCorrelation: createIntegrationTestMemoryCorrelationAdapter(),
+          memoryRetrieval: createIntegrationTestMemoryRetrievalAdapter(),
+          memorySignals: createIntegrationTestMemoryRetrievalAdapter(),
+        }),
+        now: () => "2026-06-10T10:00:00.000Z",
+      }),
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    return {
+      artifacts,
+      request,
+      statusProjection,
+      workflow,
+      writeHitlDecision,
+    };
+  };
+
+  it("blocks an unrepairable plan node config at plan-load time before any node executes and surfaces it via status", async () => {
+    const harness = buildDreamValidationWorkflow({
+      artifactStore: "workflow-app-validate-block",
+      // maxHits is constrained to 1..100; 999 is genuinely unrepairable.
+      mutateStepConfig: (step) =>
+        step.stepId === "search-dream-memory"
+          ? { ...step.config, maxHits: 999 }
+          : null,
+    });
+    await harness.writeHitlDecision;
+
+    const result = await harness.workflow.run(harness.request);
+
+    if (result.status !== "blocked") {
+      throw new Error(`expected blocked run, got ${result.status}`);
+    }
+    // The blocker names step + field; the executor never ran (fail-fast).
+    expect(result.blocker.message).toMatch(
+      /search-dream-memory.*config\.maxHits/u
+    );
+
+    // Fail-fast: the run blocked before any node executed, so no node output
+    // artifact (e.g. the search artifact) was ever written.
+    const searchArtifactRef = harness.artifacts.artifactRef({
+      path: "dream/memory-search.json",
+      runId: harness.request.runId,
+    });
+    await expect(
+      harness.artifacts.readJson({ artifactRef: searchArtifactRef })
+    ).rejects.toThrow(/artifact/iu);
+
+    // Stage 1 observability: the terminal blocker is visible via the status
+    // projection, naming exactly which node + field failed.
+    const projection = harness.statusProjection.latest.get(
+      harness.request.runId
+    );
+    expect(projection?.terminalBlocker).toStrictEqual({
+      code: "plan_node_config_invalid",
+      message: result.blocker.message,
+      nodeType: "joelclaw.memory.search",
+      redacted: true,
+      stepId: "search-dream-memory",
+    });
+  });
+
+  it("passes validation and executes a fully leashable plan (out-of-enum signalKinds is repaired, not blocked)", async () => {
+    const harness = buildDreamValidationWorkflow({
+      artifactStore: "workflow-app-validate-leashable",
+      // The classic planner miss: an out-of-enum signalKind. The leash drops it,
+      // so validation must pass and the run must execute to captured.
+      mutateStepConfig: (step) =>
+        step.stepId === "mine-memory-signals"
+          ? {
+              ...step.config,
+              signalKinds: ["workflow", "workflow-pattern", "correction"],
+            }
+          : null,
+    });
+    await harness.writeHitlDecision;
+
+    const result = await harness.workflow.run(harness.request);
+
+    if (result.status !== "captured") {
+      throw new Error(result.blocker.message);
+    }
+    expect(result.status).toBe("captured");
+    const projection = harness.statusProjection.latest.get(
+      harness.request.runId
+    );
+    expect(projection?.terminalBlocker).toBeUndefined();
+  });
 });
 
 describe("workflow run-step checkpoints (M2.5)", () => {

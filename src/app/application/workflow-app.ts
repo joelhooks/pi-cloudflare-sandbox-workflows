@@ -430,6 +430,19 @@ type PinnedPlanSupportArtifactsLoadResult =
   | BlockedPinnedPlanSupportArtifacts
   | LoadedPinnedPlanSupportArtifacts;
 
+type PinnedPlanExecutionPreparation =
+  | {
+      readonly blocker: CapabilityBlocker;
+      readonly status: "blocked";
+      readonly stepContext?: TerminalBlockerStepContext;
+      readonly summary: string;
+    }
+  | {
+      readonly machine: LoadedDynamicWorkflowMachine;
+      readonly status: "ready";
+      readonly supportArtifacts: LoadedPinnedPlanSupportArtifacts;
+    };
+
 type GeneratedWorkflowMachineState =
   DynamicWorkflowMachineDocument["xstate"]["states"][string];
 
@@ -1513,25 +1526,16 @@ export class WorkflowApp implements WorkflowAppContract {
       );
     }
 
-    const loadedMachine = await this.loadPinnedDynamicWorkflowMachine({
-      loadedPlan,
-    });
-    if (loadedMachine.status === "blocked") {
+    const preparedPlan = await this.preparePinnedPlanExecution({ loadedPlan });
+    if (preparedPlan.status === "blocked") {
       return await block(
-        loadedMachine.blocker,
-        "Pinned generated workflow machine failed validation."
+        preparedPlan.blocker,
+        preparedPlan.summary,
+        preparedPlan.stepContext
       );
     }
-
-    const loadedSupportArtifacts = await this.loadPinnedPlanSupportArtifacts({
-      loadedPlan,
-    });
-    if (loadedSupportArtifacts.status === "blocked") {
-      return await block(
-        loadedSupportArtifacts.blocker,
-        "Pinned generated harness or verification contract failed validation."
-      );
-    }
+    const loadedMachine = preparedPlan.machine;
+    const loadedSupportArtifacts = preparedPlan.supportArtifacts;
 
     await transition(
       { type: "PINNED_DYNAMIC_WORKFLOW_LOADED" },
@@ -3070,6 +3074,97 @@ export class WorkflowApp implements WorkflowAppContract {
       capabilityReceipts: [branchDelivery.capabilityReceipt, parsedReceipt],
       status: "delivered",
     };
+  }
+
+  /**
+   * Load and validate everything the pinned plan needs before the first node
+   * runs: the generated machine, the support artifacts (harness +
+   * verification contract), and — fail-fast (conformance: validate) — every
+   * `workflow.node.invoke` step's `config`. Returning one blocked/ready result
+   * keeps `run` to a single guard instead of three. On any failure the run
+   * blocks with the precise blocker (and, for a node-config miss, the offending
+   * stepId/nodeType so GET status surfaces which node + field failed).
+   */
+  private async preparePinnedPlanExecution(input: {
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+  }): Promise<PinnedPlanExecutionPreparation> {
+    const loadedMachine = await this.loadPinnedDynamicWorkflowMachine({
+      loadedPlan: input.loadedPlan,
+    });
+    if (loadedMachine.status === "blocked") {
+      return {
+        blocker: loadedMachine.blocker,
+        status: "blocked",
+        summary: "Pinned generated workflow machine failed validation.",
+      };
+    }
+
+    const supportArtifacts = await this.loadPinnedPlanSupportArtifacts({
+      loadedPlan: input.loadedPlan,
+    });
+    if (supportArtifacts.status === "blocked") {
+      return {
+        blocker: supportArtifacts.blocker,
+        status: "blocked",
+        summary:
+          "Pinned generated harness or verification contract failed validation.",
+      };
+    }
+
+    const nodeConfigBlock = this.validatePinnedPlanNodeConfigs(
+      input.loadedPlan
+    );
+    if (nodeConfigBlock !== null) {
+      return {
+        blocker: nodeConfigBlock.blocker,
+        status: "blocked",
+        stepContext: nodeConfigBlock.stepContext,
+        summary:
+          "Pinned plan node config failed fail-fast validation before execution.",
+      };
+    }
+
+    return { machine: loadedMachine, status: "ready", supportArtifacts };
+  }
+
+  /**
+   * Fail-fast plan-config validation (conformance: validate). Ask the
+   * workflow-node adapter to validate every `workflow.node.invoke` step's
+   * `config` against the same registry schema the adapter parses against at
+   * execution — so this runs AFTER the leash and a repairable config passes;
+   * only a genuinely unrepairable one fails. Returns the first failing step's
+   * blocker plus its stepId/nodeType (so the terminal blocker is legible), or
+   * `null` when every config conforms / no validator is configured — the
+   * executor still enforces config at dispatch.
+   */
+  private validatePinnedPlanNodeConfigs(
+    loadedPlan: DynamicWorkflowPlanDocument
+  ): {
+    readonly blocker: CapabilityBlocker;
+    readonly stepContext: TerminalBlockerStepContext;
+  } | null {
+    const { workflowNodeAdapter } = this.dependencies;
+    if (workflowNodeAdapter?.validatePlanNodeConfig === undefined) {
+      return null;
+    }
+
+    for (const step of loadedPlan.steps) {
+      if (step.kind !== "workflow.node.invoke") {
+        continue;
+      }
+
+      const configBlocker = workflowNodeAdapter.validatePlanNodeConfig({
+        step,
+      });
+      if (configBlocker !== null) {
+        return {
+          blocker: configBlocker,
+          stepContext: { nodeType: step.nodeType, stepId: step.stepId },
+        };
+      }
+    }
+
+    return null;
   }
 
   private async loadPinnedDynamicWorkflowMachine(input: {

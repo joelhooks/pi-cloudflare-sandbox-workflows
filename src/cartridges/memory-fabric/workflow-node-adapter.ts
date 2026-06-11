@@ -396,6 +396,60 @@ export const memoryFabricNodeConfigContractNotes = (): readonly string[] => {
   ];
 };
 
+/**
+ * Render one Zod issue as a redacted, operator-legible field clause naming the
+ * config path and the expected constraint. Zod issue messages describe the
+ * SCHEMA (e.g. "Too big: expected number to be <=100", "Invalid option:
+ * expected one of ..."), never the offending value, so the clause carries no
+ * planner payload — only the contract the config violated.
+ */
+const describePlanNodeConfigIssue = (issue: z.core.$ZodIssue): string => {
+  const path = issue.path.map(String).join(".");
+  const at = path.length > 0 ? `config.${path}` : "config";
+
+  return `${at} (${issue.message})`;
+};
+
+/**
+ * Fail-fast plan-config validation for one memory-fabric `workflow.node.invoke`
+ * step, run at plan-load time before the first node executes. The step's config
+ * is parsed against the SAME leashed registry schema its execute fn uses, so a
+ * config the leash can repair (omitted defaults, out-of-enum members it drops)
+ * passes and returns `null`; only a genuinely unrepairable config (e.g. a
+ * `maxHits` outside 1..100, a non-string `query`) blocks. A `nodeType` the
+ * registry does not cover also returns `null` — that step is not this adapter's
+ * config to validate. On failure the blocker names the stepId, nodeType, and the
+ * first violated field path + expected constraint so the run blocks legibly at
+ * the start instead of mid-walk.
+ */
+export const validateMemoryFabricNodeConfig = (
+  step: WorkflowNodeInvocationStep
+): CapabilityBlocker | null => {
+  const schema = (
+    MEMORY_FABRIC_NODE_CONFIG_SCHEMAS as Record<string, z.ZodType | undefined>
+  )[step.nodeType];
+  if (schema === undefined) {
+    return null;
+  }
+
+  const parsed = schema.safeParse(step.config);
+  if (parsed.success) {
+    return null;
+  }
+
+  const issue = parsed.error.issues.at(0);
+  const detail =
+    issue === undefined
+      ? "config did not satisfy the node's contract"
+      : describePlanNodeConfigIssue(issue);
+
+  return {
+    code: "plan_node_config_invalid",
+    message: `Plan step ${step.stepId} (nodeType ${step.nodeType}) has invalid config: ${detail}.`,
+    redacted: true,
+  };
+};
+
 const blocker = (
   code: CapabilityBlocker["code"],
   message: string
@@ -2586,5 +2640,8 @@ export const createMemoryFabricWorkflowNodeAdapter = (
       "adapter_unavailable",
       `Memory fabric workflow node adapter does not support nodeType ${input.step.nodeType}.`
     );
+  },
+  validatePlanNodeConfig(input) {
+    return validateMemoryFabricNodeConfig(input.step);
   },
 });

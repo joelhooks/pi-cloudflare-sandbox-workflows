@@ -164,4 +164,13 @@ export const createArtifactBackedWorkflowCartridgeAdapter = (
       status: "executed",
     };
   },
+  validatePlanNodeConfig(input) {
+    // Fail-fast plan-config validation is the delegate cartridge's contract; the
+    // artifact-backed wrapper only adds cartridge-export proof at execution time
+    // and has no config schema of its own, so it forwards verbatim (and returns
+    // null when the delegate does not implement the optional validator).
+    return (
+      config.delegate.validatePlanNodeConfig?.({ step: input.step }) ?? null
+    );
+  },
 });

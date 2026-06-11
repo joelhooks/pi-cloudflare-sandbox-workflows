@@ -245,6 +245,22 @@ export interface WorkflowNodeAdapterPort {
     readonly plan: DynamicWorkflowPlanDocument;
     readonly step: WorkflowNodeInvocationStep;
   }): Promise<WorkflowNodeExecutionResult>;
+
+  /**
+   * Fail-fast plan-config validation, run once at plan-load time (before the
+   * first node executes) for one `workflow.node.invoke` step. The adapter parses
+   * `step.config` against the SAME leashed registry schema its `execute` fn uses,
+   * so a config the leash can repair returns `null` (valid) and only a genuinely
+   * unrepairable config returns a precise `plan_node_config_invalid` blocker that
+   * names the offending field path and the expected constraint (redacted, no
+   * secrets). Returning `null` for a `nodeType` the adapter does not own (no
+   * registry schema) leaves that step to the executor's existing dispatch. The
+   * method is optional so adapters without a config registry need not implement
+   * it; the app treats an absent method as "nothing to validate".
+   */
+  validatePlanNodeConfig?(input: {
+    readonly step: WorkflowNodeInvocationStep;
+  }): CapabilityBlocker | null;
 }
 
 export interface AgentPlannerLanePort extends DynamicWorkflowPlannerPort {

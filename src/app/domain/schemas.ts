@@ -1164,6 +1164,7 @@ export const CapabilityDenialCodeSchema = z.enum([
   "resource_scope_denied",
   "adapter_unavailable",
   "receipt_persistence_failed",
+  "plan_node_config_invalid",
 ]);
 
 export const CapabilityBlockerSchema = z.object({
