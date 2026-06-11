@@ -85,6 +85,7 @@ import type {
   WorkflowTerminalBlocker,
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
+import { primarySourceFamiliesOf } from "../domain/source-profile.ts";
 import type { MemorySourceProfile } from "../domain/source-profile.ts";
 import {
   workflowTraceContextForCapability,
@@ -3567,6 +3568,23 @@ export class WorkflowApp implements WorkflowAppContract {
       })
     );
 
+    // Deterministic criticality backstop: derive the primary source families
+    // from the run's INSTALLED profile, not from planner-provided config. The
+    // report node unions these with any config-provided families, so a dead
+    // primary source cannot masquerade as a dream even if the stochastic planner
+    // omits the field (the "contract, not a caveat" requirement).
+    const profileSourceProfileId = input.request.planProposal.sourceProfileId;
+    const installedSourceProfile =
+      profileSourceProfileId === undefined
+        ? undefined
+        : (this.dependencies.installedSourceProfiles ?? []).find(
+            (profile) => profile.profileId === profileSourceProfileId
+          );
+    const profilePrimarySourceFamilies =
+      installedSourceProfile === undefined
+        ? []
+        : primarySourceFamiliesOf(installedSourceProfile);
+
     try {
       return await workflowNodeAdapter.execute({
         actor: input.request.actor,
@@ -3576,6 +3594,7 @@ export class WorkflowApp implements WorkflowAppContract {
         dependencyArtifactRefs,
         machine: input.machine,
         plan: input.loadedPlan,
+        primarySourceFamilies: profilePrimarySourceFamilies,
         // Resolve the run's pinned kernel skills the SAME way the planner prompt
         // does (resolveKernelSkills over the pinned packages), so an agentic
         // analytical node reasons over the same workflow-design / analysis skill

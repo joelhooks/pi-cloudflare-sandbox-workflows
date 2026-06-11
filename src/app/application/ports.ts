@@ -58,6 +58,7 @@ import type {
   WzrrdPublishDeliveryResult,
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
+import type { MemorySourceFamily } from "../domain/source-profile.ts";
 
 export type FrontDoorRoute = "POST /runs";
 
@@ -273,6 +274,14 @@ export interface WorkflowNodeAdapterPort {
      * skills passes `[]` — graceful degradation, never a crash.
      */
     readonly resolvedKernelSkills?: readonly ResolvedKernelSkill[];
+    /**
+     * Primary source families declared by the run's INSTALLED source profile —
+     * the deterministic backstop for criticality enforcement. The report node
+     * enforces against these (unioned with any planner-provided config), so a
+     * dead primary source cannot masquerade as a dream even if the stochastic
+     * planner omits the field. Empty when the profile declares no primaries.
+     */
+    readonly primarySourceFamilies?: readonly MemorySourceFamily[];
     readonly step: WorkflowNodeInvocationStep;
   }): Promise<WorkflowNodeExecutionResult>;
 

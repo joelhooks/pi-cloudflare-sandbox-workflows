@@ -2908,8 +2908,18 @@ const executeHitlReportNode = async (
   // unavailable) from masquerading as a confident transcript review. Families
   // with no primary contract (the default `[]`) skip this check entirely, so
   // supplementary staleness stays a non-blocking caveat as before.
+  // Union the planner-provided config families with the profile-injected
+  // backstop (input.primarySourceFamilies, derived deterministically from the
+  // installed profile by the workflow app). The planner cannot weaken the
+  // contract by omitting the field — the profile's primaries always enforce.
+  const enforcedPrimarySourceFamilies = [
+    ...new Set([
+      ...nodeConfig.primarySourceFamilies,
+      ...(input.primarySourceFamilies ?? []),
+    ]),
+  ];
   const unreadPrimaryFamilies = unreadPrimaryFamiliesFor({
-    primarySourceFamilies: nodeConfig.primarySourceFamilies,
+    primarySourceFamilies: enforcedPrimarySourceFamilies,
     search: reportInputs.search,
   });
   if (unreadPrimaryFamilies.length > 0) {
