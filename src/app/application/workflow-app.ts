@@ -1,6 +1,7 @@
 import { createActor } from "xstate";
 
 import { hashJson, sha256Hex } from "../domain/hash.ts";
+import { resolveKernelSkills } from "../domain/kernel-skills.ts";
 import {
   CapabilityLeaseRequestSchema,
   CapabilityLeaseReceiptSchema,
@@ -3575,6 +3576,15 @@ export class WorkflowApp implements WorkflowAppContract {
         dependencyArtifactRefs,
         machine: input.machine,
         plan: input.loadedPlan,
+        // Resolve the run's pinned kernel skills the SAME way the planner prompt
+        // does (resolveKernelSkills over the pinned packages), so an agentic
+        // analytical node reasons over the same workflow-design / analysis skill
+        // content the planner used. The plan carries the pinned packages with
+        // full metadata, so no extra store read is needed; a run with no kernel
+        // skills resolves to `[]`.
+        resolvedKernelSkills: resolveKernelSkills(
+          input.loadedPlan.pinnedPackages
+        ),
         step: input.step,
       });
     } catch (error) {

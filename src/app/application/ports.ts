@@ -1,3 +1,4 @@
+import type { ResolvedKernelSkill } from "../domain/kernel-skills.ts";
 import type {
   Actor,
   ArtifactRef,
@@ -260,6 +261,18 @@ export interface WorkflowNodeAdapterPort {
     readonly completedStepArtifactRefs?: Readonly<Record<string, ArtifactRef>>;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly plan: DynamicWorkflowPlanDocument;
+    /**
+     * The kernel skill content (workflow-design patterns, data-access guides,
+     * analysis playbooks) resolved from the run's pinned kernel packages, the
+     * same set injected into the planner prompt. Carried here so an agentic
+     * analytical node (the correlate/propose/report lanes the next stages make
+     * reason over evidence) can read the same analysis skill the planner used
+     * to shape the workflow, instead of being a deterministic template-filler
+     * with no access to kernel content. Optional and defaulted empty: an
+     * adapter that does not consume skills ignores it, and a run with no kernel
+     * skills passes `[]` — graceful degradation, never a crash.
+     */
+    readonly resolvedKernelSkills?: readonly ResolvedKernelSkill[];
     readonly step: WorkflowNodeInvocationStep;
   }): Promise<WorkflowNodeExecutionResult>;
 

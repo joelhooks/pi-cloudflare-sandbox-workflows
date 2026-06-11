@@ -293,6 +293,31 @@ export const WorkflowNodeTypeSchema = z
   )
   .brand<"WorkflowNodeType">();
 
+/**
+ * Maximum inline kernel-skill body size, in characters. A skill body is shaped
+ * reasoning content (a workflow-design pattern, an analysis method, a
+ * data-access guide) that rides inline in the package manifest so it reaches
+ * the planner through `pinnedPackages[*].metadata.exports` with no extra
+ * artifact read, and reaches the mount through the manifest write. The cap
+ * bounds prompt growth and keeps one runaway export from drowning the planner;
+ * `resolveKernelSkills` enforces a second, run-level total budget on top of it.
+ */
+export const KERNEL_SKILL_BODY_MAX_CHARS = 16_000;
+
+/**
+ * Inline content for a `kind: "skill"` package export. The body is the skill
+ * itself (the text the planner/agentic-node reads into its reasoning), not a
+ * ref to fetch later: keeping it inline means a pinned kernel already carries
+ * its skills in-memory by the time the planner builds its prompt, so the
+ * consumption path needs no second store round-trip and the existing
+ * package-manifest seed + mount writer carry the body for free.
+ */
+export const KernelSkillContentSchema = z.object({
+  body: z.string().min(1).max(KERNEL_SKILL_BODY_MAX_CHARS),
+  skillId: z.string().min(1),
+  title: z.string().min(1),
+});
+
 export const PackageExportSchema = z
   .object({
     contractRef: z.string().min(1),
@@ -313,8 +338,26 @@ export const PackageExportSchema = z
       "skill",
     ]),
     nodeType: WorkflowNodeTypeSchema.optional(),
+    skill: KernelSkillContentSchema.optional(),
   })
   .superRefine((exportRecord, context) => {
+    if (exportRecord.kind === "skill" && exportRecord.skill === undefined) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Skill package exports must carry inline skill content (skillId, title, body).",
+        path: ["skill"],
+      });
+    }
+
+    if (exportRecord.kind !== "skill" && exportRecord.skill !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Only skill package exports may carry inline skill content.",
+        path: ["skill"],
+      });
+    }
+
     if (
       exportRecord.kind === "workflow-node" &&
       exportRecord.nodeType === undefined
@@ -2306,6 +2349,7 @@ export type LinearCommentPayload = z.infer<typeof LinearCommentPayloadSchema>;
 export type LinearIssueResource = z.infer<typeof LinearIssueResourceSchema>;
 export type OutputTarget = z.infer<typeof OutputTargetSchema>;
 export type PackageEntitlement = z.infer<typeof PackageEntitlementSchema>;
+export type KernelSkillContent = z.infer<typeof KernelSkillContentSchema>;
 export type PackageExport = z.infer<typeof PackageExportSchema>;
 export type PackageMetadata = z.infer<typeof PackageMetadataSchema>;
 export type PinnedPackage = z.infer<typeof PinnedPackageSchema>;

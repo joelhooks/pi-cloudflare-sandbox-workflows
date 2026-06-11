@@ -11,6 +11,10 @@ import type {
 } from "../application/ports.ts";
 import { hashJson } from "../domain/hash.ts";
 import {
+  renderKernelSkillsPromptSection,
+  resolveKernelSkills,
+} from "../domain/kernel-skills.ts";
+import {
   AgentLaneReceiptSchema,
   DynamicWorkflowBlueprintSchema,
   PlannerLaneBlueprintDocumentSchema,
@@ -76,7 +80,18 @@ const researchReviewOutputJsonSchema = JSON.stringify(
   2
 );
 
-const plannerPromptFor = (input: {
+/**
+ * Build the planner lane prompt. The "## Kernel Skills (use these to design the
+ * workflow)" section is the kernel-consumption keystone: it resolves the inline
+ * skill exports of the pinned kernel packages and injects their FULL bodies, so
+ * the planner reasons over real workflow-design / data-access / analysis
+ * guidance instead of `JSON.stringify(pinnedPackages)` + "copy these refs."
+ * When no pinned package exports a skill the section is omitted entirely, so a
+ * run without kernel skills reads exactly as it did before this wire existed.
+ * Exported so the consumption path can be asserted directly in tests without
+ * standing up a full lane runtime.
+ */
+export const plannerPromptFor = (input: {
   readonly actor: Actor;
   readonly availablePackages: readonly PackageMetadata[];
   readonly notification?: DynamicWorkflowNotificationInput;
@@ -84,8 +99,12 @@ const plannerPromptFor = (input: {
   readonly proposal: PlanProposal;
   readonly runId: string;
   readonly workItemId: string;
-}): string =>
-  [
+}): string => {
+  const kernelSkillsSection = renderKernelSkillsPromptSection(
+    resolveKernelSkills(input.pinnedPackages)
+  );
+
+  return [
     "# Pi Planner Lane",
     "",
     "Generate a DynamicWorkflowBlueprint for the requested run. Emit only JSON. Do not wrap the JSON in Markdown. Do not call tools, perform side effects, or materialize secrets.",
@@ -202,10 +221,13 @@ const plannerPromptFor = (input: {
     "",
     JSON.stringify(input.availablePackages, null, 2),
     "",
+    ...kernelSkillsSection,
+    ...(kernelSkillsSection.length > 0 ? [""] : []),
     "## Pinned Packages",
     "",
     JSON.stringify(input.pinnedPackages, null, 2),
   ].join("\n");
+};
 
 const assertPlannerBlueprintBoundToRequest = (input: {
   readonly actor: Actor;

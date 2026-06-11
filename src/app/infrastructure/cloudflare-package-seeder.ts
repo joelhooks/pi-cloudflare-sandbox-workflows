@@ -100,6 +100,30 @@ export const defaultPackageSeedTemplates =
           exportId: "operator-law",
           kind: "prompt",
         },
+        {
+          // Fixture kernel skill proving the kernel-consumption wire end to end.
+          // The planner prompt builder reads this body into a real "Kernel
+          // Skills" section and the agentic node-adapter input carries it; the
+          // next stage replaces this placeholder with authored workflow-design /
+          // analysis skills. Keep it minimal but real so a pinned claw-kernel
+          // always exercises the consumption path.
+          contractRef: "contract://claw-kernel/workflow-shape-skill.v1",
+          exportId: "workflow-shape-skill",
+          kind: "skill",
+          skill: {
+            body: [
+              "# Dream Workflow Shape",
+              "",
+              "Shape a transcript-review dream as a deterministic envelope around stochastic reasoning:",
+              "search -> hydrate -> correlate -> propose-refinements -> hitl-report -> STOP.",
+              "Fan out source families in the search node; fan in receipts at hydrate.",
+              "Never render a confident review over a primary source that resolved zero receipts;",
+              "block instead. Capture the generated machine as durable memory before the report.",
+            ].join("\n"),
+            skillId: "dream.workflow-shape",
+            title: "Dream Workflow Shape",
+          },
+        },
       ],
       kind: "kernel",
       latestVersion: "1.0.0",
