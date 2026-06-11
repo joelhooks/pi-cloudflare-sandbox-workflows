@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { z } from "zod";
 
@@ -49,6 +52,43 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER_BYTES = 4_000_000;
 const REDACTED_TOKEN = "[redacted-token]";
 const UNKNOWN_MACHINE_ID = "unknown";
+
+/**
+ * Path to the local system bus env file. The JoelClaw CLI does NOT self-load
+ * its Typesense connection config; without this, it dials `localhost:8108` and
+ * never reaches the real index on `panda:8108`. We load it here and pass it as
+ * the child env so `agent-transcripts` resolves to real sessions.
+ */
+const SYSTEM_BUS_ENV_PATH = join(homedir(), ".config", "system-bus.env");
+
+/**
+ * Only these keys are lifted from `system-bus.env` into the CLI child env. We
+ * intentionally allowlist rather than spread the whole file so an unrelated
+ * secret in that file never leaks into a child process we spawn.
+ */
+const JOELCLAW_ENV_KEYS = [
+  "TYPESENSE_URL",
+  "TYPESENSE_API_KEY",
+  "JOELCLAW_CENTRAL_URL",
+] as const;
+
+/**
+ * Redacted, operator-legible cause categories for a JoelClaw CLI failure. These
+ * are the ONLY substrings appended to a skip reason on the error path — never
+ * stderr verbatim, never a path, never a secret value. They let an operator
+ * tell "binary missing" from "config absent" from "command errored" from
+ * "garbage stdout" without exposing anything sensitive.
+ */
+const JOELCLAW_SKIP_CAUSE = {
+  cliError: "joelclaw-cli-error",
+  cliNotFound: "joelclaw-cli-not-found",
+  cliTimeout: "joelclaw-cli-timeout",
+  indexUnavailable: "joelclaw-index-unavailable",
+  parseFailed: "joelclaw-output-unparseable",
+} as const;
+
+type JoelClawSkipCause =
+  (typeof JOELCLAW_SKIP_CAUSE)[keyof typeof JOELCLAW_SKIP_CAUSE];
 
 const JoelClawSessionRuntimeSchema = z.enum([
   "all",
@@ -167,15 +207,150 @@ export const trustedJoelClawSessionSourceForAuthorityRoot = (
   };
 };
 
-const defaultCommand: TrustedJoelClawSessionBridgeCommand = (input) =>
-  Promise.resolve({
-    stdout: execFileSync("joelclaw", [...input.args], {
-      encoding: "utf-8",
-      maxBuffer: DEFAULT_MAX_BUFFER_BYTES,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: DEFAULT_TIMEOUT_MS,
-    }),
-  });
+/**
+ * A failure that carries a redacted cause category so the catch path can append
+ * a diagnosable (but non-leaking) skip reason. `message` is never surfaced.
+ */
+export class JoelClawSessionBridgeError extends Error {
+  readonly causeCategory: JoelClawSkipCause;
+
+  constructor(causeCategory: JoelClawSkipCause, detail: string) {
+    super(detail);
+    this.name = "JoelClawSessionBridgeError";
+    this.causeCategory = causeCategory;
+  }
+}
+
+/**
+ * Parses a `KEY=VALUE` env file (shell-style). Skips blanks and `#` comments,
+ * strips a leading `export `, and trims one layer of matching single/double
+ * quotes from values. Returns only the JoelClaw allowlist keys; everything else
+ * in the file is ignored so unrelated secrets never reach the child process.
+ */
+export const parseJoelClawSystemBusEnv = (
+  fileContents: string
+): Record<string, string> => {
+  const parsed: Record<string, string> = {};
+  const allowlist = new Set<string>(JOELCLAW_ENV_KEYS);
+
+  for (const rawLine of fileContents.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) {
+      continue;
+    }
+
+    const withoutExport = line.startsWith("export ")
+      ? line.slice("export ".length).trim()
+      : line;
+    const equalsIndex = withoutExport.indexOf("=");
+    if (equalsIndex <= 0) {
+      continue;
+    }
+
+    const key = withoutExport.slice(0, equalsIndex).trim();
+    if (!allowlist.has(key)) {
+      continue;
+    }
+
+    let value = withoutExport.slice(equalsIndex + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    parsed[key] = value;
+  }
+
+  return parsed;
+};
+
+/**
+ * Reads the JoelClaw Typesense connection overlay from `~/.config/system-bus.env`
+ * (allowlist keys only). Tolerant by design: a missing or unreadable file
+ * yields an empty overlay rather than throwing — `agent-transcripts` degrading
+ * to a skip is acceptable; the dream hard-failing is not.
+ */
+export const readJoelClawBridgeEnvOverlay = (input?: {
+  readonly envPath?: string;
+  readonly readEnvFile?: (path: string) => string;
+}): Record<string, string> => {
+  const envPath = input?.envPath ?? SYSTEM_BUS_ENV_PATH;
+  const readEnvFile =
+    input?.readEnvFile ??
+    ((path: string) => readFileSync(path, { encoding: "utf-8" }));
+
+  try {
+    return parseJoelClawSystemBusEnv(readEnvFile(envPath));
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Loads the JoelClaw connection env, merging the `system-bus.env` overlay OVER
+ * `process.env` so the spawned CLI reaches the real index on `panda:8108`
+ * instead of dialing `localhost:8108`. Returns a plain record; callers that need
+ * the strict `ProcessEnv` shape (e.g. `execFileSync`) should spread the real
+ * `process.env` themselves and only merge the overlay.
+ */
+export const loadJoelClawBridgeEnv = (input?: {
+  readonly envPath?: string;
+  readonly processEnv?: Readonly<Record<string, string | undefined>>;
+  readonly readEnvFile?: (path: string) => string;
+}): Record<string, string | undefined> => ({
+  ...(input?.processEnv ?? process.env),
+  ...readJoelClawBridgeEnvOverlay(input),
+});
+
+const errnoCode = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+
+  const { code } = error;
+  return typeof code === "string" ? code : undefined;
+};
+
+const causeForExecError = (error: unknown): JoelClawSkipCause => {
+  const code = errnoCode(error);
+  if (code === "ENOENT") {
+    return JOELCLAW_SKIP_CAUSE.cliNotFound;
+  }
+  if (code === "ETIMEDOUT") {
+    return JOELCLAW_SKIP_CAUSE.cliTimeout;
+  }
+
+  return JOELCLAW_SKIP_CAUSE.cliError;
+};
+
+const defaultCommand: TrustedJoelClawSessionBridgeCommand = (input) => {
+  // Spread the real `process.env` (keeps the strict ProcessEnv shape) then
+  // merge the redacted system-bus overlay so the CLI reaches panda:8108.
+  const env = { ...process.env, ...readJoelClawBridgeEnvOverlay() };
+  try {
+    return Promise.resolve({
+      stdout: execFileSync("joelclaw", [...input.args], {
+        encoding: "utf-8",
+        env,
+        maxBuffer: DEFAULT_MAX_BUFFER_BYTES,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: DEFAULT_TIMEOUT_MS,
+      }),
+    });
+  } catch (error) {
+    // Re-throw as a typed, redacted-cause error. We deliberately drop the raw
+    // message/stderr/path here so nothing sensitive reaches the skip reason.
+    return Promise.reject(
+      new JoelClawSessionBridgeError(
+        causeForExecError(error),
+        "joelclaw CLI invocation failed"
+      )
+    );
+  }
+};
 
 const searchArgs = (input: {
   readonly limit: number;
@@ -333,7 +508,9 @@ export const searchTrustedJoelClawSessionSource = async (input: {
       return {
         hits: [],
         hydrations: [],
-        skippedSources: [`${input.sourceId}:joelclaw-index-unavailable`],
+        skippedSources: [
+          `${input.sourceId}:${JOELCLAW_SKIP_CAUSE.indexUnavailable}`,
+        ],
       };
     }
 
@@ -387,11 +564,16 @@ export const searchTrustedJoelClawSessionSource = async (input: {
       hydrations,
       skippedSources: [],
     };
-  } catch {
+  } catch (error) {
+    const cause =
+      error instanceof JoelClawSessionBridgeError
+        ? error.causeCategory
+        : JOELCLAW_SKIP_CAUSE.parseFailed;
+
     return {
       hits: [],
       hydrations: [],
-      skippedSources: [`${input.sourceId}:joelclaw-index-unavailable`],
+      skippedSources: [`${input.sourceId}:${cause}`],
     };
   }
 };
