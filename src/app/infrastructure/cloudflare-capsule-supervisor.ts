@@ -20,10 +20,16 @@ import type {
   AgentLaneReleaseReceipt,
   ContextCapsuleRecord,
 } from "../domain/schemas.ts";
+import type { CloudflareD1PackageRegistryConfig } from "./cloudflare-package-registry.ts";
+import { reapStuckRunsForWorkItem } from "./cloudflare-run-reaper.ts";
 
 export interface WorkflowCapsuleSupervisorEnv {
+  readonly WORKFLOW_APP_D1?: CloudflareD1PackageRegistryConfig["d1"];
+  readonly WORKFLOW_APP_TIMEOUT_MS?: number | string;
   readonly WORKFLOW_CAPSULE_SUPERVISOR: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>;
 }
+
+const TimeoutMsSchema = z.coerce.number().int().min(1);
 
 const ResolveCapsuleRequestSchema = z.object({
   runId: z.string().min(1),
@@ -159,6 +165,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       workItemId: input.workItemId,
     });
     await this.putRecord(nextRecord);
+    await this.ensureReaperAlarm();
 
     return json(
       AgentLaneAdmissionDecisionSchema.parse({
@@ -191,6 +198,98 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async getRecordResponse(): Promise<Response> {
     return json(await this.getRecord());
+  }
+
+  /**
+   * Reaper alarm. Marks any run for this work item stuck in a non-terminal D1
+   * state past the timeout as failed and releases its leaked admission slots.
+   * No-op when no run is stuck (idempotent re-sweep) and when D1/timeout are
+   * unbound. Re-arms itself while admission slots remain so a later crash is
+   * still swept.
+   */
+  override async alarm(): Promise<void> {
+    const reaperContext = this.resolveReaperContext();
+    if (reaperContext === undefined) {
+      return;
+    }
+
+    const record = await this.getRecord();
+    if (record.workItemId === undefined) {
+      return;
+    }
+
+    const { reapedRunIds } = await reapStuckRunsForWorkItem({
+      d1: reaperContext.d1,
+      timeoutMs: reaperContext.timeoutMs,
+      workItemId: record.workItemId,
+    });
+
+    if (reapedRunIds.length > 0) {
+      await this.releaseAdmissionSlotsAfterReap(record);
+    }
+
+    await this.rearmReaperAlarmIfSlotsRemain();
+  }
+
+  private resolveReaperContext():
+    | undefined
+    | {
+        readonly d1: NonNullable<
+          WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+        >;
+        readonly timeoutMs: number;
+      } {
+    const d1 = this.env.WORKFLOW_APP_D1;
+    const timeoutMs = TimeoutMsSchema.safeParse(
+      this.env.WORKFLOW_APP_TIMEOUT_MS
+    );
+    if (d1 === undefined || !timeoutMs.success) {
+      return undefined;
+    }
+
+    return { d1, timeoutMs: timeoutMs.data };
+  }
+
+  private async releaseAdmissionSlotsAfterReap(
+    record: SupervisorRecord
+  ): Promise<void> {
+    if (record.activeLaneIds.length === 0) {
+      return;
+    }
+
+    let { failedLaneIds } = record;
+    for (const laneId of record.activeLaneIds) {
+      failedLaneIds = appendUnique(failedLaneIds, laneId);
+    }
+    await this.putRecord(
+      SupervisorRecordSchema.parse({
+        ...record,
+        activeLaneIds: [],
+        failedLaneIds,
+      })
+    );
+  }
+
+  private async ensureReaperAlarm(): Promise<void> {
+    const reaperContext = this.resolveReaperContext();
+    if (reaperContext === undefined) {
+      return;
+    }
+
+    const fireAt = Date.now() + reaperContext.timeoutMs;
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing === null || existing > fireAt) {
+      await this.ctx.storage.setAlarm(fireAt);
+    }
+  }
+
+  private async rearmReaperAlarmIfSlotsRemain(): Promise<void> {
+    const record = await this.getRecord();
+    if (record.activeLaneIds.length === 0) {
+      return;
+    }
+
+    await this.ensureReaperAlarm();
   }
 
   private async releaseLane(request: Request): Promise<Response> {
