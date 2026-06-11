@@ -17,6 +17,26 @@ export const MemorySourceFamilySchema = z.enum([
   "support",
 ]);
 
+/**
+ * Criticality tier for a source family in a profile. A `primary` family is one
+ * the workflow EXISTS to read: if it resolves zero authority/receipts the run
+ * must not masquerade as a confident report. A `supplementary` family is a
+ * correlation surface whose absence or staleness is a non-blocking caveat.
+ *
+ * This tier is what separates "the one source I exist to read is unreadable"
+ * (a contract violation) from "panda is stale" (a footnote). See the binding
+ * diagnosis `system-design-gap-content-vs-plumbing`.
+ */
+export const MemorySourceCriticalitySchema = z.enum([
+  "primary",
+  "supplementary",
+]);
+
+export const MemorySourceFamilyExpectationSchema = z.object({
+  criticality: MemorySourceCriticalitySchema,
+  family: MemorySourceFamilySchema,
+});
+
 export const MemoryRuntimeSchema = z.enum([
   "claude",
   "cloudflare",
@@ -194,6 +214,15 @@ export const MemorySourceProfileSchema = z
     requiresGeneratedWorkflowProof: z.boolean().default(false),
     schemaVersion: z.literal("memory.source-profile.v1"),
     sourceFamiliesExpected: z.array(MemorySourceFamilySchema).min(1),
+    /**
+     * Per-family criticality tier. Defaulted to `[]` so existing profile data
+     * stays valid (a family with no expectation entry is treated as
+     * `supplementary`). A profile that declares a family `primary` here turns
+     * that family's absence into a run-blocking contract instead of a caveat.
+     */
+    sourceFamilyExpectations: z
+      .array(MemorySourceFamilyExpectationSchema)
+      .default([]),
     sourcePacks: z.array(MemorySourcePackSchema).default([]),
     timeHorizons: z.array(MemoryCoverageHorizonSchema).min(1),
     title: z.string().min(1),
@@ -212,9 +241,68 @@ export const MemorySourceProfileSchema = z
       }
       packIds.add(pack.packId);
     }
+
+    const expectedFamilies = new Set<MemorySourceFamily>(
+      profile.sourceFamiliesExpected
+    );
+    const expectationFamilies = new Set<MemorySourceFamily>();
+    for (const [
+      index,
+      expectation,
+    ] of profile.sourceFamilyExpectations.entries()) {
+      if (!expectedFamilies.has(expectation.family)) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Memory source profile sourceFamilyExpectations may only declare criticality for families in sourceFamiliesExpected.",
+          path: ["sourceFamilyExpectations", index, "family"],
+        });
+      }
+
+      if (expectationFamilies.has(expectation.family)) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "Memory source profile sourceFamilyExpectations family values must be unique.",
+          path: ["sourceFamilyExpectations", index, "family"],
+        });
+      }
+      expectationFamilies.add(expectation.family);
+    }
   });
 
+/**
+ * Resolve the criticality tier for one source family under a profile. A family
+ * with no explicit expectation entry is `supplementary` (the non-blocking
+ * default), so existing profiles that never declare criticality keep their old
+ * "coverage gaps are caveats" behavior.
+ */
+export const sourceFamilyCriticalityOf = (input: {
+  readonly family: MemorySourceFamily;
+  readonly profile: Pick<MemorySourceProfile, "sourceFamilyExpectations">;
+}): MemorySourceCriticality =>
+  input.profile.sourceFamilyExpectations.find(
+    (expectation) => expectation.family === input.family
+  )?.criticality ?? "supplementary";
+
+/**
+ * The source families a profile declares `primary`: the families the workflow
+ * exists to read, whose unread state must block rather than masquerade.
+ */
+export const primarySourceFamiliesOf = (
+  profile: Pick<MemorySourceProfile, "sourceFamilyExpectations">
+): MemorySourceFamily[] =>
+  profile.sourceFamilyExpectations
+    .filter((expectation) => expectation.criticality === "primary")
+    .map((expectation) => expectation.family);
+
 export type MemoryCoverageHorizon = z.infer<typeof MemoryCoverageHorizonSchema>;
+export type MemorySourceCriticality = z.infer<
+  typeof MemorySourceCriticalitySchema
+>;
+export type MemorySourceFamilyExpectation = z.infer<
+  typeof MemorySourceFamilyExpectationSchema
+>;
 export type MemoryFabricNodeType = z.infer<typeof MemoryFabricNodeTypeSchema>;
 export type MemoryPrivacyTier = z.infer<typeof MemoryPrivacyTierSchema>;
 export type MemoryRelayOperation = z.infer<typeof MemoryRelayOperationSchema>;

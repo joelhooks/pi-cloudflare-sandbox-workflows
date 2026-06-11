@@ -192,6 +192,24 @@ const LeashedSourceFamiliesSchema = z.preprocess(
   z.array(MemorySourceFamilySchema).min(1).optional()
 );
 
+// Coerce the report node's `primarySourceFamilies` to a clean MemorySourceFamily
+// array: a non-array (the planner emitting a bare string) or an all-hallucinated
+// array collapses to `[]`, which means "no primary contract on this report" and
+// preserves the legacy caveat-only behavior. Valid members survive. This stays
+// SHAPE tolerance; it never relaxes the primary-source enforcement that runs on
+// the parsed result.
+const coercePrimarySourceFamilies = (value: unknown): MemorySourceFamily[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((family) => {
+    const parsed = MemorySourceFamilySchema.safeParse(family);
+
+    return parsed.success ? [parsed.data] : [];
+  });
+};
+
 const MemoryReadabilitySchema = z
   .enum(["actor-private", "org-private", "public"])
   .default("actor-private");
@@ -262,6 +280,17 @@ const WorkflowHitlReportNodeConfigSchema = z.object({
     WorkflowHitlReportProofLevelSchema.default("plan-derived"),
   hydrationRef: ArtifactRefSchema.optional(),
   hydrationStepId: z.string().min(1).optional(),
+  // The source families this run EXISTS to read. The planner copies these from
+  // the installed source profile's criticality contract (see the dream profile's
+  // planner guidance). Defaulted to `[]` so a report that declares no primary
+  // family keeps the legacy "coverage gaps are caveats" behavior; a primary
+  // family that resolved zero receipts blocks the report instead of letting a
+  // dead source masquerade as a confident review. Out-of-enum members the
+  // planner hallucinates are dropped (leash), not blocked.
+  primarySourceFamilies: z.preprocess(
+    coercePrimarySourceFamilies,
+    z.array(MemorySourceFamilySchema).default([])
+  ),
   refinementProposalRef: ArtifactRefSchema.optional(),
   refinementProposalStepId: z.string().min(1).optional(),
   searchRef: ArtifactRefSchema.optional(),
@@ -738,6 +767,35 @@ const latestDependencyArtifactRef = (
   return refs.at(-1) ?? null;
 };
 
+// The most recent prior output of a given upstream nodeType. plan.steps are in
+// execution order, so the LAST completed node-invoke step of that type is the
+// input this node should consume. Final fallback when the stochastic planner
+// ordered the run correctly but omitted the explicit ref / stepId / dependsOn.
+const upstreamRefByNodeType = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly nodeType: string;
+  readonly plan: DynamicWorkflowPlanDocument;
+}): ArtifactRef | null => {
+  const completed = input.completedStepArtifactRefs;
+  if (completed === undefined) {
+    return null;
+  }
+  let resolved: ArtifactRef | null = null;
+  for (const step of input.plan.steps) {
+    if (step.kind !== "workflow.node.invoke") {
+      continue;
+    }
+    const ref = completed[step.stepId];
+    if (step.nodeType === input.nodeType && ref !== undefined) {
+      resolved = ref;
+    }
+  }
+
+  return resolved;
+};
+
 // The planner's capture-artifact intent is "capture the generated machine and
 // harness" (it emits artifactKinds like workflow.xstate-machine.v1 /
 // workflow.generated-harness.v1 and a capturePurpose, both ignored by the strip
@@ -824,35 +882,6 @@ const captureArtifactPinFor = async (input: {
       "Memory capture artifact node requires a readable generated artifact ref."
     );
   }
-};
-
-// The most recent prior output of a given upstream nodeType. plan.steps are in
-// execution order, so the LAST completed node-invoke step of that type is the
-// input this node should consume. Final fallback when the stochastic planner
-// ordered the run correctly but omitted the explicit ref / stepId / dependsOn.
-const upstreamRefByNodeType = (input: {
-  readonly completedStepArtifactRefs:
-    | Readonly<Record<string, ArtifactRef>>
-    | undefined;
-  readonly nodeType: string;
-  readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null => {
-  const completed = input.completedStepArtifactRefs;
-  if (completed === undefined) {
-    return null;
-  }
-  let resolved: ArtifactRef | null = null;
-  for (const step of input.plan.steps) {
-    if (step.kind !== "workflow.node.invoke") {
-      continue;
-    }
-    const ref = completed[step.stepId];
-    if (step.nodeType === input.nodeType && ref !== undefined) {
-      resolved = ref;
-    }
-  }
-
-  return resolved;
 };
 
 const searchRefFor = (input: {
@@ -1318,6 +1347,54 @@ const reportCardForHit = (input: {
     summary: input.hit.summary,
     title: `Finding ${input.index + 1}: ${familyLabel} needs human review`,
   };
+};
+
+// Families that resolved at least one search hit carrying at least one receipt.
+// A receipt is the proof a family was actually READ — a hit with no receipts is
+// not authority. Used to decide whether a PRIMARY family is unread.
+const familiesWithReceiptsIn = (
+  search: MemorySearchDocument
+): Set<MemorySourceFamily> => {
+  const families = new Set<MemorySourceFamily>();
+  for (const hit of search.hits) {
+    for (const receipt of hit.receipts) {
+      families.add(receipt.family);
+    }
+  }
+
+  return families;
+};
+
+// The PRIMARY families that resolved zero receipts in this run: the families the
+// workflow exists to read but could not. A non-empty result means a dead primary
+// source — the run must not masquerade as a confident review over it.
+const unreadPrimaryFamiliesFor = (input: {
+  readonly primarySourceFamilies: readonly MemorySourceFamily[];
+  readonly search: MemorySearchDocument;
+}): MemorySourceFamily[] => {
+  const resolved = familiesWithReceiptsIn(input.search);
+
+  return input.primarySourceFamilies.filter((family) => !resolved.has(family));
+};
+
+// Block: a primary source the run exists to read resolved zero receipts. The
+// message names the unread families and the skipped-source caveats that explain
+// why (e.g. `...:joelclaw-index-unavailable`) so GET status surfaces a precise,
+// redacted blocker instead of a confident bookshelf-review masquerade.
+const deadPrimarySourceBlocker = (input: {
+  readonly search: MemorySearchDocument;
+  readonly unreadPrimaryFamilies: readonly MemorySourceFamily[];
+}): BlockedWorkflowNodeExecutionResult => {
+  const families = input.unreadPrimaryFamilies.join(", ");
+  const skipped =
+    input.search.skippedSources.length === 0
+      ? "no skipped-source caveats were recorded"
+      : `skipped-source caveats: ${input.search.skippedSources.join(", ")}`;
+
+  return blocker(
+    "stale_package",
+    `Primary source family ${families} resolved zero receipts -- this run cannot be a confident review of it (${skipped}). Fix the source or remove it from the run's primary contract.`
+  );
 };
 
 const reportCardsFor = (input: {
@@ -2430,6 +2507,23 @@ const executeHitlReportNode = async (
   );
   if ("status" in reportInputs) {
     return reportInputs;
+  }
+
+  // Source-criticality contract: a PRIMARY family the run exists to read that
+  // resolved zero receipts blocks the report. This is the boundary that stops a
+  // dead primary source (e.g. agent-transcripts when the JoelClaw index is
+  // unavailable) from masquerading as a confident transcript review. Families
+  // with no primary contract (the default `[]`) skip this check entirely, so
+  // supplementary staleness stays a non-blocking caveat as before.
+  const unreadPrimaryFamilies = unreadPrimaryFamiliesFor({
+    primarySourceFamilies: nodeConfig.primarySourceFamilies,
+    search: reportInputs.search,
+  });
+  if (unreadPrimaryFamilies.length > 0) {
+    return deadPrimarySourceBlocker({
+      search: reportInputs.search,
+      unreadPrimaryFamilies,
+    });
   }
 
   const refinementProposals = await loadOptionalRefinementProposalDocument({

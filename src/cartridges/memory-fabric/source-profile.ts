@@ -4,6 +4,7 @@ import type {
   MemoryRelayOperation,
   MemoryRuntime,
   MemorySourceFamily,
+  MemorySourceFamilyExpectation,
   MemorySourcePack,
   MemorySourceProfile,
 } from "../../app/domain/source-profile.ts";
@@ -16,6 +17,25 @@ export const dreamTranscriptReviewSourceFamilies = [
   "cloudflare-runs",
   "docs-pdf-brain",
   "repo-outputs",
+] as const satisfies readonly MemorySourceFamily[];
+
+/**
+ * Criticality contract for the Dream transcript-review profile. The whole point
+ * of this workflow is to read agent transcripts (the JoelClaw session index), so
+ * `agent-transcripts` is PRIMARY: if it resolves zero receipts the run must not
+ * masquerade as a transcript review. Every other family is SUPPLEMENTARY — a
+ * correlation surface whose absence or staleness stays a non-blocking caveat.
+ */
+export const dreamTranscriptReviewSourceFamilyExpectations = [
+  { criticality: "primary", family: "agent-transcripts" },
+  { criticality: "supplementary", family: "brain" },
+  { criticality: "supplementary", family: "cloudflare-runs" },
+  { criticality: "supplementary", family: "docs-pdf-brain" },
+  { criticality: "supplementary", family: "repo-outputs" },
+] as const satisfies readonly MemorySourceFamilyExpectation[];
+
+export const dreamTranscriptReviewPrimarySourceFamilies = [
+  "agent-transcripts",
 ] as const satisfies readonly MemorySourceFamily[];
 
 export const dreamTranscriptReviewRequiredRuntimes = [
@@ -130,6 +150,7 @@ export const dreamTranscriptReviewSourceProfile =
         `Dream cartridge node palette: ${memoryFabricWorkflowNodePalette.join(", ")}. The planner may choose order, branching, loops, parallelism, and Think lanes when justified by the task, but verifier proof must show run/artifact capture receipts, signal mining, memory search, hydration, correlation, refinement proposals, HITL report, HITL decision seed, and HITL follow-up run request effects happened through generated workflow.node.invoke states.`,
         'Use outputTarget {"kind":"wzrrd","reviewPath":"review/summary.json","primaryDocument":{"artifactPath":"report/hitl-report.mdsvx","publishPath":"report.mdsvx","mediaType":"text/mdsvx","title":"This dream found work to do.","template":{"templateId":"joel/tufte-mdsvx","version":"0.1.0","format":"mdsvx","noindex":true,"defaultExpiresIn":"24h","rendererId":"joel/static-tufte-mdsvx-preview@0.1.0"}}}.',
         "Public Wzrrd output must be noindex, redacted, and proof-below-dreams using docs/dream-report-canon.md.",
+        `Source criticality contract: agent-transcripts is a PRIMARY source this run exists to read. On the joelclaw.memory.hitl-report node set config.primarySourceFamilies to ${JSON.stringify([...dreamTranscriptReviewPrimarySourceFamilies])}. If a primary family resolves zero receipts (e.g. the JoelClaw session index is unavailable) the report node BLOCKS instead of rendering a confident review; supplementary families (brain, repo-outputs, docs-pdf-brain, cloudflare-runs) stay non-blocking caveats.`,
         "Accepted dreams must be reviewable as memory.hitl-decision.v1 decisions with reasoning, rating, recommendation, receipt metadata, Brain/package/workflow artifact update targets, and next-workflow seed constraints. The generated workflow must then produce memory.hitl-decision-workflow-seed.v1 and draft memory.hitl-follow-up-run-request.v1 with submitted:false; the draft is planner input for the next run, not a hidden mutation or live submission.",
       ],
       workItemId: "work-item:memory-fabric",
@@ -142,6 +163,9 @@ export const dreamTranscriptReviewSourceProfile =
     requiresGeneratedWorkflowProof: true,
     schemaVersion: "memory.source-profile.v1",
     sourceFamiliesExpected: [...dreamTranscriptReviewSourceFamilies],
+    sourceFamilyExpectations: [
+      ...dreamTranscriptReviewSourceFamilyExpectations,
+    ],
     sourcePacks: [...dreamTranscriptReviewSourcePacks],
     timeHorizons: [...dreamTranscriptReviewTimeHorizons],
     title: "Dream Transcript Review",
