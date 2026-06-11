@@ -10,6 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@terrastruct/d2": "^0.1.33",
     "zod": "^4.4.3"
   },
   "devDependencies": {

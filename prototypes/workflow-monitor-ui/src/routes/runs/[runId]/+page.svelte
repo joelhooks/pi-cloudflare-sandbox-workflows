@@ -29,10 +29,12 @@
   let status = $state<null | WorkflowRunStatusDocument>(null);
   let stream = $state<null | WorkflowEventStreamDocument>(null);
   let durability = $state<null | RunDurabilityDump>(null);
+  let diagramSvg = $state<null | string>(null);
 
   let statusError = $state<null | string>(null);
   let streamError = $state<null | string>(null);
   let durabilityError = $state<null | string>(null);
+  let diagramError = $state<null | string>(null);
 
   let loading = $state(true);
   let paused = $state(false);
@@ -66,17 +68,21 @@
     inFlight = true;
     const encoded = encodeURIComponent(runId);
 
-    const [statusRes, eventsRes, durabilityRes] = await Promise.allSettled([
-      fetch(`/api/runs/${encoded}/status`, {
-        headers: { accept: "application/json" },
-      }),
-      fetch(`/api/runs/${encoded}/events`, {
-        headers: { accept: "application/json" },
-      }),
-      fetch(`/api/runs/${encoded}/durability`, {
-        headers: { accept: "application/json" },
-      }),
-    ]);
+    const [statusRes, eventsRes, durabilityRes, diagramRes] =
+      await Promise.allSettled([
+        fetch(`/api/runs/${encoded}/status`, {
+          headers: { accept: "application/json" },
+        }),
+        fetch(`/api/runs/${encoded}/events`, {
+          headers: { accept: "application/json" },
+        }),
+        fetch(`/api/runs/${encoded}/durability`, {
+          headers: { accept: "application/json" },
+        }),
+        fetch(`/api/runs/${encoded}/state-diagram`, {
+          headers: { accept: "image/svg+xml" },
+        }),
+      ]);
 
     if (statusRes.status === "fulfilled") {
       try {
@@ -140,6 +146,28 @@
       }
     } else {
       durabilityError = "Could not reach the durability endpoint.";
+    }
+
+    if (diagramRes.status === "fulfilled") {
+      try {
+        if (diagramRes.value.ok) {
+          diagramSvg = await diagramRes.value.text();
+          diagramError = null;
+        } else {
+          let message = `State diagram failed with ${diagramRes.value.status}.`;
+          try {
+            const body: unknown = await diagramRes.value.json();
+            message = extractError(body, diagramRes.value.status);
+          } catch {
+            // Non-JSON error body; keep the generic message.
+          }
+          diagramError = message;
+        }
+      } catch {
+        diagramError = "Could not read the state-diagram response.";
+      }
+    } else {
+      diagramError = "Could not reach the state-diagram endpoint.";
     }
 
     inFlight = false;
@@ -243,6 +271,27 @@
       <button onclick={() => void refresh()}>Refresh</button>
     </div>
   </header>
+
+  <section class="diagram-card" class:is-terminal={terminal}>
+    <div class="diagram-head">
+      <h2 class="card-title">Safety-envelope state machine</h2>
+      <p class="card-hint">
+        Live D2 render. The walked path is filled green, the current state has a
+        heavy accent stroke and pulses, and a blocked run lights its escape edge
+        red.
+      </p>
+    </div>
+    <div class="diagram-stage">
+      {#if diagramSvg !== null}
+        <!-- eslint-disable-next-line svelte/no-at-html-tags -- server-rendered, redaction-safe D2 SVG -->
+        <div class="diagram-svg">{@html diagramSvg}</div>
+      {:else if diagramError !== null}
+        <p class="card-empty">Diagram unavailable: {diagramError}</p>
+      {:else}
+        <p class="card-empty">Rendering state machine…</p>
+      {/if}
+    </div>
+  </section>
 
   <div class="meta-line">
     {#if latestStatus !== null}

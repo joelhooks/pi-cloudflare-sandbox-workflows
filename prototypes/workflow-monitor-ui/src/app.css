@@ -332,6 +332,69 @@ a.run-id:hover {
   color: var(--tone-amber-fg);
 }
 
+/* Live D2 state-machine diagram (centerpiece, top of run page) */
+.diagram-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 18px;
+  padding: 16px 18px 8px;
+}
+
+.diagram-card.is-terminal {
+  border-color: var(--border-strong);
+}
+
+.diagram-head {
+  margin-bottom: 12px;
+}
+
+.diagram-stage {
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+  padding: 8px 0 12px;
+}
+
+.diagram-svg {
+  max-width: 100%;
+}
+
+.diagram-svg svg {
+  height: auto;
+  max-width: 100%;
+}
+
+/*
+ * The current state carries the D2 `current` class (preserved on its node <g>).
+ * Pulse the node's shape rect so the live state reads as active. The pulse is
+ * disabled on a terminal run — captured/blocked are settled, not "working".
+ */
+.diagram-svg g.current .shape rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: diagram-pulse 1.6s ease-in-out infinite;
+}
+
+.diagram-card.is-terminal .diagram-svg g.current .shape rect {
+  animation: none;
+}
+
+@keyframes diagram-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diagram-svg g.current .shape rect {
+    animation: none;
+  }
+}
+
 .detail-grid {
   display: grid;
   gap: 18px;

@@ -241,6 +241,9 @@ importers:
 
   prototypes/workflow-monitor-ui:
     dependencies:
+      '@terrastruct/d2':
+        specifier: ^0.1.33
+        version: 0.1.33
       zod:
         specifier: ^4.4.3
         version: 4.4.3
