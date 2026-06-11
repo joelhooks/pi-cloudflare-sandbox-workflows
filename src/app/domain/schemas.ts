@@ -1967,15 +1967,34 @@ export const ContextCapsuleRecordSchema = z.object({
  * XState-owned and only round-tripped through `createActor(machine, { snapshot })`.
  */
 export const RunStepCheckpointSchema = z.object({
+  // Cumulative capability lease receipts collected so far. Carried so a resumed
+  // drive (single-step or post-eviction) rebuilds the full execution accounting
+  // the finishing envelope needs — receipts issued in a prior drive are not
+  // re-collected on resume, so without this they would be lost from the receipt.
+  capabilityReceipts: z.array(CapabilityLeaseReceiptSchema).default([]),
   completedStepIds: z.array(z.string().min(1)).default([]),
   envelopeSnapshot: z.unknown(),
+  // Every output artifact ref observed so far (a node may emit several), so the
+  // resumed finishing envelope captures the same artifact set as a whole-run.
+  // Distinct from `outputArtifactRefs`, which is the per-step primary refs.
+  executionArtifactRefs: z.array(ArtifactRefSchema).default([]),
   generatedMachineSnapshot: z.unknown(),
+  // Ordered generated-machine states walked so far, for observability parity.
+  generatedStateSequence: z.array(z.string().min(1)).default([]),
   outputArtifactRefs: z.array(ArtifactRefSchema).default([]),
   persistedAt: IsoDateTimeSchema,
+  // The `review.summary` output path reserved for the review gate, if a
+  // review.summary step has completed; re-derived on resume to keep the terminal
+  // review surface stable.
+  reviewSummaryPath: z.string().min(1).optional(),
   runId: z.string().min(1),
   schemaVersion: z.literal("workflow.run-step-checkpoint.v1"),
   stepIndex: z.number().int().min(0),
   workItemId: z.string().min(1),
+  // Cumulative worker lane receipts collected so far (research/review lanes and
+  // integration-test capability lanes). Carried for the same reason as
+  // capabilityReceipts: a resumed drive must surface the full lane evidence.
+  workerLaneReceipts: z.array(AgentLaneReceiptSchema).default([]),
 });
 
 export const PersistRunCheckpointRequestSchema = z.object({
@@ -2153,6 +2172,51 @@ export const WorkflowRunBlockedSchema = z.object({
 export const WorkflowRunResultSchema = z.discriminatedUnion("status", [
   WorkflowRunReceiptSchema,
   WorkflowRunBlockedSchema,
+]);
+
+/**
+ * How `WorkflowApp.run()` drives a run through its dynamic-node loop. `whole-run`
+ * (the default) walks the entire pinned plan plus the finishing envelope in a
+ * single invocation — the legacy behavior. `single-step` resumes from the latest
+ * checkpoint, executes EXACTLY ONE not-yet-completed dynamic node, persists its
+ * checkpoint, and returns: a `paused` result when more dynamic nodes remain, or a
+ * terminal result (`captured`/`blocked`) once the last node has run and the
+ * finishing envelope (verify -> receipts -> summarize -> captured) completed. The
+ * DO alarm uses `single-step` so each alarm advances exactly one node with a
+ * fresh wall-clock budget and a hung node is isolated to its own invocation.
+ */
+export const WorkflowRunDriveModeSchema = z.enum(["single-step", "whole-run"]);
+
+export const WorkflowRunDriveOptionsSchema = z.object({
+  driveMode: WorkflowRunDriveModeSchema.default("whole-run"),
+});
+
+/**
+ * Non-terminal result of a `single-step` drive: exactly one dynamic node ran and
+ * its checkpoint was persisted, but more dynamic nodes remain (or the finishing
+ * envelope has not yet run). The DO re-arms `alarm(now)` and KEEPS the run-start
+ * record so the next alarm resumes the run from this checkpoint and advances the
+ * next node. `stepIndex` is the checkpoint index just persisted (it increments by
+ * one per drive); `completedStepIds` is the cumulative set of completed steps.
+ */
+export const WorkflowRunPausedSchema = z.object({
+  completedStepIds: z.array(z.string().min(1)).default([]),
+  eventLog: z.array(WorkflowEventSchema),
+  runId: z.string().min(1),
+  status: z.literal("paused"),
+  stepIndex: z.number().int().min(0),
+});
+
+/**
+ * Result of driving a run for one invocation. The whole-run default only ever
+ * yields a terminal `WorkflowRunResult` (captured/blocked); `single-step` adds
+ * the non-terminal `paused` variant so the DO can distinguish "re-drive the next
+ * node" from "this run is done". A terminal result never carries `paused`.
+ */
+export const WorkflowRunDriveResultSchema = z.discriminatedUnion("status", [
+  WorkflowRunReceiptSchema,
+  WorkflowRunBlockedSchema,
+  WorkflowRunPausedSchema,
 ]);
 
 export type Actor = z.infer<typeof ActorSchema>;
@@ -2436,6 +2500,14 @@ export type WzrrdResource = z.infer<typeof WzrrdResourceSchema>;
 export type StartRunRequest = z.infer<typeof StartRunRequestSchema>;
 export type WorkflowRunAccepted = z.infer<typeof WorkflowRunAcceptedSchema>;
 export type WorkflowRunBlocked = z.infer<typeof WorkflowRunBlockedSchema>;
+export type WorkflowRunDriveMode = z.infer<typeof WorkflowRunDriveModeSchema>;
+export type WorkflowRunDriveOptions = z.infer<
+  typeof WorkflowRunDriveOptionsSchema
+>;
+export type WorkflowRunDriveResult = z.infer<
+  typeof WorkflowRunDriveResultSchema
+>;
+export type WorkflowRunPaused = z.infer<typeof WorkflowRunPausedSchema>;
 export type WorkflowRunReceipt = z.infer<typeof WorkflowRunReceiptSchema>;
 export type WorkflowRunRequest = z.infer<typeof WorkflowRunRequestSchema>;
 export type WorkflowRunResult = z.infer<typeof WorkflowRunResultSchema>;

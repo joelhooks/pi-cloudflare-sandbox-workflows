@@ -44,6 +44,8 @@ import type {
   VerificationResultDocument,
   WorkflowExecutionProofArtifact,
   WorkflowExecutionProofDocument,
+  WorkflowRunDriveOptions,
+  WorkflowRunDriveResult,
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowEvent,
@@ -60,7 +62,14 @@ export type FrontDoorRoute = "POST /runs";
 
 export interface WorkerFrontDoorContract {
   readonly route: FrontDoorRoute;
-  startRun(input: unknown): Promise<WorkflowRunResult>;
+  // Single wide signature: a `single-step` drive may yield the non-terminal
+  // `paused` variant alongside the terminal captured/blocked. Callers that only
+  // drive whole-run (omit options) still get a `WorkflowRunDriveResult` and must
+  // treat `paused` as unreachable for their mode.
+  startRun(
+    input: unknown,
+    options?: WorkflowRunDriveOptions
+  ): Promise<WorkflowRunDriveResult>;
 }
 
 export interface ContextCapsuleActorContract {
@@ -483,5 +492,11 @@ export interface ReviewGateActorContract {
 
 export interface WorkflowAppContract {
   readonly appName: "workflow-app";
+  // Overloaded so the legacy no-options call still narrows over the 2-variant
+  // terminal union (captured/blocked); a `single-step` drive may also `paused`.
   run(request: WorkflowRunRequest): Promise<WorkflowRunResult>;
+  run(
+    request: WorkflowRunRequest,
+    options: WorkflowRunDriveOptions
+  ): Promise<WorkflowRunDriveResult>;
 }

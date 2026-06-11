@@ -28,7 +28,10 @@ import {
   LoadRunCheckpointResolutionSchema,
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
-import type { WorkflowRunRequest } from "../domain/schemas.ts";
+import type {
+  WorkflowRunDriveOptions,
+  WorkflowRunRequest,
+} from "../domain/schemas.ts";
 import type { MemorySourceProfile } from "../domain/source-profile.ts";
 import {
   createCloudflarePiPlannerLaneAdapter,
@@ -442,11 +445,19 @@ const resolveLinearComments = (input: {
   });
 };
 
+/**
+ * Default the drive options to whole-run when a caller (the legacy submit path)
+ * omits them, so `startRun` carries no nullish branch of its own.
+ */
+const resolveDriveOptions = (
+  options: WorkflowRunDriveOptions | undefined
+): WorkflowRunDriveOptions => options ?? { driveMode: "whole-run" };
+
 export const createCloudflareWorkflowFrontDoor = (
   config: CloudflareWorkflowFrontDoorConfig
 ): WorkerFrontDoorContract => ({
   route: "POST /runs",
-  async startRun(input) {
+  async startRun(input, options?: WorkflowRunDriveOptions) {
     const request = WorkflowRunRequestSchema.parse(input);
     const runStore = await provisionRunStore({ config, request });
     const capsuleSupervisor = resolveCapsuleSupervisor(config);
@@ -615,6 +626,6 @@ export const createCloudflareWorkflowFrontDoor = (
       wzrrdSiteRef: config.wzrrdSiteRef ?? "wzrrd:default",
     });
 
-    return await workflow.run(request);
+    return await workflow.run(request, resolveDriveOptions(options));
   },
 });

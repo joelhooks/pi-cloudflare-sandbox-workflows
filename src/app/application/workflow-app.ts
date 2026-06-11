@@ -30,6 +30,8 @@ import {
   WorkflowExecutionProofDocumentSchema,
   WorkflowEventSchema,
   WorkflowRunBlockedSchema,
+  WorkflowRunDriveOptionsSchema,
+  WorkflowRunPausedSchema,
   WorkflowRunReceiptSchema,
   WorkflowRunRequestSchema,
   WorkflowStatusProjectionSchema,
@@ -74,6 +76,8 @@ import type {
   WorkflowExecutionProofDocument,
   WorkflowEvent,
   WorkflowNodeType,
+  WorkflowRunDriveOptions,
+  WorkflowRunDriveResult,
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowStatusProjection,
@@ -196,10 +200,15 @@ type BlockRun = (
  * Idempotent by `runId` + `stepIndex` in the storage layer.
  */
 type PersistRunCheckpoint = (input: {
+  readonly capabilityReceipts: readonly CapabilityLeaseReceipt[];
   readonly completedStepIds: readonly string[];
+  readonly executionArtifactRefs: readonly ArtifactRef[];
   readonly generatedMachineSnapshot: unknown;
+  readonly generatedStateSequence: readonly string[];
   readonly outputArtifactRefs: readonly ArtifactRef[];
+  readonly reviewSummaryPath: string | undefined;
   readonly stepIndex: number;
+  readonly workerLaneReceipts: readonly AgentLaneReceipt[];
 }) => Promise<void>;
 
 type WorkflowRuntimeEnvironment =
@@ -227,7 +236,22 @@ interface DynamicExecutionBlocked {
   readonly status: "blocked";
 }
 
-type DynamicExecutionResult = DynamicExecutionBlocked | DynamicExecutionSuccess;
+/**
+ * Single-step drive paused after executing exactly one dynamic node: its
+ * checkpoint is persisted and more dynamic nodes remain (the generated machine is
+ * not yet at `done`). `run()` lifts this into a `WorkflowRunPaused` result so the
+ * DO can re-arm `alarm(now)` and resume from this checkpoint on the next alarm.
+ */
+interface DynamicExecutionPaused {
+  readonly completedStepIds: string[];
+  readonly status: "paused";
+  readonly stepIndex: number;
+}
+
+type DynamicExecutionResult =
+  | DynamicExecutionBlocked
+  | DynamicExecutionPaused
+  | DynamicExecutionSuccess;
 
 type WorkflowNodeInvocationStep = Extract<
   DynamicWorkflowStep,
@@ -1307,8 +1331,19 @@ export class WorkflowApp implements WorkflowAppContract {
     }
   }
 
-  async run(input: WorkflowRunRequest): Promise<WorkflowRunResult> {
+  // Overloaded so the legacy no-options call still narrows over the 2-variant
+  // terminal union (captured/blocked); a `single-step` drive may also `paused`.
+  run(input: WorkflowRunRequest): Promise<WorkflowRunResult>;
+  run(
+    input: WorkflowRunRequest,
+    options: WorkflowRunDriveOptions
+  ): Promise<WorkflowRunDriveResult>;
+  async run(
+    input: WorkflowRunRequest,
+    options?: WorkflowRunDriveOptions
+  ): Promise<WorkflowRunDriveResult> {
     const request = WorkflowRunRequestSchema.parse(input);
+    const { driveMode } = WorkflowRunDriveOptionsSchema.parse(options ?? {});
     const eventLog: WorkflowEvent[] = [];
     const actor = createActor(dynamicWorkflowSafetyEnvelopeMachine);
     let projectionCapsule: ContextCapsuleRecord | null = null;
@@ -1373,15 +1408,22 @@ export class WorkflowApp implements WorkflowAppContract {
 
     const persistCheckpoint: PersistRunCheckpoint = async (checkpointInput) => {
       const checkpoint = RunStepCheckpointSchema.parse({
+        capabilityReceipts: [...checkpointInput.capabilityReceipts],
         completedStepIds: [...checkpointInput.completedStepIds],
         envelopeSnapshot: actor.getPersistedSnapshot(),
+        executionArtifactRefs: [...checkpointInput.executionArtifactRefs],
         generatedMachineSnapshot: checkpointInput.generatedMachineSnapshot,
+        generatedStateSequence: [...checkpointInput.generatedStateSequence],
         outputArtifactRefs: [...checkpointInput.outputArtifactRefs],
         persistedAt: new Date().toISOString(),
         runId: request.runId,
         schemaVersion: "workflow.run-step-checkpoint.v1",
         stepIndex: checkpointInput.stepIndex,
         workItemId: request.workItemId,
+        workerLaneReceipts: [...checkpointInput.workerLaneReceipts],
+        ...(checkpointInput.reviewSummaryPath === undefined
+          ? {}
+          : { reviewSummaryPath: checkpointInput.reviewSummaryPath }),
       });
       await this.dependencies.contextCapsules.persistCheckpoint({
         checkpoint,
@@ -1562,8 +1604,9 @@ export class WorkflowApp implements WorkflowAppContract {
         workItemId: request.workItemId,
       });
 
-    const execution = await this.executeDynamicWorkflow({
+    const execution = await this.driveDynamicWorkflow({
       block,
+      driveMode,
       loadedPlan,
       machine: loadedMachine.machine,
       persistCheckpoint,
@@ -1571,8 +1614,12 @@ export class WorkflowApp implements WorkflowAppContract {
       resumeCheckpoint,
       transition,
     });
-    if (execution.status === "blocked") {
-      return execution.result;
+    // Non-success drive short-circuits the finishing envelope: `blocked` returns
+    // its terminal result; `paused` (single-step, FIX: one node per alarm)
+    // surfaces the non-terminal result the DO re-drives on. The envelope runs
+    // only after the last node executes and the machine reaches `done`.
+    if (execution.status !== "executed") {
+      return WorkflowApp.nonExecutedDriveResult(request, eventLog, execution);
     }
 
     const observabilityPack =
@@ -3561,10 +3608,14 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly resumeCheckpoint: RunStepCheckpoint | null;
   }): Promise<null | {
     readonly artifactRefsByStepId: ReadonlyMap<string, ArtifactRef>;
+    readonly capabilityReceipts: readonly CapabilityLeaseReceipt[];
     readonly completedStepIds: readonly string[];
+    readonly executionArtifactRefs: readonly ArtifactRef[];
     readonly generatedMachineSnapshot: unknown;
+    readonly generatedStateSequence: readonly string[];
     readonly nextStepIndex: number;
     readonly reviewSummaryPath: string | undefined;
+    readonly workerLaneReceipts: readonly AgentLaneReceipt[];
   }> {
     const checkpoint = input.resumeCheckpoint;
     if (checkpoint === null) {
@@ -3617,13 +3668,79 @@ export class WorkflowApp implements WorkflowAppContract {
 
     return {
       artifactRefsByStepId,
+      // Restore the cumulative execution accounting so the resumed finishing
+      // envelope (verify -> receipts -> summarize -> captured) surfaces the same
+      // receipts and artifact set as a whole-run; receipts issued in a prior
+      // drive are not re-collected on resume, so they live in the checkpoint.
+      capabilityReceipts: [...checkpoint.capabilityReceipts],
       completedStepIds: [...checkpoint.completedStepIds],
+      executionArtifactRefs: [...checkpoint.executionArtifactRefs],
       generatedMachineSnapshot: checkpoint.generatedMachineSnapshot,
+      generatedStateSequence: [...checkpoint.generatedStateSequence],
       // The persisted checkpoint at index N was written after step N crossed
       // STEP_DONE, so the next checkpoint this run writes is N + 1.
       nextStepIndex: checkpoint.stepIndex + 1,
-      reviewSummaryPath,
+      // Prefer the path re-derived from the current plan's review.summary step;
+      // fall back to the persisted path so a resume before that step still keeps
+      // the terminal review surface stable.
+      reviewSummaryPath: reviewSummaryPath ?? checkpoint.reviewSummaryPath,
+      workerLaneReceipts: [...checkpoint.workerLaneReceipts],
     };
+  }
+
+  /**
+   * Run the dynamic-node loop honoring the requested drive mode. `single-step`
+   * (FIX: one node per alarm) bounds the loop to exactly one not-yet-completed
+   * dynamic node and pauses if more remain; `whole-run` leaves the budget
+   * unbounded so the legacy single-invocation walk is byte-identical. Kept as a
+   * thin wrapper so `run()` neither computes the budget nor conditionally spreads
+   * it under `exactOptionalPropertyTypes`.
+   */
+  private async driveDynamicWorkflow(input: {
+    readonly block: BlockRun;
+    readonly driveMode: WorkflowRunDriveOptions["driveMode"];
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly machine: DynamicWorkflowMachineDocument;
+    readonly persistCheckpoint: PersistRunCheckpoint;
+    readonly request: WorkflowRunRequest;
+    readonly resumeCheckpoint: RunStepCheckpoint | null;
+    readonly transition: SafetyEnvelopeTransition;
+  }): Promise<DynamicExecutionResult> {
+    return await this.executeDynamicWorkflow({
+      block: input.block,
+      loadedPlan: input.loadedPlan,
+      machine: input.machine,
+      persistCheckpoint: input.persistCheckpoint,
+      request: input.request,
+      resumeCheckpoint: input.resumeCheckpoint,
+      ...(input.driveMode === "single-step" ? { stepBudget: 1 } : {}),
+      transition: input.transition,
+    });
+  }
+
+  /**
+   * Translate a non-`executed` dynamic-execution result into the run result the
+   * caller returns. `blocked` passes its terminal result through; `paused`
+   * (single-step, FIX: one node per alarm) is lifted into the non-terminal
+   * `WorkflowRunPaused` the DO re-drives on, carrying the just-persisted
+   * checkpoint's step index and the cumulative completed step ids.
+   */
+  private static nonExecutedDriveResult(
+    request: WorkflowRunRequest,
+    eventLog: readonly WorkflowEvent[],
+    execution: DynamicExecutionBlocked | DynamicExecutionPaused
+  ): WorkflowRunDriveResult {
+    if (execution.status === "blocked") {
+      return execution.result;
+    }
+
+    return WorkflowRunPausedSchema.parse({
+      completedStepIds: execution.completedStepIds,
+      eventLog,
+      runId: request.runId,
+      status: "paused",
+      stepIndex: execution.stepIndex,
+    });
   }
 
   /**
@@ -3657,6 +3774,11 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly persistCheckpoint: PersistRunCheckpoint;
     readonly request: WorkflowRunRequest;
     readonly resumeCheckpoint?: RunStepCheckpoint | null;
+    // Single-step drive (FIX: one node per alarm). When set, the loop executes at
+    // most this many not-yet-completed dynamic nodes this invocation, then pauses
+    // (returns `status: "paused"`) if more remain. `undefined` => whole-run mode,
+    // which walks every step plus the finishing envelope in one invocation.
+    readonly stepBudget?: number;
     readonly transition: SafetyEnvelopeTransition;
   }): Promise<DynamicExecutionResult> {
     const artifactRefs: ArtifactRef[] = [];
@@ -3672,6 +3794,12 @@ export class WorkflowApp implements WorkflowAppContract {
     let reviewSummaryPath: string | undefined;
     let workflowCompleted = false;
     let checkpointStepIndex = 0;
+    // Single-step drive accounting (FIX: one node per alarm). `stepsExecuted`
+    // counts dynamic nodes run THIS invocation (resumed steps do not count);
+    // `lastCheckpointStepIndex` is the index of the most recently persisted
+    // checkpoint, reported back so the DO/tests can assert one-node-per-alarm.
+    let stepsExecuted = 0;
+    let lastCheckpointStepIndex = -1;
 
     // M2.5 step 3 (resume): rehydrate the generated-machine actor from the most
     // recent durable checkpoint that the two-factor skip check trusts, so an
@@ -3697,8 +3825,16 @@ export class WorkflowApp implements WorkflowAppContract {
       }
       for (const [stepId, artifactRef] of resumeFrom.artifactRefsByStepId) {
         artifactRefsByStepId.set(stepId, artifactRef);
-        artifactRefs.push(artifactRef);
       }
+      // Restore the full execution accounting from the checkpoint so the finishing
+      // envelope captures the same artifact set + receipts as a whole-run. The
+      // full artifact ref list (a node may emit several) and the receipts are not
+      // re-collected for skipped steps, so they are rehydrated here rather than
+      // rederived from `artifactRefsByStepId` (which holds only per-step primaries).
+      artifactRefs.push(...resumeFrom.executionArtifactRefs);
+      capabilityReceipts.push(...resumeFrom.capabilityReceipts);
+      workerLaneReceipts.push(...resumeFrom.workerLaneReceipts);
+      generatedStateSequence.push(...resumeFrom.generatedStateSequence);
       checkpointStepIndex = resumeFrom.nextStepIndex;
       // A `review.summary` step completed before the crash reserved this path
       // for the review gate; re-derive it from the plan so the resumed run keeps
@@ -3714,12 +3850,19 @@ export class WorkflowApp implements WorkflowAppContract {
      */
     const checkpointAfterStepDone = async (): Promise<void> => {
       await input.persistCheckpoint({
+        capabilityReceipts: [...capabilityReceipts],
         completedStepIds: [...completedStepIds],
+        executionArtifactRefs: [...artifactRefs],
         generatedMachineSnapshot: workflowActor.getPersistedSnapshot(),
+        generatedStateSequence: [...generatedStateSequence],
         outputArtifactRefs: [...artifactRefsByStepId.values()],
+        reviewSummaryPath,
         stepIndex: checkpointStepIndex,
+        workerLaneReceipts: [...workerLaneReceipts],
       });
+      lastCheckpointStepIndex = checkpointStepIndex;
       checkpointStepIndex += 1;
+      stepsExecuted += 1;
     };
 
     for (let count = 0; count < maxTransitions; count += 1) {
@@ -3739,6 +3882,24 @@ export class WorkflowApp implements WorkflowAppContract {
       if (resolvedState.status === "done") {
         workflowCompleted = true;
         break;
+      }
+
+      // Single-step drive (FIX: one node per alarm). We are at a not-yet-done
+      // step state; if this invocation already burned its step budget, pause
+      // here rather than executing the next node — its checkpoint is durable, so
+      // the next alarm resumes from it and advances exactly one more node. The
+      // `done` check above means the last node never pauses: after it runs, the
+      // next state is `done`, so the finishing envelope runs in the same drive.
+      if (
+        input.stepBudget !== undefined &&
+        stepsExecuted >= input.stepBudget &&
+        lastCheckpointStepIndex >= 0
+      ) {
+        return {
+          completedStepIds: [...completedStepIds],
+          status: "paused",
+          stepIndex: lastCheckpointStepIndex,
+        };
       }
 
       const resolvedStep = resolveGeneratedWorkflowPlanStep({

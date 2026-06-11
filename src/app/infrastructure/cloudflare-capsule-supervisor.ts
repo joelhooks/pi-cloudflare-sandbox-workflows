@@ -190,30 +190,46 @@ const appendUnique = (
     : [...laneIds, laneIdToAppend];
 
 /**
- * Drive one queued run through the front door from inside the alarm invocation.
- * `WorkflowApp.run()` (reached via the front door) loads the latest checkpoint
- * and resumes from it, so a re-drive of an evicted run continues rather than
- * restarts (FIX 1). Returns `true` when the run reached a terminal status
- * (captured/blocked) so the caller may retire its run-start record; returns
- * `false` when the drive threw (e.g. transient adapter failure) so the record is
- * kept and a later alarm re-drives. Swallows and logs the error so one failed
- * run does not abort driving the rest of the queue.
+ * Outcome of driving one run for a single alarm (single-step drive).
+ * - `terminal`: the run reached captured/blocked. Retire its run-start record.
+ * - `paused`: exactly one dynamic node ran and its checkpoint is durable, more
+ *   remain. Keep the run-start record and re-arm `alarm(now)` so the next alarm
+ *   advances the next node at work-speed with no dead gap.
+ * - `failed`: the drive threw (e.g. transient adapter failure, or a node that
+ *   hung past the invocation budget). Keep the record; the watchdog/reaper
+ *   backstop re-drives or sweeps it.
+ */
+type DriveOutcome = "failed" | "paused" | "terminal";
+
+/**
+ * Drive one queued run through the front door from inside the alarm invocation,
+ * in single-step mode: `WorkflowApp.run()` resumes from the latest checkpoint and
+ * executes EXACTLY ONE not-yet-completed dynamic node, then either pauses (more
+ * nodes remain) or reaches a terminal status (the last node ran and the finishing
+ * envelope completed). A `paused` result keeps the run advancing one node per
+ * alarm with a fresh wall-clock budget per node, so a hung node is isolated to
+ * its own invocation and a healthy run's checkpoint stays fresh (the reaper never
+ * sweeps it). Swallows and logs a throw so one failed run does not abort driving
+ * the rest of the queue.
  */
 const driveOneQueuedRun = async (
   frontDoor: WorkerFrontDoorContract,
   request: WorkflowRunRequest
-): Promise<boolean> => {
+): Promise<DriveOutcome> => {
   try {
-    // `startRun` resolves only at a terminal status (captured | blocked); an
-    // eviction kills the invocation mid-await, leaving the run-start record and
-    // a still-set driving marker for the next alarm to re-drive.
-    await frontDoor.startRun(request);
+    // Single-step drive: resolves at a terminal status (captured | blocked) OR a
+    // non-terminal `paused` (one node ran, more remain). An eviction kills the
+    // invocation mid-await, leaving the run-start record and a still-set driving
+    // marker for the next alarm to re-drive.
+    const result = await frontDoor.startRun(request, {
+      driveMode: "single-step",
+    });
 
-    return true;
+    return result.status === "paused" ? "paused" : "terminal";
   } catch (error) {
     console.error("queued run driver failed", request.runId, error);
 
-    return false;
+    return "failed";
   }
 };
 
@@ -547,19 +563,25 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   }
 
   /**
-   * Drive every run parked by `/start-run`. A run-start record is kept until the
-   * run reaches a TERMINAL status (captured/blocked); only then is it deleted
-   * (FIX 1). A refired alarm therefore finds an evicted run's record and re-drives
-   * it, at which point `WorkflowApp.run()` resumes from the latest checkpoint —
-   * the run-start record is what makes resume reachable in production.
+   * Drive every run parked by `/start-run`, ONE dynamic node per alarm. Each
+   * drive runs in single-step mode: `WorkflowApp.run()` resumes from the latest
+   * checkpoint, executes exactly one not-yet-completed dynamic node, and either
+   * pauses (more nodes remain) or reaches a terminal status (the last node ran and
+   * the finishing envelope completed). The run-start record is kept until the run
+   * reaches a TERMINAL status; on `paused` it is kept and `alarm(now)` is re-armed
+   * so the next alarm immediately advances the next node — nodes flow at
+   * work-speed with no dead gap, a hung node is isolated to its own invocation,
+   * and a healthy run's checkpoint stays fresh so the reaper never sweeps it. A
+   * refired alarm also re-drives an evicted run's record, resuming from its latest
+   * checkpoint — the record is what makes resume reachable in production.
    *
    * Concurrency is guarded by a short-lived `driving:<runId>` marker carrying the
    * driver's start timestamp: a drive only begins when no marker exists or the
    * existing marker is stale (older than `WORKFLOW_APP_TIMEOUT_MS` — the previous
-   * driver was evicted). A normal completion clears its own marker, so two alarms
-   * never double-drive the same run; an evicted run leaves a stale marker that the
-   * next alarm overrides to re-drive. Drives runs sequentially so one fresh
-   * wall-clock budget is consumed at a time.
+   * driver was evicted). A normal completion (terminal or paused) clears its own
+   * marker, so two alarms never double-drive the same run; an evicted run leaves a
+   * stale marker that the next alarm overrides to re-drive. Drives runs
+   * sequentially so one fresh wall-clock budget is consumed at a time.
    */
   private async driveQueuedRuns(now: number): Promise<void> {
     const queued = await this.ctx.storage.list({
@@ -581,15 +603,22 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await this.ctx.storage.put(drivingMarkerStorageKey(request.runId), {
         startedAtMs: now,
       });
-      const reachedTerminal = await driveOneQueuedRun(frontDoor, request);
-      if (reachedTerminal) {
+      const outcome = await driveOneQueuedRun(frontDoor, request);
+      if (outcome === "terminal") {
         // Terminal: retire both the run-start record and the marker. A future
         // alarm finds nothing to re-drive.
         await this.ctx.storage.delete(runStartStorageKey(request.runId));
+      } else if (outcome === "paused") {
+        // Single-step drive paused after one node: KEEP the run-start record so
+        // the next alarm resumes from the just-persisted checkpoint, and re-arm
+        // alarm(now) so that next node fires immediately — nodes flow at
+        // work-speed with no dead gap. The marker clears below so the immediate
+        // re-drive is not blocked by a fresh marker.
+        await this.armAlarmAt(now);
       }
-      // Whether terminal or a transient throw, clear our marker. On eviction the
-      // invocation dies before reaching here, so the marker survives (stale) and
-      // re-drive is gated by staleness rather than re-driven immediately.
+      // For terminal, paused, or a transient throw, clear our marker. On eviction
+      // the invocation dies before reaching here, so the marker survives (stale)
+      // and re-drive is gated by staleness rather than re-driven immediately.
       await this.ctx.storage.delete(drivingMarkerStorageKey(request.runId));
     }
   }

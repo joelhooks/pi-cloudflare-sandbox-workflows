@@ -38,6 +38,7 @@ import type {
   CapabilityBlocker,
   DynamicWorkflowBlueprint,
   DynamicWorkflowStep,
+  WorkflowRunDriveResult,
 } from "../../src/app/domain/schemas.ts";
 import {
   MemorySourcePackDispositionSchema,
@@ -5597,19 +5598,21 @@ describe("workflow run resume from checkpoint (M2.5)", () => {
     }
 
     expect({
+      // The two already-done steps did not re-fire: their prior receipts are
+      // RESTORED from the checkpoint (so the finishing envelope sees the full
+      // accounting) rather than re-issued, so the discord capability receipt
+      // appears exactly once and the research-review worker lane appears exactly
+      // once — a re-fire would duplicate them.
+      capabilityReceiptCount: execution.capabilityReceipts.length,
       // The full plan is still accounted as complete after resume.
       completedStepIds: [...execution.completedStepIds].toSorted(),
-      // The two already-done steps never re-fired: no capability receipt was
-      // re-issued for the discord step, and the research-review worker lane was
-      // not re-run on this invocation.
-      reIssuedCapabilityReceipts: execution.capabilityReceipts.length,
-      reRanResearchReview: resumedWorkerLaneStepIds(
+      researchReviewLaneCount: resumedWorkerLaneStepIds(
         execution.workerLaneReceipts
-      ).includes("research-review"),
+      ).filter((stepId) => stepId === "research-review").length,
     }).toStrictEqual({
+      capabilityReceiptCount: 1,
       completedStepIds: loadedPlan.steps.map((step) => step.stepId).toSorted(),
-      reIssuedCapabilityReceipts: 0,
-      reRanResearchReview: false,
+      researchReviewLaneCount: 1,
     });
   });
 
@@ -5673,6 +5676,109 @@ describe("workflow run resume from checkpoint (M2.5)", () => {
     }).toStrictEqual({
       status: "captured",
       stepCheckpointCount: 3,
+    });
+  });
+});
+
+/**
+ * Drive a run in single-step mode (one dynamic node per call) until it reaches a
+ * terminal status, mirroring how the DO alarm re-drives the SAME durable state on
+ * each fire. Returns the ordered drive results so a test can assert the run
+ * advanced exactly one node per drive (paused stepIndex increments) and the last
+ * drive folded the finishing envelope into a terminal `captured`.
+ */
+const driveRunOneNodePerCall = async (
+  rig: ReturnType<typeof buildResumableWorkflow>,
+  request: ReturnType<typeof buildIntegrationTestRunRequest>,
+  maxDrives = 16
+): Promise<WorkflowRunDriveResult[]> => {
+  const drives: WorkflowRunDriveResult[] = [];
+  for (let count = 0; count < maxDrives; count += 1) {
+    // eslint-disable-next-line no-await-in-loop -- each drive must complete and
+    // persist its checkpoint before the next drive resumes from it.
+    const result = await rig.workflow.run(request, {
+      driveMode: "single-step",
+    });
+    drives.push(result);
+    if (result.status !== "paused") {
+      return drives;
+    }
+  }
+  throw new Error(
+    `Single-step drive did not reach terminal within ${maxDrives} drives.`
+  );
+};
+
+describe("workflow single-step drive (one node per alarm)", () => {
+  it("advances exactly one dynamic node per drive and reaches captured in N drives", async () => {
+    const rig = buildResumableWorkflow("workflow-app-single-step");
+    const request = buildIntegrationTestRunRequest();
+
+    const drives = await driveRunOneNodePerCall(rig, request);
+    const terminal = drives.at(-1);
+    const paused = drives.slice(0, -1);
+
+    expect({
+      // The default plan has three dynamic nodes; three drives terminate it (the
+      // last node's drive folds in the finishing envelope), so two pauses precede
+      // the terminal captured.
+      driveStatuses: drives.map((drive) => drive.status),
+      // Each pause advanced the checkpoint by exactly one step index — one node
+      // per drive, no skips, no double-steps.
+      pausedStepIndexes: paused.map((drive) =>
+        drive.status === "paused" ? drive.stepIndex : -1
+      ),
+      terminalStatus: terminal?.status,
+    }).toStrictEqual({
+      driveStatuses: ["paused", "paused", "captured"],
+      pausedStepIndexes: [0, 1],
+      terminalStatus: "captured",
+    });
+  });
+
+  it("a single-step driven run reaches captured with the same receipts as whole-run mode", async () => {
+    const wholeRunRig = buildResumableWorkflow(
+      "workflow-app-single-step-whole"
+    );
+    const wholeRun = await wholeRunRig.workflow.run(
+      buildIntegrationTestRunRequest()
+    );
+    if (wholeRun.status !== "captured") {
+      throw new Error(wholeRun.blocker.message);
+    }
+
+    const singleStepRig = buildResumableWorkflow(
+      "workflow-app-single-step-step"
+    );
+    const singleStepDrives = await driveRunOneNodePerCall(
+      singleStepRig,
+      buildIntegrationTestRunRequest()
+    );
+    const singleStep = singleStepDrives.at(-1);
+    if (singleStep === undefined || singleStep.status !== "captured") {
+      throw new Error(
+        `Expected single-step drive to capture, got ${singleStep?.status}.`
+      );
+    }
+
+    expect({
+      // The single-step drive captured the same set of step output artifacts and
+      // the same review surface shape as the one-shot whole-run.
+      artifactRefCount: singleStep.artifactRefs.length,
+      capabilityReceiptCount: singleStep.capabilityReceipts.length,
+      status: singleStep.status,
+      // One checkpoint per plan step was persisted across the drives — proof the
+      // run walked the full pinned plan one node at a time.
+      stepCheckpointCount: [
+        ...singleStepRig.contextCapsules.checkpoints.keys(),
+      ].filter((key) => key.startsWith(`${singleStep.runId}:`)).length,
+      workerLaneReceiptCount: singleStep.workerLaneReceipts.length,
+    }).toStrictEqual({
+      artifactRefCount: wholeRun.artifactRefs.length,
+      capabilityReceiptCount: wholeRun.capabilityReceipts.length,
+      status: "captured" as const,
+      stepCheckpointCount: 3,
+      workerLaneReceiptCount: wholeRun.workerLaneReceipts.length,
     });
   });
 });

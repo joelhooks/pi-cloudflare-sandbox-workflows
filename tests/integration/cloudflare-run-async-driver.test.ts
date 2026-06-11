@@ -5,6 +5,7 @@ import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts
 import {
   LoadRunCheckpointResolutionSchema,
   WorkflowRunBlockedSchema,
+  WorkflowRunPausedSchema,
   WorkflowRunRequestSchema,
 } from "../../src/app/domain/schemas.ts";
 import type {
@@ -201,6 +202,107 @@ const drivingMarkerKey = (request: WorkflowRunRequest): string =>
   `driving:${request.runId}`;
 
 const TEST_TIMEOUT_MS = 600_000;
+
+/**
+ * Persist a checkpoint through the supervisor's own `/persist-checkpoint` route
+ * (the exact durable write a single-step drive performs), so a stateful single-
+ * step front door can advance the run one step index at a time and the DO reads
+ * the same checkpoints the resume path would.
+ */
+const persistCheckpointViaSupervisor = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest,
+  overrides: { readonly persistedAt: string; readonly stepIndex: number }
+): Promise<Response> =>
+  supervisor.fetch(
+    new Request("https://supervisor.internal/persist-checkpoint", {
+      body: JSON.stringify({
+        checkpoint: {
+          completedStepIds: Array.from(
+            { length: overrides.stepIndex + 1 },
+            (_unused, index) => `step-${index}`
+          ),
+          envelopeSnapshot: { status: "active" },
+          generatedMachineSnapshot: { status: "active" },
+          outputArtifactRefs: [],
+          persistedAt: overrides.persistedAt,
+          runId: request.runId,
+          schemaVersion: "workflow.run-step-checkpoint.v1",
+          stepIndex: overrides.stepIndex,
+          workItemId: request.workItemId,
+        },
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+interface SingleStepDriveLog {
+  readonly driveModes: (string | undefined)[];
+  readonly outcomeStatuses: ("blocked" | "captured" | "paused")[];
+  readonly persistedStepIndexes: number[];
+}
+
+/**
+ * A stateful single-step front door that drives a multi-node run against the
+ * supervisor's OWN checkpoint storage: each `startRun` resumes from the latest
+ * checkpoint, persists exactly one more (stepIndex + 1), and returns `paused`
+ * until the last node, then a terminal status — exactly the contract the real
+ * `WorkflowApp.run({ driveMode: "single-step" })` honors. Records the drive mode
+ * the DO passed and the per-drive checkpoint index so a test can assert one node
+ * per alarm.
+ */
+const createSingleStepFrontDoor = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  totalSteps: number,
+  log: SingleStepDriveLog
+): WorkerFrontDoorContract => ({
+  route: "POST /runs",
+  async startRun(input, options) {
+    const request = WorkflowRunRequestSchema.parse(input);
+    log.driveModes.push(options?.driveMode);
+
+    const latest = await loadLatestCheckpoint(supervisor, request);
+    const nextStepIndex = latest === null ? 0 : latest.stepIndex + 1;
+    await persistCheckpointViaSupervisor(supervisor, request, {
+      persistedAt: new Date().toISOString(),
+      stepIndex: nextStepIndex,
+    });
+    log.persistedStepIndexes.push(nextStepIndex);
+
+    if (nextStepIndex < totalSteps - 1) {
+      log.outcomeStatuses.push("paused");
+
+      return WorkflowRunPausedSchema.parse({
+        completedStepIds: Array.from(
+          { length: nextStepIndex + 1 },
+          (_unused, index) => `step-${index}`
+        ),
+        eventLog: [],
+        runId: request.runId,
+        status: "paused",
+        stepIndex: nextStepIndex,
+      });
+    }
+
+    log.outcomeStatuses.push("blocked");
+
+    // Terminal: a `blocked` result stands in for the run reaching its terminal
+    // status after the last node + finishing envelope (captured/blocked both
+    // retire the run-start record identically).
+    return WorkflowRunBlockedSchema.parse({
+      blocker: {
+        code: "adapter_unavailable",
+        message: "Single-step drive reached terminal in test.",
+        redacted: true,
+      },
+      eventLog: [],
+      runId: request.runId,
+      status: "blocked",
+    });
+  },
+});
 
 describe("Capsule supervisor async run driver", () => {
   it("accepts /start-run by parking the run and arming an immediate alarm without driving it", async () => {
@@ -454,6 +556,163 @@ describe("Capsule supervisor async run driver", () => {
         freshRunStartKept: true,
         // Stale marker allowed the re-drive (one drive to terminal).
         staleDriveCount: 1,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  // step-driver(core): a multi-node run advances exactly ONE node per alarm. Each
+  // alarm drives in single-step mode, persists one more checkpoint (stepIndex + 1),
+  // re-arms alarm(now) on `paused`, and keeps the run-start record until terminal.
+  it("drives one node per alarm, re-arming alarm(now) and retaining the run-start record until terminal", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const request = buildIntegrationTestRunRequest();
+    const totalSteps = 3;
+    const log: SingleStepDriveLog = {
+      driveModes: [],
+      outcomeStatuses: [],
+      persistedStepIndexes: [],
+    };
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+      createSingleStepFrontDoor(supervisor, totalSteps, log)
+    );
+    try {
+      await startRun(supervisor, request);
+
+      // Alarms 1 + 2 each advance one node and pause; the run-start record + a
+      // freshly re-armed alarm survive each. The DO clears the start alarm in the
+      // fake state to observe the re-arm; the runtime would do this between fires.
+      const runStartKeptAcrossAlarms: boolean[] = [];
+      const alarmReArmedAfterPause: boolean[] = [];
+      for (let alarmCount = 0; alarmCount < totalSteps - 1; alarmCount += 1) {
+        state.alarmAt = null;
+        // eslint-disable-next-line no-await-in-loop -- alarms fire sequentially.
+        await supervisor.alarm();
+        runStartKeptAcrossAlarms.push(state.store.has(runStartKey(request)));
+        alarmReArmedAfterPause.push(state.alarmAt !== null);
+      }
+
+      // Final alarm runs the last node and reaches terminal, retiring the record.
+      state.alarmAt = null;
+      await supervisor.alarm();
+
+      const latestCheckpoint = await loadLatestCheckpoint(supervisor, request);
+
+      expect({
+        // alarm(now) was re-armed after each pause so the next node fires at once.
+        alarmReArmedAfterPause,
+        // Every drive used single-step mode.
+        driveModes: log.driveModes,
+        // The latest checkpoint advanced to the final step index.
+        latestCheckpointStepIndex: latestCheckpoint?.stepIndex ?? null,
+        // The two pre-terminal drives paused; the last reached terminal.
+        outcomeStatuses: log.outcomeStatuses,
+        // One checkpoint per alarm, stepIndex incrementing by exactly one.
+        persistedStepIndexes: log.persistedStepIndexes,
+        // ...and retired only once the run reached terminal.
+        runStartClearedAtTerminal: !state.store.has(runStartKey(request)),
+        // The run-start record was retained while paused...
+        runStartKeptAcrossAlarms,
+      }).toStrictEqual({
+        alarmReArmedAfterPause: [true, true],
+        driveModes: ["single-step", "single-step", "single-step"],
+        latestCheckpointStepIndex: 2,
+        outcomeStatuses: ["paused", "paused", "blocked"],
+        persistedStepIndexes: [0, 1, 2],
+        runStartClearedAtTerminal: true,
+        runStartKeptAcrossAlarms: [true, true],
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  // step-driver(core): a run that advanced THIS alarm (its checkpoint is fresh)
+  // is protected from the reaper — it paused with forward progress, so the next
+  // alarm resumes it rather than the reaper sweeping it to blocked.
+  it("does not sweep a run that advanced this alarm (fresh checkpoint after a paused drive)", async () => {
+    const state = createFakeDurableObjectState();
+    const request = buildIntegrationTestRunRequest();
+    const reaped: string[] = [];
+    // The reaper's "find stuck runs" SELECT returns this run as a candidate, so
+    // protection must come from the fresh-checkpoint filter — not from D1
+    // returning nothing. The UPDATE's bind records any run id D1 was asked to
+    // sweep; a protected run is filtered out before the UPDATE, so it never lands.
+    const reapingD1 = {
+      prepare: (query: string) => ({
+        all: () => Promise.resolve({ results: [] }),
+        bind: (...args: unknown[]) => ({
+          all: () =>
+            /^\s*select/iu.test(query)
+              ? Promise.resolve({
+                  results: [
+                    {
+                      actor_id: request.actor.id,
+                      capsule_id: `capsule:${request.workItemId}`,
+                      event_index: 0,
+                      run_id: request.runId,
+                      status: "executingDynamicWorkflow",
+                      work_item_id: request.workItemId,
+                    },
+                  ],
+                })
+              : Promise.resolve({ results: [] }),
+          run: () => {
+            if (/^\s*update/iu.test(query)) {
+              const runId = args.at(2);
+              if (typeof runId === "string") {
+                reaped.push(runId);
+              }
+            }
+
+            return Promise.resolve({ meta: { changes: 1 }, success: true });
+          },
+        }),
+        run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+      }),
+    };
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub feeding the reaper a stuck-run candidate so the fresh-checkpoint protection is what spares the run.
+      WORKFLOW_APP_D1: reapingD1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const log: SingleStepDriveLog = {
+      driveModes: [],
+      outcomeStatuses: [],
+      persistedStepIndexes: [],
+    };
+    // Seed an admission lane this run owns so the reaper has a slot to consider.
+    state.store.set("record", {
+      activeLaneOwners: { "lane:reaper-test": request.runId },
+      workItemId: request.workItemId,
+    });
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+      createSingleStepFrontDoor(supervisor, 4, log)
+    );
+    try {
+      await startRun(supervisor, request);
+
+      // One alarm: drives one node (pauses with a fresh checkpoint), then the
+      // reaper runs in the SAME alarm and must NOT sweep this run.
+      await supervisor.alarm();
+
+      expect({
+        droveOneNode: log.persistedStepIndexes,
+        paused: log.outcomeStatuses,
+        reapedRunIds: reaped,
+        runStartKept: state.store.has(runStartKey(request)),
+      }).toStrictEqual({
+        droveOneNode: [0],
+        paused: ["paused"],
+        // The fresh checkpoint protected the run — the reaper swept nothing.
+        reapedRunIds: [],
+        runStartKept: true,
       });
     } finally {
       __capsuleSupervisorTestHooks.resetRunDriverFactory();

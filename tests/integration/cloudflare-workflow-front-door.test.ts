@@ -38,9 +38,9 @@ import type {
   ReviewSurfaceDocument,
   WorkflowObservabilityPack,
   WorkflowExecutionProofDocument,
+  WorkflowRunDriveResult,
   WorkflowRunReceipt,
   WorkflowRunRequest,
-  WorkflowRunResult,
 } from "../../src/app/domain/schemas.ts";
 import { buildAgentLanePackageMountIndex } from "../../src/app/infrastructure/agent-lane-package-mounts.ts";
 import type { CloudflareArtifactsRunStore } from "../../src/app/infrastructure/cloudflare-artifacts-store.ts";
@@ -472,8 +472,11 @@ const seedPackageArtifacts = (
 };
 
 const requireCapturedResult = (
-  result: WorkflowRunResult
+  result: WorkflowRunDriveResult
 ): WorkflowRunReceipt => {
+  if (result.status === "paused") {
+    throw new Error(`Run paused at step ${result.stepIndex}.`);
+  }
   if (result.status !== "captured") {
     throw new Error(result.blocker.message);
   }
