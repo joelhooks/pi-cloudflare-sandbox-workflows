@@ -34,7 +34,11 @@ import type {
   WorkflowRunRequest,
 } from "../domain/schemas.ts";
 import type { CloudflareD1PackageRegistryConfig } from "./cloudflare-package-registry.ts";
-import { reapStuckRunsForWorkItem } from "./cloudflare-run-reaper.ts";
+import {
+  reapStuckRunsForWorkItem,
+  TERMINAL_RUN_STATES,
+} from "./cloudflare-run-reaper.ts";
+import { createCloudflareWorkflowRunStatusReader } from "./cloudflare-workflow-event-stream.ts";
 
 export interface WorkflowCapsuleSupervisorEnv {
   readonly WORKFLOW_APP_D1?: CloudflareD1PackageRegistryConfig["d1"];
@@ -628,12 +632,49 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     }
 
     const timeoutMs = this.resolveTimeoutMs();
-    const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
-    const frontDoor = await driver(this.env);
+    // Probe the authoritative run store so this loop can retire records for runs
+    // that are already finished. The single supervisor DO is keyed by workItemId,
+    // so EVERY run for a work item is parked here and driven from this one loop.
+    // A drive that throws — e.g. a planner refusing to re-run an already-completed
+    // lane on a run that is already `blocked` — returns "failed", which KEEPS the
+    // run-start record; and the reaper marks a stuck run `blocked` in D1 but never
+    // retires its record either. Both leave a poison record that is re-driven
+    // every alarm, burning this handler's wall-clock budget and starving newer
+    // runs parked behind it (the run-15 phantom-accept: a fresh run 202's but is
+    // evicted before it is ever driven because older terminal records monopolize
+    // the alarm). D1 already knows these runs are terminal, so drop their records
+    // before spending a drive on them.
+    const d1 = this.env.WORKFLOW_APP_D1;
+    const statusReader =
+      d1 === undefined
+        ? undefined
+        : createCloudflareWorkflowRunStatusReader({ d1 });
+    // Built lazily on the first run that actually needs driving so a pure
+    // poison-drain alarm never constructs a front door it won't use (and a flaky
+    // Sandbox/Artifacts binding can't throw before the poison is retired).
+    let frontDoor: WorkerFrontDoorContract | undefined;
     for (const value of queued.values()) {
       const request = WorkflowRunRequestSchema.parse(value);
+
+      if (statusReader !== undefined) {
+        const snapshot = await statusReader.read({ runId: request.runId });
+        if (snapshot !== null && TERMINAL_RUN_STATES.has(snapshot.status)) {
+          // Authoritative store says terminal (blocked/captured): nothing left to
+          // advance. Retire the record (and any stale marker) so it stops
+          // re-driving and the runs behind it get their turn.
+          await this.ctx.storage.delete(runStartStorageKey(request.runId));
+          await this.ctx.storage.delete(drivingMarkerStorageKey(request.runId));
+          continue;
+        }
+      }
+
       if (await this.driverIsAlreadyRunning(request.runId, now, timeoutMs)) {
         continue;
+      }
+
+      if (frontDoor === undefined) {
+        const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
+        frontDoor = await driver(this.env);
       }
 
       await this.ctx.storage.put(drivingMarkerStorageKey(request.runId), {

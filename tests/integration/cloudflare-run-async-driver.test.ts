@@ -631,6 +631,93 @@ describe("Capsule supervisor async run driver", () => {
     }
   });
 
+  // FIX (carrier): single-supervisor-DO starvation. The DO is keyed by
+  // workItemId, so EVERY run for a work item is parked in this one DO and driven
+  // from one loop. A drive that throws returns "failed", which KEEPS the
+  // run-start record, and the reaper marks a stuck run `blocked` in D1 but never
+  // retires its record — both leave a poison record re-driven every alarm,
+  // burning the alarm budget and starving newer runs parked behind them (run 15:
+  // a fresh run 202's then phantoms because older terminal records monopolize the
+  // alarm). The fix drains any record whose authoritative D1 status is terminal
+  // before driving it. Here a `blocked`-in-D1 poison record sorts BEFORE a fresh
+  // run (lexicographic list order); the alarm must retire the poison WITHOUT
+  // driving it and still drive the fresh run.
+  it("retires a D1-terminal poison record without driving it and drives the fresh run behind it", async () => {
+    const state = createFakeDurableObjectState();
+    const poison = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-a-terminal-poison",
+    };
+    const fresh = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-b-fresh-starved",
+    };
+    // D1 stub: the authoritative store says the poison run is `blocked`
+    // (terminal) and has no row for the fresh run (never driven → not terminal).
+    const terminalAwareD1 = {
+      prepare: () => ({
+        all: () => Promise.resolve({ results: [] }),
+        bind: (runId: string) => ({
+          all: () =>
+            Promise.resolve({
+              results:
+                runId === poison.runId
+                  ? [
+                      {
+                        blocker_code: null,
+                        blocker_message: null,
+                        blocker_node_type: null,
+                        blocker_step_id: null,
+                        run_id: poison.runId,
+                        status: "blocked",
+                      },
+                    ]
+                  : [],
+            }),
+          run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+        }),
+        run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+      }),
+    };
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub returning the run status row the drain probe reads.
+      WORKFLOW_APP_D1: terminalAwareD1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+
+    // Both runs are parked (the poison sorts first), plus a stale driving marker
+    // on the poison run that the old code would have re-driven forever.
+    state.store.set(runStartKey(poison), poison);
+    state.store.set(drivingMarkerKey(poison), {
+      startedAtMs: Date.now() - 2 * TEST_TIMEOUT_MS,
+    });
+    state.store.set(runStartKey(fresh), fresh);
+
+    const startedRuns: WorkflowRunRequest[] = [];
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+      createBlockedFrontDoor(startedRuns)
+    );
+    try {
+      await supervisor.alarm();
+
+      expect({
+        drivenRunIds: startedRuns.map((started) => started.runId),
+        poisonMarkerCleared: !state.store.has(drivingMarkerKey(poison)),
+        poisonRetired: !state.store.has(runStartKey(poison)),
+      }).toStrictEqual({
+        // The poison terminal record was retired without a drive; only the fresh
+        // run was driven (to terminal, so its record clears via the normal path).
+        drivenRunIds: [fresh.runId],
+        poisonMarkerCleared: true,
+        poisonRetired: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
   // FIX 1, test (b): the driving marker prevents concurrent double-drive, but a
   // stale marker (the prior driver was evicted) allows the next alarm to
   // re-drive. Both halves are exercised against the same seeded parked run.
