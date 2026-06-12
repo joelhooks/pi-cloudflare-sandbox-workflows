@@ -1495,35 +1495,24 @@ export class WorkflowApp implements WorkflowAppContract {
       }
     );
 
+    // Pinned on every drive (idempotent artifact write; no planner involvement),
+    // so the captured-artifact + review-surface steps downstream see the same
+    // notification payload whether this is the first drive or a re-drive.
     const discordPayload = await this.pinDiscordPayload(request);
-    const planning = await this.proposeDynamicWorkflowBlueprint({
+
+    // Idempotent across re-drives: re-planning is skipped when `run/plan.json`
+    // already exists (see resolvePinnedDynamicWorkflow).
+    const resolvedPlan = await this.resolvePinnedDynamicWorkflow({
       discordPayload,
       packageMetadata,
       pinnedPackages: pinResult.pinnedPackages,
       request,
     });
-    if (planning.status === "blocked") {
-      return await block(planning.blocker, planning.summary);
+    if (resolvedPlan.status === "blocked") {
+      return await block(resolvedPlan.blocker, resolvedPlan.summary);
     }
-    const { blueprint } = planning;
-    if (
-      !this.isIntegrationTestMode() &&
-      (!blueprint.plannerLane.realAgent ||
-        blueprint.plannerLane.runtime === "integration-test")
-    ) {
-      return await block(
-        blocker(
-          "adapter_unavailable",
-          "Production workflow planning requires a real planner agent lane."
-        ),
-        "Planner lane was not a real agent execution."
-      );
-    }
+    const { loadedPlan, pinnedDynamicWorkflow, planArtifact } = resolvedPlan;
 
-    const pinnedDynamicWorkflow = await this.pinDynamicWorkflowBlueprint({
-      blueprint,
-      request,
-    });
     const { planDocument } = pinnedDynamicWorkflow;
 
     await transition(
@@ -1536,39 +1525,11 @@ export class WorkflowApp implements WorkflowAppContract {
         stepCount: String(planDocument.steps.length),
       }
     );
-
-    const planWrite = await this.dependencies.artifacts.writeJson({
-      path: "run/plan.json",
-      redacted: true,
-      runId: request.runId,
-      value: planDocument,
-    });
-    const planArtifact = PlanArtifactSchema.parse({
-      artifactRef: planWrite.artifactRef,
-      hash: planWrite.contentHash,
-      pinnedAt: planDocument.createdAt,
-      runId: request.runId,
-    });
     projectionPlanArtifact = planArtifact;
     await transition({ type: "PLAN_PINNED" }, "Dynamic plan artifact pinned.", {
       planHash: planArtifact.hash,
       planRef: planArtifact.artifactRef,
     });
-
-    const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
-      await this.dependencies.artifacts.readJson({
-        artifactRef: planArtifact.artifactRef,
-      })
-    );
-    if (hashJson(loadedPlan) !== planArtifact.hash) {
-      return await block(
-        blocker(
-          "payload_hash_mismatch",
-          "Pinned plan hash changed before execution."
-        ),
-        "Pinned dynamic plan hash check failed."
-      );
-    }
 
     const preparedPlan = await this.preparePinnedPlanExecution({ loadedPlan });
     if (preparedPlan.status === "blocked") {
@@ -3362,6 +3323,163 @@ export class WorkflowApp implements WorkflowAppContract {
       status: "loaded",
       verificationContract: parsedContract.data,
     };
+  }
+
+  /**
+   * Resolve the pinned dynamic workflow for a drive, reconstructing it from a
+   * prior `run/plan.json` when one exists and only invoking the one-shot planner
+   * lane on the first drive.
+   *
+   * The CARRIER fix: {@link run} re-creates the outer safety envelope fresh on
+   * every drive and has no terminal short-circuit, so a re-drive (DO alarm
+   * re-fire, or single-step pause-and-rearm) re-enters from the top. Routing the
+   * planner phase through {@link loadExistingPinnedPlan} makes it idempotent — a
+   * re-drive rebuilds the {@link PinnedDynamicWorkflow} from the embedded
+   * artifacts in the pinned plan (machine, harness, verification contract,
+   * planner-lane receipt all live inside `planDocument`) instead of re-running
+   * the ~213s planner, which previously tripped the lane's `already-completed`
+   * admission guard and surfaced as a spurious `adapter_unavailable` block.
+   */
+  private async resolvePinnedDynamicWorkflow(input: {
+    readonly discordPayload: PinnedDiscordPayload | null;
+    readonly packageMetadata: readonly PackageMetadata[];
+    readonly pinnedPackages: readonly PinnedPackage[];
+    readonly request: WorkflowRunRequest;
+  }): Promise<
+    | {
+        readonly blocker: CapabilityBlocker;
+        readonly status: "blocked";
+        readonly summary: string;
+      }
+    | {
+        readonly loadedPlan: DynamicWorkflowPlanDocument;
+        readonly pinnedDynamicWorkflow: PinnedDynamicWorkflow;
+        readonly planArtifact: PlanArtifact;
+        readonly status: "resolved";
+      }
+  > {
+    const existingPinnedPlan = await this.loadExistingPinnedPlan(
+      input.request.runId
+    );
+    if (existingPinnedPlan !== null) {
+      const { planArtifact, planDocument: loadedPlan } = existingPinnedPlan;
+      return {
+        loadedPlan,
+        pinnedDynamicWorkflow: {
+          harnessArtifact: loadedPlan.harness,
+          machineArtifact: loadedPlan.machine,
+          planDocument: loadedPlan,
+          plannerLaneReceipt: loadedPlan.plannerLane,
+          verificationContractArtifact: loadedPlan.verificationContract,
+        },
+        planArtifact,
+        status: "resolved",
+      };
+    }
+
+    const planning = await this.proposeDynamicWorkflowBlueprint({
+      discordPayload: input.discordPayload,
+      packageMetadata: input.packageMetadata,
+      pinnedPackages: input.pinnedPackages,
+      request: input.request,
+    });
+    if (planning.status === "blocked") {
+      return {
+        blocker: planning.blocker,
+        status: "blocked",
+        summary: planning.summary,
+      };
+    }
+    const { blueprint } = planning;
+    if (
+      !this.isIntegrationTestMode() &&
+      (!blueprint.plannerLane.realAgent ||
+        blueprint.plannerLane.runtime === "integration-test")
+    ) {
+      return {
+        blocker: blocker(
+          "adapter_unavailable",
+          "Production workflow planning requires a real planner agent lane."
+        ),
+        status: "blocked",
+        summary: "Planner lane was not a real agent execution.",
+      };
+    }
+
+    const pinnedDynamicWorkflow = await this.pinDynamicWorkflowBlueprint({
+      blueprint,
+      request: input.request,
+    });
+    const { planDocument } = pinnedDynamicWorkflow;
+    const planWrite = await this.dependencies.artifacts.writeJson({
+      path: "run/plan.json",
+      redacted: true,
+      runId: input.request.runId,
+      value: planDocument,
+    });
+    const planArtifact = PlanArtifactSchema.parse({
+      artifactRef: planWrite.artifactRef,
+      hash: planWrite.contentHash,
+      pinnedAt: planDocument.createdAt,
+      runId: input.request.runId,
+    });
+    const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
+      await this.dependencies.artifacts.readJson({
+        artifactRef: planArtifact.artifactRef,
+      })
+    );
+    if (hashJson(loadedPlan) !== planArtifact.hash) {
+      return {
+        blocker: blocker(
+          "payload_hash_mismatch",
+          "Pinned plan hash changed before execution."
+        ),
+        status: "blocked",
+        summary: "Pinned dynamic plan hash check failed.",
+      };
+    }
+
+    return {
+      loadedPlan,
+      pinnedDynamicWorkflow,
+      planArtifact,
+      status: "resolved",
+    };
+  }
+
+  /**
+   * Recover a previously pinned dynamic plan for a run, or `null` when none
+   * exists yet. Used by {@link resolvePinnedDynamicWorkflow} to make the planner
+   * phase idempotent across re-drives: the first invocation pins `run/plan.json`;
+   * any later drive of the same run loads it here instead of re-invoking the
+   * one-shot planner lane.
+   *
+   * A read failure resolves to `null` (treated as "no pinned plan"), which is no
+   * worse than the pre-existing behavior — the caller falls through to fresh
+   * planning, exactly as it did before this guard existed.
+   */
+  private async loadExistingPinnedPlan(runId: string): Promise<{
+    readonly planArtifact: PlanArtifact;
+    readonly planDocument: DynamicWorkflowPlanDocument;
+  } | null> {
+    const artifactRef = this.dependencies.artifacts.artifactRef({
+      path: "run/plan.json",
+      runId,
+    });
+    let raw: unknown;
+    try {
+      raw = await this.dependencies.artifacts.readJson({ artifactRef });
+    } catch {
+      return null;
+    }
+    const planDocument = DynamicWorkflowPlanDocumentSchema.parse(raw);
+    const planArtifact = PlanArtifactSchema.parse({
+      artifactRef,
+      hash: hashJson(planDocument),
+      pinnedAt: planDocument.createdAt,
+      runId,
+    });
+    return { planArtifact, planDocument };
   }
 
   private async pinDynamicWorkflowBlueprint(input: {

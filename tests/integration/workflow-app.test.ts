@@ -5472,7 +5472,12 @@ describe("workflow run-step checkpoints (M2.5)", () => {
 // Build a workflow over shared artifact + capsule stores so a seeded full run
 // and a later resumed `executeDynamicWorkflow` invocation share the same durable
 // state (checkpoints + committed output artifacts) the resume reads.
-const buildResumableWorkflow = (namespace: string) => {
+const buildResumableWorkflow = (
+  namespace: string,
+  dynamicWorkflowPlanner: ReturnType<
+    typeof createIntegrationTestDynamicWorkflowPlanner
+  > = createIntegrationTestDynamicWorkflowPlanner()
+) => {
   const artifacts = createMemoryArtifactStore(namespace);
   const contextCapsules = createMemoryContextCapsuleActor();
   const workflow = new WorkflowApp({
@@ -5487,7 +5492,7 @@ const buildResumableWorkflow = (namespace: string) => {
       dryRun: "secretref:discord-dry-run",
       send: "secretref:discord-bot",
     },
-    dynamicWorkflowPlanner: createIntegrationTestDynamicWorkflowPlanner(),
+    dynamicWorkflowPlanner,
     executionMode: "integration-test",
     observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
       artifacts,
@@ -5781,6 +5786,41 @@ describe("workflow single-step drive (one node per alarm)", () => {
       status: "captured" as const,
       stepCheckpointCount: 3,
       workerLaneReceiptCount: wholeRun.workerLaneReceipts.length,
+    });
+  });
+
+  it("re-drives the same run to captured without re-invoking the one-shot planner lane", async () => {
+    // A real Pi planner lane is a one-shot agent execution: the admission
+    // controller refuses to replay an already-completed lane (it throws). The DO
+    // alarm re-drives the SAME durable state on every fire, so a run that planned
+    // on its first drive must reconstruct the pinned plan from `run/plan.json` on
+    // every subsequent drive — never calling the planner again.
+    let plannerInvocations = 0;
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const rig = buildResumableWorkflow("workflow-app-planner-idempotent", {
+      async proposePlan(input) {
+        plannerInvocations += 1;
+
+        return await planner.proposePlan(input);
+      },
+    });
+    const request = buildIntegrationTestRunRequest();
+
+    const drives = await driveRunOneNodePerCall(rig, request);
+    const terminal = drives.at(-1);
+
+    expect({
+      // Three drives walk the run to terminal (paused, paused, captured)...
+      driveStatuses: drives.map((drive) => drive.status),
+      // ...but the one-shot planner lane fires exactly once across all of them.
+      // Before the plan-reload fix this was 3 (one re-invocation per drive),
+      // which surfaced as `adapter_unavailable` on the second real-agent drive.
+      plannerInvocations,
+      terminalStatus: terminal?.status,
+    }).toStrictEqual({
+      driveStatuses: ["paused", "paused", "captured"],
+      plannerInvocations: 1,
+      terminalStatus: "captured",
     });
   });
 });
