@@ -16,6 +16,7 @@ describe(provisionCloudflareArtifactsRunStore, () => {
             token: "artifact-token?expires=1780960000",
             tokenExpiresAt: "2026-06-09T00:00:00.000Z",
           }),
+        get: () => Promise.reject(new Error("get should not be called")),
       },
       description: "live run store",
       repoName: "piwf-run-live-test",
@@ -47,6 +48,7 @@ describe(provisionCloudflareArtifactsRunStore, () => {
             token: "artifact-token?expires=1780960000",
             tokenExpiresAt: "2026-06-09T00:00:00.000Z",
           }),
+        get: () => Promise.reject(new Error("get should not be called")),
       },
       description: "live run store",
       repoName: "piwf-run-string-undefined",
@@ -60,6 +62,79 @@ describe(provisionCloudflareArtifactsRunStore, () => {
     ).toBe(
       "artifact://piwf-run-string-undefined/runs/run-live-test/run/planner-blueprint.json"
     );
+  });
+
+  it("re-attaches to the existing run repo when the repo already exists", async () => {
+    let createCalls = 0;
+    let mintedTokenScope: string | undefined;
+    let mintedTokenTtl: number | undefined;
+
+    const runStore = await provisionCloudflareArtifactsRunStore({
+      artifacts: {
+        create: () => {
+          createCalls += 1;
+          return Promise.reject(
+            Object.assign(new Error("repo already exists"), {
+              code: "ALREADY_EXISTS",
+            })
+          );
+        },
+        get: () =>
+          Promise.resolve({
+            createToken: (scope: "write" | "read", ttl?: number) => {
+              mintedTokenScope = scope;
+              mintedTokenTtl = ttl;
+              return Promise.resolve({
+                expiresAt: "2026-06-13T00:00:00.000Z",
+                plaintext: "rotated-token?expires=1781040000",
+              });
+            },
+            remote: "https://example.invalid/git/default/piwf-run-redrive.git",
+          }),
+      },
+      description: "live run store",
+      repoName: "piwf-run-redrive",
+    });
+
+    expect({
+      artifactRef: runStore.store.artifactRef({
+        path: "run/planner-blueprint.json",
+        runId: "run-redrive",
+      }),
+      createCalls,
+      mintedTokenScope,
+      mintedTokenTtl,
+      repoName: runStore.artifactRepoName,
+      tokenExpiresAt: runStore.artifactTokenExpiresAt,
+      tokenSecret: runStore.artifactTokenSecret,
+    }).toStrictEqual({
+      artifactRef:
+        "artifact://piwf-run-redrive/runs/run-redrive/run/planner-blueprint.json",
+      createCalls: 1,
+      mintedTokenScope: "write",
+      mintedTokenTtl: 86_400,
+      repoName: "piwf-run-redrive",
+      tokenExpiresAt: "2026-06-13T00:00:00.000Z",
+      tokenSecret: "rotated-token",
+    });
+  });
+
+  it("rethrows Artifacts errors that are not ALREADY_EXISTS", async () => {
+    await expect(
+      provisionCloudflareArtifactsRunStore({
+        artifacts: {
+          create: () =>
+            Promise.reject(
+              Object.assign(new Error("invalid repo name"), {
+                code: "INVALID_REPO_NAME",
+              })
+            ),
+          get: () => Promise.reject(new Error("get should not be called")),
+        },
+        description: "live run store",
+        repoName: "piwf-run-invalid",
+      })
+    ).rejects.toThrow("invalid repo name");
   });
 
   it("derives the store namespace from the Artifacts remote when namespace is invalid", () => {

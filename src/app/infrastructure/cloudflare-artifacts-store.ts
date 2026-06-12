@@ -28,6 +28,18 @@ interface CloudflareArtifactsGitStoreConfig {
   readonly namespace: string;
 }
 
+interface CloudflareArtifactsRunRepoHandle {
+  readonly name?: string;
+  readonly remote: string;
+  createToken(
+    scope: "write" | "read",
+    ttl?: number
+  ): Promise<{
+    readonly expiresAt: string;
+    readonly plaintext: string;
+  }>;
+}
+
 interface CloudflareArtifactsRunProvisionInput {
   readonly artifacts: {
     create(
@@ -43,6 +55,7 @@ interface CloudflareArtifactsRunProvisionInput {
       readonly token: string;
       readonly tokenExpiresAt: string;
     }>;
+    get(name: string): Promise<CloudflareArtifactsRunRepoHandle>;
   };
   readonly description: string;
   readonly repoName: string;
@@ -298,28 +311,77 @@ export const createCloudflareArtifactsGitStore = (
   config: CloudflareArtifactsGitStoreConfig
 ): ArtifactStoreContract => new CloudflareArtifactsGitStore(config);
 
-export const provisionCloudflareArtifactsRunStore = async (
-  input: CloudflareArtifactsRunProvisionInput
-): Promise<CloudflareArtifactsRunStore> => {
-  const repo = await input.artifacts.create(input.repoName, {
-    description: input.description,
-    readOnly: false,
-    setDefaultBranch: "main",
-  });
-  const artifactTokenSecret = tokenSecretForGit(repo.token);
-  const artifactRepoName = assertRunRepoName(
-    repo.name ?? repoNameFromArtifactsRemote(repo.remote) ?? input.repoName
-  );
+const isArtifactsErrorCode = (
+  error: unknown,
+  code: string
+): error is { readonly code: string } =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { readonly code?: unknown }).code === code;
+
+// Tokens minted when re-attaching to an already-provisioned run repo. Mirrors
+// the binding's `create` default (24h) so a re-driven run gets the same lease
+// window as its first drive.
+const runStoreTokenTtlSeconds = 86_400;
+
+const runStoreFromRepoFields = (fields: {
+  readonly remote: string;
+  readonly repoName: string;
+  readonly tokenExpiresAt: string;
+  readonly tokenPlaintext: string;
+}): CloudflareArtifactsRunStore => {
+  const artifactTokenSecret = tokenSecretForGit(fields.tokenPlaintext);
+  const artifactRepoName = assertRunRepoName(fields.repoName);
 
   return {
-    artifactRemote: repo.remote,
+    artifactRemote: fields.remote,
     artifactRepoName,
-    artifactTokenExpiresAt: repo.tokenExpiresAt,
+    artifactTokenExpiresAt: fields.tokenExpiresAt,
     artifactTokenSecret,
     store: createCloudflareArtifactsGitStore({
-      artifactRemote: repo.remote,
+      artifactRemote: fields.remote,
       artifactTokenSecret,
       namespace: artifactRepoName,
     }),
   };
+};
+
+// Provisioning a run store is re-entrant: the single-step driver re-enters
+// `startRun` on every drive, so the second+ drive of any multi-node run hits an
+// already-created repo. Treat `create` as a get-or-create — on ALREADY_EXISTS,
+// re-attach via `get` and mint a fresh write token instead of going dark.
+export const provisionCloudflareArtifactsRunStore = async (
+  input: CloudflareArtifactsRunProvisionInput
+): Promise<CloudflareArtifactsRunStore> => {
+  try {
+    const repo = await input.artifacts.create(input.repoName, {
+      description: input.description,
+      readOnly: false,
+      setDefaultBranch: "main",
+    });
+
+    return runStoreFromRepoFields({
+      remote: repo.remote,
+      repoName:
+        repo.name ?? repoNameFromArtifactsRemote(repo.remote) ?? input.repoName,
+      tokenExpiresAt: repo.tokenExpiresAt,
+      tokenPlaintext: repo.token,
+    });
+  } catch (error) {
+    if (!isArtifactsErrorCode(error, "ALREADY_EXISTS")) {
+      throw error;
+    }
+
+    const repo = await input.artifacts.get(input.repoName);
+    const token = await repo.createToken("write", runStoreTokenTtlSeconds);
+
+    return runStoreFromRepoFields({
+      remote: repo.remote,
+      repoName:
+        repo.name ?? repoNameFromArtifactsRemote(repo.remote) ?? input.repoName,
+      tokenExpiresAt: token.expiresAt,
+      tokenPlaintext: token.plaintext,
+    });
+  }
 };
