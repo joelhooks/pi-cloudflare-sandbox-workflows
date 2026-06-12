@@ -196,6 +196,57 @@ describe("memory-fabric query-bearing node config leashes", () => {
   });
 });
 
+describe("memory-fabric node-budget bounding leash", () => {
+  // The run-14 blocker: a planner that orders an over-budget payload (152 real
+  // hits) blows a single Worker invocation. The leash CLAMPS each per-node budget
+  // to an invocation-sized ceiling instead of honoring or rejecting it, so one
+  // node always fits one invocation. Truncates floats and floors below 1.
+  it("clamps an over-budget search maxHits down to the search ceiling", () => {
+    const config = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.search"
+    ].parse({ maxHits: 999, query: "dream workflow" });
+    expect(config.maxHits).toBe(25);
+  });
+
+  it("clamps an over-budget signals maxSignals down to the signals ceiling", () => {
+    const config = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.signals"
+    ].parse({ maxSignals: 999, query: "dream workflow" });
+    expect(config.maxSignals).toBe(15);
+  });
+
+  it("clamps an over-budget hydration maxReceipts down to the hydration ceiling", () => {
+    const config = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.hydrate"
+    ].parse({ maxReceipts: 999 });
+    expect(config.maxReceipts).toBe(12);
+  });
+
+  it("floors a sub-1 budget up to 1 and truncates a fractional budget", () => {
+    const floored = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.search"
+    ].parse({ maxHits: 0, query: "dream workflow" });
+    expect(floored.maxHits).toBe(1);
+
+    const truncated = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.search"
+    ].parse({ maxHits: 7.9, query: "dream workflow" });
+    expect(truncated.maxHits).toBe(7);
+  });
+
+  it("leaves an in-budget value untouched and still defaults an omitted budget", () => {
+    const inBudget = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.search"
+    ].parse({ maxHits: 5, query: "dream workflow" });
+    expect(inBudget.maxHits).toBe(5);
+
+    const omitted = MEMORY_FABRIC_NODE_CONFIG_SCHEMAS[
+      "joelclaw.memory.hydrate"
+    ].parse({});
+    expect(omitted.maxReceipts).toBe(10);
+  });
+});
+
 describe("memory-fabric capture-artifact node ref leash", () => {
   it("resolves the planner artifactKinds intent to the pinned generated machine ref and executes", async () => {
     const artifacts = createMemoryArtifactStore("dream-leash-capture-artifact");

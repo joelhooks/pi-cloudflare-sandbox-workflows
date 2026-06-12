@@ -5319,10 +5319,12 @@ describe("workflow app integration contract", () => {
   it("blocks an unrepairable plan node config at plan-load time before any node executes and surfaces it via status", async () => {
     const harness = buildDreamValidationWorkflow({
       artifactStore: "workflow-app-validate-block",
-      // maxHits is constrained to 1..100; 999 is genuinely unrepairable.
+      // A wrong-TYPE maxHits (a string) is genuinely unrepairable: the budget
+      // clamp passes non-numbers through, so the number schema rejects it and the
+      // run blocks fail-fast. (An over-budget NUMBER is clamped now, not blocked.)
       mutateStepConfig: (step) =>
         step.stepId === "search-dream-memory"
-          ? { ...step.config, maxHits: 999 }
+          ? { ...step.config, maxHits: "lots" }
           : null,
     });
     await harness.writeHitlDecision;

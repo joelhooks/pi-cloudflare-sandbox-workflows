@@ -564,8 +564,12 @@ describe("Capsule supervisor async run driver", () => {
 
   // step-driver(core): a multi-node run advances exactly ONE node per alarm. Each
   // alarm drives in single-step mode, persists one more checkpoint (stepIndex + 1),
-  // re-arms alarm(now) on `paused`, and keeps the run-start record until terminal.
-  it("drives one node per alarm, re-arming alarm(now) and retaining the run-start record until terminal", async () => {
+  // re-arms a fresh resume alarm on `paused`, and keeps the run-start record until
+  // terminal. The resume alarm is a strictly-future set (now + RESUME_DELAY_MS), not
+  // alarm(now): inside the firing handler the phantom firing time defeats a lowering
+  // re-arm and a past-time set never re-fires, so each node gets its own fresh
+  // invocation budget instead of racing the reaper inside the same alarm.
+  it("drives one node per alarm, re-arming a fresh resume alarm and retaining the run-start record until terminal", async () => {
     const state = createFakeDurableObjectState();
     const supervisor = createSupervisor(state, {
       WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
@@ -603,11 +607,12 @@ describe("Capsule supervisor async run driver", () => {
       const latestCheckpoint = await loadLatestCheckpoint(supervisor, request);
 
       expect({
-        // alarm(now) was re-armed after each pause so the next node fires at once.
+        // A fresh resume alarm was re-armed after each pause so the next node fires
+        // on its own invocation a beat later (now + RESUME_DELAY_MS).
         alarmReArmedAfterPause,
-        // The DO drives whole-run (no explicit mode) today; this stub still
-        // returns `paused` to exercise the DO's pause-handling + re-arm path,
-        // which stays live for when single-step is re-enabled per driveMode.
+        // The DO now drives single-step: one node per alarm, an explicit
+        // driveMode on every startRun, so a heavy node owns a full invocation
+        // budget instead of sharing one whole-run pass.
         driveModes: log.driveModes,
         // The latest checkpoint advanced to the final step index.
         latestCheckpointStepIndex: latestCheckpoint?.stepIndex ?? null,
@@ -621,7 +626,7 @@ describe("Capsule supervisor async run driver", () => {
         runStartKeptAcrossAlarms,
       }).toStrictEqual({
         alarmReArmedAfterPause: [true, true],
-        driveModes: [undefined, undefined, undefined],
+        driveModes: ["single-step", "single-step", "single-step"],
         latestCheckpointStepIndex: 2,
         outcomeStatuses: ["paused", "paused", "blocked"],
         persistedStepIndexes: [0, 1, 2],

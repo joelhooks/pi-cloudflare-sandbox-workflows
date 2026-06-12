@@ -202,6 +202,24 @@ const appendUnique = (
 type DriveOutcome = "failed" | "paused" | "terminal";
 
 /**
+ * Delay before a paused single-step drive's next node fires (the resume re-arm).
+ * Small enough that nodes flow at near work-speed, but STRICTLY POSITIVE because
+ * of two workerd alarm semantics that a now/past alarm trips over:
+ *
+ *   1. Inside an alarm handler, the firing alarm is not deleted until the handler
+ *      returns successfully, so `getAlarm()` still reports the firing time
+ *      `T_fired <= now`. `armAlarmAt` only ever LOWERS the alarm, so both
+ *      `armAlarmAt(now)` and `armAlarmAt(now + delta)` see that phantom earlier
+ *      time and set nothing — the run stalls after one node (observed live as run
+ *      11's 1-node regress). The resume re-arm must therefore set the alarm
+ *      UNCONDITIONALLY (see `armResumeAlarm`), not through the lowering guard.
+ *   2. A `setAlarm(now)` / past-time alarm set from within a handler does not
+ *      reliably re-fire in live workerd; a strictly-future time is the canonical
+ *      self-reschedule that does.
+ */
+const RESUME_DELAY_MS = 250;
+
+/**
  * Drive one queued run through the front door from inside the alarm invocation,
  * in single-step mode: `WorkflowApp.run()` resumes from the latest checkpoint and
  * executes EXACTLY ONE not-yet-completed dynamic node, then either pauses (more
@@ -217,15 +235,17 @@ const driveOneQueuedRun = async (
   request: WorkflowRunRequest
 ): Promise<DriveOutcome> => {
   try {
-    // Whole-run drive: runs the entire envelope + dynamic loop to a terminal
-    // status in one invocation. The dynamic nodes are fast (a real dream ran 8
-    // in 11s) and every downstream op is now bounded by AbortSignal.timeout, so
-    // a node can no longer hang the invocation — the original reason for
-    // single-step. Single-step remains available via driveMode for genuinely
-    // long runs once its live workerd alarm re-fire is debugged; in workerd the
-    // post-pause armAlarmAt(now) did not promptly re-fire, stalling after one
-    // node. Whole-run is the proven path to a captured dream today.
-    const result = await frontDoor.startRun(request);
+    // Single-step drive: resume from the latest checkpoint and execute EXACTLY
+    // ONE not-yet-completed dynamic node, then pause (more remain) or reach a
+    // terminal status (the last node ran + the finishing envelope completed).
+    // Each node gets its own fresh wall-clock budget, so a heavy real-data
+    // retrieval node (search/hydrate/correlate over the live JoelClaw index) no
+    // longer races the reaper inside a shared whole-run invocation — the failure
+    // mode that reaped run 14 at node 3. The paused path (driveQueuedRuns) re-arms
+    // an imminent future alarm so the next node fires at work-speed.
+    const result = await frontDoor.startRun(request, {
+      driveMode: "single-step",
+    });
 
     return result.status === "paused" ? "paused" : "terminal";
   } catch (error) {
@@ -612,11 +632,14 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         await this.ctx.storage.delete(runStartStorageKey(request.runId));
       } else if (outcome === "paused") {
         // Single-step drive paused after one node: KEEP the run-start record so
-        // the next alarm resumes from the just-persisted checkpoint, and re-arm
-        // alarm(now) so that next node fires immediately — nodes flow at
-        // work-speed with no dead gap. The marker clears below so the immediate
-        // re-drive is not blocked by a fresh marker.
-        await this.armAlarmAt(now);
+        // the next alarm resumes from the just-persisted checkpoint, and re-arm a
+        // strictly-future alarm so that next node fires at work-speed with no dead
+        // gap. Uses armResumeAlarm (unconditional future set), NOT armAlarmAt: the
+        // firing alarm is still reported by getAlarm() inside this handler, and
+        // armAlarmAt only lowers, so it would treat that phantom as an earlier
+        // alarm and re-arm nothing — stalling after one node. The marker clears
+        // below so the imminent re-drive is not blocked by a fresh marker.
+        await this.armResumeAlarm(now);
       }
       // For terminal, paused, or a transient throw, clear our marker. On eviction
       // the invocation dies before reaching here, so the marker survives (stale)
@@ -790,6 +813,29 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     if (existing === null || existing > fireAt) {
       await this.ctx.storage.setAlarm(fireAt);
     }
+  }
+
+  /**
+   * Re-arm the alarm for an IMMINENT single-step resume (the paused path).
+   * UNCONDITIONALLY sets the alarm to a strictly-future `now + RESUME_DELAY_MS`,
+   * unlike `armAlarmAt` which only lowers an existing alarm.
+   *
+   * The unconditional future set is what makes single-step actually advance in
+   * live workerd. Inside this alarm handler the firing alarm is not yet deleted,
+   * so `getAlarm()` returns `T_fired <= now`; `armAlarmAt`'s lowering guard would
+   * see that phantom earlier time and set nothing, leaving no future alarm once
+   * the handler returns and workerd deletes the fired one — the run stalls after
+   * exactly one node (run 11). A strictly-future `setAlarm` set during the handler
+   * is retained and re-fires reliably (the canonical self-reschedule).
+   *
+   * The reaper deadline is not lost by moving the slot earlier: it lives in
+   * `REAPER_DUE_AT_STORAGE_KEY` and `rearmReaperAlarmIfSlotsRemain` re-arms it at
+   * the end of every alarm, and `armAlarmAt(reaperDueAt)` there won't raise this
+   * sooner resume alarm (it only lowers), so both the imminent resume and the
+   * eventual sweep are preserved.
+   */
+  private async armResumeAlarm(now: number): Promise<void> {
+    await this.ctx.storage.setAlarm(now + RESUME_DELAY_MS);
   }
 
   private async rearmReaperAlarmIfSlotsRemain(): Promise<void> {

@@ -186,6 +186,30 @@ const AGENTIC_REFINEMENT_OUTPUT_JSON_SCHEMA = JSON.stringify(
   2
 );
 
+// Node-budget bounding (the run-14 blocker). Each retrieval/correlation node runs
+// as ONE relay round-trip whose work the planner sizes via maxHits/maxSignals/
+// maxReceipts. Single-step gives every node its own fresh invocation, but a node
+// can still order an unbounded payload — 152 real JoelClaw hits + per-receipt
+// hydration + O(n^2) correlation is what blew a single invocation and got run 14
+// reaped at node 3. These ceilings cap the largest payload a node will fetch so
+// one node always fits one invocation's wall-clock + CPU budget. They CLAMP rather
+// than reject (a leash, not a gate): a planner that asks for 100 hits gets the
+// budgeted ceiling, not a parse error, and still reviews real — just bounded —
+// evidence. Modest by design; raise once the node-by-node walk is green.
+const MEMORY_SEARCH_MAX_HITS_CEILING = 25;
+const MEMORY_SIGNALS_MAX_CEILING = 15;
+const MEMORY_HYDRATION_MAX_RECEIPTS_CEILING = 12;
+
+// Clamp a planner-supplied positive-integer budget to [1, ceiling]. Passes
+// non-numbers (including `undefined`) through untouched so the field's `.default`
+// still applies on omission; truncates and floors a number into the budget band.
+const clampToBudgetCeiling =
+  (ceiling: number) =>
+  (value: unknown): unknown =>
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.min(Math.max(Math.trunc(value), 1), ceiling)
+      : value;
+
 const filterToValidSignalKinds = (value: unknown): unknown => {
   if (!Array.isArray(value)) {
     return value;
@@ -256,13 +280,19 @@ const MemoryCaptureArtifactNodeConfigSchema = z.object({
 });
 
 const MemorySearchNodeConfigSchema = z.object({
-  maxHits: z.number().int().min(1).max(100).default(10),
+  maxHits: z.preprocess(
+    clampToBudgetCeiling(MEMORY_SEARCH_MAX_HITS_CEILING),
+    z.number().int().min(1).max(MEMORY_SEARCH_MAX_HITS_CEILING).default(10)
+  ),
   query: z.string().min(1).default(MEMORY_FABRIC_FALLBACK_QUERY),
   sourceFamilies: LeashedSourceFamiliesSchema,
 });
 
 const MemorySignalsNodeConfigSchema = z.object({
-  maxSignals: z.number().int().min(1).max(100).default(10),
+  maxSignals: z.preprocess(
+    clampToBudgetCeiling(MEMORY_SIGNALS_MAX_CEILING),
+    z.number().int().min(1).max(MEMORY_SIGNALS_MAX_CEILING).default(10)
+  ),
   query: z.string().min(1).default(MEMORY_FABRIC_FALLBACK_QUERY),
   signalKinds: z.preprocess(
     filterToValidSignalKinds,
@@ -272,7 +302,15 @@ const MemorySignalsNodeConfigSchema = z.object({
 });
 
 const MemoryHydrationNodeConfigSchema = z.object({
-  maxReceipts: z.number().int().min(1).max(100).default(10),
+  maxReceipts: z.preprocess(
+    clampToBudgetCeiling(MEMORY_HYDRATION_MAX_RECEIPTS_CEILING),
+    z
+      .number()
+      .int()
+      .min(1)
+      .max(MEMORY_HYDRATION_MAX_RECEIPTS_CEILING)
+      .default(10)
+  ),
   searchRef: ArtifactRefSchema.optional(),
   searchStepId: z.string().min(1).optional(),
 });
@@ -451,7 +489,7 @@ export const memoryFabricNodeConfigContractNotes = (): readonly string[] => {
 /**
  * Render one Zod issue as a redacted, operator-legible field clause naming the
  * config path and the expected constraint. Zod issue messages describe the
- * SCHEMA (e.g. "Too big: expected number to be <=100", "Invalid option:
+ * SCHEMA (e.g. "Too big: expected number to be <=25", "Invalid option:
  * expected one of ..."), never the offending value, so the clause carries no
  * planner payload — only the contract the config violated.
  */
@@ -468,7 +506,8 @@ const describePlanNodeConfigIssue = (issue: z.core.$ZodIssue): string => {
  * is parsed against the SAME leashed registry schema its execute fn uses, so a
  * config the leash can repair (omitted defaults, out-of-enum members it drops)
  * passes and returns `null`; only a genuinely unrepairable config (e.g. a
- * `maxHits` outside 1..100, a non-string `query`) blocks. A `nodeType` the
+ * non-string `query`) blocks — a numeric `maxHits` above the budget ceiling is
+ * now clamped by the leash, not blocked. A `nodeType` the
  * registry does not cover also returns `null` — that step is not this adapter's
  * config to validate. On failure the blocker names the stepId, nodeType, and the
  * first violated field path + expected constraint so the run blocks legibly at

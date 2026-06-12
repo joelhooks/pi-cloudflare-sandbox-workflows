@@ -27,10 +27,12 @@ const nodeStep = (input: {
 
 describe("memory-fabric fail-fast plan node config validation", () => {
   it("blocks an unrepairable config with a precise plan_node_config_invalid blocker naming the step and field", () => {
-    // maxHits is constrained to 1..100; 999 is outside the envelope and the
-    // leash has no clamp, so this is genuinely unrepairable and must block.
+    // A wrong-TYPE maxHits (a string, not a number) is genuinely unrepairable:
+    // the budget clamp passes non-numbers through untouched, so the inner number
+    // schema rejects it and the node blocks. (An over-budget number is now
+    // clamped, not blocked — see the next test.)
     const step = nodeStep({
-      config: { maxHits: 999, query: "dream workflow" },
+      config: { maxHits: "lots", query: "dream workflow" },
       nodeType: "joelclaw.memory.search",
       stepId: "search-dream-memory",
     });
@@ -42,11 +44,26 @@ describe("memory-fabric fail-fast plan node config validation", () => {
       redacted: true,
     });
     // The clause names step + nodeType + field, and describes the schema
-    // constraint — never the offending value (no "999").
+    // constraint — never the offending value (no "lots").
     expect(blocker?.message).toMatch(
       /search-dream-memory.*joelclaw\.memory\.search.*config\.maxHits/u
     );
-    expect(blocker?.message).not.toContain("999");
+    expect(blocker?.message).not.toContain("lots");
+  });
+
+  it("clamps an over-budget numeric maxHits to the node budget ceiling instead of blocking", () => {
+    // Node-budget bounding (the run-14 blocker): a planner that orders 999 hits
+    // is no longer unrepairable — the leash CLAMPS it to the search ceiling so the
+    // node fits one Worker invocation, rather than blocking the whole run. The
+    // clamped value that reaches the relay (999 -> 25) is asserted end-to-end in
+    // the workflow-app execution test; here the contract is simply: repairable.
+    const step = nodeStep({
+      config: { maxHits: 999, query: "dream workflow" },
+      nodeType: "joelclaw.memory.search",
+      stepId: "search-dream-memory",
+    });
+
+    expect(validateMemoryFabricNodeConfig(step)).toBeNull();
   });
 
   it("passes a leashable config (out-of-enum signalKinds, omitted query) because the leash repairs it", () => {
