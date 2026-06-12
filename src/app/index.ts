@@ -46,10 +46,8 @@ export {
 } from "./control-plane/d1-schema.ts";
 export { canonicalJson, hashJson, sha256Hex } from "./domain/hash.ts";
 export * from "./domain/schemas.ts";
-export {
-  __cloudflareSandboxAgentLaneTestHooks,
-  createCloudflareSandboxPiAgentLaneRuntime,
-} from "./infrastructure/cloudflare-sandbox-agent-lanes.ts";
+export { createCloudflareSandboxPiAgentLaneRuntime } from "./infrastructure/cloudflare-sandbox-agent-lanes.ts";
+export { buildPiAgentLaneCommand } from "./infrastructure/cloudflare-sandbox-agent-lane-command.ts";
 export {
   createCloudflareArtifactsGitStore,
   provisionCloudflareArtifactsRunStore,

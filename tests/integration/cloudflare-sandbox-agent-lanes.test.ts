@@ -21,6 +21,7 @@ import {
   buildAgentLanePackageMountIndex,
   mountedPackagePathFor,
 } from "../../src/app/infrastructure/agent-lane-package-mounts.ts";
+import { buildPiAgentLaneCommand } from "../../src/app/infrastructure/cloudflare-sandbox-agent-lane-command.ts";
 import { integrationTestPackageMetadata } from "./workflow-app-fixtures.ts";
 
 const buildPinnedPackageFixture = (
@@ -116,6 +117,38 @@ describe(jsonOutputNormalizerNodeScript, () => {
       readsRawOutputPath: true,
       usesExtractor: true,
       writesPrettyJson: true,
+    });
+  });
+});
+
+describe(buildPiAgentLaneCommand, () => {
+  const command = buildPiAgentLaneCommand();
+
+  it("guarantees a result marker on any exit via an EXIT trap installed before fallible work", () => {
+    const trapIndex = command.indexOf("trap emit_failure_marker EXIT");
+    const cloneIndex = command.indexOf('git clone "$ARTIFACTS_GIT_REMOTE"');
+
+    expect({
+      emitsErrorStatusOnFailure: command.includes('status: "error"'),
+      emitsOkStatusOnSuccess: command.includes('status: "ok"'),
+      guardsAgainstDoubleEmit: command.includes(
+        'if [ "$marker_emitted" = "1" ]'
+      ),
+      sameMarkerPrefixForBothPaths:
+        (command.match(/__PIWF_AGENT_LANE_RESULT__/gu) ?? []).length === 2,
+      scrubsCredentialsBeforeTailing: command.includes(
+        "s#https://x:[^@]*@#https://x:***@#g"
+      ),
+      tracksFailingStepThroughPush: command.includes('current_step="git-push"'),
+      trapInstalledBeforeClone: trapIndex !== -1 && trapIndex < cloneIndex,
+    }).toStrictEqual({
+      emitsErrorStatusOnFailure: true,
+      emitsOkStatusOnSuccess: true,
+      guardsAgainstDoubleEmit: true,
+      sameMarkerPrefixForBothPaths: true,
+      scrubsCredentialsBeforeTailing: true,
+      tracksFailingStepThroughPush: true,
+      trapInstalledBeforeClone: true,
     });
   });
 });

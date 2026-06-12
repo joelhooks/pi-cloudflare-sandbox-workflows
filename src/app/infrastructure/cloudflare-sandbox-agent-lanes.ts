@@ -3,7 +3,6 @@ import type {
   ISandbox,
   Sandbox as SandboxDurableObject,
 } from "@cloudflare/sandbox";
-import { z } from "zod";
 
 import type {
   AgentLaneRuntimePort,
@@ -15,12 +14,12 @@ import {
   WorkflowTraceContextSchema,
 } from "../domain/schemas.ts";
 import type { AgentLaneReceipt } from "../domain/schemas.ts";
-import { jsonOutputNormalizerNodeScript } from "./agent-lane-json-output.ts";
+import { buildAgentLanePackageMountIndex } from "./agent-lane-package-mounts.ts";
 import {
-  agentLanePackageMountWriterNodeScript,
-  buildAgentLanePackageMountIndex,
-} from "./agent-lane-package-mounts.ts";
-import { agentLaneTokenCostAccountingNodeScript } from "./agent-lane-token-cost-accounting.ts";
+  buildPiAgentLaneCommand,
+  parseLaneResultMarker,
+} from "./cloudflare-sandbox-agent-lane-command.ts";
+import type { SandboxCommandResult } from "./cloudflare-sandbox-agent-lane-command.ts";
 import { buildSandboxId, safeGitRefSegment } from "./sandbox-id.ts";
 
 interface CloudflareSandboxAgentLaneEnv {
@@ -30,26 +29,6 @@ interface CloudflareSandboxAgentLaneEnv {
 interface RealSandbox extends ISandbox {
   destroy(): Promise<void>;
 }
-
-interface SandboxCommandResult {
-  readonly command: string;
-  readonly duration: number;
-  readonly exitCode: number;
-  readonly stderr: string;
-  readonly stdout: string;
-  readonly success: boolean;
-  readonly timestamp: string;
-}
-
-interface SandboxLaneResultMarker {
-  readonly artifactCommitSha: string;
-  readonly receiptPath: string;
-}
-
-const SandboxLaneResultMarkerSchema = z.object({
-  artifactCommitSha: z.string().min(1),
-  receiptPath: z.string().min(1),
-});
 
 const assertRealPiLaneInput = (input: AgentLaneRuntimeRequest): void => {
   if (!input.artifactRemote.startsWith("https://")) {
@@ -120,142 +99,6 @@ printf '\n__PIWF_EXIT_CODE__:%s\n' "$status"`;
     success: exitCode === 0,
     timestamp: result.timestamp,
   };
-};
-
-const buildPiAgentLaneCommand = (): string => String.raw`set -eu
-started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-agent_dir="/workspace/.pi/agent"
-auth_path="$agent_dir/auth.json"
-raw_output_path="/workspace/piwf-agent-lane-output-raw.txt"
-stderr_path="/workspace/piwf-agent-lane-stderr.txt"
-export raw_output_path stderr_path
-rm -rf /workspace/piwf-agent-lane
-mkdir -p "$agent_dir"
-printf '%s' "$PI_AUTH_JSON_B64" | base64 -d > "$auth_path"
-chmod 600 "$auth_path"
-git clone "$ARTIFACTS_GIT_REMOTE" /workspace/piwf-agent-lane
-cd /workspace/piwf-agent-lane
-git config user.name "pi-workflow-agent-lane"
-git config user.email "pi-workflow-agent-lane@example.invalid"
-git checkout -B "$LANE_BRANCH"
-node <<'NODE'
-${agentLanePackageMountWriterNodeScript}
-NODE
-mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(dirname "$LANE_TRANSCRIPT_PATH")" "$(dirname "$LANE_RECEIPT_PATH")"
-printf '%s' "$LANE_PROMPT" > "$LANE_PROMPT_PATH"
-set +e
-pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
-pi_status=$?
-set -e
-if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
-  if ! node <<'NODE'
-${jsonOutputNormalizerNodeScript}
-NODE
-  then
-    cp "$raw_output_path" "$LANE_OUTPUT_PATH"
-    pi_status=65
-  fi
-else
-  cp "$raw_output_path" "$LANE_OUTPUT_PATH"
-fi
-completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-{
-  printf '# Pi agent lane transcript\n\n'
-  printf 'Run: %s\n' "$RUN_ID"
-  printf 'Work item: %s\n' "$WORK_ITEM_ID"
-  printf 'Lane: %s\n' "$LANE_ID"
-  printf 'Trace: %s\n' "$WORKFLOW_TRACE_ID"
-  printf 'Span: %s\n' "$WORKFLOW_SPAN_ID"
-  printf 'Exit status: %s\n\n' "$pi_status"
-  printf '## Mounted Packages\n\n'
-  cat packages/pinned-packages.json || true
-  printf '\n\n'
-  printf '## Raw Output\n\n'
-  cat "$raw_output_path" || true
-  printf '\n\n## Normalized Output\n\n'
-  cat "$LANE_OUTPUT_PATH" || true
-  printf '\n\n## Stderr\n\n'
-  cat "$stderr_path" || true
-} > "$LANE_TRANSCRIPT_PATH"
-prompt_hash="$(sha256sum "$LANE_PROMPT_PATH" | awk '{print $1}')"
-transcript_hash="$(sha256sum "$LANE_TRANSCRIPT_PATH" | awk '{print $1}')"
-output_hash="$(sha256sum "$LANE_OUTPUT_PATH" | awk '{print $1}')"
-package_mount_index_hash="$(sha256sum packages/pinned-packages.json | awk '{print $1}')"
-package_mount_count="$(node <<'NODE'
-const fs = require("fs");
-const index = JSON.parse(fs.readFileSync("packages/pinned-packages.json", "utf8"));
-process.stdout.write(String(index.mounts.length));
-NODE
-)"
-export completed_at output_hash package_mount_count package_mount_index_hash pi_status prompt_hash started_at transcript_hash
-node <<'NODE'
-const fs = require("fs");
-${agentLaneTokenCostAccountingNodeScript}
-const outputRefs = JSON.parse(process.env.LANE_OUTPUT_ARTIFACT_REFS_JSON);
-const accounting = parseAgentLaneTokenCostAccountingFromText([
-  fs.readFileSync(process.env.raw_output_path, "utf8"),
-  fs.readFileSync(process.env.stderr_path, "utf8")
-].join("\n"));
-const receipt = {
-  completedAt: process.env.completed_at,
-  kind: process.env.LANE_KIND,
-  laneId: process.env.LANE_ID,
-  outputPins: outputRefs.map((artifactRef) => ({
-    artifactRef,
-    hash: process.env.output_hash,
-    mediaType: process.env.LANE_OUTPUT_MEDIA_TYPE
-  })),
-  outputRefs,
-  packageMounts: {
-    artifactRef: process.env.LANE_PACKAGE_MOUNT_INDEX_ARTIFACT_REF,
-    hash: process.env.package_mount_index_hash,
-    mediaType: "application/json",
-    mountCount: Number(process.env.package_mount_count)
-  },
-  prompt: {
-    artifactRef: process.env.LANE_PROMPT_ARTIFACT_REF,
-    hash: process.env.prompt_hash,
-    mediaType: "text/markdown"
-  },
-  realAgent: true,
-  receiptRef: process.env.LANE_RECEIPT_ARTIFACT_REF,
-  authLease: JSON.parse(process.env.LANE_AUTH_LEASE_JSON),
-  redacted: true,
-  runtime: process.env.LANE_RUNTIME,
-  sandboxRef: process.env.LANE_SANDBOX_REF,
-  startedAt: process.env.started_at,
-  status: Number(process.env.pi_status) === 0 ? "completed" : "failed",
-  ...(accounting === null ? {} : { tokenCostAccounting: accounting }),
-  traceContext: JSON.parse(process.env.WORKFLOW_TRACE_CONTEXT_JSON),
-  transcript: {
-    artifactRef: process.env.LANE_TRANSCRIPT_ARTIFACT_REF,
-    hash: process.env.transcript_hash,
-    mediaType: "text/markdown"
-  }
-};
-fs.writeFileSync(process.env.LANE_RECEIPT_PATH, JSON.stringify(receipt, null, 2) + "\n");
-NODE
-git add "$LANE_PROMPT_PATH" "$LANE_OUTPUT_PATH" "$LANE_TRANSCRIPT_PATH" "$LANE_RECEIPT_PATH" packages
-git commit -m "agent lane: $LANE_ID $RUN_ID"
-commit="$(git rev-parse HEAD)"
-git push origin HEAD:"refs/heads/$LANE_BRANCH"
-export commit
-node <<'NODE'
-const payload = {
-  artifactCommitSha: process.env.commit,
-  receiptPath: process.env.LANE_RECEIPT_PATH
-};
-process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringify(payload), "utf8").toString("base64") + "\n");
-NODE
-exit "$pi_status"`;
-
-const parseLaneResultMarker = (stdout: string): SandboxLaneResultMarker => {
-  const marker = /__PIWF_AGENT_LANE_RESULT__:([A-Za-z0-9+/=]+)/u.exec(stdout);
-  if (marker?.[1] === undefined) {
-    throw new Error("Cloudflare Sandbox lane did not emit a result marker.");
-  }
-
-  return SandboxLaneResultMarkerSchema.parse(JSON.parse(atob(marker[1])));
 };
 
 const getRealSandbox = (
@@ -368,7 +211,12 @@ const runCloudflareSandboxPiAgentLane = async (input: {
         timeout: input.input.timeoutMs,
       }
     );
-    const marker = parseLaneResultMarker(result.stdout);
+    const marker = parseLaneResultMarker(result);
+    if (marker.status === "error") {
+      throw new Error(
+        `Cloudflare Sandbox Pi lane aborted at step "${marker.failingStep ?? "unknown"}" (exit ${marker.exitCode}, pi ${marker.piStatus ?? "n/a"}): ${marker.gitLogTail || marker.stderrTail || "no diagnostic output"}`
+      );
+    }
     if (!result.success) {
       throw new Error(
         `Cloudflare Sandbox Pi lane failed after commit ${marker.artifactCommitSha}: ${result.stderr || result.stdout}`
@@ -416,7 +264,3 @@ export const createCloudflareSandboxPiAgentLaneRuntime = (
   },
   runtime: "pi-agent-cli",
 });
-
-export const __cloudflareSandboxAgentLaneTestHooks = {
-  buildPiAgentLaneCommand,
-};
