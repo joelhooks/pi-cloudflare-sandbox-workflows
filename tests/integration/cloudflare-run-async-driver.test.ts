@@ -507,6 +507,130 @@ describe("Capsule supervisor async run driver", () => {
     }
   });
 
+  // FIX (carrier): the live failure the pre-existing watchdog test never modeled.
+  // Inside a real alarm handler getAlarm() returns the FIRING alarm's time
+  // (T_fired <= now) — workerd has not deleted it yet — NOT null. armAlarmAt only
+  // LOWERS, so against that phantom it set nothing for a future time: the
+  // start-of-handler watchdog never persisted, and a node that EVICTED before
+  // returning `paused` (the multi-minute planning prologue — the ONLY other
+  // phantom-safe re-arm is armResumeAlarm on the paused path) left the DO with no
+  // future alarm at all. It went dark until the reaper swept it at checkpoint-
+  // staleness (run 14: blocked at checkpoint+timeout). The fake models the phantom
+  // by leaving the fired alarm in the slot as a PAST time; the watchdog must still
+  // leave a STRICTLY-FUTURE alarm. The pre-existing watchdog test nulls the slot,
+  // so it passed against the phantom-blocked code and never caught this.
+  it("keeps a strictly-future watchdog after an evicted drive despite the phantom firing alarm", async () => {
+    const state = createFakeDurableObjectState();
+    const emptyD1 = {
+      prepare: () => ({
+        all: () => Promise.resolve({ results: [] }),
+        bind: () => ({
+          all: () => Promise.resolve({ results: [] }),
+          run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+        }),
+        run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+      }),
+    };
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub; the watchdog only needs a bound D1 to resolve reaper context.
+      WORKFLOW_APP_D1: emptyD1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const request = buildIntegrationTestRunRequest();
+
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() => ({
+      route: "POST /runs",
+      startRun(input) {
+        WorkflowRunRequestSchema.parse(input);
+        // The long node exceeds the invocation budget and is evicted before it can
+        // return `paused`, the only other phantom-safe re-arm path.
+        throw new Error("simulated workerd eviction mid planning prologue");
+      },
+    }));
+    try {
+      await startRun(supervisor, request);
+
+      const now = Date.now();
+      // Model the phantom: the immediate drive alarm has FIRED and workerd is now
+      // inside the handler, so getAlarm() reports that fired time — a value <= now,
+      // NOT null. The phantom-blocked armAlarmAt would re-arm nothing against it.
+      state.alarmAt = now - 1000;
+
+      await supervisor.alarm();
+
+      expect({
+        futureAlarmArmed: state.alarmAt !== null && state.alarmAt > now,
+        runStartKept: state.store.has(runStartKey(request)),
+      }).toStrictEqual({
+        futureAlarmArmed: true,
+        runStartKept: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  // FIX (carrier guard): on the paused path driveQueuedRuns arms an IMMINENT resume
+  // alarm (now + RESUME_DELAY_MS). The end-of-handler watchdog re-arm must NOT raise
+  // that to the far reaper deadline (now + timeout) — doing so would stall the walk
+  // ~10 minutes per node instead of advancing at work-speed. drivePausedThisAlarm
+  // makes the re-arm yield to the resume alarm it just set.
+  it("does not clobber a paused drive's imminent resume alarm with the far watchdog deadline", async () => {
+    const state = createFakeDurableObjectState();
+    // A bound D1 is REQUIRED for this test to have teeth: without it
+    // resolveReaperContext() returns undefined and armReaperWatchdog is a no-op,
+    // so the end-of-handler re-arm could never clobber the resume even if the
+    // drivePausedThisAlarm guard were removed — the test would pass vacuously.
+    const emptyD1 = {
+      prepare: () => ({
+        all: () => Promise.resolve({ results: [] }),
+        bind: () => ({
+          all: () => Promise.resolve({ results: [] }),
+          run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+        }),
+        run: () => Promise.resolve({ meta: { changes: 0 }, success: true }),
+      }),
+    };
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 stub; the watchdog only needs a bound D1 to resolve reaper context.
+      WORKFLOW_APP_D1: emptyD1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    const request = buildIntegrationTestRunRequest();
+    const log: SingleStepDriveLog = {
+      driveModes: [],
+      outcomeStatuses: [],
+      persistedStepIndexes: [],
+    };
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+      createSingleStepFrontDoor(supervisor, 3, log)
+    );
+    try {
+      await startRun(supervisor, request);
+
+      const now = Date.now();
+      await supervisor.alarm();
+
+      const alarmDelta = state.alarmAt === null ? null : state.alarmAt - now;
+      expect({
+        paused: log.outcomeStatuses,
+        // The next alarm is the imminent resume, NOT the ~10-minute watchdog: a
+        // delta far below TEST_TIMEOUT_MS proves the re-arm yielded to the resume.
+        resumeAlarmIsImminent:
+          alarmDelta !== null && alarmDelta > 0 && alarmDelta < 10_000,
+      }).toStrictEqual({
+        paused: ["paused"],
+        resumeAlarmIsImminent: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
   // FIX 1, test (b): the driving marker prevents concurrent double-drive, but a
   // stale marker (the prior driver was evicted) allows the next alarm to
   // re-drive. Both halves are exercised against the same seeded parked run.

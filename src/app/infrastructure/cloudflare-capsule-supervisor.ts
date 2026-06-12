@@ -256,6 +256,15 @@ const driveOneQueuedRun = async (
 };
 
 export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowCapsuleSupervisorEnv> {
+  /**
+   * True when a single-step drive paused during the CURRENT alarm() handler and
+   * already armed an imminent resume alarm (now + RESUME_DELAY_MS). The
+   * end-of-handler reaper re-arm reads this to avoid clobbering that strictly-
+   * earlier resume with the later eviction watchdog, which would stall the walk
+   * after exactly one node. Reset at the top of every alarm().
+   */
+  private drivePausedThisAlarm = false;
+
   override fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     const postRoutes: Record<string, () => Promise<Response>> = {
@@ -536,22 +545,27 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
    */
   override async alarm(): Promise<void> {
     const now = Date.now();
+    this.drivePausedThisAlarm = false;
 
     // Arm a watchdog alarm BEFORE the drive, but only while a run-start record
     // is still queued (a non-terminal run that could be killed mid-drive).
-    // driveQueuedRuns awaits the whole run to a terminal status; if workerd
-    // evicts/kills this invocation mid-run (long multi-node walks exceed a
-    // single invocation budget), every line below — including the reaper re-arm
-    // at the end — never executes, leaving the run orphaned with no future alarm
-    // to reap or re-drive it. Scheduling the watchdog first guarantees a later
+    // driveQueuedRuns awaits one node to a paused/terminal status; the very first
+    // dynamic node can be a multi-minute planning prologue that exceeds a single
+    // invocation budget, so if workerd evicts/kills this invocation mid-node,
+    // every line below — including the reaper re-arm at the end — never executes,
+    // leaving the run orphaned with no future alarm to reap or re-drive it (the
+    // run-14 dark-DO failure). Scheduling the watchdog first guarantees a later
     // alarm fires to resume the run from its latest checkpoint (fresh) or sweep
     // it (stale), so a killed drive is recovered rather than wedged forever.
-    // Gating on queued records keeps an idle DO from re-arming forever.
+    // Gating on queued records keeps an idle DO from re-arming forever. This MUST
+    // be phantom-safe: see armReaperWatchdog — the firing alarm is still reported
+    // by getAlarm() inside this handler, so the lowering armAlarmAt would set
+    // nothing and leave the DO dark on eviction.
     const queuedBeforeDrive = await this.ctx.storage.list({
       prefix: runStartStoragePrefix,
     });
     if (queuedBeforeDrive.size > 0) {
-      await this.ensureReaperAlarm();
+      await this.armReaperWatchdog(now);
     }
 
     await this.driveQueuedRuns(now);
@@ -640,6 +654,10 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         // alarm and re-arm nothing — stalling after one node. The marker clears
         // below so the imminent re-drive is not blocked by a fresh marker.
         await this.armResumeAlarm(now);
+        // Tell the end-of-handler reaper re-arm that an imminent resume is set,
+        // so it does not clobber this strictly-earlier alarm with the far
+        // eviction-watchdog deadline (which would stall the walk after one node).
+        this.drivePausedThisAlarm = true;
       }
       // For terminal, paused, or a transient throw, clear our marker. On eviction
       // the invocation dies before reaching here, so the marker survives (stale)
@@ -838,17 +856,57 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     await this.ctx.storage.setAlarm(now + RESUME_DELAY_MS);
   }
 
+  /**
+   * Arm the eviction watchdog from INSIDE an alarm() handler. Unlike
+   * ensureReaperAlarm (which calls the lowering armAlarmAt), this UNCONDITIONALLY
+   * `setAlarm`s a strictly-future deadline (`now + timeoutMs`, the start of the
+   * re-drive window), so it survives the workerd phantom: during a handler the
+   * firing alarm is not yet deleted, getAlarm() returns `T_fired <= now`, and a
+   * lowering arm would see that phantom and set nothing — leaving the DO dark on
+   * eviction (run 14). A strictly-future setAlarm during the handler is retained
+   * and re-fires, so an evicted long node is recovered rather than wedged. The
+   * tracked REAPER_DUE_AT deadline is kept at min(existing, fresh) so a sooner
+   * pending sweep is never deferred, but a stale (<= now) phantom value is
+   * replaced by the fresh future deadline rather than re-armed in the past.
+   */
+  private async armReaperWatchdog(now: number): Promise<void> {
+    const reaperContext = this.resolveReaperContext();
+    if (reaperContext === undefined) {
+      return;
+    }
+    const fresh = now + reaperContext.timeoutMs;
+    const existing = ReaperDueAtSchema.nullable().parse(
+      (await this.ctx.storage.get(REAPER_DUE_AT_STORAGE_KEY)) ?? null
+    );
+    const reaperDueAt =
+      existing === null || existing <= now ? fresh : Math.min(existing, fresh);
+    await this.ctx.storage.put(REAPER_DUE_AT_STORAGE_KEY, reaperDueAt);
+    await this.ctx.storage.setAlarm(reaperDueAt);
+  }
+
   private async rearmReaperAlarmIfSlotsRemain(): Promise<void> {
     const record = await this.getRecord();
-    if (activeLaneIdsOf(record).length === 0) {
-      // No slots to sweep: clear the tracked deadline so a stale due time does
-      // not keep arming alarms after every run has released.
+    const queued = await this.ctx.storage.list({
+      prefix: runStartStoragePrefix,
+    });
+    if (activeLaneIdsOf(record).length === 0 && queued.size === 0) {
+      // No active lanes AND no queued run-start records to drive: clear the
+      // tracked deadline so a stale due time does not keep arming alarms after
+      // everything has released. Queued records must keep the watchdog alive —
+      // an evicted run that never returned paused still has a record to recover.
       await this.ctx.storage.delete(REAPER_DUE_AT_STORAGE_KEY);
 
       return;
     }
+    if (this.drivePausedThisAlarm) {
+      // A single-step drive paused this handler and already armed an imminent
+      // resume (now + RESUME_DELAY_MS). Re-arming the far watchdog here would
+      // clobber that strictly-earlier alarm and stall the walk after one node.
+      // The resume fires first; the next handler re-evaluates the watchdog.
+      return;
+    }
 
-    await this.ensureReaperAlarm();
+    await this.armReaperWatchdog(Date.now());
   }
 
   private async releaseLane(request: Request): Promise<Response> {
