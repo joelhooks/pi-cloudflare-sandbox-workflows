@@ -1,0 +1,47 @@
+---
+title: "Phase 2 Spec: AIHero Support Sweep as Second Workflow Shape"
+status: active
+updated: 2026-06-12
+source: .brain/resources/aihero-support-sweep-workflow-candidate.svx
+---
+
+# Phase 2 Spec: AIHero Support Sweep as Second Workflow Shape
+
+Phase 2 of the carrier roadmap (see dream-pilot-progress runs 17–18 for the wound history Phase 1 closes). Goal: prove the carrier is shape-agnostic by installing a second cartridge with **zero new branches in the core runner or Dream cartridge**, then hold both shapes to a 10-run burn-in gate.
+
+## Gate
+
+Phase 2 implementation starts only after Phase 1a (drive ledger + write fencing, `phase1a-drive-ledger`) and Phase 1b (lifecycle-faithful fakes + chaos-resume suite, `phase1b-chaos-harness`) merge and the chaos suite is green. The burn-in is meaningless on a carrier that can't survive eviction.
+
+## Deliverable 1: `src/cartridges/aihero-support-sweep/`
+
+Mirror the memory-fabric cartridge anatomy (installer, package seed template, source profiles, workflow-node adapter) and register in `src/cartridges/cloudflare-workflow-cartridges.ts`. Source roots from `.brain/data/workflow-candidates/aihero-support-sweep-source-roots.json`:
+
+- `source:brain:badass-courses:aihero-support`
+- `source:support:badass-courses:aihero-front-snapshot`
+- `source:comms:badass-courses:aihero-internal-comms`
+- `source:people-org-memory:badass-courses:aihero-crm`
+
+Candidate shape per the candidate doc: inventory → derived-index health → signal search (issue/account/person/product) → redacted-evidence hydration for selected receipts → HITL support recommendations → lease-gated side effects.
+
+## Deliverable 2: Post-review workflow
+
+Exercise the HITL decision seed path (landed in `e2c5e31`) end to end: a run completes → human reviews the HITL report (or no review exists and the seed derives a `generated-draft` decision) → a follow-up run is seeded from the decision with `decisionSource` threaded through. Both `human-review` and `generated-draft` paths must produce a live captured follow-up run.
+
+## Deliverable 3: 10-run burn-in gate
+
+Ten consecutive live runs reaching `captured` across both shapes (mix dream + support sweep) with **zero carrier patches between runs**. Any failure is a carrier failure: fix the class in the carrier (with a chaos-suite test that would have caught it), reset the count. Phase 3 (fair scheduling, polish) starts only after the gate passes.
+
+## Default calls on the candidate doc's open questions
+
+Defaults chosen to unblock execution; Joel overrides any of these by editing this doc.
+
+1. **Scheduled vs on-demand** → on-demand first. Scheduling is Phase 3 territory (fair scheduling is already its headline).
+2. **Which actions auto vs HITL** → burn-in iteration is **draft-only**: HITL recommendations plus a private, noindex Wzrrd review page (already lease-gated). No live Front/GitHub/Linear side effects until the gate passes and Joel allowlists specific actions.
+3. **Comms SQLite adapter** → treat the internal comms archive as files for now. A dedicated adapter waits for the third use (premature abstraction).
+4. **Public/private boundary** → all support/comms/customer evidence is customer-private. It never appears in public report content; Wzrrd pages for this shape are private review surfaces only.
+
+## Boundary (restating the candidate doc, binding here)
+
+- Not part of Dreamer readiness; packaged as its own cartridge/source pack.
+- Live side effects require scoped capability leases and HITL review — no exceptions during burn-in.
