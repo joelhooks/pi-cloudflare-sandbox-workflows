@@ -28,6 +28,8 @@ import {
   VerificationResultArtifactSchema,
   VerificationResultDocumentSchema,
   WorkflowDriveLedgerPhaseSchema,
+  WorkflowDriveLaneDispatchSchema,
+  WorkflowDriveLaneStatusReceiptSchema,
   WorkflowExecutionProofArtifactSchema,
   WorkflowExecutionProofDocumentSchema,
   WorkflowEventSchema,
@@ -84,6 +86,8 @@ import type {
   WorkflowRunDriveResult,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowDriveLaneDispatch,
+  WorkflowDriveLaneStatusReceipt,
   WorkflowDriveNodeAttempt,
   WorkflowStatusProjection,
   WorkflowTerminalBlocker,
@@ -112,6 +116,7 @@ import type {
   DynamicWorkflowPlannerPort,
   AgentVerifierOutputEvidence,
   AgentVerifierLanePort,
+  AgentWorkerStepResult,
   AgentWorkerLanePort,
   GitHubBranchCommitCapabilityAdapter,
   GitHubPullRequestCapabilityAdapter,
@@ -282,6 +287,24 @@ type AdmitDynamicNodeAttempt = (input: {
   readonly nodeIndex: number;
   readonly step: DynamicWorkflowStep;
 }) => Promise<DynamicNodeAttemptAdmission>;
+
+type LoadDriveLaneDispatch = (input: {
+  readonly nodeIndex: number;
+  readonly stepId: string;
+}) => WorkflowDriveLaneDispatch | null;
+
+type RecordDriveLaneDispatch = (
+  dispatch: WorkflowDriveLaneDispatch
+) => Promise<void>;
+
+type RecordDriveLaneStatus = (
+  statusReceipt: WorkflowDriveLaneStatusReceipt
+) => Promise<void>;
+
+const driveLaneDispatchKey = (input: {
+  readonly nodeIndex: number;
+  readonly stepId: string;
+}): string => `${input.nodeIndex}:${input.stepId}`;
 
 type WorkflowNodeInvocationStep = Extract<
   DynamicWorkflowStep,
@@ -1517,6 +1540,46 @@ export class WorkflowApp implements WorkflowAppContract {
       });
     };
 
+    const loadDriveLaneDispatch: LoadDriveLaneDispatch = (dispatchInput) => {
+      if (driveLedger === null) {
+        return null;
+      }
+
+      const dispatch =
+        driveLedger.laneDispatches[driveLaneDispatchKey(dispatchInput)];
+      return dispatch === undefined
+        ? null
+        : WorkflowDriveLaneDispatchSchema.parse(dispatch);
+    };
+
+    const recordDriveLaneDispatch: RecordDriveLaneDispatch = async (
+      dispatch
+    ) => {
+      if (driveGeneration === undefined) {
+        return;
+      }
+
+      driveLedger =
+        await this.dependencies.contextCapsules.recordDriveLaneDispatch({
+          dispatch,
+          driveGeneration,
+        });
+    };
+
+    const recordDriveLaneStatus: RecordDriveLaneStatus = async (
+      statusReceipt
+    ) => {
+      if (driveGeneration === undefined) {
+        return;
+      }
+
+      driveLedger =
+        await this.dependencies.contextCapsules.recordDriveLaneStatus({
+          driveGeneration,
+          statusReceipt,
+        });
+    };
+
     await assertActiveDrive();
     const capturedPhase = completedPhase("capture-completed");
     if (capturedPhase !== null) {
@@ -1805,9 +1868,12 @@ export class WorkflowApp implements WorkflowAppContract {
         admitDynamicNodeAttempt,
         block,
         driveMode,
+        loadDriveLaneDispatch,
         loadedPlan,
         machine: loadedMachine.machine,
         persistCheckpoint,
+        recordDriveLaneDispatch,
+        recordDriveLaneStatus,
         request,
         resumeCheckpoint,
         transition,
@@ -4240,8 +4306,11 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly block: BlockRun;
     readonly driveMode: WorkflowRunDriveOptions["driveMode"];
     readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly loadDriveLaneDispatch: LoadDriveLaneDispatch;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly persistCheckpoint: PersistRunCheckpoint;
+    readonly recordDriveLaneDispatch: RecordDriveLaneDispatch;
+    readonly recordDriveLaneStatus: RecordDriveLaneStatus;
     readonly request: WorkflowRunRequest;
     readonly resumeCheckpoint: RunStepCheckpoint | null;
     readonly transition: SafetyEnvelopeTransition;
@@ -4249,9 +4318,12 @@ export class WorkflowApp implements WorkflowAppContract {
     return await this.executeDynamicWorkflow({
       admitDynamicNodeAttempt: input.admitDynamicNodeAttempt,
       block: input.block,
+      loadDriveLaneDispatch: input.loadDriveLaneDispatch,
       loadedPlan: input.loadedPlan,
       machine: input.machine,
       persistCheckpoint: input.persistCheckpoint,
+      recordDriveLaneDispatch: input.recordDriveLaneDispatch,
+      recordDriveLaneStatus: input.recordDriveLaneStatus,
       request: input.request,
       resumeCheckpoint: input.resumeCheckpoint,
       ...(input.driveMode === "single-step" ? { stepBudget: 1 } : {}),
@@ -4384,13 +4456,246 @@ export class WorkflowApp implements WorkflowAppContract {
     }
   }
 
+  private async artifactRefsResolve(
+    artifactRefs: Iterable<ArtifactRef>
+  ): Promise<boolean> {
+    for (const artifactRef of artifactRefs) {
+      if (!(await this.artifactRefResolves(artifactRef))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private async cleanupAsyncWorkerLane(input: {
+    readonly dispatch: WorkflowDriveLaneDispatch;
+    readonly reason: "completed" | "failed" | "timed-out";
+    readonly receipt?: AgentLaneReceipt;
+  }): Promise<void> {
+    try {
+      await this.dependencies.agentWorkerLane?.cleanupStep?.(input);
+    } catch (error) {
+      console.warn("Async worker lane cleanup skipped", {
+        error: error instanceof Error ? error.message : String(error),
+        laneId: input.dispatch.laneId,
+        reason: input.reason,
+        runId: input.dispatch.runId,
+      });
+    }
+  }
+
+  // oxlint-disable-next-line complexity -- Async lane dispatch/poll/advance/block is the carrier state machine; keeping it explicit makes the Durable Object behavior auditable.
+  private async executeAsyncResearchReviewStep(input: {
+    readonly admitDynamicNodeAttempt: AdmitDynamicNodeAttempt;
+    readonly block: BlockRun;
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly loadDriveLaneDispatch: LoadDriveLaneDispatch;
+    readonly machine: DynamicWorkflowMachineDocument;
+    readonly nodeIndex: number;
+    readonly recordDriveLaneDispatch: RecordDriveLaneDispatch;
+    readonly recordDriveLaneStatus: RecordDriveLaneStatus;
+    readonly request: WorkflowRunRequest;
+    readonly step: Extract<
+      DynamicWorkflowStep,
+      { readonly kind: "research.review" }
+    >;
+  }): Promise<
+    | {
+        readonly status: "unsupported";
+      }
+    | {
+        readonly completedStepIds: string[];
+        readonly status: "paused";
+        readonly stepIndex: number;
+      }
+    | {
+        readonly outputRefs: readonly ArtifactRef[];
+        readonly receipt: AgentLaneReceipt;
+        readonly status: "executed";
+      }
+    | DynamicExecutionBlocked
+  > {
+    const { agentWorkerLane } = this.dependencies;
+    if (
+      agentWorkerLane?.dispatchStep === undefined ||
+      agentWorkerLane.pollStep === undefined ||
+      agentWorkerLane.readStepReceipt === undefined
+    ) {
+      return { status: "unsupported" };
+    }
+
+    const existingDispatch = input.loadDriveLaneDispatch({
+      nodeIndex: input.nodeIndex,
+      stepId: input.step.stepId,
+    });
+    if (existingDispatch === null) {
+      const attemptAdmission = await input.admitDynamicNodeAttempt({
+        nodeIndex: input.nodeIndex,
+        step: input.step,
+      });
+      if (attemptAdmission.status === "blocked") {
+        return { result: attemptAdmission.result, status: "blocked" };
+      }
+
+      try {
+        const dispatch = WorkflowDriveLaneDispatchSchema.parse(
+          await agentWorkerLane.dispatchStep({
+            machine: input.machine,
+            nodeIndex: input.nodeIndex,
+            plan: input.loadedPlan,
+            step: input.step,
+          })
+        );
+        await input.recordDriveLaneDispatch(dispatch);
+
+        return {
+          completedStepIds: [],
+          status: "paused",
+          stepIndex: input.nodeIndex,
+        };
+      } catch (error) {
+        const result = await input.block(
+          blocker(
+            "adapter_unavailable",
+            `Async worker lane dispatch failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          ),
+          "Async worker lane dispatch failed.",
+          { stepId: input.step.stepId }
+        );
+
+        return { result, status: "blocked" };
+      }
+    }
+
+    const dispatch = existingDispatch;
+    let recovered: AgentWorkerStepResult | null;
+    try {
+      recovered = await agentWorkerLane.readStepReceipt({ dispatch });
+    } catch (error) {
+      const result = await input.block(
+        blocker(
+          "receipt_persistence_failed",
+          `Async worker lane receipt recovery failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        ),
+        "Async worker lane receipt recovery failed.",
+        { stepId: input.step.stepId }
+      );
+
+      return { result, status: "blocked" };
+    }
+
+    if (recovered !== null) {
+      const receipt = AgentLaneReceiptSchema.parse(recovered.receipt);
+      if (receipt.status !== "completed") {
+        await this.cleanupAsyncWorkerLane({
+          dispatch,
+          reason: "failed",
+          receipt,
+        });
+        const result = await input.block(
+          blocker(
+            "capability_denied",
+            `Async worker lane ${dispatch.laneId} ended with receipt status ${receipt.status}.`
+          ),
+          "Async worker lane returned a terminal failed receipt.",
+          { stepId: input.step.stepId }
+        );
+
+        return { result, status: "blocked" };
+      }
+
+      const outputRefs = [...recovered.outputRefs];
+      const refsToResolve = new Set<ArtifactRef>([
+        ...dispatch.expectedOutputArtifactRefs,
+        ...outputRefs,
+      ]);
+      if (
+        outputRefs.length > 0 &&
+        (await this.artifactRefsResolve(refsToResolve))
+      ) {
+        await this.cleanupAsyncWorkerLane({
+          dispatch,
+          reason: "completed",
+          receipt,
+        });
+
+        return {
+          outputRefs,
+          receipt,
+          status: "executed",
+        };
+      }
+    }
+
+    const statusReceipt = WorkflowDriveLaneStatusReceiptSchema.parse(
+      await agentWorkerLane.pollStep({ dispatch })
+    );
+    await input.recordDriveLaneStatus(statusReceipt);
+
+    if (
+      statusReceipt.status === "failed" ||
+      statusReceipt.status === "killed" ||
+      statusReceipt.status === "error"
+    ) {
+      await this.cleanupAsyncWorkerLane({ dispatch, reason: "failed" });
+      const result = await input.block(
+        blocker(
+          "capability_denied",
+          `Async worker lane ${dispatch.laneId} ended with process status ${statusReceipt.status}.`
+        ),
+        "Async worker lane process ended before a completed receipt was recoverable.",
+        { stepId: input.step.stepId }
+      );
+
+      return { result, status: "blocked" };
+    }
+
+    const deadlineMs = Date.parse(dispatch.deadline);
+    const pastDeadline =
+      Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
+    if (
+      pastDeadline &&
+      (statusReceipt.status === "not_found" ||
+        statusReceipt.status === "completed")
+    ) {
+      await this.cleanupAsyncWorkerLane({
+        dispatch,
+        reason: "timed-out",
+      });
+      const result = await input.block(
+        blocker(
+          "capability_denied",
+          `Async worker lane ${dispatch.laneId} did not produce a recoverable receipt before its deadline.`
+        ),
+        "Async worker lane receipt was not recoverable by its deadline.",
+        { stepId: input.step.stepId }
+      );
+
+      return { result, status: "blocked" };
+    }
+
+    return {
+      completedStepIds: [],
+      status: "paused",
+      stepIndex: input.nodeIndex,
+    };
+  }
+
   // oxlint-disable-next-line complexity -- Generated workflow dispatch is explicit until step handlers move behind the workflow-node registry.
   private async executeDynamicWorkflow(input: {
     readonly block: BlockRun;
     readonly admitDynamicNodeAttempt: AdmitDynamicNodeAttempt;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly loadDriveLaneDispatch: LoadDriveLaneDispatch;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly persistCheckpoint: PersistRunCheckpoint;
+    readonly recordDriveLaneDispatch: RecordDriveLaneDispatch;
+    readonly recordDriveLaneStatus: RecordDriveLaneStatus;
     readonly request: WorkflowRunRequest;
     readonly resumeCheckpoint?: RunStepCheckpoint | null;
     // Single-step drive (FIX: one node per alarm). When set, the loop executes at
@@ -4549,6 +4854,55 @@ export class WorkflowApp implements WorkflowAppContract {
           { stepId: step.stepId }
         );
         return { result, status: "blocked" };
+      }
+
+      if (step.kind === "research.review") {
+        const asyncWorkerResult = await this.executeAsyncResearchReviewStep({
+          admitDynamicNodeAttempt: input.admitDynamicNodeAttempt,
+          block: input.block,
+          loadDriveLaneDispatch: input.loadDriveLaneDispatch,
+          loadedPlan: input.loadedPlan,
+          machine: input.machine,
+          nodeIndex: checkpointStepIndex,
+          recordDriveLaneDispatch: input.recordDriveLaneDispatch,
+          recordDriveLaneStatus: input.recordDriveLaneStatus,
+          request: input.request,
+          step,
+        });
+        if (asyncWorkerResult.status === "paused") {
+          return {
+            completedStepIds: [...completedStepIds],
+            status: "paused",
+            stepIndex: asyncWorkerResult.stepIndex,
+          };
+        }
+        if (asyncWorkerResult.status === "blocked") {
+          return {
+            result: asyncWorkerResult.result,
+            status: "blocked",
+          };
+        }
+        if (asyncWorkerResult.status === "executed") {
+          artifactRefs.push(...asyncWorkerResult.outputRefs);
+          const primaryOutputRef = asyncWorkerResult.outputRefs.at(0);
+          if (primaryOutputRef !== undefined) {
+            artifactRefsByStepId.set(step.stepId, primaryOutputRef);
+          }
+          workerLaneReceipts.push(asyncWorkerResult.receipt);
+          completedStepIds.add(step.stepId);
+          await input.transition(
+            { type: "DYNAMIC_STEP_EXECUTED" },
+            "Dynamic research/review step executed from the pinned plan.",
+            {
+              outputRefs: asyncWorkerResult.outputRefs.join(","),
+              stepId: step.stepId,
+              workerLaneReceiptRef: asyncWorkerResult.receipt.receiptRef,
+            }
+          );
+          workflowActor.send({ type: "STEP_DONE" });
+          await checkpointAfterStepDone();
+          continue;
+        }
       }
 
       const attemptAdmission = await input.admitDynamicNodeAttempt({
@@ -4879,27 +5233,41 @@ export class WorkflowApp implements WorkflowAppContract {
         continue;
       }
 
-      if (receipt.artifactCommitSha === undefined) {
-        return {
-          blocker: blocker(
-            "stale_package",
-            "Worker lane output evidence is missing its pinned Artifacts commit."
-          ),
-          status: "blocked",
-        };
-      }
-
       for (const outputPin of receipt.outputPins) {
         try {
+          const evidenceText = await this.readVerifierEvidenceText({
+            ...(receipt.artifactCommitSha === undefined
+              ? {}
+              : { artifactCommitSha: receipt.artifactCommitSha }),
+            artifactRef: outputPin.artifactRef,
+          });
+          let evidenceHash = outputPin.hash;
+          if (receipt.artifactCommitSha === undefined) {
+            evidenceHash = outputPin.mediaType.includes("json")
+              ? hashJson(JSON.parse(evidenceText))
+              : sha256Hex(evidenceText);
+          }
+          if (
+            receipt.artifactCommitSha === undefined &&
+            evidenceHash !== outputPin.hash
+          ) {
+            return {
+              blocker: blocker(
+                "payload_hash_mismatch",
+                "Worker lane output evidence hash does not match its receipt pin."
+              ),
+              status: "blocked",
+            };
+          }
+
           outputEvidence.push({
-            artifactCommitSha: receipt.artifactCommitSha,
+            ...(receipt.artifactCommitSha === undefined
+              ? {}
+              : { artifactCommitSha: receipt.artifactCommitSha }),
             artifactRef: outputPin.artifactRef,
             hash: outputPin.hash,
             mediaType: outputPin.mediaType,
-            text: await this.readVerifierEvidenceText({
-              artifactCommitSha: receipt.artifactCommitSha,
-              artifactRef: outputPin.artifactRef,
-            }),
+            text: evidenceText,
           });
           evidenceArtifactRefs.add(outputPin.artifactRef);
         } catch {

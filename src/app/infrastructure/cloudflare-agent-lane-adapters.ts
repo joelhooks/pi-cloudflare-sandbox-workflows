@@ -19,11 +19,14 @@ import {
 } from "../domain/kernel-skills.ts";
 import {
   AgentLaneReceiptSchema,
+  AgentLaneDispatchReceiptSchema,
   DynamicWorkflowBlueprintSchema,
   PlannerLaneBlueprintDocumentSchema,
   ResearchReviewOutputDocumentSchema,
   VerificationResultArtifactSchema,
   VerificationResultDocumentSchema,
+  WorkflowDriveLaneDispatchSchema,
+  WorkflowDriveLaneStatusReceiptSchema,
   WorkflowObservabilityPackSchema,
 } from "../domain/schemas.ts";
 import type {
@@ -476,54 +479,147 @@ const workerPromptFor = (input: {
       : []),
   ].join("\n");
 
+const workerLaneRequestFor = (
+  config: CloudflarePiLaneAdapterConfig,
+  input: {
+    readonly plan: DynamicWorkflowPlanDocument;
+    readonly step: DynamicWorkflowStep;
+  }
+): AgentLaneRuntimeRequest => {
+  const stepPath = safePathSegment(input.step.stepId);
+  const laneId = `lane:worker:${input.plan.runId}:${input.step.stepId}`;
+
+  return {
+    artifactRef: (artifactInput) =>
+      config.artifactStore.artifactRef(artifactInput),
+    artifactRemote: config.artifactRemote,
+    artifactTokenSecret: config.artifactTokenSecret,
+    authLease: config.authLease,
+    branchName: `worker-${safePathSegment(input.step.stepId)}`,
+    kind: "worker",
+    laneId,
+    leasedPiAuthJsonBase64: config.leasedPiAuthJsonBase64,
+    model: config.model,
+    outputMediaType:
+      input.step.kind === "research.review"
+        ? "application/json"
+        : "text/markdown",
+    outputPath: workerOutputPathFor(input.step),
+    packageMounts: input.plan.pinnedPackages,
+    prompt: workerPromptFor(input),
+    promptPath: `lanes/${stepPath}/prompt.md`,
+    provider: config.provider,
+    receiptPath: `receipts/worker-${stepPath}-lane.json`,
+    runId: input.plan.runId,
+    timeoutMs: config.timeoutMs,
+    traceContext: workflowTraceContextForLane({
+      laneId,
+      runId: input.plan.runId,
+    }),
+    transcriptPath: `lanes/${stepPath}/transcript.md`,
+    workItemId: input.plan.workItemId,
+  };
+};
+
+const agentLaneDispatchReceiptFor = (
+  dispatch: ReturnType<typeof WorkflowDriveLaneDispatchSchema.parse>
+) =>
+  AgentLaneDispatchReceiptSchema.parse({
+    ...dispatch,
+    schemaVersion: "agent-lane.dispatch-receipt.v1",
+  });
+
 export const createCloudflarePiWorkerLaneAdapter = (
   config: CloudflarePiLaneAdapterConfig
-): AgentWorkerLanePort => ({
-  laneKind: "worker",
-  async runStep(input) {
-    const stepPath = safePathSegment(input.step.stepId);
-    const outputPath = workerOutputPathFor(input.step);
-    const laneId = `lane:worker:${input.plan.runId}:${input.step.stepId}`;
-    const receipt = AgentLaneReceiptSchema.parse(
-      await config.runtime.runLane({
-        artifactRef: (artifactInput) =>
-          config.artifactStore.artifactRef(artifactInput),
-        artifactRemote: config.artifactRemote,
-        artifactTokenSecret: config.artifactTokenSecret,
-        authLease: config.authLease,
-        branchName: `worker-${safePathSegment(input.step.stepId)}`,
-        kind: "worker",
-        laneId,
-        leasedPiAuthJsonBase64: config.leasedPiAuthJsonBase64,
-        model: config.model,
-        outputMediaType:
-          input.step.kind === "research.review"
-            ? "application/json"
-            : "text/markdown",
-        outputPath,
-        packageMounts: input.plan.pinnedPackages,
-        prompt: workerPromptFor(input),
-        promptPath: `lanes/${stepPath}/prompt.md`,
-        provider: config.provider,
-        receiptPath: `receipts/worker-${stepPath}-lane.json`,
-        runId: input.plan.runId,
-        timeoutMs: config.timeoutMs,
-        traceContext: workflowTraceContextForLane({
-          laneId,
-          runId: input.plan.runId,
-        }),
-        transcriptPath: `lanes/${stepPath}/transcript.md`,
-        workItemId: input.plan.workItemId,
-      })
-    );
+): AgentWorkerLanePort => {
+  const adapter: AgentWorkerLanePort = {
+    async cleanupStep(input) {
+      await config.runtime.cleanupLane?.({
+        dispatch: agentLaneDispatchReceiptFor(input.dispatch),
+        reason: input.reason,
+        ...(input.receipt === undefined ? {} : { receipt: input.receipt }),
+      });
+    },
+    laneKind: "worker",
+    async runStep(input) {
+      const receipt = AgentLaneReceiptSchema.parse(
+        await config.runtime.runLane(workerLaneRequestFor(config, input))
+      );
 
-    return {
-      outputRefs: receipt.outputRefs,
-      receipt,
+      return {
+        outputRefs: receipt.outputRefs,
+        receipt,
+      };
+    },
+    runtime: config.runtime.runtime,
+  };
+
+  if (
+    config.runtime.dispatchLane !== undefined &&
+    config.runtime.pollLane !== undefined &&
+    config.runtime.readLaneReceipt !== undefined
+  ) {
+    adapter.dispatchStep = async (input) => {
+      const dispatch = await config.runtime.dispatchLane?.(
+        workerLaneRequestFor(config, input)
+      );
+      if (dispatch === undefined) {
+        throw new Error("Agent lane runtime does not support async dispatch.");
+      }
+
+      return WorkflowDriveLaneDispatchSchema.parse({
+        ...dispatch,
+        dispatchKey: `${input.nodeIndex}:${input.step.stepId}`,
+        nodeIndex: input.nodeIndex,
+        schemaVersion: "workflow.drive-lane-dispatch.v1",
+        status: "lane-dispatched",
+        stepId: input.step.stepId,
+      });
     };
-  },
-  runtime: config.runtime.runtime,
-});
+
+    adapter.pollStep = async (input) => {
+      const statusReceipt = await config.runtime.pollLane?.({
+        dispatch: agentLaneDispatchReceiptFor(input.dispatch),
+      });
+      if (statusReceipt === undefined) {
+        throw new Error("Agent lane runtime does not support async polling.");
+      }
+
+      return WorkflowDriveLaneStatusReceiptSchema.parse({
+        ...statusReceipt,
+        dispatchKey: input.dispatch.dispatchKey,
+        nodeIndex: input.dispatch.nodeIndex,
+        ...(input.dispatch.nodeType === undefined
+          ? {}
+          : { nodeType: input.dispatch.nodeType }),
+        schemaVersion: "workflow.drive-lane-status.v1",
+        stepId: input.dispatch.stepId,
+      });
+    };
+
+    adapter.readStepReceipt = async (input) => {
+      const receipt = await config.runtime.readLaneReceipt?.({
+        artifacts: config.artifactStore,
+        dispatch: agentLaneDispatchReceiptFor(input.dispatch),
+      });
+      if (receipt === undefined) {
+        throw new Error(
+          "Agent lane runtime does not support receipt recovery."
+        );
+      }
+      if (receipt === null) {
+        return null;
+      }
+
+      return {
+        outputRefs: receipt.outputRefs,
+        receipt,
+      };
+    };
+  }
+
+  return adapter;
+};
 
 /**
  * Production analysis reasoning lane: the "dream thinks" seam wired to the same

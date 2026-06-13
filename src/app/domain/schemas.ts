@@ -67,6 +67,15 @@ export const AgentLaneStatusSchema = z.enum([
   "failed",
 ]);
 
+export const AgentLaneProcessStatusSchema = z.enum([
+  "starting",
+  "running",
+  "completed",
+  "failed",
+  "killed",
+  "error",
+]);
+
 export const AgentLaneTokenCostAccountingSourceSchema = z.enum([
   "pi-cli-usage",
   "adapter-reported",
@@ -166,6 +175,38 @@ export const WorkflowTraceContextSchema = z.object({
   redacted: z.literal(true),
   spanId: z.string().min(1),
   traceId: z.string().min(1),
+});
+
+export const AgentLaneDispatchReceiptSchema = z.object({
+  deadline: IsoDateTimeSchema,
+  dispatchedAt: IsoDateTimeSchema,
+  expectedOutputArtifactRefs: z.array(ArtifactRefSchema).min(1),
+  expectedReceiptArtifactRef: ArtifactRefSchema,
+  kind: AgentLaneKindSchema,
+  laneAuthLeaseId: z.string().min(1),
+  laneId: z.string().min(1),
+  processId: z.string().min(1),
+  promptArtifactRef: ArtifactRefSchema,
+  runId: z.string().min(1),
+  sandboxId: z.string().min(1),
+  schemaVersion: z.literal("agent-lane.dispatch-receipt.v1"),
+  sessionId: z.string().min(1).optional(),
+  workItemId: z.string().min(1),
+});
+
+export const AgentLaneProcessStatusReceiptSchema = z.object({
+  checkedAt: IsoDateTimeSchema,
+  endTime: z.union([IsoDateTimeSchema, z.number()]).optional(),
+  exitCode: z.number().int().optional(),
+  kind: AgentLaneKindSchema,
+  laneId: z.string().min(1),
+  processId: z.string().min(1),
+  runId: z.string().min(1),
+  sandboxId: z.string().min(1),
+  schemaVersion: z.literal("agent-lane.process-status.v1"),
+  sessionId: z.string().min(1).optional(),
+  status: z.union([AgentLaneProcessStatusSchema, z.literal("not_found")]),
+  workItemId: z.string().min(1),
 });
 
 const enforceRealAgentRuntime = (
@@ -2268,8 +2309,33 @@ export const WorkflowDriveNodeAttemptSchema = z.object({
   stepId: z.string().min(1),
 });
 
+export const WorkflowDriveLaneDispatchSchema =
+  AgentLaneDispatchReceiptSchema.extend({
+    dispatchKey: z.string().min(1),
+    nodeIndex: z.number().int().min(0),
+    nodeType: WorkflowNodeTypeSchema.optional(),
+    schemaVersion: z.literal("workflow.drive-lane-dispatch.v1"),
+    status: z.literal("lane-dispatched"),
+    stepId: z.string().min(1),
+  });
+
+export const WorkflowDriveLaneStatusReceiptSchema =
+  AgentLaneProcessStatusReceiptSchema.extend({
+    dispatchKey: z.string().min(1),
+    nodeIndex: z.number().int().min(0),
+    nodeType: WorkflowNodeTypeSchema.optional(),
+    schemaVersion: z.literal("workflow.drive-lane-status.v1"),
+    stepId: z.string().min(1),
+  });
+
 export const WorkflowDriveLedgerSchema = z.object({
   driveGeneration: z.number().int().min(0).default(0),
+  laneDispatches: z
+    .record(z.string().min(1), WorkflowDriveLaneDispatchSchema)
+    .default({}),
+  laneStatuses: z
+    .record(z.string().min(1), WorkflowDriveLaneStatusReceiptSchema)
+    .default({}),
   nodeAttempts: z
     .record(z.string().min(1), WorkflowDriveNodeAttemptSchema)
     .default({}),
@@ -2314,6 +2380,16 @@ export const WorkflowDriveNodeAttemptRecordRequestSchema = z.object({
   runId: z.string().min(1),
   stepId: z.string().min(1),
   workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveLaneDispatchRecordRequestSchema = z.object({
+  dispatch: WorkflowDriveLaneDispatchSchema,
+  driveGeneration: z.number().int().min(0),
+});
+
+export const WorkflowDriveLaneStatusRecordRequestSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  statusReceipt: WorkflowDriveLaneStatusReceiptSchema,
 });
 
 export const WorkflowDriveGenerationAssertionRequestSchema = z.object({
@@ -2393,6 +2469,12 @@ export type WorkflowDriveLedgerPhase = z.infer<
 >;
 export type WorkflowDriveLedgerPhaseId = z.infer<
   typeof WorkflowDrivePhaseIdSchema
+>;
+export type WorkflowDriveLaneDispatch = z.infer<
+  typeof WorkflowDriveLaneDispatchSchema
+>;
+export type WorkflowDriveLaneStatusReceipt = z.infer<
+  typeof WorkflowDriveLaneStatusReceiptSchema
 >;
 export type WorkflowDriveNodeAttempt = z.infer<
   typeof WorkflowDriveNodeAttemptSchema
@@ -2515,6 +2597,9 @@ export type AgentLaneAdmissionRequest = z.infer<
   typeof AgentLaneAdmissionRequestSchema
 >;
 export type AgentLaneKind = z.infer<typeof AgentLaneKindSchema>;
+export type AgentLaneDispatchReceipt = z.infer<
+  typeof AgentLaneDispatchReceiptSchema
+>;
 export type AgentLanePackageMountEvidence = z.infer<
   typeof AgentLanePackageMountEvidenceSchema
 >;
@@ -2533,6 +2618,9 @@ export type AgentLaneReleaseRequest = z.infer<
 >;
 export type AgentLaneReleaseStatus = z.infer<
   typeof AgentLaneReleaseStatusSchema
+>;
+export type AgentLaneProcessStatusReceipt = z.infer<
+  typeof AgentLaneProcessStatusReceiptSchema
 >;
 export type AgentLaneReceipt = z.infer<typeof AgentLaneReceiptSchema>;
 export type AgentLaneRuntime = z.infer<typeof AgentLaneRuntimeSchema>;

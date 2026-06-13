@@ -200,3 +200,55 @@ the dream shape to capture reliably in burn-in if node 0 genuinely exceeds one
 supervisor invocation. Fix A prevents silent infinite loops; Fix B is the path
 from "blocked instead of zombie" to "captured without violating the generated
 workflow contract."
+
+## Implementation receipt (2026-06-13)
+
+Implemented the approved carrier-only async sandbox lane in the working tree.
+
+State machine landed:
+
+- **Dispatch:** first admitted `research.review` dynamic node calls the worker
+  lane async dispatch path, persists `workflow.drive-lane-dispatch.v1` in the
+  drive ledger keyed by `nodeIndex:stepId`, and returns `paused` without
+  `STEP_DONE` or checkpoint.
+- **Poll:** later drives reload the pinned plan and existing dispatch record,
+  read the expected Artifacts receipt first, then poll the process handle as a
+  liveness hint. Re-dispatch is forbidden while the ledger dispatch exists.
+- **Advance:** completed receipt plus all declared output refs resolving causes
+  cleanup/release, normal `STEP_DONE`, normal `RunStepCheckpoint`, FIX A
+  clear-through of node attempts + lane dispatch/status records, and pause
+  before the next node.
+- **Block:** failed/killed/error process status, failed receipt status, or
+  `not_found`/`completed` with no recoverable receipt past deadline blocks with
+  the same redacted `capability_denied` terminal projection shape used by FIX A.
+- **Pause:** running/starting, missing receipt within deadline, or missing output
+  refs within deadline pauses for the next alarm.
+
+Touched surfaces:
+
+- `src/app/application/ports.ts`: async lane runtime and worker-lane contracts.
+- `src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts`: `startProcess`,
+  `getProcess`, Artifacts receipt recovery, and deferred cleanup.
+- `src/app/application/workflow-app.ts`: carrier lane-dispatch branch around the
+  dynamic `research.review` node; no Dream cartridge/generated-machine planner
+  branch.
+- `src/app/domain/schemas.ts`: drive-ledger lane dispatch/status records.
+- `src/app/infrastructure/cloudflare-capsule-supervisor.ts` and
+  `src/app/infrastructure/memory-adapters.ts`: generation-fenced ledger writes
+  and clear-through symmetry.
+- `tests/integration/workflow-app.test.ts`: lifecycle-faithful dispatch, poll,
+  late receipt, failure, deadline, and cold-restart/receipt-wins coverage.
+
+Verification receipts:
+
+- `pnpm check` clean.
+- `pnpm typecheck` clean.
+- `pnpm exec vitest run tests/integration/workflow-app.test.ts tests/integration/cloudflare-workflow-front-door.test.ts`
+  clean: 2 files, 60 tests.
+
+Live-only uncertainty that remains: the memory fake validates the Durable Object
+carrier state machine and Artifacts-authoritative precedence, but cannot prove
+Cloudflare's live `startProcess/getProcess` process registry behavior across
+container sleep/cold restart, exact `sessionId` recovery semantics, or real
+sandbox cleanup timing after async completion. A live dream run is still the
+receipt for those SDK/runtime properties.

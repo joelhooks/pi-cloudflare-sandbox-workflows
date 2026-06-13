@@ -35,6 +35,8 @@ import {
   StaleDriveGenerationRejectionSchema,
   WorkflowDriveAdmissionSchema,
   WorkflowDriveGenerationAssertionRequestSchema,
+  WorkflowDriveLaneDispatchRecordRequestSchema,
+  WorkflowDriveLaneStatusRecordRequestSchema,
   WorkflowDriveLedgerPhaseCompletionRequestSchema,
   WorkflowDriveNodeAttemptRecordRequestSchema,
   WorkflowDriveNodeAttemptSchema,
@@ -339,15 +341,32 @@ export const createMemoryContextCapsuleActor =
           ([, attempt]) => attempt.nodeIndex > input.checkpointStepIndex
         )
       );
+      const laneDispatches = Object.fromEntries(
+        Object.entries(current.laneDispatches).filter(
+          ([, dispatch]) => dispatch.nodeIndex > input.checkpointStepIndex
+        )
+      );
+      const laneStatuses = Object.fromEntries(
+        Object.entries(current.laneStatuses).filter(
+          ([, statusReceipt]) =>
+            statusReceipt.nodeIndex > input.checkpointStepIndex
+        )
+      );
       if (
         Object.keys(nodeAttempts).length ===
-        Object.keys(current.nodeAttempts).length
+          Object.keys(current.nodeAttempts).length &&
+        Object.keys(laneDispatches).length ===
+          Object.keys(current.laneDispatches).length &&
+        Object.keys(laneStatuses).length ===
+          Object.keys(current.laneStatuses).length
       ) {
         return;
       }
 
       putLedger({
         ...current,
+        laneDispatches,
+        laneStatuses,
         nodeAttempts,
         updatedAt: nowIso(),
       });
@@ -441,6 +460,47 @@ export const createMemoryContextCapsuleActor =
         });
 
         return Promise.resolve();
+      },
+      recordDriveLaneDispatch(input): Promise<WorkflowDriveLedger> {
+        const parsed =
+          WorkflowDriveLaneDispatchRecordRequestSchema.parse(input);
+        assertGeneration({
+          driveGeneration: parsed.driveGeneration,
+          runId: parsed.dispatch.runId,
+          workItemId: parsed.dispatch.workItemId,
+        });
+        const current = loadLedger(parsed.dispatch);
+        const { dispatch } = parsed;
+        const ledger = putLedger({
+          ...current,
+          laneDispatches: {
+            ...current.laneDispatches,
+            [dispatch.dispatchKey]: dispatch,
+          },
+          updatedAt: dispatch.dispatchedAt,
+        });
+
+        return Promise.resolve(ledger);
+      },
+      recordDriveLaneStatus(input): Promise<WorkflowDriveLedger> {
+        const parsed = WorkflowDriveLaneStatusRecordRequestSchema.parse(input);
+        assertGeneration({
+          driveGeneration: parsed.driveGeneration,
+          runId: parsed.statusReceipt.runId,
+          workItemId: parsed.statusReceipt.workItemId,
+        });
+        const current = loadLedger(parsed.statusReceipt);
+        const { statusReceipt } = parsed;
+        const ledger = putLedger({
+          ...current,
+          laneStatuses: {
+            ...current.laneStatuses,
+            [statusReceipt.dispatchKey]: statusReceipt,
+          },
+          updatedAt: statusReceipt.checkedAt,
+        });
+
+        return Promise.resolve(ledger);
       },
       recordDriveNodeAttempt(input): Promise<WorkflowDriveNodeAttempt> {
         const parsed = WorkflowDriveNodeAttemptRecordRequestSchema.parse(input);

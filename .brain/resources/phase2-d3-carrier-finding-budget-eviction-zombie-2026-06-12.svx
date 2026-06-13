@@ -69,6 +69,47 @@ a multi-minute planning prologue that exceeds a single invocation budget").
   different class. The 1/40 historical dream capture happened only when its
   nodes were light enough to fit one budget.
 
+## Observer tool — "observe, don't stare" (validated 2026-06-12)
+
+Built `/tmp/d3-burnin/watch-run.py`: a fused live observer that polls
+`/status` + `/durability` + `/events` (all under `requireWorkflowRunsAuth`) and
+renders one compact, delta-aware line per tick. It exists because pure event-tail
+(`/events?tail=live` SSE) is **blind to the zombie** — the zombie re-emits the
+same N events, so the event index never advances and an SSE tail looks silent.
+The fused view makes the distinction visible at a glance.
+
+Distinguishing signals:
+- **PROGRESS:** `ck`(stepIndex)/`done`(completedStepCount)/`ev`(eventCount) climb;
+  phase crosses `executingDynamicWorkflow → verifyingDynamicWorkflow → captured`.
+- **ASYNC LANE in flight (FIX B):** `lane×N` + `drv=active`.
+- **ZOMBIE:** `ck=—` (checkpoint null) forever, `done=0`, `ev` frozen, `alarm`
+  counting down ~600s then resetting (`REDRIVE#k` note when alarm moves while
+  checkpoint stays null).
+- **FIX A backstop:** terminal `blocked` + redacted blocker.
+
+Live receipt validating the tool against the still-parked zombie
+(run-live-20260613T040321942Z-aabe6448, now 24h+ parked):
+
+```
+  elapsed  phase                      ck  done  ev  lane drv  alarm   reaper
+       0s  executingDynamicWorkflow    —    0    8    0  none   +2.8m  +2.8m
+      55s  executingDynamicWorkflow    —    0    8    0  none   +1.9m  +1.9m
+```
+
+checkpoint null, events frozen at 8, alarm ticking toward the next reaper
+re-drive — the zombie signature, rendered unmistakably. (Gotcha: Cloudflare's
+WAF 403s the default `Python-urllib` UA; the observer sends a curl-like UA.)
+
+**Deploy-reaps-zombie side effect:** redeploying with FIX A starts counting this
+24h zombie's re-drives per `(runId,nodeIndex)`; after K it trips the attempt
+ceiling and the run goes terminal `blocked` on its own — no manual cleanup.
+
+**Observability last-mile (deferred to after FIX B lands):** the durability dump
+does NOT yet expose `nodeAttempts` (FIX A's counter) or lane-dispatch state, so
+you can't watch the breaker count toward K or see "lane dispatched, polling".
+Surface both in `RunDurabilityDumpSchema` once codex's schemas.ts edits land
+(avoid the collision). Then the observer shows the last mile.
+
 ## The fix (dispatched to codex gpt-5.5 xhigh, background task-mqbvr127-joe3x5)
 
 - **FIX A (mandatory backstop):** per-(runId,nodeIndex) drive-attempt counter in
@@ -101,3 +142,59 @@ the dream half of the burn-in to ever pass. The support-sweep half is unaffected
 by this wound. Do NOT launch burn-in runs 2-10 until: (1) FIX A + chaos test
 land, (2) the FIX B decision is made, (3) a dream-shape run reaches `captured` on
 fixed code. Then reset the count to zero and start clean.
+
+## FIX B targeting correction (2026-06-12, post-review of codex's build)
+
+Reviewing codex's FIX B working tree surfaced a **targeting inversion**. FIX B
+made the **sandbox worker lane async** — but it wired the async dispatch/poll/
+receipt cycle to step kind **`research.review`** only
+(`workflow-app.ts:4859` → `executeAsyncResearchReviewStep`; the new
+`agentWorkerLane.dispatchStep` is typed `Extract<DynamicWorkflowStep, { kind:
+"research.review" }>` in `ports.ts`; every FIX B chaos test uses
+`stepId: "research-review"`).
+
+**The dream shape emits ZERO `research.review` steps.** The memory-fabric planner
+is explicitly instructed "Use only generated `workflow.node.invoke` states for
+Dream cartridge work" (`src/cartridges/memory-fabric/source-profile.ts:148`).
+The dream's heavy retrieval prologue is `joelclaw.memory.search`
+(`package-seed.ts:37`), a **`workflow.node.invoke`** step that runs **in-DO** via
+`workflowNodeAdapter.execute()` (`workflow-app.ts:4165`) → blocking HTTP fetch to
+the memory relay (`memory-fabric/cloudflare-relay.ts:399`). It never touches the
+sandbox `agentWorkerLane`. So **FIX B as built cannot change dream execution at
+all.**
+
+What FIX B *does* correctly: it decouples the genuinely-multi-minute **sandbox
+pi-agent lane** (the SUPPORT-SWEEP's `research.review` node) from the supervisor's
+invocation budget — heavy work now runs in the Sandbox DO (its own budget,
+survives supervisor eviction) and the **durable Artifacts receipt is the source
+of truth on resume; the `getProcess` handle is only a liveness hint**. That is a
+real robustness win and is needed regardless: a synchronous sandbox lane would
+also wedge the supervisor while waiting. It is just **insufficient for the dream
+half**, which is the actual D3 blocker.
+
+So the wound is in the DREAM half (in-DO `workflow.node.invoke`) and FIX B's async
+treatment landed on the SUPPORT-SWEEP half (sandbox `research.review`).
+
+### The decisive open question — answerable only by a live receipt
+
+Does `joelclaw.memory.search` **actually** exceed the single-invocation budget in
+production? The live zombie receipts are *ambiguous*: "drive completes cleanly,
+`exceptions:[]`, zero forward progress, checkpoint null" is in tension with
+"evicted mid-node before STEP_DONE." A single sub-0.5s relay search should fit one
+invocation easily. Two live outcomes settle it (deploy A+B, re-drive ONE dream run
+with `watch-run.py` attached — this is what the observer was built for):
+
+- **dream reaches `captured`** → the in-DO node fits one budget fine; the 24h
+  zombie was a since-fixed older-deploy bug, not a budget wound. Proceed to
+  burn-in. The budget theory was wrong for the dream.
+- **dream goes `blocked` (FIX A ceiling trips after K)** → the in-DO node genuinely
+  exceeds budget. FIX B must be **extended to `workflow.node.invoke`** — but you
+  cannot make an in-DO relay fetch outlive supervisor eviction the way a separate
+  Sandbox DO does. The real fix is then to either (a) move the heavy dream
+  retrieval **into** a sandbox-backed lane (so the same async dispatch/receipt
+  model applies), or (b) make the node itself chunked/resumable (checkpoint
+  partial progress within the node). Both are larger than FIX B. Dispatch codex.
+
+FIX A + FIX B are committed because both are correct, green (typecheck + 7 async/
+ceiling chaos tests pass), and improvements regardless. Committing them does NOT
+assert the dream half is fixed — that remains the open question above.

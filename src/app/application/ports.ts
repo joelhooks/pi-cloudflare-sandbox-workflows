@@ -13,6 +13,8 @@ import type {
   StaleDriveGenerationRejection,
   WorkflowDriveAdmission,
   WorkflowDriveLedger,
+  WorkflowDriveLaneDispatch,
+  WorkflowDriveLaneStatusReceipt,
   WorkflowDriveLedgerPhase,
   WorkflowDriveNodeAttempt,
   DiscordDeliveryResult,
@@ -30,7 +32,9 @@ import type {
   PinnedPackage,
   AgentLaneAdmissionDecision,
   AgentLaneAdmissionRequest,
+  AgentLaneDispatchReceipt,
   AgentLaneKind,
+  AgentLaneProcessStatusReceipt,
   AgentLaneReleaseReceipt,
   AgentLaneReleaseRequest,
   AgentLaneReceipt,
@@ -135,6 +139,16 @@ export interface ContextCapsuleActorContract {
     readonly stepId: string;
     readonly workItemId: string;
   }): Promise<WorkflowDriveNodeAttempt>;
+
+  recordDriveLaneDispatch(input: {
+    readonly dispatch: WorkflowDriveLaneDispatch;
+    readonly driveGeneration: number;
+  }): Promise<WorkflowDriveLedger>;
+
+  recordDriveLaneStatus(input: {
+    readonly driveGeneration: number;
+    readonly statusReceipt: WorkflowDriveLaneStatusReceipt;
+  }): Promise<WorkflowDriveLedger>;
 }
 
 export class StaleDriveGenerationError extends Error {
@@ -397,6 +411,25 @@ export interface AgentLaneRuntimePort {
   readonly runtime: Exclude<AgentLaneRuntime, "integration-test">;
 
   runLane(input: AgentLaneRuntimeRequest): Promise<AgentLaneReceipt>;
+
+  dispatchLane?(
+    input: AgentLaneRuntimeRequest
+  ): Promise<AgentLaneDispatchReceipt>;
+
+  pollLane?(input: {
+    readonly dispatch: AgentLaneDispatchReceipt;
+  }): Promise<AgentLaneProcessStatusReceipt>;
+
+  readLaneReceipt?(input: {
+    readonly artifacts: Pick<ArtifactStoreContract, "readJson">;
+    readonly dispatch: AgentLaneDispatchReceipt;
+  }): Promise<AgentLaneReceipt | null>;
+
+  cleanupLane?(input: {
+    readonly dispatch: AgentLaneDispatchReceipt;
+    readonly reason: "completed" | "failed" | "timed-out";
+    readonly receipt?: AgentLaneReceipt;
+  }): Promise<void>;
 }
 
 /**
@@ -469,6 +502,30 @@ export interface AgentWorkerLanePort {
     readonly plan: DynamicWorkflowPlanDocument;
     readonly step: DynamicWorkflowStep;
   }): Promise<AgentWorkerStepResult>;
+
+  dispatchStep?(input: {
+    readonly machine: DynamicWorkflowMachineDocument;
+    readonly nodeIndex: number;
+    readonly plan: DynamicWorkflowPlanDocument;
+    readonly step: Extract<
+      DynamicWorkflowStep,
+      { readonly kind: "research.review" }
+    >;
+  }): Promise<WorkflowDriveLaneDispatch>;
+
+  pollStep?(input: {
+    readonly dispatch: WorkflowDriveLaneDispatch;
+  }): Promise<WorkflowDriveLaneStatusReceipt>;
+
+  readStepReceipt?(input: {
+    readonly dispatch: WorkflowDriveLaneDispatch;
+  }): Promise<AgentWorkerStepResult | null>;
+
+  cleanupStep?(input: {
+    readonly dispatch: WorkflowDriveLaneDispatch;
+    readonly reason: "completed" | "failed" | "timed-out";
+    readonly receipt?: AgentLaneReceipt;
+  }): Promise<void>;
 }
 
 export interface AgentVerifierOutputEvidence {

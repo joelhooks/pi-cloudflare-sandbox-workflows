@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, test } from "vitest";
 
 import type {
+  AgentWorkerLanePort,
   ArtifactStoreContract,
   WorkflowNodeAdapterPort,
   WorkflowPostExecutionArtifactRecorderPort,
@@ -12,6 +13,8 @@ import { WorkflowApp } from "../../src/app/application/workflow-app.ts";
 import { hashJson, sha256Hex } from "../../src/app/domain/hash.ts";
 import {
   AgentLaneReceiptSchema,
+  WorkflowDriveLaneDispatchSchema,
+  WorkflowDriveLaneStatusReceiptSchema,
   DiscordDeliveryResultSchema,
   DiscordMessageApprovalSchema,
   DynamicWorkflowBlueprintSchema,
@@ -42,6 +45,7 @@ import type {
   CapabilityBlocker,
   DynamicWorkflowBlueprint,
   DynamicWorkflowStep,
+  WorkflowDriveLaneDispatch,
   WorkflowRunDriveResult,
   WorkflowStatusProjection,
 } from "../../src/app/domain/schemas.ts";
@@ -3054,9 +3058,12 @@ describe("workflow app integration contract", () => {
           status: "blocked" as const,
         });
       },
+      loadDriveLaneDispatch: () => null,
       loadedPlan,
       machine: subsetMachine,
       persistCheckpoint: () => Promise.resolve(),
+      recordDriveLaneDispatch: () => Promise.resolve(),
+      recordDriveLaneStatus: () => Promise.resolve(),
       request,
       transition: (command) => {
         transitionCommands.push(command.type);
@@ -5665,11 +5672,21 @@ const buildResumableWorkflow = (
   dynamicWorkflowPlanner: ReturnType<
     typeof createIntegrationTestDynamicWorkflowPlanner
   > = createIntegrationTestDynamicWorkflowPlanner(),
-  options: { readonly deterministicVerifier?: boolean } = {}
+  options: {
+    readonly agentWorkerLane?: AgentWorkerLanePort;
+    readonly createAgentWorkerLane?: (
+      artifacts: ReturnType<typeof createMemoryArtifactStore>
+    ) => AgentWorkerLanePort;
+    readonly deterministicVerifier?: boolean;
+  } = {}
 ) => {
   const artifacts = createMemoryArtifactStore(namespace);
   const contextCapsules = createMemoryContextCapsuleActor();
+  const statusProjection = createMemoryWorkflowStatusProjectionStore();
+  const agentWorkerLane =
+    options.agentWorkerLane ?? options.createAgentWorkerLane?.(artifacts);
   const workflow = new WorkflowApp({
+    ...(agentWorkerLane === undefined ? {} : { agentWorkerLane }),
     artifacts,
     capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
       discordSecretRef: "secretref:discord-bot",
@@ -5700,7 +5717,7 @@ const buildResumableWorkflow = (
     reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
       artifacts,
     }),
-    statusProjection: createMemoryWorkflowStatusProjectionStore(),
+    statusProjection,
     wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
     wzrrdSecretRefs: {
       dryRun: "secretref:wzrrd-dry-run",
@@ -5709,7 +5726,7 @@ const buildResumableWorkflow = (
     wzrrdSiteRef: "wzrrd:test",
   });
 
-  return { artifacts, contextCapsules, workflow };
+  return { artifacts, contextCapsules, statusProjection, workflow };
 };
 
 // Seed a complete run, then load the pinned (deterministic-per-run) plan +
@@ -5765,9 +5782,12 @@ const resumeExecution = (
         runId: input.request.runId,
         status: "blocked" as const,
       }),
+    loadDriveLaneDispatch: () => null,
     loadedPlan: input.loadedPlan,
     machine: input.machine,
     persistCheckpoint: () => Promise.resolve(),
+    recordDriveLaneDispatch: () => Promise.resolve(),
+    recordDriveLaneStatus: () => Promise.resolve(),
     request: input.request,
     resumeCheckpoint: input.resumeCheckpoint,
     transition: () => Promise.resolve(),
@@ -5913,7 +5933,489 @@ const driveRunOneNodePerCall = async (
   );
 };
 
+const createAsyncWorkerLaneHarness = (input: {
+  readonly artifacts: ReturnType<typeof createMemoryArtifactStore>;
+  readonly deadline?: string;
+  readonly processStatuses?: (
+    | "starting"
+    | "running"
+    | "completed"
+    | "failed"
+    | "killed"
+    | "error"
+    | "not_found"
+  )[];
+}) => {
+  const cleanups: string[] = [];
+  const dispatches: WorkflowDriveLaneDispatch[] = [];
+  const polls: string[] = [];
+  let processCounter = 0;
+  const processStatuses = [...(input.processStatuses ?? ["running"])];
+  const lane: AgentWorkerLanePort = {
+    cleanupStep(cleanupInput) {
+      cleanups.push(`${cleanupInput.reason}:${cleanupInput.dispatch.laneId}`);
+      return Promise.resolve();
+    },
+    dispatchStep(dispatchInput) {
+      processCounter += 1;
+      const outputRef = input.artifacts.artifactRef({
+        path: dispatchInput.step.outputPath,
+        runId: dispatchInput.plan.runId,
+      });
+      const dispatch = WorkflowDriveLaneDispatchSchema.parse({
+        deadline:
+          input.deadline ?? new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        dispatchKey: `${dispatchInput.nodeIndex}:${dispatchInput.step.stepId}`,
+        dispatchedAt: "2026-06-12T23:00:00.000Z",
+        expectedOutputArtifactRefs: [outputRef],
+        expectedReceiptArtifactRef: input.artifacts.artifactRef({
+          path: `receipts/worker-${dispatchInput.step.stepId}-lane.json`,
+          runId: dispatchInput.plan.runId,
+        }),
+        kind: "worker",
+        laneAuthLeaseId: `lease:async-worker:${dispatchInput.plan.runId}`,
+        laneId: `lane:worker:${dispatchInput.plan.runId}:${dispatchInput.step.stepId}`,
+        nodeIndex: dispatchInput.nodeIndex,
+        processId: `process-${processCounter}`,
+        promptArtifactRef: input.artifacts.artifactRef({
+          path: `lanes/${dispatchInput.step.stepId}/prompt.md`,
+          runId: dispatchInput.plan.runId,
+        }),
+        runId: dispatchInput.plan.runId,
+        sandboxId: `sandbox-${dispatchInput.plan.runId}`,
+        schemaVersion: "workflow.drive-lane-dispatch.v1",
+        status: "lane-dispatched",
+        stepId: dispatchInput.step.stepId,
+        workItemId: dispatchInput.plan.workItemId,
+      });
+      dispatches.push(dispatch);
+
+      return Promise.resolve(dispatch);
+    },
+    laneKind: "worker",
+    pollStep(pollInput) {
+      const status =
+        processStatuses.shift() ?? processStatuses.at(-1) ?? "running";
+      polls.push(`${status}:${pollInput.dispatch.laneId}`);
+
+      return Promise.resolve(
+        WorkflowDriveLaneStatusReceiptSchema.parse({
+          checkedAt: new Date().toISOString(),
+          dispatchKey: pollInput.dispatch.dispatchKey,
+          kind: pollInput.dispatch.kind,
+          laneId: pollInput.dispatch.laneId,
+          nodeIndex: pollInput.dispatch.nodeIndex,
+          processId: pollInput.dispatch.processId,
+          runId: pollInput.dispatch.runId,
+          sandboxId: pollInput.dispatch.sandboxId,
+          schemaVersion: "workflow.drive-lane-status.v1",
+          status,
+          stepId: pollInput.dispatch.stepId,
+          workItemId: pollInput.dispatch.workItemId,
+        })
+      );
+    },
+    async readStepReceipt(readInput) {
+      try {
+        const receipt = AgentLaneReceiptSchema.parse(
+          await input.artifacts.readJson({
+            artifactRef: readInput.dispatch.expectedReceiptArtifactRef,
+          })
+        );
+
+        return {
+          outputRefs: receipt.outputRefs,
+          receipt,
+        };
+      } catch {
+        return null;
+      }
+    },
+    runStep() {
+      throw new Error("blocking worker lane should not be used");
+    },
+    runtime: "pi-agent-cli",
+  };
+  const writeCompletedReceipt = (
+    dispatch = dispatches[0]
+  ): AgentLaneReceipt => {
+    if (dispatch === undefined) {
+      throw new Error("No async worker lane dispatch exists.");
+    }
+    const [outputRef] = dispatch.expectedOutputArtifactRefs;
+    if (outputRef === undefined) {
+      throw new Error("Async dispatch did not declare an output artifact ref.");
+    }
+    const output = {
+      redacted: true,
+      runId: dispatch.runId,
+      stepId: dispatch.stepId,
+      summary: "Async worker lane completed from Artifacts receipt.",
+    };
+    input.artifacts.setJson(outputRef, output);
+    const receipt = AgentLaneReceiptSchema.parse({
+      authLease: {
+        expiresAt: "2026-06-13T00:00:00.000Z",
+        issuedAt: "2026-06-12T23:00:00.000Z",
+        leaseId: dispatch.laneAuthLeaseId,
+        redacted: true,
+        runId: dispatch.runId,
+        scope: "pi-agent-auth-json",
+        secretRef: "secretref:pi-agent-auth-json",
+        workItemId: dispatch.workItemId,
+      },
+      completedAt: "2026-06-12T23:01:00.000Z",
+      kind: "worker",
+      laneId: dispatch.laneId,
+      outputPins: [
+        {
+          artifactRef: outputRef,
+          hash: hashJson(output),
+          mediaType: "application/json",
+        },
+      ],
+      outputRefs: [outputRef],
+      prompt: {
+        artifactRef: dispatch.promptArtifactRef,
+        hash: sha256Hex("async worker prompt"),
+        mediaType: "text/markdown",
+      },
+      realAgent: true,
+      receiptRef: dispatch.expectedReceiptArtifactRef,
+      redacted: true,
+      runtime: "pi-agent-cli",
+      sandboxRef: `cloudflare-sandbox:${dispatch.sandboxId}`,
+      startedAt: dispatch.dispatchedAt,
+      status: "completed",
+      traceContext: {
+        redacted: true,
+        spanId: `span:${dispatch.runId}:async-worker`,
+        traceId: `trace:${dispatch.runId}`,
+      },
+      transcript: {
+        artifactRef: input.artifacts.artifactRef({
+          path: `lanes/${dispatch.stepId}/transcript.md`,
+          runId: dispatch.runId,
+        }),
+        hash: sha256Hex("async worker transcript"),
+        mediaType: "text/markdown",
+      },
+    });
+    input.artifacts.setJson(dispatch.expectedReceiptArtifactRef, receipt);
+
+    return receipt;
+  };
+
+  return {
+    cleanups,
+    dispatches,
+    lane,
+    polls,
+    writeCompletedReceipt,
+  };
+};
+
+const driveOneAdmittedSingleStep = async (
+  rig: ReturnType<typeof buildResumableWorkflow>,
+  request: ReturnType<typeof buildIntegrationTestRunRequest>
+): Promise<WorkflowRunDriveResult> => {
+  const admission = await rig.contextCapsules.admitDrive({
+    runId: request.runId,
+    workItemId: request.workItemId,
+  });
+
+  return await rig.workflow.run(request, {
+    driveGeneration: admission.driveGeneration,
+    driveMode: "single-step",
+  });
+};
+
 describe("workflow single-step drive (one node per alarm)", () => {
+  it("dispatches an async worker lane once, polls, then advances from the Artifacts receipt", async () => {
+    let plannerInvocations = 0;
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-dispatch-poll-advance",
+      {
+        async proposePlan(input) {
+          plannerInvocations += 1;
+
+          return await planner.proposePlan(input);
+        },
+      },
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            processStatuses: ["running"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    const dispatched = await driveOneAdmittedSingleStep(rig, request);
+    const polled = await driveOneAdmittedSingleStep(rig, request);
+    asyncLane.writeCompletedReceipt();
+    const advanced = await driveOneAdmittedSingleStep(rig, request);
+    const checkpointCountAfterAdvance = [
+      ...rig.contextCapsules.checkpoints.keys(),
+    ].filter((key) => key.startsWith(`${request.runId}:`)).length;
+    const remaining = await driveRunOneNodePerCall(rig, request);
+    const terminal = remaining.at(-1);
+    const ledger = rig.contextCapsules.driveLedgers.get(
+      `${request.workItemId}:${request.runId}`
+    );
+
+    expect({
+      advancedStatus: advanced.status,
+      checkpointCountAfterAdvance,
+      cleanupReasons: asyncLane.cleanups,
+      dispatchCount: asyncLane.dispatches.length,
+      dispatchLaneRecordsAfterAdvance: Object.keys(
+        ledger?.laneDispatches ?? {}
+      ),
+      dispatchedStatus: dispatched.status,
+      plannerInvocations,
+      pollCount: asyncLane.polls.length,
+      polledStatus: polled.status,
+      terminalBlocker:
+        terminal?.status === "blocked" ? terminal.blocker.message : null,
+      terminalStatus: terminal?.status,
+    }).toStrictEqual({
+      advancedStatus: "paused",
+      checkpointCountAfterAdvance: 1,
+      cleanupReasons: [`completed:${asyncLane.dispatches[0]?.laneId}`],
+      dispatchCount: 1,
+      dispatchLaneRecordsAfterAdvance: [],
+      dispatchedStatus: "paused",
+      plannerInvocations: 1,
+      pollCount: 1,
+      polledStatus: "paused",
+      terminalBlocker: null,
+      terminalStatus: "captured",
+    });
+  });
+
+  it("keeps polling a dispatched async worker lane while the receipt is missing", async () => {
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-missing-receipt",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            processStatuses: ["starting", "running"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const firstPoll = await driveOneAdmittedSingleStep(rig, request);
+    const secondPoll = await driveOneAdmittedSingleStep(rig, request);
+    const checkpointCount = [...rig.contextCapsules.checkpoints.keys()].filter(
+      (key) => key.startsWith(`${request.runId}:`)
+    ).length;
+
+    expect({
+      checkpointCount,
+      dispatchCount: asyncLane.dispatches.length,
+      firstPollStatus: firstPoll.status,
+      pollStatuses: asyncLane.polls.map((poll) => poll.split(":")[0]),
+      secondPollStatus: secondPoll.status,
+    }).toStrictEqual({
+      checkpointCount: 0,
+      dispatchCount: 1,
+      firstPollStatus: "paused",
+      pollStatuses: ["starting", "running"],
+      secondPollStatus: "paused",
+    });
+  });
+
+  it("advances from a late async worker lane receipt after earlier paused polls", async () => {
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-late-receipt",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            processStatuses: ["running", "running"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    await driveOneAdmittedSingleStep(rig, request);
+    asyncLane.writeCompletedReceipt();
+    const advanced = await driveOneAdmittedSingleStep(rig, request);
+
+    expect({
+      advancedStatus: advanced.status,
+      checkpointCount: [...rig.contextCapsules.checkpoints.keys()].filter(
+        (key) => key.startsWith(`${request.runId}:`)
+      ).length,
+      dispatchCount: asyncLane.dispatches.length,
+      pollCount: asyncLane.polls.length,
+    }).toStrictEqual({
+      advancedStatus: "paused",
+      checkpointCount: 1,
+      dispatchCount: 1,
+      pollCount: 1,
+    });
+  });
+
+  it("blocks when an async worker lane process fails before a receipt is recoverable", async () => {
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-failed-process",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            processStatuses: ["failed"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const blocked = await driveOneAdmittedSingleStep(rig, request);
+    if (blocked.status !== "blocked") {
+      throw new Error(`Expected blocked, got ${blocked.status}.`);
+    }
+
+    expect({
+      blocker: blocked.blocker,
+      cleanupReasons: asyncLane.cleanups,
+      projectionBlocker: rig.statusProjection.latest.get(request.runId)
+        ?.terminalBlocker,
+    }).toStrictEqual({
+      blocker: {
+        code: "capability_denied",
+        message: `Async worker lane ${asyncLane.dispatches[0]?.laneId} ended with process status failed.`,
+        redacted: true,
+      },
+      cleanupReasons: [`failed:${asyncLane.dispatches[0]?.laneId}`],
+      projectionBlocker: {
+        code: "capability_denied",
+        message: `Async worker lane ${asyncLane.dispatches[0]?.laneId} ended with process status failed.`,
+        redacted: true,
+        stepId: "research-review",
+      },
+    });
+  });
+
+  it("blocks when getProcess returns null past the async worker lane deadline", async () => {
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-null-deadline",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            deadline: "2000-01-01T00:00:00.000Z",
+            processStatuses: ["not_found"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const blocked = await driveOneAdmittedSingleStep(rig, request);
+    if (blocked.status !== "blocked") {
+      throw new Error(`Expected blocked, got ${blocked.status}.`);
+    }
+
+    expect({
+      blockerCode: blocked.blocker.code,
+      cleanupReasons: asyncLane.cleanups,
+      dispatchCount: asyncLane.dispatches.length,
+      pollStatuses: asyncLane.polls.map((poll) => poll.split(":")[0]),
+    }).toStrictEqual({
+      blockerCode: "capability_denied",
+      cleanupReasons: [`timed-out:${asyncLane.dispatches[0]?.laneId}`],
+      dispatchCount: 1,
+      pollStatuses: ["not_found"],
+    });
+  });
+
+  it("advances from an Artifacts receipt even when the process handle is gone", async () => {
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-receipt-wins",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            processStatuses: ["not_found"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    asyncLane.writeCompletedReceipt();
+    const advanced = await driveOneAdmittedSingleStep(rig, request);
+
+    expect({
+      advancedStatus: advanced.status,
+      checkpointCount: [...rig.contextCapsules.checkpoints.keys()].filter(
+        (key) => key.startsWith(`${request.runId}:`)
+      ).length,
+      dispatchCount: asyncLane.dispatches.length,
+      pollCount: asyncLane.polls.length,
+    }).toStrictEqual({
+      advancedStatus: "paused",
+      checkpointCount: 1,
+      dispatchCount: 1,
+      pollCount: 0,
+    });
+  });
+
   it("advances exactly one dynamic node per drive and reaches captured in N drives", async () => {
     const rig = buildResumableWorkflow("workflow-app-single-step");
     const request = buildIntegrationTestRunRequest();

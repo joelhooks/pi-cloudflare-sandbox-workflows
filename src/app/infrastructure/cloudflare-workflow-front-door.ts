@@ -342,6 +342,24 @@ const createCapsuleSupervisorClient = (
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
     },
+    async recordDriveLaneDispatch(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(
+          stubFor(input.dispatch.workItemId),
+          "/record-drive-lane-dispatch",
+          input
+        )
+      );
+    },
+    async recordDriveLaneStatus(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(
+          stubFor(input.statusReceipt.workItemId),
+          "/record-drive-lane-status",
+          input
+        )
+      );
+    },
     async recordDriveNodeAttempt(input) {
       return WorkflowDriveNodeAttemptSchema.parse(
         await postJson(
