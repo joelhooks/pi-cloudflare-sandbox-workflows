@@ -201,6 +201,9 @@ const createAdmissionCapsuleController = (): ContextCapsuleActorContract &
 
   return {
     admissions,
+    admitDrive(input) {
+      return capsules.admitDrive(input);
+    },
     admitLane(input) {
       admissions.push(input);
       if (activeLaneIds.size >= input.maxActiveLanes) {
@@ -237,11 +240,20 @@ const createAdmissionCapsuleController = (): ContextCapsuleActorContract &
     appendEvent(input) {
       return capsules.appendEvent(input);
     },
+    assertActiveDriveGeneration(input) {
+      return capsules.assertActiveDriveGeneration(input);
+    },
+    loadDriveLedger(input) {
+      return capsules.loadDriveLedger(input);
+    },
     loadLatestCheckpoint(input) {
       return capsules.loadLatestCheckpoint(input);
     },
     persistCheckpoint(input) {
       return capsules.persistCheckpoint(input);
+    },
+    recordDrivePhaseCompletion(input) {
+      return capsules.recordDrivePhaseCompletion(input);
     },
     releaseLane(input) {
       releases.push(input);

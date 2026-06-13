@@ -3,6 +3,7 @@
 import type { Sandbox as SandboxDurableObject } from "@cloudflare/sandbox";
 
 import { createAdmittedAgentLaneRuntime } from "../application/admitted-agent-lane-runtime.ts";
+import { StaleDriveGenerationError } from "../application/ports.ts";
 import type {
   AgentAnalysisReasoningLanePort,
   AgentLaneAdmissionControllerContract,
@@ -27,6 +28,9 @@ import {
   AgentLaneReleaseReceiptSchema,
   ContextCapsuleRecordSchema,
   LoadRunCheckpointResolutionSchema,
+  StaleDriveGenerationRejectionSchema,
+  WorkflowDriveAdmissionSchema,
+  WorkflowDriveLedgerSchema,
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type {
@@ -273,6 +277,12 @@ const postJson = async (
     })
   );
   if (!response.ok) {
+    if (response.status === 409) {
+      throw new StaleDriveGenerationError(
+        StaleDriveGenerationRejectionSchema.parse(await response.json())
+      );
+    }
+
     throw new Error(`Capsule supervisor request failed: ${path}`);
   }
 
@@ -286,6 +296,11 @@ const createCapsuleSupervisorClient = (
     namespace.get(namespace.idFromName(workItemId));
 
   return {
+    async admitDrive(input) {
+      return WorkflowDriveAdmissionSchema.parse(
+        await postJson(stubFor(input.workItemId), "/admit-drive", input)
+      );
+    },
     async admitLane(input) {
       return AgentLaneAdmissionDecisionSchema.parse(
         await postJson(stubFor(input.workItemId), "/admit-lane", input)
@@ -293,6 +308,18 @@ const createCapsuleSupervisorClient = (
     },
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
+    },
+    async assertActiveDriveGeneration(input) {
+      await postJson(
+        stubFor(input.workItemId),
+        "/assert-drive-generation",
+        input
+      );
+    },
+    async loadDriveLedger(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(stubFor(input.workItemId), "/load-drive-ledger", input)
+      );
     },
     async loadLatestCheckpoint(input) {
       return LoadRunCheckpointResolutionSchema.parse(
@@ -305,6 +332,11 @@ const createCapsuleSupervisorClient = (
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
+    },
+    async recordDrivePhaseCompletion(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(stubFor(input.workItemId), "/record-drive-phase", input)
+      );
     },
     async releaseLane(input) {
       return AgentLaneReleaseReceiptSchema.parse(

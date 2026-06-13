@@ -1,0 +1,55 @@
+---
+title: "Phase 1a Drive Ledger"
+type: "receipt"
+status: "active"
+created_at: "2026-06-13"
+tags:
+  - durable-execution
+  - drive-ledger
+  - cloudflare
+  - workflow-app
+---
+
+# Phase 1a Drive Ledger
+
+Phase 1a makes re-drive state explicit in the capsule supervisor Durable Object instead of inferring completion from best-effort artifact reads.
+
+## Decision
+
+The per-run drive ledger is the authority for completed run phases:
+
+- `plan-pinned`
+- `execution-completed`
+- `verification-completed`
+- `capture-completed`
+
+Each phase entry records the artifact ref, artifact hash, media type, receipt kind, completion time, drive generation, and the artifact commit sha that proves the phase. `WorkflowApp.run()` only skips a phase when the ledger says that phase completed, then reconstructs from the artifact at the recorded commit sha. Ledger-silent phases run normally.
+
+Drive generations fence writes. The supervisor admits a new generation for each drive, persists it in the ledger, and passes it into `WorkflowApp.run()`. Status projection writes and phase ledger writes assert the generation before mutating state. A stale generation receives a typed `stale_drive_generation` rejection and aborts quietly instead of writing blockers or ledger entries.
+
+## Receipts
+
+- Spec source: `.brain/resources/phase1a-drive-ledger-spec.md`.
+- Code surfaces: `src/app/infrastructure/cloudflare-capsule-supervisor.ts`, `src/app/application/workflow-app.ts`, `src/app/application/ports.ts`, `src/app/domain/schemas.ts`, `src/app/infrastructure/cloudflare-artifacts-store.ts`, `src/app/infrastructure/memory-adapters.ts`.
+- Integration tests:
+  - `tests/integration/cloudflare-run-async-driver.test.ts` proves stale generation rejection and ledger persistence across supervisor instance swaps.
+  - `tests/integration/workflow-app.test.ts` proves ledger-driven re-drive skips the planner and dynamic execution phases, then resumes at verification/capture.
+
+## Verification
+
+Passed:
+
+```bash
+pnpm check
+pnpm typecheck
+pnpm verify
+pnpm exec vitest run tests/integration/cloudflare-run-async-driver.test.ts tests/integration/workflow-app.test.ts
+```
+
+Additional full-suite probe:
+
+```bash
+pnpm exec vitest run
+```
+
+The Codex sandbox showed environmental failures (local relay HTTP tests cannot bind `127.0.0.1`, and fresh worktrees lack the generated `.svelte-kit/tsconfig.json` for `prototypes/workflow-monitor-ui` until `svelte-kit sync` runs). Outside the sandbox, with `svelte-kit sync` applied, the full suite is green: 342/342. Note `pnpm verify` is only `pnpm check && pnpm typecheck`; it does not run tests.

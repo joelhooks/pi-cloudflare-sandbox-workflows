@@ -200,6 +200,9 @@ export const createArtifactEvidenceDeterministicVerifier = (
 
     return {
       result: VerificationResultArtifactSchema.parse({
+        ...(writeReceipt.artifactCommitSha === undefined
+          ? {}
+          : { artifactCommitSha: writeReceipt.artifactCommitSha }),
         artifactRef: writeReceipt.artifactRef,
         hash: writeReceipt.contentHash,
         mediaType: "application/json",

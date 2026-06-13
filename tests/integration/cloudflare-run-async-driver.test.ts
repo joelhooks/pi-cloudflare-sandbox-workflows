@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts";
 import {
   LoadRunCheckpointResolutionSchema,
+  StaleDriveGenerationRejectionSchema,
+  WorkflowDriveAdmissionSchema,
+  WorkflowDriveLedgerSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunPausedSchema,
   WorkflowRunRequestSchema,
@@ -143,6 +146,73 @@ const startRun = (
       method: "POST",
     })
   );
+
+const admitDrive = async (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest
+) => {
+  const response = await supervisor.fetch(
+    new Request("https://supervisor.internal/admit-drive", {
+      body: JSON.stringify({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+  return WorkflowDriveAdmissionSchema.parse(await response.json());
+};
+
+const recordDrivePhase = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest,
+  input: {
+    readonly artifactCommitSha: string;
+    readonly driveGeneration: number;
+    readonly phaseId: "capture-completed" | "plan-pinned";
+  }
+): Promise<Response> =>
+  supervisor.fetch(
+    new Request("https://supervisor.internal/record-drive-phase", {
+      body: JSON.stringify({
+        driveGeneration: input.driveGeneration,
+        phase: {
+          artifactCommitSha: input.artifactCommitSha,
+          artifactHash:
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          artifactRef: `artifact://workflow-app/runs/${request.runId}/run/${input.phaseId}.json`,
+          mediaType: "application/json",
+          phaseId: input.phaseId,
+          receiptKind: `test.${input.phaseId}.v1`,
+          refs: {},
+        },
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+const loadDriveLedger = async (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest
+) => {
+  const response = await supervisor.fetch(
+    new Request("https://supervisor.internal/load-drive-ledger", {
+      body: JSON.stringify({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+  return WorkflowDriveLedgerSchema.parse(await response.json());
+};
 
 /**
  * Read the latest persisted checkpoint for a run through the supervisor's own
@@ -305,6 +375,80 @@ const createSingleStepFrontDoor = (
 });
 
 describe("Capsule supervisor async run driver", () => {
+  it("rejects stale drive generation writes so interleaved drives cannot stomp", async () => {
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor(state);
+    const request = buildIntegrationTestRunRequest();
+    const driveA = await admitDrive(supervisor, request);
+    const driveB = await admitDrive(supervisor, request);
+
+    const staleWrite = await recordDrivePhase(supervisor, request, {
+      artifactCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      driveGeneration: driveA.driveGeneration,
+      phaseId: "capture-completed",
+    });
+    const acceptedWrite = await recordDrivePhase(supervisor, request, {
+      artifactCommitSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      driveGeneration: driveB.driveGeneration,
+      phaseId: "capture-completed",
+    });
+    const ledger = await loadDriveLedger(supervisor, request);
+
+    expect({
+      acceptedStatus: acceptedWrite.status,
+      finalCaptureCommit: ledger.phases["capture-completed"]?.artifactCommitSha,
+      finalCaptureGeneration:
+        ledger.phases["capture-completed"]?.driveGeneration,
+      staleBody: StaleDriveGenerationRejectionSchema.parse(
+        await staleWrite.json()
+      ),
+      staleStatus: staleWrite.status,
+    }).toStrictEqual({
+      acceptedStatus: 200,
+      finalCaptureCommit: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      finalCaptureGeneration: driveB.driveGeneration,
+      staleBody: {
+        code: "stale_drive_generation",
+        currentGeneration: driveB.driveGeneration,
+        driveGeneration: driveA.driveGeneration,
+        message: `Drive generation ${driveA.driveGeneration} is stale for run ${request.runId}; current generation is ${driveB.driveGeneration}.`,
+        redacted: true,
+        runId: request.runId,
+        workItemId: request.workItemId,
+      },
+      staleStatus: 409,
+    });
+  });
+
+  it("keeps the drive ledger intact across supervisor instance swaps", async () => {
+    const state = createFakeDurableObjectState();
+    const firstSupervisor = createSupervisor(state);
+    const request = buildIntegrationTestRunRequest();
+    const admission = await admitDrive(firstSupervisor, request);
+    await recordDrivePhase(firstSupervisor, request, {
+      artifactCommitSha: "cccccccccccccccccccccccccccccccccccccccc",
+      driveGeneration: admission.driveGeneration,
+      phaseId: "plan-pinned",
+    });
+
+    const freshSupervisor = createSupervisor(state);
+    const ledger = await loadDriveLedger(freshSupervisor, request);
+
+    expect({
+      driveGeneration: ledger.driveGeneration,
+      phaseCommit: ledger.phases["plan-pinned"]?.artifactCommitSha,
+      phaseGeneration: ledger.phases["plan-pinned"]?.driveGeneration,
+      runId: ledger.runId,
+      workItemId: ledger.workItemId,
+    }).toStrictEqual({
+      driveGeneration: admission.driveGeneration,
+      phaseCommit: "cccccccccccccccccccccccccccccccccccccccc",
+      phaseGeneration: admission.driveGeneration,
+      runId: request.runId,
+      workItemId: request.workItemId,
+    });
+  });
+
   it("accepts /start-run by parking the run and arming an immediate alarm without driving it", async () => {
     const state = createFakeDurableObjectState();
     const supervisor = createSupervisor(state);

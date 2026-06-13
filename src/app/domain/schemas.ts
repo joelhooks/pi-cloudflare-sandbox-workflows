@@ -17,6 +17,7 @@ export const ActorSchema = z.object({
 });
 
 export const ArtifactWriteReceiptSchema = z.object({
+  artifactCommitSha: z.string().min(1).optional(),
   artifactRef: ArtifactRefSchema,
   contentHash: Sha256HexSchema,
   mediaType: z.string().min(1),
@@ -942,6 +943,7 @@ export const VerificationResultDocumentSchema = z.object({
 });
 
 export const VerificationResultArtifactSchema = z.object({
+  artifactCommitSha: z.string().min(1).optional(),
   artifactRef: ArtifactRefSchema,
   hash: Sha256HexSchema,
   mediaType: z.literal("application/json"),
@@ -1683,6 +1685,7 @@ export const WorkflowStatusProjectionSchema = z.object({
   actorId: z.string().min(1),
   capsuleId: z.string().min(1),
   currentState: SafetyEnvelopeStateSchema,
+  driveGeneration: z.number().int().min(0).optional(),
   eventCount: z.number().int().min(1),
   lastEvent: WorkflowEventSchema,
   planArtifact: PlanArtifactSchema.optional(),
@@ -2232,7 +2235,79 @@ export const WorkflowRunResultSchema = z.discriminatedUnion("status", [
 export const WorkflowRunDriveModeSchema = z.enum(["single-step", "whole-run"]);
 
 export const WorkflowRunDriveOptionsSchema = z.object({
+  driveGeneration: z.number().int().min(0).optional(),
   driveMode: WorkflowRunDriveModeSchema.default("whole-run"),
+});
+
+export const WorkflowDrivePhaseIdSchema = z.enum([
+  "plan-pinned",
+  "execution-completed",
+  "verification-completed",
+  "capture-completed",
+]);
+
+export const WorkflowDriveLedgerPhaseSchema = z.object({
+  artifactCommitSha: z.string().min(1),
+  artifactHash: Sha256HexSchema,
+  artifactRef: ArtifactRefSchema,
+  completedAt: IsoDateTimeSchema,
+  driveGeneration: z.number().int().min(0),
+  mediaType: z.string().min(1),
+  phaseId: WorkflowDrivePhaseIdSchema,
+  receiptKind: z.string().min(1),
+  refs: z.record(z.string().min(1), z.string().min(1)).default({}),
+});
+
+export const WorkflowDriveLedgerSchema = z.object({
+  driveGeneration: z.number().int().min(0).default(0),
+  phases: z
+    .record(z.string().min(1), WorkflowDriveLedgerPhaseSchema)
+    .default({}),
+  runId: z.string().min(1),
+  schemaVersion: z.literal("workflow.drive-ledger.v1"),
+  updatedAt: IsoDateTimeSchema,
+  workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveLedgerRequestSchema = z.object({
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveAdmissionRequestSchema =
+  WorkflowDriveLedgerRequestSchema;
+
+export const WorkflowDriveAdmissionSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  ledger: WorkflowDriveLedgerSchema,
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveLedgerPhaseCompletionRequestSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  phase: WorkflowDriveLedgerPhaseSchema.omit({
+    completedAt: true,
+    driveGeneration: true,
+  }),
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveGenerationAssertionRequestSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const StaleDriveGenerationRejectionSchema = z.object({
+  code: z.literal("stale_drive_generation"),
+  currentGeneration: z.number().int().min(0),
+  driveGeneration: z.number().int().min(0),
+  message: z.string().min(1),
+  redacted: z.literal(true),
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
 });
 
 /**
@@ -2284,6 +2359,19 @@ export type ContextCapsuleRecord = z.infer<typeof ContextCapsuleRecordSchema>;
 export type RunStepCheckpoint = z.infer<typeof RunStepCheckpointSchema>;
 export type RunDurabilityRequest = z.infer<typeof RunDurabilityRequestSchema>;
 export type RunDurabilityDump = z.infer<typeof RunDurabilityDumpSchema>;
+export type StaleDriveGenerationRejection = z.infer<
+  typeof StaleDriveGenerationRejectionSchema
+>;
+export type WorkflowDriveAdmission = z.infer<
+  typeof WorkflowDriveAdmissionSchema
+>;
+export type WorkflowDriveLedger = z.infer<typeof WorkflowDriveLedgerSchema>;
+export type WorkflowDriveLedgerPhase = z.infer<
+  typeof WorkflowDriveLedgerPhaseSchema
+>;
+export type WorkflowDriveLedgerPhaseId = z.infer<
+  typeof WorkflowDrivePhaseIdSchema
+>;
 export type PersistRunCheckpointRequest = z.infer<
   typeof PersistRunCheckpointRequestSchema
 >;

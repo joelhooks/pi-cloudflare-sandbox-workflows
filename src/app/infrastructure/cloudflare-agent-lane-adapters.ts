@@ -811,6 +811,7 @@ export const createCloudflarePiVerifierLaneAdapter = (
 
     return {
       result: VerificationResultArtifactSchema.parse({
+        artifactCommitSha: requireLaneCommitSha(receipt, "Verifier"),
         artifactRef: resultPin.artifactRef,
         hash: resultPin.hash,
         mediaType: "application/json",

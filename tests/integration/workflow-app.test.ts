@@ -5657,7 +5657,8 @@ const buildResumableWorkflow = (
   namespace: string,
   dynamicWorkflowPlanner: ReturnType<
     typeof createIntegrationTestDynamicWorkflowPlanner
-  > = createIntegrationTestDynamicWorkflowPlanner()
+  > = createIntegrationTestDynamicWorkflowPlanner(),
+  options: { readonly deterministicVerifier?: boolean } = {}
 ) => {
   const artifacts = createMemoryArtifactStore(namespace);
   const contextCapsules = createMemoryContextCapsuleActor();
@@ -5674,6 +5675,13 @@ const buildResumableWorkflow = (
       send: "secretref:discord-bot",
     },
     dynamicWorkflowPlanner,
+    ...(options.deterministicVerifier === true
+      ? {
+          deterministicVerifier: createArtifactEvidenceDeterministicVerifier({
+            artifacts,
+          }),
+        }
+      : {}),
     executionMode: "integration-test",
     observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
       artifacts,
@@ -6002,6 +6010,141 @@ describe("workflow single-step drive (one node per alarm)", () => {
       driveStatuses: ["paused", "paused", "captured"],
       plannerInvocations: 1,
       terminalStatus: "captured",
+    });
+  });
+
+  it("uses the drive ledger to skip completed phases and resume at the next phase", async () => {
+    let plannerInvocations = 0;
+    const planner = createIntegrationTestDynamicWorkflowPlanner();
+    const rig = buildResumableWorkflow(
+      "workflow-app-drive-ledger-redrive",
+      {
+        async proposePlan(input) {
+          plannerInvocations += 1;
+
+          const blueprint = await planner.proposePlan(input);
+
+          return DynamicWorkflowBlueprintSchema.parse({
+            ...blueprint,
+            verificationContract: {
+              ...blueprint.verificationContract,
+              verifier: {
+                kind: "deterministic",
+                source: "builtin:artifact-evidence-integrity.v1",
+              },
+            },
+          });
+        },
+      },
+      { deterministicVerifier: true }
+    );
+    const request = buildIntegrationTestRunRequest();
+    const firstAdmission = await rig.contextCapsules.admitDrive({
+      runId: request.runId,
+      workItemId: request.workItemId,
+    });
+    const seeded = await rig.workflow.run(request, {
+      driveGeneration: firstAdmission.driveGeneration,
+      driveMode: "whole-run",
+    });
+    if (seeded.status !== "captured") {
+      throw new Error(
+        seeded.status === "blocked"
+          ? seeded.blocker.message
+          : `Expected seeded run to capture, got ${seeded.status}.`
+      );
+    }
+
+    const ledgerKey = `${request.workItemId}:${request.runId}`;
+    const ledger = rig.contextCapsules.driveLedgers.get(ledgerKey);
+    const planPhase = ledger?.phases["plan-pinned"];
+    const executionPhase = ledger?.phases["execution-completed"];
+    if (
+      ledger === undefined ||
+      planPhase === undefined ||
+      executionPhase === undefined
+    ) {
+      throw new Error("Seeded run did not record plan and execution phases.");
+    }
+    rig.contextCapsules.driveLedgers.set(ledgerKey, {
+      ...ledger,
+      phases: {
+        "execution-completed": executionPhase,
+        "plan-pinned": planPhase,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+
+    const freshWorkflow = new WorkflowApp({
+      artifacts: rig.artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(rig.artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: rig.contextCapsules,
+      deterministicVerifier: createArtifactEvidenceDeterministicVerifier({
+        artifacts: rig.artifacts,
+      }),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        proposePlan() {
+          throw new Error("planner replayed despite plan-pinned ledger phase");
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts: rig.artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(rig.artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts: rig.artifacts,
+      }),
+      statusProjection: createMemoryWorkflowStatusProjectionStore(),
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+    const redriveAdmission = await rig.contextCapsules.admitDrive({
+      runId: request.runId,
+      workItemId: request.workItemId,
+    });
+
+    const redrive = await freshWorkflow.run(request, {
+      driveGeneration: redriveAdmission.driveGeneration,
+      driveMode: "whole-run",
+    });
+
+    expect({
+      plannerInvocations,
+      recordedPhases: Object.keys(
+        rig.contextCapsules.driveLedgers.get(ledgerKey)?.phases ?? {}
+      ).toSorted(),
+      redriveDynamicStepEvents: redrive.eventLog.filter(
+        (event) =>
+          event.summary ===
+          "Dynamic research/review step executed from the pinned plan."
+      ).length,
+      redriveStatus: redrive.status,
+    }).toStrictEqual({
+      plannerInvocations: 1,
+      recordedPhases: [
+        "capture-completed",
+        "execution-completed",
+        "plan-pinned",
+        "verification-completed",
+      ],
+      redriveDynamicStepEvents: 0,
+      redriveStatus: "captured",
     });
   });
 });
