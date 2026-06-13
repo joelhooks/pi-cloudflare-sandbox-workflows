@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { ArtifactStoreContract } from "../../src/app/application/ports.ts";
 import { hashJson, sha256Hex } from "../../src/app/domain/hash.ts";
 import {
   DiscordMessagePayloadSchema,
@@ -643,7 +644,7 @@ describe("Cloudflare capability lease broker", () => {
       receiptStatus: receipt.delivery.status,
       receiptTraceContext: receipt.traceContext,
     }).toStrictEqual({
-      operationKinds: ["wzrrd.site.publish", "lease", "lease-update", "wzrrd"],
+      operationKinds: ["wzrrd.site.publish", "lease-update", "wzrrd"],
       receiptCapability: "wzrrd.site.publish",
       receiptResource: {
         kind: "wzrrd.site",
@@ -652,6 +653,49 @@ describe("Cloudflare capability lease broker", () => {
       },
       receiptStatus: "dry-run",
       receiptTraceContext: fixture.leaseRequest.traceContext,
+    });
+  });
+
+  it("issues Wzrrd leases without rereading or rewriting the payload artifact", async () => {
+    const fixture = await buildWzrrdLeaseFixture();
+    const d1 = createFakeD1();
+    const artifacts: ArtifactStoreContract = {
+      artifactRef: (input) => fixture.artifacts.artifactRef(input),
+      readJson: () =>
+        Promise.reject(
+          new Error("Wzrrd lease issuance should not reread artifacts.")
+        ),
+      readText: () =>
+        Promise.reject(
+          new Error("Wzrrd lease issuance should not reread artifacts.")
+        ),
+      writeJson: () =>
+        Promise.reject(
+          new Error("Wzrrd lease issuance should not write artifacts.")
+        ),
+      writeText: () =>
+        Promise.reject(
+          new Error("Wzrrd lease issuance should not write artifacts.")
+        ),
+    };
+    const broker = createCloudflareCapabilityLeaseBroker({
+      artifacts,
+      d1: d1.d1,
+      policy: {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "workflow-capability-policy",
+        wzrrdSecretRef: "secretref:wzrrd-api",
+      },
+    });
+
+    const decision = await broker.requestLease(fixture.leaseRequest);
+
+    expect({
+      decisionStatus: decision.status,
+      operationKinds: d1.operations.map((operation) => operation.values[2]),
+    }).toStrictEqual({
+      decisionStatus: "issued",
+      operationKinds: ["wzrrd.site.publish"],
     });
   });
 

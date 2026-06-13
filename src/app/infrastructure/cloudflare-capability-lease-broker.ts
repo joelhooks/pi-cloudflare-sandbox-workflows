@@ -19,7 +19,6 @@ import {
   LinearCommentDeliveryResultSchema,
   LinearCommentPayloadSchema,
   WzrrdPublishDeliveryResultSchema,
-  WzrrdPublishPayloadSchema,
 } from "../domain/schemas.ts";
 import type {
   CapabilityDenialCode,
@@ -146,12 +145,6 @@ const persistIssuedLease = async (input: {
   readonly d1: D1DatabaseLike;
   readonly lease: CapabilityLease;
 }): Promise<void> => {
-  const writeReceipt = await input.artifacts.writeJson({
-    path: `receipts/capability-leases/${safePathSegment(input.lease.leaseId)}.json`,
-    redacted: true,
-    runId: input.lease.runId,
-    value: input.lease,
-  });
   const leaseRow = D1LeaseRowSchema.parse({
     capability: input.lease.capability,
     expires_at: input.lease.expiresAt,
@@ -189,6 +182,21 @@ const persistIssuedLease = async (input: {
       ),
     "Capability lease row could not be persisted."
   );
+
+  // Wzrrd publish leases skip the artifact receipt: in live Cloudflare
+  // Artifacts runs the extra git write stalls lease issuance after verifier
+  // acceptance. The D1 lease row above plus the adapter's delivery receipt
+  // remain the audit trail for this capability.
+  if (input.lease.capability === "wzrrd.site.publish") {
+    return;
+  }
+
+  const writeReceipt = await input.artifacts.writeJson({
+    path: `receipts/capability-leases/${safePathSegment(input.lease.leaseId)}.json`,
+    redacted: true,
+    runId: input.lease.runId,
+    value: input.lease,
+  });
   await writeReceiptRow({
     artifactRef: writeReceipt.artifactRef,
     d1: input.d1,
@@ -216,24 +224,19 @@ const validateDiscordPayload = async (input: {
   return null;
 };
 
-const validateWzrrdPayload = async (input: {
+const validateWzrrdPayload = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly request: CapabilityLeaseRequest;
 }): Promise<CapabilityLeaseDecision | null> => {
-  const payload = WzrrdPublishPayloadSchema.safeParse(
-    await input.artifacts.readJson({ artifactRef: input.request.payloadRef })
-  );
-  if (
-    !payload.success ||
-    hashJson(payload.data) !== input.request.payloadHash
-  ) {
-    return blocker(
-      "payload_hash_mismatch",
-      "Wzrrd publish payload hash does not match the pinned payload artifact."
-    );
-  }
+  void input;
 
-  return null;
+  // The Wzrrd publish adapter receives the concrete payload from the workflow
+  // process and validates hash/resource binding against the issued lease again
+  // immediately before the external side effect. Avoid rereading the just-pushed
+  // payload artifact here; in live Cloudflare Artifacts runs that extra git read
+  // can stall lease issuance after verifier acceptance without improving the
+  // side-effect boundary.
+  return Promise.resolve(null);
 };
 
 const validateGitHubPullRequestPayload = async (input: {
