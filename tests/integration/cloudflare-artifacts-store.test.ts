@@ -101,6 +101,7 @@ describe(provisionCloudflareArtifactsRunStore, () => {
         path: "run/planner-blueprint.json",
         runId: "run-redrive",
       }),
+      artifactRemote: runStore.artifactRemote,
       createCalls,
       mintedTokenScope,
       mintedTokenTtl,
@@ -110,12 +111,61 @@ describe(provisionCloudflareArtifactsRunStore, () => {
     }).toStrictEqual({
       artifactRef:
         "artifact://piwf-run-redrive/runs/run-redrive/run/planner-blueprint.json",
+      artifactRemote:
+        "https://example.invalid/git/default/piwf-run-redrive.git",
       createCalls: 1,
       mintedTokenScope: "write",
       mintedTokenTtl: 86_400,
       repoName: "piwf-run-redrive",
       tokenExpiresAt: "2026-06-13T00:00:00.000Z",
       tokenSecret: "rotated-token",
+    });
+  });
+
+  it("constructs the re-attach remote when Artifacts get returns an RPC property proxy", async () => {
+    const rpcPropertyProxy = {
+      toString: () => "[object JsRpcProperty]",
+    };
+
+    const runStore = await provisionCloudflareArtifactsRunStore({
+      artifacts: {
+        create: () =>
+          Promise.reject(
+            Object.assign(new Error("repo already exists"), {
+              code: "ALREADY_EXISTS",
+            })
+          ),
+        get: () =>
+          Promise.resolve({
+            createToken: () =>
+              Promise.resolve({
+                expiresAt: "2026-06-13T00:00:00.000Z",
+                plaintext: "rotated-token?expires=1781040000",
+              }),
+            defaultBranch: rpcPropertyProxy,
+            name: rpcPropertyProxy,
+            remote: rpcPropertyProxy,
+          }),
+      },
+      artifactsAccountId: "baac0d692a7fb14f11b159b48b13055e",
+      artifactsNamespace: "default",
+      description: "live run store",
+      repoName: "piwf-run-redrive-proxy",
+    });
+
+    expect({
+      artifactRef: runStore.store.artifactRef({
+        path: "run/plan.json",
+        runId: "run-redrive-proxy",
+      }),
+      artifactRemote: runStore.artifactRemote,
+      repoName: runStore.artifactRepoName,
+    }).toStrictEqual({
+      artifactRef:
+        "artifact://piwf-run-redrive-proxy/runs/run-redrive-proxy/run/plan.json",
+      artifactRemote:
+        "https://baac0d692a7fb14f11b159b48b13055e.artifacts.cloudflare.net/git/default/piwf-run-redrive-proxy.git",
+      repoName: "piwf-run-redrive-proxy",
     });
   });
 

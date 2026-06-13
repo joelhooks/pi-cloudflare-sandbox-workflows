@@ -111,6 +111,8 @@ export interface CloudflareWorkflowFrontDoorConfig {
   readonly analyticsEngine?: AnalyticsEngineDatasetLike;
   readonly analyticsEngineDataset?: string;
   readonly artifacts?: Artifacts;
+  readonly artifactsAccountId?: string | undefined;
+  readonly artifactsNamespace?: string | undefined;
   readonly capabilityLeases?: CapabilityLeaseBrokerActorContract;
   readonly capabilityLeasePolicy?: CloudflareCapabilityLeaseBrokerConfig["policy"];
   readonly contextCapsules?: CapsuleSupervisorPorts;
@@ -370,6 +372,8 @@ const provisionRunStore = async (input: {
 
   return await provisionCloudflareArtifactsRunStore({
     artifacts: input.config.artifacts,
+    artifactsAccountId: input.config.artifactsAccountId,
+    artifactsNamespace: input.config.artifactsNamespace,
     description: `Workflow app run ${input.request.runId}`,
     repoName: defaultRunRepoName(
       input.request,

@@ -335,6 +335,8 @@ export const createFrontDoorFromEnv = (
           },
         }),
     artifacts: bindings.ARTIFACTS,
+    artifactsAccountId: bindings.WORKFLOW_APP_ARTIFACTS_ACCOUNT_ID,
+    artifactsNamespace: bindings.WORKFLOW_APP_ARTIFACTS_NAMESPACE,
     capabilityLeasePolicy: {
       discordSecretRef: discordBotSecretRef,
       githubBranchCommitSecretRef: bindings.GITHUB_BRANCH_COMMIT_SECRET_REF,
@@ -1592,12 +1594,13 @@ const handleWorkflowRunSubmissionRequest = async <Environment>(
       "Run duplicate guard failed before execution."
     );
   }
-  if (existingRun !== null) {
+  if (existingRun !== null && isTerminalWorkflowState(existingRun.status)) {
     return Response.json(
       {
         error: {
           code: "duplicate_run_id",
-          message: "Run id already exists; refusing to re-execute.",
+          message:
+            "Run id already reached a terminal state; refusing to re-execute.",
           redacted: true,
         },
         run: WorkflowRunStatusSnapshotSchema.parse(existingRun),

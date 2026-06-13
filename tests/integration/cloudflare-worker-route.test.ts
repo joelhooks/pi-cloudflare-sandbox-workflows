@@ -1037,7 +1037,7 @@ describe("Cloudflare Worker route", () => {
     });
   });
 
-  it("rejects duplicate run ids with the stored status without re-executing the lanes", async () => {
+  it("rejects terminal duplicate run ids with the stored status without re-executing the lanes", async () => {
     const body = buildIntegrationTestRunRequest();
     const calls: unknown[] = [];
     const duplicateLookups: unknown[] = [];
@@ -1068,7 +1068,8 @@ describe("Cloudflare Worker route", () => {
       body: {
         error: {
           code: "duplicate_run_id",
-          message: "Run id already exists; refusing to re-execute.",
+          message:
+            "Run id already reached a terminal state; refusing to re-execute.",
           redacted: true,
         },
         run: {
@@ -1079,6 +1080,49 @@ describe("Cloudflare Worker route", () => {
       calls: [],
       duplicateLookups: [{ runId: body.runId }],
       status: 409,
+    });
+  });
+
+  it("re-arms non-terminal duplicate run ids instead of leaving dark runs stuck", async () => {
+    const body = buildIntegrationTestRunRequest();
+    const calls: unknown[] = [];
+    const duplicateLookups: unknown[] = [];
+
+    const response = await fetchWithTestFrontDoor({
+      calls,
+      readRunStatus(_env, runInput) {
+        duplicateLookups.push(runInput);
+
+        return Promise.resolve({
+          runId: runInput.runId,
+          status: "requestingReviewSurfaceDeliveryLease",
+        });
+      },
+      request: new Request("https://workflow.example.test/runs", {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json", ...runsAuthHeaders },
+        method: "POST",
+      }),
+    });
+
+    expect({
+      body: await response.json(),
+      calls,
+      duplicateLookups,
+      status: response.status,
+    }).toStrictEqual({
+      body: {
+        runId: body.runId,
+        status: "accepted",
+      },
+      calls: [
+        {
+          request: body,
+          workItemId: body.workItemId,
+        },
+      ],
+      duplicateLookups: [{ runId: body.runId }],
+      status: 202,
     });
   });
 

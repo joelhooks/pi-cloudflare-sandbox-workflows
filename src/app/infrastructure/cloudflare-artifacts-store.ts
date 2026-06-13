@@ -15,6 +15,10 @@ import {
   ArtifactWriteReceiptSchema,
 } from "../domain/schemas.ts";
 import type { ArtifactRef, ArtifactWriteReceipt } from "../domain/schemas.ts";
+import {
+  cloudflareArtifactsGitRemoteForRepo,
+  resolveArtifactsRepoGitFields,
+} from "./cloudflare-artifacts-repo-fields.ts";
 import { GitMemoryFS } from "./git-memory-fs.ts";
 
 interface CloudflareArtifactsGitStoreConfig {
@@ -26,11 +30,16 @@ interface CloudflareArtifactsGitStoreConfig {
   };
   readonly defaultBranch?: string;
   readonly namespace: string;
+  // When true, the worktree clones the run remote before the first read/write so
+  // it observes artifacts pushed by an earlier drive (or another DO instance).
+  // Set only when re-attaching to an already-provisioned repo; a freshly created
+  // repo has no history to clone and inits empty.
+  readonly seedFromRemote?: boolean;
 }
 
 interface CloudflareArtifactsRunRepoHandle {
-  readonly name?: string;
-  readonly remote: string;
+  readonly name?: unknown;
+  readonly remote?: unknown;
   createToken(
     scope: "write" | "read",
     ttl?: number
@@ -41,6 +50,8 @@ interface CloudflareArtifactsRunRepoHandle {
 }
 
 interface CloudflareArtifactsRunProvisionInput {
+  readonly artifactsAccountId?: string | undefined;
+  readonly artifactsNamespace?: string | undefined;
   readonly artifacts: {
     create(
       name: string,
@@ -50,8 +61,9 @@ interface CloudflareArtifactsRunProvisionInput {
         readonly setDefaultBranch: string;
       }
     ): Promise<{
-      readonly name?: string;
-      readonly remote: string;
+      readonly defaultBranch?: unknown;
+      readonly name?: unknown;
+      readonly remote?: unknown;
       readonly token: string;
       readonly tokenExpiresAt: string;
     }>;
@@ -74,11 +86,30 @@ const textDecoder = new TextDecoder();
 const tokenSecretForGit = (token: string): string =>
   token.split("?expires=").at(0) ?? token;
 
+const isMissingDefaultBranchError = (error: unknown): boolean =>
+  /Could not find .+\.$/u.test(
+    error instanceof Error ? error.message : String(error)
+  );
+
 const invalidNamespaceValues = new Set(["", "undefined"]);
 
 const repoNameFromArtifactsRemote = (remote: string): string | null => {
   const match = /\/git\/[^/]+\/([^/?#]+)\.git(?:[?#].*)?$/u.exec(remote);
   return match?.[1] === undefined ? null : decodeURIComponent(match[1]);
+};
+
+const repoNameFromArtifactsResponse = (
+  responseName: unknown,
+  input: { readonly remote: string; readonly requestedRepoName: string }
+): string => {
+  if (
+    typeof responseName === "string" &&
+    !invalidNamespaceValues.has(responseName)
+  ) {
+    return responseName;
+  }
+
+  return repoNameFromArtifactsRemote(input.remote) ?? input.requestedRepoName;
 };
 
 const resolveArtifactStoreNamespace = (input: {
@@ -155,6 +186,7 @@ class CloudflareArtifactsGitStore implements ArtifactStoreContract {
   private initialized = false;
   private readonly namespace: string;
   private readonly remote: string;
+  private readonly seedFromRemote: boolean;
   private readonly tokenSecret: string;
 
   constructor(config: CloudflareArtifactsGitStoreConfig) {
@@ -168,6 +200,7 @@ class CloudflareArtifactsGitStore implements ArtifactStoreContract {
       remote: config.artifactRemote,
     });
     this.remote = config.artifactRemote;
+    this.seedFromRemote = config.seedFromRemote ?? false;
     this.tokenSecret = config.artifactTokenSecret;
   }
 
@@ -272,12 +305,48 @@ class CloudflareArtifactsGitStore implements ArtifactStoreContract {
     }
 
     await this.fs.promises.mkdir(this.dir, { recursive: true });
+
+    // A fresh per-drive store would otherwise init an empty worktree and never
+    // observe artifacts an earlier drive pushed (e.g. run/plan.json), which is
+    // how the planner phase got re-invoked across DO instances and blocked.
+    // When re-attaching to an existing repo, clone its history so reads see
+    // committed-and-pushed artifacts. Only an empty repo with no default branch
+    // falls back to init; other clone failures must stay loud.
+    if (this.seedFromRemote && (await this.tryCloneWorktree())) {
+      this.initialized = true;
+      return;
+    }
+
     await gitInit({
       defaultBranch: this.defaultBranch,
       dir: this.dir,
       fs: this.fs,
     });
     this.initialized = true;
+  }
+
+  private async tryCloneWorktree(): Promise<boolean> {
+    try {
+      await clone({
+        dir: this.dir,
+        fs: this.fs,
+        http,
+        onAuth: () => ({ password: this.tokenSecret, username: "x" }),
+        ref: this.defaultBranch,
+        singleBranch: true,
+        url: this.remote,
+      });
+      return true;
+    } catch (error) {
+      if (!isMissingDefaultBranchError(error)) {
+        throw error;
+      }
+
+      // The repo was provisioned but its first drive pushed nothing yet (it
+      // blocked before planning committed run/plan.json), so there is no branch
+      // to clone. Fall back to an empty init; the next write creates the branch.
+      return false;
+    }
   }
 
   private async readTextAtCommit(
@@ -326,8 +395,12 @@ const isArtifactsErrorCode = (
 const runStoreTokenTtlSeconds = 86_400;
 
 const runStoreFromRepoFields = (fields: {
+  readonly defaultBranch?: string | undefined;
   readonly remote: string;
   readonly repoName: string;
+  // True when re-attaching to an existing repo (a prior drive may have pushed
+  // artifacts); false for a freshly created, empty repo.
+  readonly seedFromRemote: boolean;
   readonly tokenExpiresAt: string;
   readonly tokenPlaintext: string;
 }): CloudflareArtifactsRunStore => {
@@ -342,7 +415,11 @@ const runStoreFromRepoFields = (fields: {
     store: createCloudflareArtifactsGitStore({
       artifactRemote: fields.remote,
       artifactTokenSecret,
+      ...(fields.defaultBranch === undefined
+        ? {}
+        : { defaultBranch: fields.defaultBranch }),
       namespace: artifactRepoName,
+      seedFromRemote: fields.seedFromRemote,
     }),
   };
 };
@@ -360,11 +437,28 @@ export const provisionCloudflareArtifactsRunStore = async (
       readOnly: false,
       setDefaultBranch: "main",
     });
+    const fallbackRemote =
+      input.artifactsAccountId === undefined
+        ? undefined
+        : cloudflareArtifactsGitRemoteForRepo({
+            accountId: input.artifactsAccountId,
+            namespace: input.artifactsNamespace,
+            repoName: input.repoName,
+          });
+    const gitFields = resolveArtifactsRepoGitFields(repo, {
+      defaultBranch: "main",
+      remote: fallbackRemote,
+    });
 
     return runStoreFromRepoFields({
-      remote: repo.remote,
-      repoName:
-        repo.name ?? repoNameFromArtifactsRemote(repo.remote) ?? input.repoName,
+      defaultBranch: gitFields.defaultBranch,
+      remote: gitFields.remote,
+      repoName: repoNameFromArtifactsResponse(repo.name, {
+        remote: gitFields.remote,
+        requestedRepoName: input.repoName,
+      }),
+      // Brand-new repo: nothing has been pushed, so init the worktree empty.
+      seedFromRemote: false,
       tokenExpiresAt: repo.tokenExpiresAt,
       tokenPlaintext: repo.token,
     });
@@ -375,11 +469,29 @@ export const provisionCloudflareArtifactsRunStore = async (
 
     const repo = await input.artifacts.get(input.repoName);
     const token = await repo.createToken("write", runStoreTokenTtlSeconds);
+    const fallbackRemote =
+      input.artifactsAccountId === undefined
+        ? undefined
+        : cloudflareArtifactsGitRemoteForRepo({
+            accountId: input.artifactsAccountId,
+            namespace: input.artifactsNamespace,
+            repoName: input.repoName,
+          });
+    const gitFields = resolveArtifactsRepoGitFields(repo, {
+      defaultBranch: "main",
+      remote: fallbackRemote,
+    });
 
     return runStoreFromRepoFields({
-      remote: repo.remote,
-      repoName:
-        repo.name ?? repoNameFromArtifactsRemote(repo.remote) ?? input.repoName,
+      defaultBranch: gitFields.defaultBranch,
+      remote: gitFields.remote,
+      repoName: repoNameFromArtifactsResponse(repo.name, {
+        remote: gitFields.remote,
+        requestedRepoName: input.repoName,
+      }),
+      // Re-attaching to an existing repo: an earlier drive may have pushed
+      // artifacts this drive must read, so clone the remote before first access.
+      seedFromRemote: true,
       tokenExpiresAt: token.expiresAt,
       tokenPlaintext: token.plaintext,
     });
