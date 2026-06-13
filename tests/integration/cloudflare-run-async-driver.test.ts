@@ -993,6 +993,73 @@ describe("Capsule supervisor async run driver", () => {
     }
   });
 
+  it("redrives through fresh Durable Object instances over the same storage", async () => {
+    const state = createFakeDurableObjectState();
+    const request = buildIntegrationTestRunRequest();
+    const totalSteps = 3;
+    const log: SingleStepDriveLog = {
+      driveModes: [],
+      outcomeStatuses: [],
+      persistedStepIndexes: [],
+    };
+    let activeSupervisor: CloudflareWorkflowCapsuleSupervisorInstance | null =
+      null;
+    let instanceCount = 0;
+    const freshSupervisor = (): CloudflareWorkflowCapsuleSupervisorInstance => {
+      instanceCount += 1;
+      activeSupervisor = createSupervisor(state, {
+        WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+      });
+
+      return activeSupervisor;
+    };
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() =>
+      createSingleStepFrontDoor(
+        activeSupervisor ?? freshSupervisor(),
+        totalSteps,
+        log
+      )
+    );
+    try {
+      await startRun(freshSupervisor(), request);
+
+      const runStartKeptAcrossEvictions: boolean[] = [];
+      for (let alarmCount = 0; alarmCount < totalSteps - 1; alarmCount += 1) {
+        state.alarmAt = null;
+        // eslint-disable-next-line no-await-in-loop -- each alarm is a fresh post-eviction DO instance over the same storage.
+        await freshSupervisor().alarm();
+        runStartKeptAcrossEvictions.push(state.store.has(runStartKey(request)));
+      }
+
+      state.alarmAt = null;
+      await freshSupervisor().alarm();
+      const latestCheckpoint = await loadLatestCheckpoint(
+        freshSupervisor(),
+        request
+      );
+
+      expect({
+        driveModes: log.driveModes,
+        instanceCount,
+        latestCheckpointStepIndex: latestCheckpoint?.stepIndex ?? null,
+        outcomeStatuses: log.outcomeStatuses,
+        persistedStepIndexes: log.persistedStepIndexes,
+        runStartClearedAtTerminal: !state.store.has(runStartKey(request)),
+        runStartKeptAcrossEvictions,
+      }).toStrictEqual({
+        driveModes: ["single-step", "single-step", "single-step"],
+        instanceCount: 5,
+        latestCheckpointStepIndex: 2,
+        outcomeStatuses: ["paused", "paused", "blocked"],
+        persistedStepIndexes: [0, 1, 2],
+        runStartClearedAtTerminal: true,
+        runStartKeptAcrossEvictions: [true, true],
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
   // step-driver(core): a run that advanced THIS alarm (its checkpoint is fresh)
   // is protected from the reaper — it paused with forward progress, so the next
   // alarm resumes it rather than the reaper sweeping it to blocked.
