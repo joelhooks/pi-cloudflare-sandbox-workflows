@@ -266,6 +266,7 @@ interface WorkflowNodeStepExecutionBlocked {
 }
 
 interface DynamicVerificationSuccess {
+  readonly executionReceiptRef?: ArtifactRef;
   readonly resultArtifact?: VerificationResultArtifact;
   readonly resultDocument?: VerificationResultDocument;
   readonly status: "bypassed" | "verified";
@@ -589,7 +590,18 @@ const resolveCurrentGeneratedWorkflowState = (input: {
 const primaryOutputPathForStep = (
   step: DynamicWorkflowStep
 ): string | undefined => {
-  if (step.kind === "workflow.node.invoke" || step.kind === "research.review") {
+  if (step.kind === "workflow.node.invoke") {
+    if (
+      step.nodeType === "joelclaw.memory.hitl-report" &&
+      step.outputPath.endsWith(".mdsvx")
+    ) {
+      return `${step.outputPath.slice(0, -".mdsvx".length)}.json`;
+    }
+
+    return step.outputPath;
+  }
+
+  if (step.kind === "research.review") {
     return step.outputPath;
   }
 
@@ -629,6 +641,18 @@ const resolveGeneratedWorkflowPlanStep = (input: {
 
 const safeArtifactPathSegment = (value: string): string =>
   value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
+
+const isMissingArtifactReadError = (error: unknown): boolean => {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const { code } = error as { readonly code?: unknown };
+    if (code === "ENOENT") {
+      return true;
+    }
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /^(Artifact|JSON artifact|Text artifact) not found:/u.test(message);
+};
 
 const hasApprovedGitHubRealDelivery = (request: WorkflowRunRequest): boolean =>
   request.actor.roleIds.includes("github.branch.commit") &&
@@ -1261,6 +1285,23 @@ export class WorkflowApp implements WorkflowAppContract {
     return this.dependencies.statusProjection.record({ projection });
   }
 
+  private recordContextCapsuleEvent(input: {
+    readonly event: WorkflowEvent;
+    readonly workItemId: string;
+  }): void {
+    void (async () => {
+      try {
+        await this.dependencies.contextCapsules.appendEvent(input);
+      } catch (error) {
+        console.warn("context capsule event append skipped", {
+          error: error instanceof Error ? error.message : String(error),
+          state: input.event.state,
+          workItemId: input.workItemId,
+        });
+      }
+    })();
+  }
+
   private async proposeDynamicWorkflowBlueprint(input: {
     readonly discordPayload: PinnedDiscordPayload | null;
     readonly packageMetadata: readonly PackageMetadata[];
@@ -1368,10 +1409,6 @@ export class WorkflowApp implements WorkflowAppContract {
         summary,
       });
       eventLog.push(event);
-      await this.dependencies.contextCapsules.appendEvent({
-        event,
-        workItemId: request.workItemId,
-      });
       await this.recordStatusProjection({
         capsule: projectionCapsule,
         event,
@@ -1379,6 +1416,10 @@ export class WorkflowApp implements WorkflowAppContract {
         planArtifact: projectionPlanArtifact,
         request,
         ...(terminalBlocker === undefined ? {} : { terminalBlocker }),
+      });
+      this.recordContextCapsuleEvent({
+        event,
+        workItemId: request.workItemId,
       });
     };
 
@@ -1600,7 +1641,9 @@ export class WorkflowApp implements WorkflowAppContract {
       block,
       execution,
       loadedPlan,
+      machine: loadedMachine.machine,
       observabilityPack,
+      planArtifact,
       transition,
       verificationContract: loadedSupportArtifacts.verificationContract,
     });
@@ -1663,6 +1706,9 @@ export class WorkflowApp implements WorkflowAppContract {
       stepArtifactRefs: [
         ...execution.artifactRefs,
         ...postExecutionArtifactRefs,
+        ...(verification.executionReceiptRef === undefined
+          ? []
+          : [verification.executionReceiptRef]),
         ...(verification.resultArtifact === undefined
           ? []
           : [verification.resultArtifact.artifactRef]),
@@ -1851,11 +1897,7 @@ export class WorkflowApp implements WorkflowAppContract {
       ),
       workflowNodeOutputRefs: input.execution.artifactRefs,
     } as const;
-    const runtimeEnvironment =
-      this.dependencies.runtimeEnvironment ??
-      (this.isIntegrationTestMode()
-        ? ({ platform: "local-integration" } as const)
-        : null);
+    const runtimeEnvironment = this.workflowRuntimeEnvironment();
 
     if (runtimeEnvironment?.platform !== "cloudflare-workers") {
       if (!this.isIntegrationTestMode()) {
@@ -2086,6 +2128,9 @@ export class WorkflowApp implements WorkflowAppContract {
       input.pinnedDynamicWorkflow.harnessArtifact.artifactRef,
       input.pinnedDynamicWorkflow.verificationContractArtifact.artifactRef,
       input.executionProofArtifact.artifactRef,
+      ...(input.verification.executionReceiptRef === undefined
+        ? []
+        : [input.verification.executionReceiptRef]),
       input.planArtifact.artifactRef,
       ...input.postExecutionArtifactRefs,
       input.observabilityPack.artifact.artifactRef,
@@ -3454,9 +3499,9 @@ export class WorkflowApp implements WorkflowAppContract {
    * any later drive of the same run loads it here instead of re-invoking the
    * one-shot planner lane.
    *
-   * A read failure resolves to `null` (treated as "no pinned plan"), which is no
-   * worse than the pre-existing behavior — the caller falls through to fresh
-   * planning, exactly as it did before this guard existed.
+   * A missing artifact resolves to `null` (treated as "no pinned plan") for the
+   * first drive. Other read failures must propagate; turning clone/auth/network
+   * failures into "no pinned plan" silently replays the one-shot planner lane.
    */
   private async loadExistingPinnedPlan(runId: string): Promise<{
     readonly planArtifact: PlanArtifact;
@@ -3469,7 +3514,11 @@ export class WorkflowApp implements WorkflowAppContract {
     let raw: unknown;
     try {
       raw = await this.dependencies.artifacts.readJson({ artifactRef });
-    } catch {
+    } catch (error) {
+      if (!isMissingArtifactReadError(error)) {
+        throw error;
+      }
+
       return null;
     }
     const planDocument = DynamicWorkflowPlanDocumentSchema.parse(raw);
@@ -4312,28 +4361,88 @@ export class WorkflowApp implements WorkflowAppContract {
   }
 
   private async readVerifierEvidenceText(input: {
-    readonly artifactCommitSha: string;
+    readonly artifactCommitSha?: string;
     readonly artifactRef: ArtifactRef;
   }): Promise<string> {
+    const readInput =
+      input.artifactCommitSha === undefined
+        ? { artifactRef: input.artifactRef }
+        : {
+            artifactCommitSha: input.artifactCommitSha,
+            artifactRef: input.artifactRef,
+          };
     try {
-      return await this.dependencies.artifacts.readText({
-        artifactCommitSha: input.artifactCommitSha,
-        artifactRef: input.artifactRef,
-      });
+      return await this.dependencies.artifacts.readText(readInput);
     } catch {
-      const value = await this.dependencies.artifacts.readJson({
-        artifactCommitSha: input.artifactCommitSha,
-        artifactRef: input.artifactRef,
-      });
+      const value = await this.dependencies.artifacts.readJson(readInput);
 
       return JSON.stringify(value, null, 2);
     }
   }
 
+  private async loadArtifactRefVerifierEvidence(input: {
+    readonly artifactRefs: readonly ArtifactRef[];
+    readonly existingArtifactRefs: ReadonlySet<ArtifactRef>;
+  }): Promise<VerifierOutputEvidenceLoadResult> {
+    const outputEvidence: AgentVerifierOutputEvidence[] = [];
+    for (const artifactRef of input.artifactRefs) {
+      if (
+        input.existingArtifactRefs.has(artifactRef) ||
+        artifactRef.includes("/memory/relay-lease-receipts/") ||
+        artifactRef.includes("/run/workflow-node-cartridges/") ||
+        artifactRef.endsWith(".mdsvx")
+      ) {
+        continue;
+      }
+
+      try {
+        const json = await this.dependencies.artifacts.readJson({
+          artifactRef,
+        });
+        outputEvidence.push({
+          artifactRef,
+          hash: hashJson(json),
+          mediaType: "application/json",
+          text: JSON.stringify(json, null, 2),
+        });
+        continue;
+      } catch {
+        // Fall through to text evidence; generated workflow nodes can emit MDSvX
+        // report artifacts and other text sidecars.
+      }
+
+      try {
+        const text = await this.dependencies.artifacts.readText({
+          artifactRef,
+        });
+        outputEvidence.push({
+          artifactRef,
+          hash: sha256Hex(text),
+          mediaType: artifactRef.endsWith(".mdsvx")
+            ? "text/mdsvx"
+            : "text/plain",
+          text,
+        });
+      } catch {
+        return {
+          blocker: blocker(
+            "stale_package",
+            "Generated workflow artifact evidence could not be loaded for verification."
+          ),
+          status: "blocked",
+        };
+      }
+    }
+
+    return { outputEvidence, status: "loaded" };
+  }
+
   private async loadVerifierOutputEvidence(input: {
+    readonly artifactRefs: readonly ArtifactRef[];
     readonly workerLaneReceipts: readonly AgentLaneReceipt[];
   }): Promise<VerifierOutputEvidenceLoadResult> {
     const outputEvidence: AgentVerifierOutputEvidence[] = [];
+    const evidenceArtifactRefs = new Set<ArtifactRef>();
     for (const receipt of input.workerLaneReceipts) {
       if (receipt.outputPins.length === 0) {
         continue;
@@ -4361,6 +4470,7 @@ export class WorkflowApp implements WorkflowAppContract {
               artifactRef: outputPin.artifactRef,
             }),
           });
+          evidenceArtifactRefs.add(outputPin.artifactRef);
         } catch {
           return {
             blocker: blocker(
@@ -4373,14 +4483,186 @@ export class WorkflowApp implements WorkflowAppContract {
       }
     }
 
-    return { outputEvidence, status: "loaded" };
+    const artifactEvidence = await this.loadArtifactRefVerifierEvidence({
+      artifactRefs: input.artifactRefs,
+      existingArtifactRefs: evidenceArtifactRefs,
+    });
+    if (artifactEvidence.status === "blocked") {
+      return artifactEvidence;
+    }
+
+    return {
+      outputEvidence: [...outputEvidence, ...artifactEvidence.outputEvidence],
+      status: "loaded",
+    };
+  }
+
+  private async loadExistingVerificationResult(input: {
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly verificationContract: VerificationContractDocument;
+  }): Promise<
+    | {
+        readonly result: VerificationResultArtifact;
+        readonly resultDocument: VerificationResultDocument;
+        readonly status: "loaded";
+      }
+    | { readonly status: "missing" }
+  > {
+    const artifactRef = this.dependencies.artifacts.artifactRef({
+      path: input.verificationContract.outputPath,
+      runId: input.loadedPlan.runId,
+    });
+
+    try {
+      const resultDocument = VerificationResultDocumentSchema.parse(
+        await this.dependencies.artifacts.readJson({ artifactRef })
+      );
+
+      return {
+        result: VerificationResultArtifactSchema.parse({
+          artifactRef,
+          hash: hashJson(resultDocument),
+          mediaType: "application/json",
+          resultId: resultDocument.resultId,
+        }),
+        resultDocument,
+        status: "loaded",
+      };
+    } catch (error) {
+      if (isMissingArtifactReadError(error)) {
+        return { status: "missing" };
+      }
+
+      throw error;
+    }
+  }
+
+  private workflowRuntimeEnvironment(): WorkflowRuntimeEnvironment | null {
+    return (
+      this.dependencies.runtimeEnvironment ??
+      (this.isIntegrationTestMode()
+        ? ({ platform: "local-integration" } as const)
+        : null)
+    );
+  }
+
+  private async captureGeneratedWorkflowExecutionReceipt(input: {
+    readonly execution: DynamicExecutionSuccess;
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly machine: DynamicWorkflowMachineDocument;
+    readonly planArtifact: PlanArtifact;
+  }): Promise<AgentVerifierOutputEvidence> {
+    const { execution, loadedPlan, machine, planArtifact } = input;
+    const { completedStepIds, generatedStateSequence } = execution;
+    const runtimeEnvironment = this.workflowRuntimeEnvironment();
+    const planStepIds = loadedPlan.steps.map((step) => step.stepId);
+    const missingStepIds = planStepIds.filter(
+      (stepId) => !completedStepIds.includes(stepId)
+    );
+    const stepTransitions = loadedPlan.steps.map((step, index) => ({
+      completionEvent: "STEP_DONE",
+      fromState:
+        generatedStateSequence[index] ?? `missing-state-for:${step.stepId}`,
+      ...(step.kind === "workflow.node.invoke"
+        ? { nodeType: step.nodeType }
+        : {}),
+      stepId: step.stepId,
+      stepKind: step.kind,
+      toState: generatedStateSequence[index + 1] ?? "done",
+    }));
+    const executionSurface =
+      runtimeEnvironment?.platform === "cloudflare-workers"
+        ? "cloudflare-workers-generated-machine-supervisor"
+        : "local-integration-generated-machine-supervisor";
+    const supervisorRuntime =
+      runtimeEnvironment === null
+        ? { platform: "unknown" as const }
+        : (() => {
+            if (runtimeEnvironment.platform === "cloudflare-workers") {
+              return {
+                cloudflare: {
+                  ...(runtimeEnvironment.deploymentId === undefined
+                    ? {}
+                    : { deploymentId: runtimeEnvironment.deploymentId }),
+                  platform: "cloudflare-workers" as const,
+                  ...(runtimeEnvironment.workerName === undefined
+                    ? {}
+                    : { workerName: runtimeEnvironment.workerName }),
+                },
+                platform: "cloudflare-workers" as const,
+              };
+            }
+
+            return { platform: "local-integration" as const };
+          })();
+    const document = {
+      actorLifecycle: {
+        actorFactory: "createGeneratedWorkflowActor",
+        advancedWith: "NEXT",
+        firstExecutableState: generatedStateSequence.at(0) ?? null,
+        reachedDone: generatedStateSequence.at(-1) === "done",
+        startState: machine.xstate.initial,
+        started: true,
+        terminalState: generatedStateSequence.at(-1) ?? null,
+      },
+      completionPolicy: {
+        allowedCompletionEvents: ["STEP_DONE", "STEP_BLOCKED"],
+        blockedStepIds: [],
+        blockedTransitionCount: 0,
+        observedCompletionEvents: ["STEP_DONE"],
+      },
+      executionSurface,
+      generatedAt: new Date().toISOString(),
+      loadedArtifacts: {
+        harnessArtifact: loadedPlan.harness,
+        machineArtifact: loadedPlan.machine,
+        planArtifact,
+      },
+      planStepCoverage: {
+        allPlanStepsCompleted: missingStepIds.length === 0,
+        completedStepIds,
+        missingStepIds,
+        planStepIds,
+      },
+      receiptId: `generated-workflow-execution:${loadedPlan.runId}`,
+      redacted: true,
+      runId: loadedPlan.runId,
+      schemaVersion: "workflow.generated-machine-execution-receipt.v1",
+      supervisorRuntime,
+      transitionProof: {
+        completedStepCount: completedStepIds.length,
+        generatedStateSequence,
+        stepTransitions,
+      },
+      workItemId: loadedPlan.workItemId,
+      workerLaneReceiptRefs: execution.workerLaneReceipts.map(
+        (receipt) => receipt.receiptRef
+      ),
+      workflowNodeOutputRefs: execution.artifactRefs,
+    } as const;
+
+    const write = await this.dependencies.artifacts.writeJson({
+      path: "run/generated-workflow-execution-receipt.json",
+      redacted: true,
+      runId: loadedPlan.runId,
+      value: document,
+    });
+
+    return {
+      artifactRef: write.artifactRef,
+      hash: write.contentHash,
+      mediaType: write.mediaType,
+      text: JSON.stringify(document, null, 2),
+    };
   }
 
   private async verifyDynamicWorkflow(input: {
     readonly block: BlockRun;
     readonly execution: DynamicExecutionSuccess;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly machine: DynamicWorkflowMachineDocument;
     readonly observabilityPack: WorkflowObservabilityPackArtifact;
+    readonly planArtifact: PlanArtifact;
     readonly transition: SafetyEnvelopeTransition;
     readonly verificationContract: VerificationContractDocument;
   }): Promise<DynamicVerificationResult> {
@@ -4432,7 +4714,15 @@ export class WorkflowApp implements WorkflowAppContract {
       return { status: "bypassed" };
     }
 
+    const executionReceiptEvidence =
+      await this.captureGeneratedWorkflowExecutionReceipt({
+        execution: input.execution,
+        loadedPlan: input.loadedPlan,
+        machine: input.machine,
+        planArtifact: input.planArtifact,
+      });
     const outputEvidence = await this.loadVerifierOutputEvidence({
+      artifactRefs: input.execution.artifactRefs,
       workerLaneReceipts: input.execution.workerLaneReceipts,
     });
     if (outputEvidence.status === "blocked") {
@@ -4444,6 +4734,7 @@ export class WorkflowApp implements WorkflowAppContract {
     }
     const outputEvidenceWithObservability = [
       ...outputEvidence.outputEvidence,
+      executionReceiptEvidence,
       {
         artifactRef: input.observabilityPack.artifact.artifactRef,
         hash: input.observabilityPack.artifact.contentHash,
@@ -4453,6 +4744,7 @@ export class WorkflowApp implements WorkflowAppContract {
     ];
     const outputRefs = [
       ...input.execution.artifactRefs,
+      executionReceiptEvidence.artifactRef,
       input.observabilityPack.artifact.artifactRef,
     ];
 
@@ -4516,6 +4808,7 @@ export class WorkflowApp implements WorkflowAppContract {
       );
 
       return {
+        executionReceiptRef: executionReceiptEvidence.artifactRef,
         resultArtifact,
         resultDocument,
         status: "verified",
@@ -4524,6 +4817,17 @@ export class WorkflowApp implements WorkflowAppContract {
           : { verifierLaneReceipt: verification.verifierLaneReceipt }),
       };
     };
+
+    const existingVerification = await this.loadExistingVerificationResult({
+      loadedPlan: input.loadedPlan,
+      verificationContract: input.verificationContract,
+    });
+    if (existingVerification.status === "loaded") {
+      return await acceptVerification({
+        result: existingVerification.result,
+        resultDocument: existingVerification.resultDocument,
+      });
+    }
 
     if (input.verificationContract.verifier.kind === "deterministic") {
       const { deterministicVerifier } = this.dependencies;

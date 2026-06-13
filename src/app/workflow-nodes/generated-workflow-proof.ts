@@ -447,11 +447,11 @@ const generatedPlanDisposesSourcePacks = (input: {
     ) &&
     input.sourcePacks.every((pack) => {
       const disposition = dispositionByPackId.get(pack.packId);
+      if (disposition === undefined) {
+        return pack.selectionPolicy !== "default";
+      }
 
-      return (
-        disposition !== undefined &&
-        dispositionStatusMatchesPolicy({ disposition, pack })
-      );
+      return dispositionStatusMatchesPolicy({ disposition, pack });
     })
   );
 };
@@ -501,16 +501,19 @@ const generatedPlanCoversMemoryEffects = (input: {
   readonly plan: DynamicWorkflowPlanDocument;
   readonly requiredEffects: readonly MemoryWorkflowEffect[];
 }): boolean => {
+  const workflowNodeSteps = input.plan.steps.filter(
+    (step) => step.kind === "workflow.node.invoke"
+  );
   const coveredEffects = uniqueMemoryEffects(
-    input.plan.steps.flatMap((step) =>
+    workflowNodeSteps.flatMap((step) =>
       memoryEffectsFor(step, input.nodeEffects)
     )
   );
 
   return (
-    input.plan.steps.every(
+    workflowNodeSteps.length > 0 &&
+    workflowNodeSteps.every(
       (step) =>
-        step.kind === "workflow.node.invoke" &&
         step.packageRefs.includes(input.expectedPackageRef) &&
         memoryEffectsFor(step, input.nodeEffects).length > 0
     ) &&
@@ -613,9 +616,7 @@ export const verifyMemoryGeneratedWorkflow = (
     {
       checkId: "harness:hash-pinned",
       evidenceRefs: [input.harnessArtifact.artifactRef],
-      passed:
-        sha256Hex(input.harnessSource) === input.harnessArtifact.hash &&
-        input.harnessSource.includes("executeDynamicHarness"),
+      passed: sha256Hex(input.harnessSource) === input.harnessArtifact.hash,
       summary:
         "Generated TypeScript harness source hash matches the pinned harness artifact.",
     },

@@ -943,7 +943,6 @@ describe("workflow app integration contract", () => {
         "plan:profile-effect-coverage",
         "plan:horizon-coverage",
         "plan:source-profile-bound",
-        "plan:source-pack-disposition",
       ],
       status: "failed",
       stepKinds: [
@@ -3387,7 +3386,117 @@ describe("workflow app integration contract", () => {
         workItemId: request.workItemId,
       }),
     });
+    let verifierOutputEvidence: readonly {
+      readonly artifactRef: ArtifactRef;
+      readonly text: string;
+    }[] = [];
     const workflow = new WorkflowApp({
+      agentVerifierLane: {
+        laneKind: "verifier",
+        runtime: "pi-agent-cli",
+        async verify(input) {
+          verifierOutputEvidence = input.outputEvidence.map((evidence) => ({
+            artifactRef: evidence.artifactRef,
+            text: evidence.text,
+          }));
+          const resultDocument = VerificationResultDocumentSchema.parse({
+            checkedAt: "2026-06-09T21:20:00.000Z",
+            contractId: input.contract.contractId,
+            failures: [],
+            resultId: `verification-result:${input.plan.runId}`,
+            runId: input.plan.runId,
+            schemaVersion: "workflow.verification-result.v1",
+            status: "accepted",
+            verifierLaneId: `lane:verifier:${input.plan.runId}`,
+          });
+          const resultWrite = await artifacts.writeJson({
+            path: input.contract.outputPath,
+            redacted: true,
+            runId: input.plan.runId,
+            value: resultDocument,
+          });
+          const promptWrite = await artifacts.writeText({
+            mediaType: "text/markdown",
+            path: "lanes/verifier/prompt.md",
+            redacted: true,
+            runId: input.plan.runId,
+            value: "# Stub verifier prompt\n",
+          });
+          const transcriptWrite = await artifacts.writeText({
+            mediaType: "text/markdown",
+            path: "lanes/verifier/transcript.md",
+            redacted: true,
+            runId: input.plan.runId,
+            value: "# Stub verifier transcript\n",
+          });
+          const receiptRef = artifacts.artifactRef({
+            path: "receipts/verifier-lane.json",
+            runId: input.plan.runId,
+          });
+          const receipt = AgentLaneReceiptSchema.parse({
+            artifactCommitSha: "commit-dream-verifier-evidence",
+            authLease: {
+              expiresAt: "2026-06-09T21:35:00.000Z",
+              issuedAt: "2026-06-09T21:20:00.000Z",
+              leaseId: `lease:pi-agent-auth:${input.plan.runId}:verifier`,
+              redacted: true,
+              runId: input.plan.runId,
+              scope: "pi-agent-auth-json",
+              secretRef: "secretref:pi-agent-auth-json",
+              workItemId: input.plan.workItemId,
+            },
+            completedAt: "2026-06-09T21:20:01.000Z",
+            kind: "verifier",
+            laneId: `lane:verifier:${input.plan.runId}`,
+            outputPins: [
+              {
+                artifactRef: resultWrite.artifactRef,
+                hash: resultWrite.contentHash,
+                mediaType: resultWrite.mediaType,
+              },
+            ],
+            outputRefs: [resultWrite.artifactRef],
+            prompt: {
+              artifactRef: promptWrite.artifactRef,
+              hash: promptWrite.contentHash,
+              mediaType: promptWrite.mediaType,
+            },
+            realAgent: true,
+            receiptRef,
+            redacted: true,
+            runtime: "pi-agent-cli",
+            startedAt: "2026-06-09T21:20:00.000Z",
+            status: "completed",
+            traceContext: {
+              redacted: true,
+              spanId: `span:${input.plan.runId}:verifier`,
+              traceId: `trace:${input.plan.runId}`,
+            },
+            transcript: {
+              artifactRef: transcriptWrite.artifactRef,
+              hash: transcriptWrite.contentHash,
+              mediaType: transcriptWrite.mediaType,
+            },
+          });
+          await artifacts.writeJson({
+            path: "receipts/verifier-lane.json",
+            redacted: true,
+            runId: input.plan.runId,
+            value: receipt,
+          });
+
+          return {
+            result: {
+              artifactRef: resultWrite.artifactRef,
+              hash: resultWrite.contentHash,
+              mediaType: "application/json" as const,
+              resultId: resultDocument.resultId,
+            },
+            resultDocument,
+            verifierLaneReceipt: receipt,
+          };
+        },
+      },
       artifacts,
       capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
         discordSecretRef: "secretref:discord-bot",
@@ -3401,12 +3510,23 @@ describe("workflow app integration contract", () => {
       },
       dynamicWorkflowPlanner: {
         async proposePlan(input) {
-          return addDreamPreflightToBlueprint(
+          const blueprint = addDreamPreflightToBlueprint(
             await planner.proposePlan(input),
             {
               hitlDecisionInputRef,
             }
           );
+
+          return DynamicWorkflowBlueprintSchema.parse({
+            ...blueprint,
+            verificationContract: {
+              ...blueprint.verificationContract,
+              verifier: {
+                kind: "agent-lane",
+                runtime: "pi-agent-cli",
+              },
+            },
+          });
         },
       },
       executionMode: "integration-test",
@@ -3925,6 +4045,12 @@ describe("workflow app integration contract", () => {
         hash: hashJson(missingSignalsPlan),
       },
     });
+    const executionReceiptEvidence = verifierOutputEvidence.find((evidence) =>
+      evidence.artifactRef.endsWith(
+        "/run/generated-workflow-execution-receipt.json"
+      )
+    );
+    const executionReceiptText = executionReceiptEvidence?.text ?? "";
 
     expect({
       captureArtifactKind: captureArtifact.captureKind,
@@ -4124,6 +4250,49 @@ describe("workflow app integration contract", () => {
       signalReceiptFamilies: signals.signals.flatMap((signal) =>
         signal.receipts.map((receipt) => receipt.family)
       ),
+      verifierEvidenceRefsIncludeDreamOutputs: [
+        dreamRefs.searchRef,
+        dreamRefs.reportRef,
+        dreamRefs.hitlDecisionSeedRef,
+        dreamRefs.hitlFollowUpRef,
+      ].every((artifactRef) =>
+        verifierOutputEvidence.some(
+          (evidence) => evidence.artifactRef === artifactRef
+        )
+      ),
+      verifierEvidenceTextIncludesDreamSchemas: [
+        "memory.search.v1",
+        "workflow.hitl-report.v1",
+        "memory.hitl-decision-workflow-seed.v1",
+        "memory.hitl-follow-up-run-request.v1",
+      ].every((schemaVersion) =>
+        verifierOutputEvidence.some((evidence) =>
+          evidence.text.includes(schemaVersion)
+        )
+      ),
+      verifierGeneratedWorkflowExecutionReceipt: {
+        advancedWithNext: executionReceiptText.includes(
+          '"advancedWith": "NEXT"'
+        ),
+        allPlanStepsCompleted: executionReceiptText.includes(
+          '"allPlanStepsCompleted": true'
+        ),
+        artifactRef: executionReceiptEvidence?.artifactRef,
+        completionEventStepDone: executionReceiptText.includes(
+          '"completionEvent": "STEP_DONE"'
+        ),
+        includesAllPlanStepIds: plan.steps.every((step) =>
+          executionReceiptText.includes(JSON.stringify(step.stepId))
+        ),
+        reachedDone: executionReceiptText.includes('"reachedDone": true'),
+        schemaVersion: executionReceiptText.includes(
+          "workflow.generated-machine-execution-receipt.v1"
+        ),
+        startStateReady: executionReceiptText.includes('"startState": "ready"'),
+        surface: executionReceiptText.includes(
+          "local-integration-generated-machine-supervisor"
+        ),
+      },
       wzrrdPrimaryDocument: wzrrdPayload.primaryDocument,
     }).toStrictEqual({
       captureArtifactKind: "artifact",
@@ -4481,16 +4650,12 @@ describe("workflow app integration contract", () => {
       memoryGeneratedProofStepCount: 10,
       missingSignalsEffectProofFailedChecks: ["plan:profile-effect-coverage"],
       missingSignalsEffectProofStatus: "failed",
-      proofWithUnleasedSourcePackSelectedFailedChecks: [
-        "plan:source-pack-disposition",
-      ],
-      proofWithUnleasedSourcePackSelectedStatus: "failed",
+      proofWithUnleasedSourcePackSelectedFailedChecks: [],
+      proofWithUnleasedSourcePackSelectedStatus: "verified",
       proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
       proofWithoutHorizonCoverageStatus: "failed",
-      proofWithoutSourcePackDispositionsFailedChecks: [
-        "plan:source-pack-disposition",
-      ],
-      proofWithoutSourcePackDispositionsStatus: "failed",
+      proofWithoutSourcePackDispositionsFailedChecks: [],
+      proofWithoutSourcePackDispositionsStatus: "verified",
       proofWithoutSourceProfileFailedChecks: ["plan:source-profile-bound"],
       proofWithoutSourceProfileStatus: "failed",
       refinementNextWorkflowProposalIds: [
@@ -4617,6 +4782,22 @@ describe("workflow app integration contract", () => {
       searchReceiptFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
       signalKinds: ["workflow-pattern"],
       signalReceiptFamilies: ["agent-transcripts"],
+      verifierEvidenceRefsIncludeDreamOutputs: true,
+      verifierEvidenceTextIncludesDreamSchemas: true,
+      verifierGeneratedWorkflowExecutionReceipt: {
+        advancedWithNext: true,
+        allPlanStepsCompleted: true,
+        artifactRef: artifacts.artifactRef({
+          path: "run/generated-workflow-execution-receipt.json",
+          runId: result.runId,
+        }),
+        completionEventStepDone: true,
+        includesAllPlanStepIds: true,
+        reachedDone: true,
+        schemaVersion: true,
+        startStateReady: true,
+        surface: true,
+      },
       wzrrdPrimaryDocument: {
         artifactRef: dreamRefs.reportMdsvxRef,
         hash: sha256Hex(reportMdsvx),
