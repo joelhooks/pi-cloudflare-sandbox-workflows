@@ -17,6 +17,8 @@ import {
   MemoryHitlDecisionDocumentSchema,
   MemoryHitlFollowUpRunRequestDocumentSchema,
   MemoryHitlDecisionWorkflowSeedDocumentSchema,
+  MemoryRefinementProposalDocumentSchema,
+  WorkflowHitlReportDocumentSchema,
 } from "../../src/cartridges/memory-fabric/schemas.ts";
 import { createMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
@@ -256,6 +258,214 @@ const decisionDocument = MemoryHitlDecisionDocumentSchema.parse({
   workItemId: machine.workItemId,
 });
 
+const refinementProposalDocument = MemoryRefinementProposalDocumentSchema.parse(
+  {
+    generatedAt: at,
+    nextWorkflowSeed: {
+      plannerInstructions: [
+        "Use accepted refinement proposals as constraints for the next generated workflow.",
+        "Keep generated follow-up work reviewable until a human accepts it.",
+      ],
+      proposalIds: [
+        "proposal:kernel-memory:generated-machine-proof",
+        "proposal:capture-ingest-fix:runtime-capture",
+      ],
+      requiredCapabilityKinds: ["brain.update.review"],
+      sourceRefs: [
+        "artifact://dream-hitl-seed-test/report/hitl-report.json",
+        "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+      ],
+    },
+    proposalCount: 2,
+    proposals: [
+      {
+        proposalId: "proposal:kernel-memory:generated-machine-proof",
+        proposedNextStep:
+          "Draft a Brain/package constraint that requires generated-machine proof before Dream follow-up work is trusted.",
+        rating: 9,
+        reasoning:
+          "The generated report cites the pinned machine, harness, and report proof.",
+        receipts: [
+          {
+            family: "agent-transcripts",
+            hash,
+            receiptId: "receipt:generated-machine-proof",
+            redacted: true,
+            sourceId: "source:joelclaw-sessions",
+          },
+        ],
+        recommendation: "accept",
+        sourceRefs: ["artifact://dream-hitl-seed-test/report/hitl-report.json"],
+        summary:
+          "Promote generated-machine proof as a durable Dream constraint.",
+        targetKind: "kernel-memory",
+        title: "Promote generated-machine proof memory",
+      },
+      {
+        proposalId: "proposal:capture-ingest-fix:runtime-capture",
+        proposedNextStep:
+          "Draft follow-up workflow repair work for recurring capture-ingest gaps.",
+        rating: 10,
+        reasoning:
+          "The generated report found recurring capture gaps in the redacted transcript receipts.",
+        receipts: [
+          {
+            family: "agent-transcripts",
+            hash,
+            receiptId: "receipt:capture-ingest-fix",
+            redacted: true,
+            sourceId: "source:joelclaw-sessions",
+          },
+        ],
+        recommendation: "turn-into-work",
+        sourceRefs: [
+          "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+        ],
+        summary: "Turn recurring capture gaps into workflow repair work.",
+        targetKind: "capture-ingest-fix",
+        title: "Repair Dream capture ingest",
+      },
+    ],
+    reasoningMode: "agentic",
+    redacted: true,
+    runId: machine.runId,
+    schemaVersion: "memory.refinement-proposals.v1",
+    sourceRefs: [
+      "artifact://dream-hitl-seed-test/report/hitl-report.json",
+      "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+    ],
+    workItemId: machine.workItemId,
+  }
+);
+
+const reportDocument = WorkflowHitlReportDocumentSchema.parse({
+  definitionOfDoneAudit: {
+    generatedAt: at,
+    items: [
+      {
+        evidenceRefs: [
+          "artifact://dream-hitl-seed-test/report/hitl-report.json",
+        ],
+        requirement:
+          "The generated Dream report remains redacted and source-backed.",
+        requirementId: "redacted-source-backed-report",
+        status: "captured",
+        summary: "The fixture report keeps rawTranscriptsReturned=false.",
+      },
+    ],
+    redacted: true,
+    runId: machine.runId,
+    schemaVersion: "workflow.hitl-report.definition-of-done-audit.v1",
+    status: "captured",
+    summary: {
+      blockedCount: 0,
+      capturedCount: 1,
+      missingCount: 0,
+      notProvenCount: 0,
+      totalCount: 1,
+    },
+  },
+  expiresIn: "24h",
+  findingCount: 1,
+  findings: [
+    {
+      rating: 9,
+      reasoning:
+        "The report has generated-machine proof and redacted source receipts.",
+      receipts: [
+        {
+          family: "agent-transcripts",
+          hash,
+          receiptId: "receipt:generated-machine-proof",
+          redacted: true,
+          sourceId: "source:joelclaw-sessions",
+        },
+      ],
+      recommendation:
+        "Draft follow-up work from the proposals, but keep it unsubmitted.",
+      summary: "This dream found work to do.",
+      title: "Generated Dream report needs follow-up drafts",
+    },
+  ],
+  generatedAt: at,
+  hitlDecisionContract: {
+    artifactPath: "report/hitl-decision.json",
+    contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",
+    decisionSchemaVersion: "memory.hitl-decision.v1",
+    exportId: "memory-hitl-decision-schema",
+    nextWorkflowSeedRequiredFor: ["accept", "turn-into-work"],
+    sourceRefs: [
+      "artifact://dream-hitl-seed-test/report/hitl-report.json",
+      "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+    ],
+    targetKinds: ["finding-card", "refinement-proposal"],
+  },
+  mdsvx: "# This dream found work to do.\n\n## The actual findings\n",
+  noindex: true,
+  proof: {
+    dynamicGenerationProofLevel: "generated-machine",
+    generatedArtifacts: {
+      harness: plan.harness,
+      machine: plan.machine,
+      plan: {
+        planId: plan.planId,
+        planner: plan.planner,
+        stepCount: plan.steps.length,
+      },
+      verificationContract: plan.verificationContract,
+    },
+    rawTranscriptsReturned: false,
+    stateMachineFigure: {
+      aspectRatio: "3:5",
+      component: "D2",
+      machineBinding: {
+        machineArtifactHash: plan.machine.hash,
+        machineArtifactRef: plan.machine.artifactRef,
+        machineId: plan.machine.machineId,
+        machineSourceArtifactRef: plan.machine.sourceArtifactRef,
+        machineSourceHash: plan.machine.sourceHash,
+        status: "bound-to-generated-machine",
+      },
+      machineId: plan.machine.machineId,
+      source: "seed -> done: STEP_DONE",
+      sourceHash: hash,
+      sourceKind: "generated-xstate-machine",
+      stateCount: 2,
+      transitionCount: 1,
+    },
+  },
+  receiptCount: 1,
+  redacted: true,
+  refinementProposalCount: 2,
+  refinementProposalRef:
+    "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+  refinementProposals: refinementProposalDocument.proposals,
+  refinementReasoningMode: "agentic",
+  runId: machine.runId,
+  schemaVersion: "workflow.hitl-report.v1",
+  sectionOrder: [
+    "run-context",
+    "actual-findings",
+    "what-to-do",
+    "actionable-line-items",
+    "proof",
+    "technical-appendix",
+  ],
+  sourceRefs: [
+    "artifact://dream-hitl-seed-test/report/hitl-report.json",
+    "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+  ],
+  template: {
+    defaultExpiresIn: "24h",
+    format: "mdsvx",
+    noindex: true,
+    templateId: "joel/tufte-mdsvx",
+    version: "0.1.0",
+  },
+  title: "This dream found work to do.",
+  workItemId: machine.workItemId,
+});
+
 describe("Dream HITL decision workflow-seed node", () => {
   it("turns accepted HITL decisions into a next-workflow seed artifact", async () => {
     const artifacts = createMemoryArtifactStore("dream-hitl-seed-node");
@@ -314,6 +524,170 @@ describe("Dream HITL decision workflow-seed node", () => {
       schemaVersion: "memory.hitl-decision-workflow-seed.v1",
       status: "ready",
       workItemDecisionIds: ["decision:dream:capture-ingest-fix"],
+    });
+  });
+
+  it("derives a generated draft seed from the report when no human decision artifact exists", async () => {
+    const artifacts = createMemoryArtifactStore("dream-hitl-generated-draft");
+    const refinementStep = {
+      config: {},
+      dependsOn: [],
+      inputRefs: [],
+      kind: "workflow.node.invoke",
+      nodeType: WorkflowNodeTypeSchema.parse(
+        "joelclaw.memory.refinement-proposals"
+      ),
+      outputPath: "dream/refinement-proposals.json",
+      packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+      stepId: "propose-dream-refinements",
+      summary: "Propose source-backed Dream refinements.",
+    } satisfies WorkflowNodeInvocationStep;
+    const reportStep = {
+      config: {},
+      dependsOn: [refinementStep.stepId],
+      inputRefs: [],
+      kind: "workflow.node.invoke",
+      nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.hitl-report"),
+      outputPath: "report/hitl-report.mdsvx",
+      packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+      stepId: "render-memory-hitl-report",
+      summary: "Render the Dream HITL report.",
+    } satisfies WorkflowNodeInvocationStep;
+    const generatedSeedStep = {
+      ...step,
+      config: {
+        decisionRef: artifacts.artifactRef({
+          path: "report/hitl-decision.json",
+          runId: machine.runId,
+        }),
+      },
+      dependsOn: [reportStep.stepId],
+      inputRefs: [],
+    } satisfies WorkflowNodeInvocationStep;
+    const generatedPlan = {
+      ...plan,
+      steps: [refinementStep, reportStep, generatedSeedStep],
+    } satisfies DynamicWorkflowPlanDocument;
+    const refinementWrite = await artifacts.writeJson({
+      path: refinementStep.outputPath,
+      redacted: true,
+      runId: machine.runId,
+      value: refinementProposalDocument,
+    });
+    const reportJsonWrite = await artifacts.writeJson({
+      path: "report/hitl-report.json",
+      redacted: true,
+      runId: machine.runId,
+      value: reportDocument,
+    });
+    const reportMdsvxWrite = await artifacts.writeText({
+      mediaType: "text/mdsvx",
+      path: reportStep.outputPath,
+      redacted: true,
+      runId: machine.runId,
+      value: reportDocument.mdsvx,
+    });
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
+      artifacts,
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+    });
+
+    const seedResult = await adapter.execute({
+      actor: integrationTestActor,
+      completedStepArtifactRefs: {
+        [refinementStep.stepId]: refinementWrite.artifactRef,
+        [reportStep.stepId]: reportMdsvxWrite.artifactRef,
+      },
+      dependencyArtifactRefs: {
+        [reportStep.stepId]: reportMdsvxWrite.artifactRef,
+      },
+      machine,
+      plan: generatedPlan,
+      step: {
+        ...generatedSeedStep,
+        inputRefs: [reportMdsvxWrite.artifactRef],
+      },
+    });
+    if (seedResult.status === "blocked") {
+      throw new Error(seedResult.blocker.message);
+    }
+    const seedRef = seedResult.outputRefs.at(0);
+    const draftDecisionRef = seedResult.outputRefs.at(1);
+    if (seedRef === undefined || draftDecisionRef === undefined) {
+      throw new Error("Expected seed and generated draft decision refs.");
+    }
+
+    const seed = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: seedRef })
+    );
+    const draftDecision = MemoryHitlDecisionDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: draftDecisionRef })
+    );
+    const followUpResult = await adapter.execute({
+      actor: integrationTestActor,
+      completedStepArtifactRefs: {
+        [generatedSeedStep.stepId]: seedRef,
+      },
+      dependencyArtifactRefs: {},
+      machine,
+      plan: generatedPlan,
+      step: {
+        ...followUpStep,
+        inputRefs: [],
+      },
+    });
+    if (followUpResult.status === "blocked") {
+      throw new Error(followUpResult.blocker.message);
+    }
+    const followUpRef = followUpResult.outputRefs.at(0);
+    if (followUpRef === undefined) {
+      throw new Error("Expected follow-up run request ref.");
+    }
+    const followUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: followUpRef })
+    );
+
+    expect({
+      acceptedDecisionIds: seed.acceptedDecisionIds,
+      actionableDecisionCount: seed.actionableDecisionCount,
+      decisionRef: seed.decisionRef,
+      decisionSource: seed.decisionSource,
+      draftDecisionCount: draftDecision.decisionCount,
+      draftDecisionReviewerType: draftDecision.reviewer.type,
+      draftRecommendationMarksDraft:
+        draftDecision.decisions
+          .at(0)
+          ?.recommendation.includes("DRAFT, not human-approved") ?? false,
+      draftReportRef: draftDecision.reportRef,
+      followUpMentionsGeneratedDraft:
+        followUp.request?.planProposal.stochasticNotes.some((note) =>
+          note.includes("generated draft")
+        ) ?? false,
+      followUpStatus: followUp.status,
+      outputRefs: seedResult.outputRefs,
+      submitted: followUp.submitted,
+      workItemDecisionIds: seed.workItemDecisionIds,
+    }).toStrictEqual({
+      acceptedDecisionIds: [
+        "decision:draft:proposal-kernel-memory-generated-machine",
+      ],
+      actionableDecisionCount: 2,
+      decisionRef: draftDecisionRef,
+      decisionSource: "generated-draft",
+      draftDecisionCount: 2,
+      draftDecisionReviewerType: "agent",
+      draftRecommendationMarksDraft: true,
+      draftReportRef: reportJsonWrite.artifactRef,
+      followUpMentionsGeneratedDraft: true,
+      followUpStatus: "drafted",
+      outputRefs: [
+        "artifact://dream-hitl-generated-draft/runs/run-dream-hitl-seed-test/report/hitl-decision-workflow-seed.json",
+        "artifact://dream-hitl-generated-draft/runs/run-dream-hitl-seed-test/report/hitl-decision-workflow-seed.generated-draft-decision.json",
+      ],
+      submitted: false,
+      workItemDecisionIds: [
+        "decision:draft:proposal-capture-ingest-fix-runtime-capt",
+      ],
     });
   });
 
@@ -406,6 +780,85 @@ describe("Dream HITL decision workflow-seed node", () => {
       status: "drafted",
       submitted: false,
       usesPlannerInstruction: true,
+    });
+  });
+
+  it("ignores non-seed follow-up input refs and falls back to the completed HITL seed step", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "memory-hitl-follow-up-upstream-seed"
+    );
+    const seedDocument = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
+      acceptedDecisionIds: ["decision:dream:generated-machine-proof"],
+      actionableDecisionCount: 2,
+      actionableDecisions: decisionDocument.decisions,
+      decisionRef: "artifact://dream-hitl-seed-test/report/hitl-decision.json",
+      generatedAt: at,
+      heldDecisionIds: [],
+      nextWorkflowSeed: decisionDocument.nextWorkflowSeed,
+      redacted: true,
+      refinementProposalRef:
+        "artifact://dream-hitl-seed-test/dream/refinement-proposals.json",
+      rejectedDecisionIds: [],
+      reportRef: decisionDocument.reportRef,
+      runId: machine.runId,
+      schemaVersion: "memory.hitl-decision-workflow-seed.v1",
+      sourceRefs: [
+        "artifact://dream-hitl-seed-test/report/hitl-decision.json",
+        "artifact://dream-hitl-seed-test/report/hitl-report.json",
+      ],
+      status: "ready",
+      summary:
+        "HITL accepted one Dream decision and turned one decision into work.",
+      workItemDecisionIds: ["decision:dream:capture-ingest-fix"],
+      workItemId: machine.workItemId,
+    });
+    const seedWrite = await artifacts.writeJson({
+      path: "report/hitl-decision-workflow-seed.json",
+      redacted: true,
+      runId: machine.runId,
+      value: seedDocument,
+    });
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
+      artifacts,
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+    });
+    const result = await adapter.execute({
+      actor: integrationTestActor,
+      completedStepArtifactRefs: {
+        [step.stepId]: seedWrite.artifactRef,
+      },
+      dependencyArtifactRefs: {},
+      machine,
+      plan,
+      step: {
+        ...followUpStep,
+        inputRefs: [
+          "artifact://dream-hitl-seed-test/runs/run-dream-hitl-seed-test/report/hitl-report.mdsvx",
+        ],
+      },
+    });
+    if (result.status === "blocked") {
+      throw new Error(result.blocker.message);
+    }
+
+    const requestRef = result.outputRefs.at(0);
+    if (requestRef === undefined) {
+      throw new Error("Expected HITL follow-up run request output ref.");
+    }
+    const followUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: requestRef })
+    );
+
+    expect({
+      decisionWorkflowSeedRef: followUp.decisionWorkflowSeedRef,
+      requestRunId: followUp.request?.runId,
+      schemaVersion: followUp.schemaVersion,
+      status: followUp.status,
+    }).toStrictEqual({
+      decisionWorkflowSeedRef: seedWrite.artifactRef,
+      requestRunId: "run-memory-hitl-follow-up-test",
+      schemaVersion: "memory.hitl-follow-up-run-request.v1",
+      status: "drafted",
     });
   });
 });

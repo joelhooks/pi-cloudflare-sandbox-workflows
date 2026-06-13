@@ -51,6 +51,8 @@ import type {
   MemoryAgenticRefinementProposal,
   MemoryCaptureReceiptDocument,
   MemoryCorrelationGraphDocument,
+  MemoryHitlDecision,
+  MemoryHitlDecisionArtifactUpdateTargetKind,
   MemoryHitlDecisionContract,
   MemoryHitlDecisionDocument,
   MemoryHitlFollowUpRunRequestDocument,
@@ -362,6 +364,10 @@ const WorkflowHitlReportNodeConfigSchema = z.object({
 const MemoryHitlDecisionWorkflowSeedNodeConfigSchema = z.object({
   decisionRef: ArtifactRefSchema.optional(),
   decisionStepId: z.string().min(1).optional(),
+  refinementProposalRef: ArtifactRefSchema.optional(),
+  refinementProposalStepId: z.string().min(1).optional(),
+  reportRef: ArtifactRefSchema.optional(),
+  reportStepId: z.string().min(1).optional(),
 });
 
 const MemoryHitlFollowUpRunRequestNodeConfigSchema = z.object({
@@ -567,6 +573,26 @@ const siblingArtifactPath = (input: {
 const relayLeaseReceiptPathFor = (step: WorkflowNodeInvocationStep): string =>
   `memory/relay-lease-receipts/${step.stepId}.json`;
 
+const hitlReportJsonPathFor = (outputPath: string): string =>
+  outputPath.endsWith(".mdsvx")
+    ? siblingArtifactPath({ extension: "json", outputPath })
+    : outputPath;
+
+const hitlReportMdsvxPathFor = (outputPath: string): string =>
+  outputPath.endsWith(".mdsvx")
+    ? outputPath
+    : siblingArtifactPath({
+        extension: "mdsvx",
+        outputPath,
+      });
+
+const hitlReportJsonArtifactRefFor = (artifactRef: ArtifactRef): ArtifactRef =>
+  ArtifactRefSchema.parse(
+    artifactRef.endsWith(".mdsvx")
+      ? siblingArtifactPath({ extension: "json", outputPath: artifactRef })
+      : artifactRef
+  );
+
 const writeDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly document:
@@ -611,17 +637,14 @@ const writeHitlReportDocument = async (input: {
   readonly step: WorkflowNodeInvocationStep;
 }): Promise<WorkflowNodeExecutionResult> => {
   const jsonWrite = await input.artifacts.writeJson({
-    path: input.step.outputPath,
+    path: hitlReportJsonPathFor(input.step.outputPath),
     redacted: true,
     runId: input.document.runId,
     value: input.document,
   });
   const mdsvxWrite = await input.artifacts.writeText({
     mediaType: "text/mdsvx",
-    path: siblingArtifactPath({
-      extension: "mdsvx",
-      outputPath: input.step.outputPath,
-    }),
+    path: hitlReportMdsvxPathFor(input.step.outputPath),
     redacted: true,
     runId: input.document.runId,
     value: input.document.mdsvx,
@@ -790,6 +813,33 @@ const loadHitlDecision = async (input: {
     return blocker(
       "stale_package",
       "Memory HITL decision artifact could not be loaded by the memory-fabric node."
+    );
+  }
+};
+
+const loadHitlReport = async (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly artifactRef: ArtifactRef;
+}): Promise<
+  | {
+      readonly document: WorkflowHitlReportDocument;
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  try {
+    return {
+      document: WorkflowHitlReportDocumentSchema.parse(
+        await input.artifacts.readJson({
+          artifactRef: hitlReportJsonArtifactRefFor(input.artifactRef),
+        })
+      ),
+      status: "loaded",
+    };
+  } catch {
+    return blocker(
+      "stale_package",
+      "Memory HITL report artifact could not be loaded by the memory-fabric node."
     );
   }
 };
@@ -1135,20 +1185,78 @@ const hitlDecisionRefFor = (input: {
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.decisionStepId,
   }) ??
-  input.inputRefs.at(0) ??
+  input.inputRefs.find((artifactRef) =>
+    artifactRef.includes("/hitl-decision.json")
+  ) ??
+  null;
+
+const hitlReportRefFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly config: z.infer<
+    typeof MemoryHitlDecisionWorkflowSeedNodeConfigSchema
+  >;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
+}): ArtifactRef | null =>
+  input.config.reportRef ??
+  dependencyRefFor({
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    stepId: input.config.reportStepId,
+  }) ??
+  upstreamRefByNodeType({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    nodeType: "joelclaw.memory.hitl-report",
+    plan: input.plan,
+  });
+
+const hitlRefinementProposalRefFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly config: z.infer<
+    typeof MemoryHitlDecisionWorkflowSeedNodeConfigSchema
+  >;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly report: WorkflowHitlReportDocument;
+}): ArtifactRef | null =>
+  input.config.refinementProposalRef ??
+  dependencyRefFor({
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    stepId: input.config.refinementProposalStepId,
+  }) ??
+  upstreamRefByNodeType({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    nodeType: "joelclaw.memory.refinement-proposals",
+    plan: input.plan,
+  }) ??
+  input.report.refinementProposalRef ??
   null;
 
 const hitlDecisionWorkflowSeedRefFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
   readonly config: z.infer<typeof MemoryHitlFollowUpRunRequestNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly inputRefs: readonly ArtifactRef[];
+  readonly plan: DynamicWorkflowPlanDocument;
 }): ArtifactRef | null =>
   input.config.seedRef ??
   dependencyRefFor({
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     stepId: input.config.seedStepId,
   }) ??
-  input.inputRefs.at(0) ??
+  input.inputRefs.find((artifactRef) =>
+    artifactRef.includes("/hitl-decision-workflow-seed.json")
+  ) ??
+  upstreamRefByNodeType({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    nodeType: "joelclaw.memory.hitl-decision-seed",
+    plan: input.plan,
+  }) ??
   null;
 
 interface RequiredReportRefs {
@@ -1987,9 +2095,152 @@ const uniqueStrings = (values: readonly string[]): string[] => [
   ...new Set(values),
 ];
 
+type ActionableRefinementProposal = MemoryRefinementProposal & {
+  readonly recommendation: "accept" | "turn-into-work";
+};
+
+const isActionableRefinementProposal = (
+  proposal: MemoryRefinementProposal
+): proposal is ActionableRefinementProposal =>
+  proposal.recommendation === "accept" ||
+  proposal.recommendation === "turn-into-work";
+
+const artifactUpdateTargetKindForProposal = (
+  targetKind: MemoryRefinementProposalTargetKind
+): MemoryHitlDecisionArtifactUpdateTargetKind => {
+  switch (targetKind) {
+    case "capability-lease": {
+      return "capability-lease";
+    }
+    case "kernel-memory": {
+      return "brain";
+    }
+    case "package-boundary":
+    case "workflow-node-plugin": {
+      return "package";
+    }
+    case "report-node-improvement": {
+      return "report";
+    }
+    case "schema-change": {
+      return "schema";
+    }
+    case "capture-ingest-fix":
+    case "dynamic-workflow-pattern": {
+      return "workflow";
+    }
+    default: {
+      const exhaustive: never = targetKind;
+      return exhaustive;
+    }
+  }
+};
+
+const generatedHitlDraftDecisionPathFor = (
+  step: WorkflowNodeInvocationStep
+): string =>
+  siblingArtifactPath({
+    extension: "generated-draft-decision.json",
+    outputPath: step.outputPath,
+  });
+
+const generatedDraftHitlDecisionDocumentFor = (input: {
+  readonly actor: MemoryWorkflowNodeExecutionInput["actor"];
+  readonly generatedAt: string;
+  readonly refinementProposalRef: ArtifactRef | null;
+  readonly refinementProposals: MemoryRefinementProposalDocument | null;
+  readonly report: WorkflowHitlReportDocument;
+  readonly reportRef: ArtifactRef;
+}): MemoryHitlDecisionDocument => {
+  const proposals =
+    input.refinementProposals?.proposals ?? input.report.refinementProposals;
+  const actionableProposals = proposals.filter(isActionableRefinementProposal);
+  const sourceRefs = uniqueArtifactRefs([
+    input.reportRef,
+    ...(input.refinementProposalRef === null
+      ? []
+      : [input.refinementProposalRef]),
+    ...input.report.sourceRefs,
+    ...(input.refinementProposals?.sourceRefs ?? []),
+    ...actionableProposals.flatMap((proposal) => proposal.sourceRefs),
+  ]);
+  const decisions: MemoryHitlDecision[] = actionableProposals.map(
+    (proposal) => ({
+      decision: proposal.recommendation,
+      decisionId: `decision:draft:${proposalSlugFor(proposal.proposalId)}`,
+      rating: proposal.rating,
+      reasoning: `Generated draft from refinement proposal ${proposal.proposalId}: ${proposal.reasoning}`,
+      receiptTrail: proposal.receipts,
+      recommendation: `DRAFT, not human-approved: ${proposal.proposedNextStep}`,
+      reviewedAt: input.generatedAt,
+      sourceRefs: uniqueArtifactRefs([
+        input.reportRef,
+        ...(input.refinementProposalRef === null
+          ? []
+          : [input.refinementProposalRef]),
+        ...proposal.sourceRefs,
+      ]),
+      summary: `Draft from refinement proposal: ${proposal.summary}`,
+      targetId: proposal.proposalId,
+      targetKind: "refinement-proposal",
+      targetTitle: proposal.title,
+    })
+  );
+  const nextWorkflowSourceRefs = uniqueArtifactRefs([
+    ...sourceRefs,
+    ...(input.refinementProposals?.nextWorkflowSeed.sourceRefs ?? []),
+  ]);
+
+  return MemoryHitlDecisionDocumentSchema.parse({
+    decisionCount: decisions.length,
+    decisions,
+    generatedAt: input.generatedAt,
+    nextWorkflowSeed: {
+      artifactUpdateTargets: actionableProposals.map((proposal) => ({
+        sourceRefs: uniqueArtifactRefs([
+          input.reportRef,
+          ...(input.refinementProposalRef === null
+            ? []
+            : [input.refinementProposalRef]),
+          ...proposal.sourceRefs,
+        ]),
+        summary: `Generated draft from ${proposal.proposalId}: ${proposal.proposedNextStep}`,
+        targetKind: artifactUpdateTargetKindForProposal(proposal.targetKind),
+      })),
+      decisionIds: decisions.map((decision) => decision.decisionId),
+      plannerInstructions:
+        decisions.length === 0
+          ? []
+          : uniqueStrings([
+              "This is a generated draft seed from the Dream report and refinement proposals, not a human approval. Keep follow-up output reviewable and submitted:false until a human accepts it.",
+              "Convert draft accepted/work-conversion proposals into source-backed Brain/package/workflow/schema/report/capability artifact update drafts; do not perform side effects without explicit leased review gates.",
+              ...(input.refinementProposals?.nextWorkflowSeed
+                .plannerInstructions ?? []),
+            ]),
+      requiredCapabilityKinds: uniqueStrings([
+        ...(input.refinementProposals?.nextWorkflowSeed
+          .requiredCapabilityKinds ?? []),
+        ...(decisions.length === 0 ? [] : ["brain.update.review"]),
+      ]),
+      sourceRefs: decisions.length === 0 ? [] : nextWorkflowSourceRefs,
+    },
+    redacted: true,
+    ...(input.refinementProposalRef === null
+      ? {}
+      : { refinementProposalRef: input.refinementProposalRef }),
+    reportRef: input.reportRef,
+    reviewer: input.actor,
+    runId: input.report.runId,
+    schemaVersion: "memory.hitl-decision.v1",
+    sourceRefs,
+    workItemId: input.report.workItemId,
+  });
+};
+
 const hitlDecisionWorkflowSeedDocumentFor = (input: {
   readonly decision: MemoryHitlDecisionDocument;
   readonly decisionRef: ArtifactRef;
+  readonly decisionSource?: "generated-draft" | "human-review";
 }): MemoryHitlDecisionWorkflowSeedDocument => {
   const actionableDecisions = actionableHitlDecisionsFor(input.decision);
   const acceptedDecisionIds = input.decision.decisions
@@ -2021,16 +2272,21 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
     actionableDecisions.length === 0
       ? "no-actionable-decisions"
       : ("ready" as const);
+  const sourceLabel =
+    input.decisionSource === "generated-draft" ? "Generated draft" : "HITL";
   const summary =
     status === "ready"
-      ? `HITL accepted ${acceptedDecisionIds.length} decision(s) and turned ${workItemDecisionIds.length} decision(s) into work; the next generated workflow must consume ${input.decision.nextWorkflowSeed.plannerInstructions.length} planner instruction(s).`
-      : "HITL review did not accept or turn any decision into work; the next generated workflow seed is intentionally empty.";
+      ? `${sourceLabel} accepted ${acceptedDecisionIds.length} decision(s) and turned ${workItemDecisionIds.length} decision(s) into work; the next generated workflow must consume ${input.decision.nextWorkflowSeed.plannerInstructions.length} planner instruction(s).`
+      : `${sourceLabel} did not accept or turn any decision into work; the next generated workflow seed is intentionally empty.`;
 
   return MemoryHitlDecisionWorkflowSeedDocumentSchema.parse({
     acceptedDecisionIds,
     actionableDecisionCount: actionableDecisions.length,
     actionableDecisions,
     decisionRef: input.decisionRef,
+    ...(input.decisionSource === undefined
+      ? {}
+      : { decisionSource: input.decisionSource }),
     generatedAt: new Date().toISOString(),
     heldDecisionIds,
     nextWorkflowSeed: input.decision.nextWorkflowSeed,
@@ -2053,7 +2309,9 @@ const hitlDecisionWorkflowSeedDocumentFor = (input: {
 const followUpRunRequestIntentFor = (
   seed: MemoryHitlDecisionWorkflowSeedDocument
 ): string =>
-  `Run the next generated workflow from accepted HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
+  seed.decisionSource === "generated-draft"
+    ? `Run the next generated workflow from generated draft Dream decisions for ${seed.workItemId}. Convert the accepted/work-conversion draft decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements; do not treat the draft as human approval.`
+    : `Run the next generated workflow from accepted HITL decisions for ${seed.workItemId}. Convert the accepted/work-conversion decisions into reviewable Brain/package/workflow/schema/report/capability artifact updates, preserving source receipts and capability requirements.`;
 
 const followUpRunRequestNotesFor = (input: {
   readonly seed: MemoryHitlDecisionWorkflowSeedDocument;
@@ -2072,6 +2330,9 @@ const followUpRunRequestNotesFor = (input: {
 
   return [
     `Consume HITL decision workflow seed ${input.seedRef}.`,
+    input.seed.decisionSource === "generated-draft"
+      ? "Decision source: generated draft from the Dream report/refinement proposals; this is planner input only and not human approval."
+      : "Decision source: human HITL review artifact.",
     `Actionable decision ids: ${input.seed.nextWorkflowSeed.decisionIds.join(", ")}.`,
     ...input.seed.nextWorkflowSeed.plannerInstructions,
     ...capabilityKinds,
@@ -3090,16 +3351,89 @@ const executeHitlDecisionWorkflowSeedNode = async (
   const nodeConfig = MemoryHitlDecisionWorkflowSeedNodeConfigSchema.parse(
     input.step.config
   );
+  const deriveGeneratedDraftSeed =
+    async (): Promise<WorkflowNodeExecutionResult> => {
+      const reportRef = hitlReportRefFor({
+        completedStepArtifactRefs: input.completedStepArtifactRefs,
+        config: nodeConfig,
+        dependencyArtifactRefs: input.dependencyArtifactRefs,
+        plan: input.plan,
+      });
+      if (reportRef === null) {
+        return blocker(
+          "stale_package",
+          "Memory HITL decision seed node requires either a memory.hitl-decision.v1 artifact ref or a workflow.hitl-report.v1 artifact ref to derive a generated draft seed."
+        );
+      }
+
+      const reportJsonRef = hitlReportJsonArtifactRefFor(reportRef);
+      const report = await loadHitlReport({
+        artifactRef: reportJsonRef,
+        artifacts: config.artifacts,
+      });
+      if (report.status === "blocked") {
+        return report;
+      }
+
+      const refinementProposalRef = hitlRefinementProposalRefFor({
+        completedStepArtifactRefs: input.completedStepArtifactRefs,
+        config: nodeConfig,
+        dependencyArtifactRefs: input.dependencyArtifactRefs,
+        plan: input.plan,
+        report: report.document,
+      });
+      const refinementProposals = await loadOptionalRefinementProposalDocument({
+        artifacts: config.artifacts,
+        refinementProposalRef,
+      });
+      if (refinementProposals.status === "blocked") {
+        return refinementProposals;
+      }
+
+      const generatedAt = new Date().toISOString();
+      const draftDecisionPath = generatedHitlDraftDecisionPathFor(input.step);
+      const draftDecisionRef = config.artifacts.artifactRef({
+        path: draftDecisionPath,
+        runId: report.document.runId,
+      });
+      const draftDecision = generatedDraftHitlDecisionDocumentFor({
+        actor: input.actor,
+        generatedAt,
+        refinementProposalRef,
+        refinementProposals: refinementProposals.document,
+        report: report.document,
+        reportRef: reportJsonRef,
+      });
+      const seed = hitlDecisionWorkflowSeedDocumentFor({
+        decision: draftDecision,
+        decisionRef: draftDecisionRef,
+        decisionSource: "generated-draft",
+      });
+      const draftDecisionWrite = await config.artifacts.writeJson({
+        path: draftDecisionPath,
+        redacted: true,
+        runId: draftDecision.runId,
+        value: draftDecision,
+      });
+      const seedWrite = await config.artifacts.writeJson({
+        path: input.step.outputPath,
+        redacted: true,
+        runId: seed.runId,
+        value: seed,
+      });
+
+      return {
+        outputRefs: [seedWrite.artifactRef, draftDecisionWrite.artifactRef],
+        status: "executed",
+      };
+    };
   const decisionRef = hitlDecisionRefFor({
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     inputRefs: input.step.inputRefs,
   });
   if (decisionRef === null) {
-    return blocker(
-      "stale_package",
-      "Memory HITL decision seed node requires a memory.hitl-decision.v1 artifact ref."
-    );
+    return await deriveGeneratedDraftSeed();
   }
 
   const decision = await loadHitlDecision({
@@ -3107,7 +3441,8 @@ const executeHitlDecisionWorkflowSeedNode = async (
     artifacts: config.artifacts,
   });
   if (decision.status === "blocked") {
-    return decision;
+    const generatedDraft = await deriveGeneratedDraftSeed();
+    return generatedDraft.status === "blocked" ? decision : generatedDraft;
   }
 
   return await writeDocument({
@@ -3115,6 +3450,7 @@ const executeHitlDecisionWorkflowSeedNode = async (
     document: hitlDecisionWorkflowSeedDocumentFor({
       decision: decision.document,
       decisionRef,
+      decisionSource: "human-review",
     }),
     step: input.step,
   });
@@ -3128,9 +3464,11 @@ const executeHitlFollowUpRunRequestNode = async (
     input.step.config
   );
   const seedRef = hitlDecisionWorkflowSeedRefFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     inputRefs: input.step.inputRefs,
+    plan: input.plan,
   });
   if (seedRef === null) {
     return blocker(

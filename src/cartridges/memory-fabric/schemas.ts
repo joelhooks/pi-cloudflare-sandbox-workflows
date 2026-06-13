@@ -522,6 +522,7 @@ export const MemoryHitlDecisionWorkflowSeedDocumentSchema = z
     actionableDecisionCount: z.number().int().min(0),
     actionableDecisions: z.array(MemoryHitlDecisionSchema).default([]),
     decisionRef: ArtifactRefSchema,
+    decisionSource: z.enum(["human-review", "generated-draft"]).optional(),
     generatedAt: IsoDateTimeSchema,
     heldDecisionIds: z.array(z.string().min(1)).default([]),
     nextWorkflowSeed: MemoryHitlDecisionNextWorkflowSeedSchema,
