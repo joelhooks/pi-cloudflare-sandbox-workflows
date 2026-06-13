@@ -6376,6 +6376,53 @@ describe("workflow single-step drive (one node per alarm)", () => {
     });
   });
 
+  it("blocks when an async worker lane is still running past its deadline", async () => {
+    // Chaos regression for the 4h-zombie wound: a sandbox container evicted or
+    // recycled mid-synthesis hands back a stale `running` process handle that
+    // never advances. Before the fix, the deadline guard only reaped
+    // `not_found`/`completed`, so `running` past deadline fell through to
+    // `paused` and the reaper re-paused it every cycle forever. The deadline —
+    // not the process status — is the source of truth for "the lane is dead."
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-running-past-deadline",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            deadline: "2000-01-01T00:00:00.000Z",
+            processStatuses: ["running"],
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const blocked = await driveOneAdmittedSingleStep(rig, request);
+    if (blocked.status !== "blocked") {
+      throw new Error(`Expected blocked, got ${blocked.status}.`);
+    }
+
+    expect({
+      blockerCode: blocked.blocker.code,
+      cleanupReasons: asyncLane.cleanups,
+      dispatchCount: asyncLane.dispatches.length,
+      pollStatuses: asyncLane.polls.map((poll) => poll.split(":")[0]),
+    }).toStrictEqual({
+      blockerCode: "capability_denied",
+      cleanupReasons: [`timed-out:${asyncLane.dispatches[0]?.laneId}`],
+      dispatchCount: 1,
+      pollStatuses: ["running"],
+    });
+  });
+
   it("advances from an Artifacts receipt even when the process handle is gone", async () => {
     let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
     const rig = buildResumableWorkflow(

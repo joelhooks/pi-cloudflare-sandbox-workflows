@@ -4658,11 +4658,18 @@ export class WorkflowApp implements WorkflowAppContract {
     const deadlineMs = Date.parse(dispatch.deadline);
     const pastDeadline =
       Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
-    if (
-      pastDeadline &&
-      (statusReceipt.status === "not_found" ||
-        statusReceipt.status === "completed")
-    ) {
+    // Past the dispatch deadline, ANY status reaching this point is a blown
+    // lane and MUST be reaped. The recoverable paths already returned above: a
+    // `completed` receipt with resolvable outputs returned "executed", and
+    // `failed`/`killed`/`error` already blocked. What survives to here —
+    // `starting`, `running`, `not_found`, or a `completed` whose outputs never
+    // resolved — is a sandbox lane that overran without a usable receipt. A
+    // process wedged `starting`/`running` past its deadline (e.g. an evicted or
+    // recycled Cloudflare container handing back a stale process handle) used
+    // to fall through to `paused` and get re-paused by the reaper every cycle
+    // FOREVER (observed: a 4h11m zombie on node 14 of a live dream run). The
+    // deadline is the single source of truth for "the lane had its chance."
+    if (pastDeadline) {
       await this.cleanupAsyncWorkerLane({
         dispatch,
         reason: "timed-out",
@@ -4670,7 +4677,7 @@ export class WorkflowApp implements WorkflowAppContract {
       const result = await input.block(
         blocker(
           "capability_denied",
-          `Async worker lane ${dispatch.laneId} did not produce a recoverable receipt before its deadline.`
+          `Async worker lane ${dispatch.laneId} did not produce a recoverable receipt before its deadline (last status ${statusReceipt.status}).`
         ),
         "Async worker lane receipt was not recoverable by its deadline.",
         { stepId: input.step.stepId }
