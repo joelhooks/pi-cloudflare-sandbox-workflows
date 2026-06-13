@@ -157,11 +157,13 @@ const runCloudflareSandboxPiAgentLane = async (input: {
       runId: input.input.runId,
     }),
   ];
+  const promptSourcePath = `/workspace/piwf-agent-lane-prompt-${safeGitRefSegment(input.input.laneId)}.md`;
   const packageMountIndex = buildAgentLanePackageMountIndex(
     input.input.packageMounts ?? []
   );
 
   try {
+    await sandbox.writeFile(promptSourcePath, input.input.prompt);
     const result = await runCommand(
       sandbox,
       buildPiAgentLaneCommand(),
@@ -186,9 +188,9 @@ const runCloudflareSandboxPiAgentLane = async (input: {
           LANE_OUTPUT_PATH: input.input.outputPath,
           LANE_PACKAGE_MOUNT_INDEX_ARTIFACT_REF: packageMountIndexRef,
           LANE_PACKAGE_MOUNT_INDEX_JSON: JSON.stringify(packageMountIndex),
-          LANE_PROMPT: input.input.prompt,
           LANE_PROMPT_ARTIFACT_REF: promptRef,
           LANE_PROMPT_PATH: input.input.promptPath,
+          LANE_PROMPT_SOURCE_PATH: promptSourcePath,
           LANE_RECEIPT_ARTIFACT_REF: receiptRef,
           LANE_RECEIPT_PATH: input.input.receiptPath,
           LANE_RUNTIME: "pi-agent-cli",

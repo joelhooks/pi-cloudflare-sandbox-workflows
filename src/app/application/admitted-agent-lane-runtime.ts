@@ -17,6 +17,32 @@ export interface AdmittedAgentLaneRuntimeConfig {
   readonly runtime: AgentLaneRuntimePort;
 }
 
+export class AgentLaneAlreadyCompletedError extends Error {
+  readonly artifactCommitSha: string | undefined;
+  readonly kind: AgentLaneRuntimeRequest["kind"];
+  readonly laneId: string;
+  readonly runId: string;
+  readonly workItemId: string;
+
+  constructor(input: {
+    readonly artifactCommitSha?: string;
+    readonly kind: AgentLaneRuntimeRequest["kind"];
+    readonly laneId: string;
+    readonly runId: string;
+    readonly workItemId: string;
+  }) {
+    super(
+      `Agent lane already completed; refusing duplicate execution: ${input.laneId}`
+    );
+    this.name = "AgentLaneAlreadyCompletedError";
+    this.artifactCommitSha = input.artifactCommitSha;
+    this.kind = input.kind;
+    this.laneId = input.laneId;
+    this.runId = input.runId;
+    this.workItemId = input.workItemId;
+  }
+}
+
 const defaultNow = (): string => new Date().toISOString();
 
 const releaseStatusFor = (receipt: AgentLaneReceipt): "completed" | "failed" =>
@@ -73,9 +99,17 @@ export const createAdmittedAgentLaneRuntime = (
     );
 
     if (admission.status === "already-completed") {
-      throw new Error(
-        `Agent lane already completed; refusing duplicate execution: ${request.laneId}`
-      );
+      const artifactCommitSha =
+        admission.artifactCommitSha === undefined
+          ? {}
+          : { artifactCommitSha: admission.artifactCommitSha };
+      throw new AgentLaneAlreadyCompletedError({
+        ...artifactCommitSha,
+        kind: admission.kind,
+        laneId: admission.laneId,
+        runId: admission.runId,
+        workItemId: admission.workItemId,
+      });
     }
 
     if (admission.status === "deferred") {

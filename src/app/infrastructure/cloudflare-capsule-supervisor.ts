@@ -298,8 +298,13 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     const activeLaneIds = activeLaneIdsOf(record);
 
     if (record.completedLaneIds.includes(input.laneId)) {
+      const releaseCommitSha =
+        record.laneReleases[input.laneId]?.artifactCommitSha;
       return json(
         AgentLaneAdmissionDecisionSchema.parse({
+          ...(releaseCommitSha === undefined
+            ? {}
+            : { artifactCommitSha: releaseCommitSha }),
           kind: input.kind,
           laneId: input.laneId,
           runId: input.runId,

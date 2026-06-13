@@ -1,7 +1,9 @@
 import { z } from "zod";
 
+import { AgentLaneAlreadyCompletedError } from "../application/admitted-agent-lane-runtime.ts";
 import type {
   AgentAnalysisReasoningLanePort,
+  AgentLaneRuntimeRequest,
   AgentLaneRuntimePort,
   AgentPlannerLanePort,
   AgentVerifierOutputEvidence,
@@ -642,6 +644,7 @@ const verifierPromptFor = (input: {
   readonly outputRefs: readonly ArtifactRef[];
   readonly plan: DynamicWorkflowPlanDocument;
 }): string => {
+  const evidenceTextLimit = 2500;
   const outputEvidence = input.outputEvidence.map((evidence) => ({
     artifactCommitSha: evidence.artifactCommitSha,
     artifactRef: evidence.artifactRef,
@@ -649,8 +652,8 @@ const verifierPromptFor = (input: {
     hash: evidence.hash,
     mediaType: evidence.mediaType,
     text:
-      evidence.text.length > 12_000
-        ? `${evidence.text.slice(0, 12_000)}\n[truncated]`
+      evidence.text.length > evidenceTextLimit
+        ? `${evidence.text.slice(0, evidenceTextLimit)}\n[truncated]`
         : evidence.text,
   }));
 
@@ -678,6 +681,7 @@ const verifierPromptFor = (input: {
     "For outputTarget delivery, including github.branch.commit, github.pull-request.create, wzrrd.site.publish, and linear.comment.create, accept that receipts are unavailable in verifier evidence because the app executes those leases only after verifier acceptance.",
     "If Capability Receipt Evidence is empty, treat it as no pre-verifier side effects executed; do not convert an empty array into a missing output-target delivery failure.",
     "For workflow.observability-pack.v1 evidence, inspect extractedObservabilityPack before the truncated text snapshot; telemetrySinks is the structured log sink evidence, and laneReceipts[*].packageMounts is the pinned package mount evidence for planner and worker lanes.",
+    "For workflow.generated-machine-execution-receipt.v1 evidence, treat cloudflare-workers-generated-machine-supervisor as the pre-verifier receipt that the pinned workflow.xstate-machine.v1 was loaded, started at ready, advanced with NEXT, executed planned meta.stepId states with STEP_DONE/STEP_BLOCKED semantics, and reached done; do not require the post-verifier run/execution-proof.json before acceptance.",
     "Use the Capability Receipt Evidence section as the source of leased side-effect evidence.",
     `The verification output path is ${JSON.stringify(input.contract.outputPath)}; do not require that file to exist before this verifier lane writes it.`,
     "",
@@ -691,6 +695,10 @@ const verifierPromptFor = (input: {
     "## Verification Contract",
     "",
     JSON.stringify(input.contract, null, 2),
+    "",
+    "## Dynamic Plan Snapshot",
+    "",
+    JSON.stringify(input.plan, null, 2),
     "",
     "## Output Refs To Inspect",
     "",
@@ -713,35 +721,81 @@ export const createCloudflarePiVerifierLaneAdapter = (
   runtime: config.runtime.runtime,
   async verify(input) {
     const laneId = `lane:verifier:${input.plan.runId}`;
-    const receipt = AgentLaneReceiptSchema.parse(
-      await config.runtime.runLane({
-        artifactRef: (artifactInput) =>
-          config.artifactStore.artifactRef(artifactInput),
-        artifactRemote: config.artifactRemote,
-        artifactTokenSecret: config.artifactTokenSecret,
-        authLease: config.authLease,
-        branchName: "verifier",
-        kind: "verifier",
+    const receiptPath = "receipts/verifier-lane.json";
+    const receiptRef = config.artifactStore.artifactRef({
+      path: receiptPath,
+      runId: input.plan.runId,
+    });
+    const loadCompletedReceipt = async (
+      artifactCommitSha: string
+    ): Promise<ReturnType<typeof AgentLaneReceiptSchema.parse>> => {
+      const receiptDocument = await config.artifactStore.readJson({
+        artifactCommitSha,
+        artifactRef: receiptRef,
+      });
+      if (typeof receiptDocument !== "object" || receiptDocument === null) {
+        throw new TypeError(
+          "Completed verifier lane receipt artifact was not a JSON object."
+        );
+      }
+
+      return AgentLaneReceiptSchema.parse({
+        ...receiptDocument,
+        artifactCommitSha,
+      });
+    };
+    const laneRequest: AgentLaneRuntimeRequest = {
+      artifactRef: (artifactInput) =>
+        config.artifactStore.artifactRef(artifactInput),
+      artifactRemote: config.artifactRemote,
+      artifactTokenSecret: config.artifactTokenSecret,
+      authLease: config.authLease,
+      branchName: "verifier",
+      kind: "verifier" as const,
+      laneId,
+      leasedPiAuthJsonBase64: config.leasedPiAuthJsonBase64,
+      model: config.model,
+      outputMediaType: "application/json",
+      outputPath: input.contract.outputPath,
+      packageMounts: input.plan.pinnedPackages,
+      prompt: verifierPromptFor(input),
+      promptPath: "lanes/verifier/prompt.md",
+      provider: config.provider,
+      receiptPath,
+      runId: input.plan.runId,
+      timeoutMs: config.timeoutMs,
+      traceContext: workflowTraceContextForLane({
         laneId,
-        leasedPiAuthJsonBase64: config.leasedPiAuthJsonBase64,
-        model: config.model,
-        outputMediaType: "application/json",
-        outputPath: input.contract.outputPath,
-        packageMounts: input.plan.pinnedPackages,
-        prompt: verifierPromptFor(input),
-        promptPath: "lanes/verifier/prompt.md",
-        provider: config.provider,
-        receiptPath: "receipts/verifier-lane.json",
         runId: input.plan.runId,
-        timeoutMs: config.timeoutMs,
-        traceContext: workflowTraceContextForLane({
-          laneId,
-          runId: input.plan.runId,
-        }),
-        transcriptPath: "lanes/verifier/transcript.md",
-        workItemId: input.plan.workItemId,
-      })
-    );
+      }),
+      transcriptPath: "lanes/verifier/transcript.md",
+      workItemId: input.plan.workItemId,
+    };
+    let receipt: ReturnType<typeof AgentLaneReceiptSchema.parse>;
+    try {
+      receipt = AgentLaneReceiptSchema.parse(
+        await config.runtime.runLane(laneRequest)
+      );
+    } catch (error) {
+      if (
+        error instanceof AgentLaneAlreadyCompletedError &&
+        error.laneId === laneId &&
+        error.artifactCommitSha !== undefined
+      ) {
+        receipt = await loadCompletedReceipt(error.artifactCommitSha);
+      } else {
+        throw error;
+      }
+    }
+    if (
+      receipt.kind !== "verifier" ||
+      receipt.laneId !== laneId ||
+      receipt.status !== "completed"
+    ) {
+      throw new Error(
+        "Verifier lane did not return a completed receipt for the requested lane."
+      );
+    }
     const resultPin = receipt.outputPins.at(0);
     if (resultPin === undefined) {
       throw new Error(

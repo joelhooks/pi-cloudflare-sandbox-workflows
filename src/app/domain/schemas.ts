@@ -115,6 +115,7 @@ export const AgentLaneAdmissionDecisionSchema = z.discriminatedUnion("status", [
     workItemId: z.string().min(1),
   }),
   z.object({
+    artifactCommitSha: z.string().min(1).optional(),
     kind: AgentLaneKindSchema,
     laneId: z.string().min(1),
     runId: z.string().min(1),

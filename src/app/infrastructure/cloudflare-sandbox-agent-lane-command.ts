@@ -93,13 +93,17 @@ cd /workspace/piwf-agent-lane
 git config user.name "pi-workflow-agent-lane"
 git config user.email "pi-workflow-agent-lane@example.invalid"
 current_step="checkout-branch"
-git checkout -B "$LANE_BRANCH" >> "$git_log_path" 2>&1
+if git show-ref --verify --quiet "refs/remotes/origin/$LANE_BRANCH"; then
+  git checkout -B "$LANE_BRANCH" "origin/$LANE_BRANCH" >> "$git_log_path" 2>&1
+else
+  git checkout -B "$LANE_BRANCH" >> "$git_log_path" 2>&1
+fi
 current_step="mount-packages"
 node <<'NODE'
 ${agentLanePackageMountWriterNodeScript}
 NODE
 mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(dirname "$LANE_TRANSCRIPT_PATH")" "$(dirname "$LANE_RECEIPT_PATH")"
-printf '%s' "$LANE_PROMPT" > "$LANE_PROMPT_PATH"
+cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"
 current_step="pi-invoke"
 set +e
 pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
@@ -200,8 +204,12 @@ NODE
 current_step="git-add"
 git add "$LANE_PROMPT_PATH" "$LANE_OUTPUT_PATH" "$LANE_TRANSCRIPT_PATH" "$LANE_RECEIPT_PATH" packages >> "$git_log_path" 2>&1
 current_step="git-commit"
-git commit -m "agent lane: $LANE_ID $RUN_ID" >> "$git_log_path" 2>&1
-commit="$(git rev-parse HEAD)"
+if git diff --cached --quiet; then
+  commit="$(git rev-parse HEAD)"
+else
+  git commit -m "agent lane: $LANE_ID $RUN_ID" >> "$git_log_path" 2>&1
+  commit="$(git rev-parse HEAD)"
+fi
 current_step="git-push"
 git push origin HEAD:"refs/heads/$LANE_BRANCH" >> "$git_log_path" 2>&1
 export commit

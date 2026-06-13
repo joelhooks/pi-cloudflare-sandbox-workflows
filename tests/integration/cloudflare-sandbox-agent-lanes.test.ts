@@ -151,6 +151,40 @@ describe(buildPiAgentLaneCommand, () => {
       trapInstalledBeforeClone: true,
     });
   });
+
+  it("copies the lane prompt from a sandbox file instead of inheriting a huge env value", () => {
+    expect({
+      copiesPromptFromSourcePath: command.includes(
+        'cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"'
+      ),
+      promptEnvRemoved: !command.includes("$LANE_PROMPT "),
+      writesPromptPath: command.includes('"$LANE_PROMPT_PATH"'),
+    }).toStrictEqual({
+      copiesPromptFromSourcePath: true,
+      promptEnvRemoved: true,
+      writesPromptPath: true,
+    });
+  });
+
+  it("reattaches existing remote lane branches before publishing rerun receipts", () => {
+    expect({
+      checksOutExistingLaneBranch: command.includes(
+        'git checkout -B "$LANE_BRANCH" "origin/$LANE_BRANCH"'
+      ),
+      checksRemoteLaneBranch: command.includes(
+        'git show-ref --verify --quiet "refs/remotes/origin/$LANE_BRANCH"'
+      ),
+      keepsFastForwardPush: command.includes(
+        'git push origin HEAD:"refs/heads/$LANE_BRANCH"'
+      ),
+      toleratesNoopCommit: command.includes("git diff --cached --quiet"),
+    }).toStrictEqual({
+      checksOutExistingLaneBranch: true,
+      checksRemoteLaneBranch: true,
+      keepsFastForwardPush: true,
+      toleratesNoopCommit: true,
+    });
+  });
 });
 
 describe(buildAgentLanePackageMountIndex, () => {

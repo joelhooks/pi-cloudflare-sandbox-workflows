@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AgentLaneAlreadyCompletedError } from "../../src/app/application/admitted-agent-lane-runtime.ts";
 import type {
   AgentLaneRuntimePort,
   AgentLaneRuntimeRequest,
@@ -884,6 +885,119 @@ describe("Cloudflare Pi verifier lane adapter", () => {
         laneId: `lane:verifier:${fixture.plan.runId}`,
         runId: fixture.plan.runId,
       }),
+    });
+  });
+
+  it("recovers a completed verifier lane from its committed receipt", async () => {
+    const fixture = await buildVerifierLaneFixture();
+    const laneId = `lane:verifier:${fixture.plan.runId}`;
+    const artifactCommitSha =
+      "verifiercommit0000000000000000000000000000000000";
+    const outputRef = fixture.artifacts.artifactRef({
+      path: fixture.contract.outputPath,
+      runId: fixture.plan.runId,
+    });
+    const promptRef = fixture.artifacts.artifactRef({
+      path: "lanes/verifier/prompt.md",
+      runId: fixture.plan.runId,
+    });
+    const receiptRef = fixture.artifacts.artifactRef({
+      path: "receipts/verifier-lane.json",
+      runId: fixture.plan.runId,
+    });
+    const transcriptRef = fixture.artifacts.artifactRef({
+      path: "lanes/verifier/transcript.md",
+      runId: fixture.plan.runId,
+    });
+    const transcript = "recovered verifier transcript";
+    fixture.artifacts.setJson(outputRef, fixture.verificationResult);
+    fixture.artifacts.setJson(
+      receiptRef,
+      AgentLaneReceiptSchema.parse({
+        authLease: agentAuthLeaseFor(fixture.plan),
+        completedAt: "2026-06-08T20:05:01.000Z",
+        kind: "verifier",
+        laneId,
+        outputPins: [
+          {
+            artifactRef: outputRef,
+            hash: hashJson(fixture.verificationResult),
+            mediaType: "application/json",
+          },
+        ],
+        outputRefs: [outputRef],
+        prompt: {
+          artifactRef: promptRef,
+          hash: sha256Hex("verifier prompt"),
+          mediaType: "text/markdown",
+        },
+        realAgent: true,
+        receiptRef,
+        redacted: true,
+        runtime: "pi-agent-cli",
+        sandboxRef: "cloudflare-sandbox:verifier-lane-test",
+        startedAt: "2026-06-08T20:05:00.000Z",
+        status: "completed",
+        traceContext: workflowTraceContextForLane({
+          laneId,
+          runId: fixture.plan.runId,
+        }),
+        transcript: {
+          artifactRef: transcriptRef,
+          hash: sha256Hex(transcript),
+          mediaType: "text/markdown",
+        },
+      })
+    );
+    const capturedRequests: AgentLaneRuntimeRequest[] = [];
+    const runtime: AgentLaneRuntimePort = {
+      runLane(request) {
+        capturedRequests.push(request);
+        throw new AgentLaneAlreadyCompletedError({
+          artifactCommitSha,
+          kind: "verifier",
+          laneId,
+          runId: fixture.plan.runId,
+          workItemId: fixture.plan.workItemId,
+        });
+      },
+      runtime: "pi-agent-cli",
+    };
+    const { observedStore, reads } = observeArtifactReads(fixture.artifacts);
+    const adapter = createCloudflarePiVerifierLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: observedStore,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture.plan),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime,
+      timeoutMs: 30_000,
+    });
+
+    const result = await adapter.verify({
+      capabilityReceipts: [],
+      contract: fixture.contract,
+      outputEvidence: [],
+      outputRefs: [],
+      plan: fixture.plan,
+    });
+
+    expect({
+      readCommitShas: reads.map((read) => read.artifactCommitSha),
+      readRefs: reads.map((read) => read.artifactRef),
+      recoveredCommit: result.verifierLaneReceipt.artifactCommitSha,
+      resultArtifactRef: result.result.artifactRef,
+      resultStatus: result.resultDocument.status,
+      runtimeCalls: capturedRequests.length,
+    }).toStrictEqual({
+      readCommitShas: [artifactCommitSha, artifactCommitSha],
+      readRefs: [receiptRef, outputRef],
+      recoveredCommit: artifactCommitSha,
+      resultArtifactRef: outputRef,
+      resultStatus: "accepted",
+      runtimeCalls: 1,
     });
   });
 });
