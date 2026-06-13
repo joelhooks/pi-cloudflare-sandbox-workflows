@@ -27,9 +27,11 @@ import {
   VerificationContractDocumentSchema,
   VerificationResultArtifactSchema,
   VerificationResultDocumentSchema,
+  WorkflowDriveLedgerPhaseSchema,
   WorkflowExecutionProofArtifactSchema,
   WorkflowExecutionProofDocumentSchema,
   WorkflowEventSchema,
+  WorkflowObservabilityPackSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunDriveOptionsSchema,
   WorkflowRunPausedSchema,
@@ -83,6 +85,8 @@ import type {
   WorkflowRunResult,
   WorkflowStatusProjection,
   WorkflowTerminalBlocker,
+  WorkflowDriveLedgerPhase,
+  WorkflowDriveLedgerPhaseId,
   WzrrdPublishPayload,
 } from "../domain/schemas.ts";
 import { primarySourceFamiliesOf } from "../domain/source-profile.ts";
@@ -271,6 +275,12 @@ interface DynamicVerificationSuccess {
   readonly resultDocument?: VerificationResultDocument;
   readonly status: "bypassed" | "verified";
   readonly verifierLaneReceipt?: AgentLaneReceipt;
+}
+
+interface CompletedExecutionLoadResult {
+  readonly execution: DynamicExecutionSuccess;
+  readonly executionReceiptEvidence: AgentVerifierOutputEvidence;
+  readonly observabilityPack: WorkflowObservabilityPackArtifact;
 }
 
 interface DynamicVerificationBlocked {
@@ -1257,6 +1267,7 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly capsule: ContextCapsuleRecord | null;
     readonly event: WorkflowEvent;
     readonly eventCount: number;
+    readonly driveGeneration?: number;
     readonly planArtifact: PlanArtifact | null;
     readonly request: WorkflowRunRequest;
     readonly terminalBlocker?: WorkflowTerminalBlocker;
@@ -1267,6 +1278,9 @@ export class WorkflowApp implements WorkflowAppContract {
         capsuleId:
           input.capsule?.capsuleId ?? `capsule:${input.request.workItemId}`,
         currentState: input.event.state,
+        ...(input.driveGeneration === undefined
+          ? {}
+          : { driveGeneration: input.driveGeneration }),
         eventCount: input.eventCount,
         lastEvent: input.event,
         ...(input.planArtifact === null
@@ -1381,17 +1395,90 @@ export class WorkflowApp implements WorkflowAppContract {
     input: WorkflowRunRequest,
     options: WorkflowRunDriveOptions
   ): Promise<WorkflowRunDriveResult>;
+  // oxlint-disable-next-line complexity -- The safety-envelope orchestration owns all phase boundaries; splitting it would hide the ledger/fencing order.
   async run(
     input: WorkflowRunRequest,
     options?: WorkflowRunDriveOptions
   ): Promise<WorkflowRunDriveResult> {
     const request = WorkflowRunRequestSchema.parse(input);
-    const { driveMode } = WorkflowRunDriveOptionsSchema.parse(options ?? {});
+    const { driveGeneration, driveMode } = WorkflowRunDriveOptionsSchema.parse(
+      options ?? {}
+    );
     const eventLog: WorkflowEvent[] = [];
     const actor = createActor(dynamicWorkflowSafetyEnvelopeMachine);
     let projectionCapsule: ContextCapsuleRecord | null = null;
     let projectionPlanArtifact: PlanArtifact | null = null;
+    let driveLedger =
+      driveGeneration === undefined
+        ? null
+        : await this.dependencies.contextCapsules.loadDriveLedger({
+            runId: request.runId,
+            workItemId: request.workItemId,
+          });
     actor.start();
+
+    const completedPhase = (
+      phaseId: WorkflowDriveLedgerPhaseId
+    ): WorkflowDriveLedgerPhase | null => {
+      const phase = driveLedger?.phases[phaseId];
+
+      return phase === undefined
+        ? null
+        : WorkflowDriveLedgerPhaseSchema.parse(phase);
+    };
+
+    const assertActiveDrive = async (): Promise<void> => {
+      if (driveGeneration === undefined) {
+        return;
+      }
+
+      await this.dependencies.contextCapsules.assertActiveDriveGeneration({
+        driveGeneration,
+        runId: request.runId,
+        workItemId: request.workItemId,
+      });
+    };
+
+    const recordDrivePhaseCompletion = async (phaseInput: {
+      readonly artifactCommitSha: string;
+      readonly artifactHash: string;
+      readonly artifactRef: ArtifactRef;
+      readonly mediaType: string;
+      readonly phaseId: WorkflowDriveLedgerPhaseId;
+      readonly receiptKind: string;
+      readonly refs?: Readonly<Record<string, string>>;
+    }): Promise<void> => {
+      if (driveGeneration === undefined) {
+        return;
+      }
+
+      driveLedger =
+        await this.dependencies.contextCapsules.recordDrivePhaseCompletion({
+          driveGeneration,
+          phase: {
+            artifactCommitSha: phaseInput.artifactCommitSha,
+            artifactHash: phaseInput.artifactHash,
+            artifactRef: phaseInput.artifactRef,
+            mediaType: phaseInput.mediaType,
+            phaseId: phaseInput.phaseId,
+            receiptKind: phaseInput.receiptKind,
+            refs: phaseInput.refs ?? {},
+          },
+          runId: request.runId,
+          workItemId: request.workItemId,
+        });
+    };
+
+    await assertActiveDrive();
+    const capturedPhase = completedPhase("capture-completed");
+    if (capturedPhase !== null) {
+      return WorkflowRunReceiptSchema.parse(
+        await this.dependencies.artifacts.readJson({
+          artifactCommitSha: capturedPhase.artifactCommitSha,
+          artifactRef: capturedPhase.artifactRef,
+        })
+      );
+    }
 
     const transition: SafetyEnvelopeTransition = async (
       command,
@@ -1409,8 +1496,10 @@ export class WorkflowApp implements WorkflowAppContract {
         summary,
       });
       eventLog.push(event);
+      await assertActiveDrive();
       await this.recordStatusProjection({
         capsule: projectionCapsule,
+        ...(driveGeneration === undefined ? {} : { driveGeneration }),
         event,
         eventCount: eventLog.length,
         planArtifact: projectionPlanArtifact,
@@ -1545,8 +1634,11 @@ export class WorkflowApp implements WorkflowAppContract {
     // already exists (see resolvePinnedDynamicWorkflow).
     const resolvedPlan = await this.resolvePinnedDynamicWorkflow({
       discordPayload,
+      ledgerDriven: driveGeneration !== undefined,
       packageMetadata,
       pinnedPackages: pinResult.pinnedPackages,
+      planLedgerPhase: completedPhase("plan-pinned"),
+      recordPhaseCompletion: recordDrivePhaseCompletion,
       request,
     });
     if (resolvedPlan.status === "blocked") {
@@ -1608,47 +1700,130 @@ export class WorkflowApp implements WorkflowAppContract {
         workItemId: request.workItemId,
       });
 
-    const execution = await this.driveDynamicWorkflow({
-      block,
-      driveMode,
-      loadedPlan,
-      machine: loadedMachine.machine,
-      persistCheckpoint,
-      request,
-      resumeCheckpoint,
-      transition,
-    });
-    // Non-success drive short-circuits the finishing envelope: `blocked` returns
-    // its terminal result; `paused` (single-step, FIX: one node per alarm)
-    // surfaces the non-terminal result the DO re-drives on. The envelope runs
-    // only after the last node executes and the machine reaches `done`.
-    if (execution.status !== "executed") {
-      return WorkflowApp.nonExecutedDriveResult(request, eventLog, execution);
+    const executionPhase = completedPhase("execution-completed");
+    const completedExecution =
+      executionPhase === null
+        ? null
+        : await this.loadCompletedExecutionFromLedger({
+            ledgerPhase: executionPhase,
+            loadedPlan,
+            request,
+          });
+    let execution: DynamicExecutionSuccess;
+    let observabilityPack: WorkflowObservabilityPackArtifact;
+    let executionReceiptEvidence: AgentVerifierOutputEvidence;
+    if (completedExecution === null) {
+      const executionResult = await this.driveDynamicWorkflow({
+        block,
+        driveMode,
+        loadedPlan,
+        machine: loadedMachine.machine,
+        persistCheckpoint,
+        request,
+        resumeCheckpoint,
+        transition,
+      });
+      // Non-success drive short-circuits the finishing envelope: `blocked`
+      // returns its terminal result; `paused` surfaces the non-terminal result
+      // the DO re-drives on. The envelope runs only after the last node executes
+      // and the machine reaches `done`.
+      if (executionResult.status !== "executed") {
+        return WorkflowApp.nonExecutedDriveResult(
+          request,
+          eventLog,
+          executionResult
+        );
+      }
+      execution = executionResult;
+
+      observabilityPack =
+        await this.dependencies.observabilityRecorder.capturePack({
+          capabilityReceipts: execution.capabilityReceipts,
+          eventLog,
+          executionArtifactRefs: execution.artifactRefs,
+          plan: loadedPlan,
+          planArtifact,
+          plannerLaneReceipt: pinnedDynamicWorkflow.plannerLaneReceipt,
+          workerLaneReceipts: execution.workerLaneReceipts,
+        });
+      executionReceiptEvidence =
+        await this.captureGeneratedWorkflowExecutionReceipt({
+          execution,
+          loadedPlan,
+          machine: loadedMachine.machine,
+          planArtifact,
+        });
+      if (
+        observabilityPack.artifact.artifactCommitSha === undefined ||
+        executionReceiptEvidence.artifactCommitSha === undefined
+      ) {
+        return await block(
+          blocker(
+            "receipt_persistence_failed",
+            "Execution phase artifacts did not return Artifacts commit shas for the drive ledger."
+          ),
+          "Execution phase commit shas could not be recorded."
+        );
+      }
+      await recordDrivePhaseCompletion({
+        artifactCommitSha: observabilityPack.artifact.artifactCommitSha,
+        artifactHash: observabilityPack.artifact.contentHash,
+        artifactRef: observabilityPack.artifact.artifactRef,
+        mediaType: observabilityPack.artifact.mediaType,
+        phaseId: "execution-completed",
+        receiptKind: "workflow.observability-pack.v1",
+        refs: {
+          executionReceiptCommitSha: executionReceiptEvidence.artifactCommitSha,
+          executionReceiptHash: executionReceiptEvidence.hash,
+          executionReceiptMediaType: executionReceiptEvidence.mediaType,
+          executionReceiptRef: executionReceiptEvidence.artifactRef,
+        },
+      });
+    } else {
+      ({ execution } = completedExecution);
+      ({ observabilityPack } = completedExecution);
+      ({ executionReceiptEvidence } = completedExecution);
     }
 
-    const observabilityPack =
-      await this.dependencies.observabilityRecorder.capturePack({
-        capabilityReceipts: execution.capabilityReceipts,
-        eventLog,
-        executionArtifactRefs: execution.artifactRefs,
-        plan: loadedPlan,
-        planArtifact,
-        plannerLaneReceipt: pinnedDynamicWorkflow.plannerLaneReceipt,
-        workerLaneReceipts: execution.workerLaneReceipts,
-      });
-
+    const verificationPhase = completedPhase("verification-completed");
     const verification = await this.verifyDynamicWorkflow({
       block,
       execution,
+      executionReceiptEvidence,
+      ledgerDriven: driveGeneration !== undefined,
       loadedPlan,
       machine: loadedMachine.machine,
       observabilityPack,
       planArtifact,
       transition,
       verificationContract: loadedSupportArtifacts.verificationContract,
+      verificationLedgerPhase: verificationPhase,
     });
     if (verification.status === "blocked") {
       return verification.result;
+    }
+    if (
+      verification.status === "verified" &&
+      verificationPhase === null &&
+      driveGeneration !== undefined
+    ) {
+      if (verification.resultArtifact?.artifactCommitSha === undefined) {
+        return await block(
+          blocker(
+            "receipt_persistence_failed",
+            "Verification result did not return an Artifacts commit sha for the drive ledger."
+          ),
+          "Verification phase commit sha could not be recorded."
+        );
+      }
+      await recordDrivePhaseCompletion({
+        artifactCommitSha: verification.resultArtifact.artifactCommitSha,
+        artifactHash: verification.resultArtifact.hash,
+        artifactRef: verification.resultArtifact.artifactRef,
+        mediaType: verification.resultArtifact.mediaType,
+        phaseId: "verification-completed",
+        receiptKind: "workflow.verification-result.v1",
+      });
     }
 
     const executionProof = await this.captureExecutionProof({
@@ -1742,7 +1917,7 @@ export class WorkflowApp implements WorkflowAppContract {
       verification,
     });
 
-    return await this.finalizeRunReceipt({
+    const finalResult = await this.finalizeRunReceipt({
       block,
       capsule,
       capturedArtifactRefs,
@@ -1759,6 +1934,33 @@ export class WorkflowApp implements WorkflowAppContract {
       transition,
       verification,
     });
+    if (finalResult.status === "captured") {
+      const finalReceiptWrite = await this.dependencies.artifacts.writeJson({
+        path: "run/final-receipt.json",
+        redacted: true,
+        runId: request.runId,
+        value: finalResult,
+      });
+      if (finalReceiptWrite.artifactCommitSha === undefined) {
+        return await block(
+          blocker(
+            "receipt_persistence_failed",
+            "Final run receipt did not return an Artifacts commit sha for the drive ledger."
+          ),
+          "Capture phase commit sha could not be recorded."
+        );
+      }
+      await recordDrivePhaseCompletion({
+        artifactCommitSha: finalReceiptWrite.artifactCommitSha,
+        artifactHash: finalReceiptWrite.contentHash,
+        artifactRef: finalReceiptWrite.artifactRef,
+        mediaType: finalReceiptWrite.mediaType,
+        phaseId: "capture-completed",
+        receiptKind: "workflow.run-receipt.v1",
+      });
+    }
+
+    return finalResult;
   }
 
   /**
@@ -3387,8 +3589,19 @@ export class WorkflowApp implements WorkflowAppContract {
    */
   private async resolvePinnedDynamicWorkflow(input: {
     readonly discordPayload: PinnedDiscordPayload | null;
+    readonly ledgerDriven: boolean;
     readonly packageMetadata: readonly PackageMetadata[];
+    readonly planLedgerPhase: WorkflowDriveLedgerPhase | null;
     readonly pinnedPackages: readonly PinnedPackage[];
+    readonly recordPhaseCompletion: (input: {
+      readonly artifactCommitSha: string;
+      readonly artifactHash: string;
+      readonly artifactRef: ArtifactRef;
+      readonly mediaType: string;
+      readonly phaseId: WorkflowDriveLedgerPhaseId;
+      readonly receiptKind: string;
+      readonly refs?: Readonly<Record<string, string>>;
+    }) => Promise<void>;
     readonly request: WorkflowRunRequest;
   }): Promise<
     | {
@@ -3403,9 +3616,20 @@ export class WorkflowApp implements WorkflowAppContract {
         readonly status: "resolved";
       }
   > {
-    const existingPinnedPlan = await this.loadExistingPinnedPlan(
-      input.request.runId
-    );
+    let existingPinnedPlan: {
+      readonly planArtifact: PlanArtifact;
+      readonly planDocument: DynamicWorkflowPlanDocument;
+    } | null = null;
+    if (input.planLedgerPhase !== null) {
+      existingPinnedPlan = await this.loadExistingPinnedPlan(
+        input.request.runId,
+        input.planLedgerPhase.artifactCommitSha
+      );
+    } else if (!input.ledgerDriven) {
+      existingPinnedPlan = await this.loadExistingPinnedPlan(
+        input.request.runId
+      );
+    }
     if (existingPinnedPlan !== null) {
       const { planArtifact, planDocument: loadedPlan } = existingPinnedPlan;
       return {
@@ -3462,11 +3686,29 @@ export class WorkflowApp implements WorkflowAppContract {
       runId: input.request.runId,
       value: planDocument,
     });
+    if (planWrite.artifactCommitSha === undefined) {
+      return {
+        blocker: blocker(
+          "receipt_persistence_failed",
+          "Pinned plan write did not return an Artifacts commit sha for the drive ledger."
+        ),
+        status: "blocked",
+        summary: "Pinned dynamic plan commit could not be recorded.",
+      };
+    }
     const planArtifact = PlanArtifactSchema.parse({
       artifactRef: planWrite.artifactRef,
       hash: planWrite.contentHash,
       pinnedAt: planDocument.createdAt,
       runId: input.request.runId,
+    });
+    await input.recordPhaseCompletion({
+      artifactCommitSha: planWrite.artifactCommitSha,
+      artifactHash: planWrite.contentHash,
+      artifactRef: planWrite.artifactRef,
+      mediaType: planWrite.mediaType,
+      phaseId: "plan-pinned",
+      receiptKind: "workflow.dynamic-plan.v1",
     });
     const loadedPlan = DynamicWorkflowPlanDocumentSchema.parse(
       await this.dependencies.artifacts.readJson({
@@ -3503,7 +3745,10 @@ export class WorkflowApp implements WorkflowAppContract {
    * first drive. Other read failures must propagate; turning clone/auth/network
    * failures into "no pinned plan" silently replays the one-shot planner lane.
    */
-  private async loadExistingPinnedPlan(runId: string): Promise<{
+  private async loadExistingPinnedPlan(
+    runId: string,
+    artifactCommitSha?: string
+  ): Promise<{
     readonly planArtifact: PlanArtifact;
     readonly planDocument: DynamicWorkflowPlanDocument;
   } | null> {
@@ -3513,9 +3758,18 @@ export class WorkflowApp implements WorkflowAppContract {
     });
     let raw: unknown;
     try {
-      raw = await this.dependencies.artifacts.readJson({ artifactRef });
+      raw =
+        artifactCommitSha === undefined
+          ? await this.dependencies.artifacts.readJson({ artifactRef })
+          : await this.dependencies.artifacts.readJson({
+              artifactCommitSha,
+              artifactRef,
+            });
     } catch (error) {
-      if (!isMissingArtifactReadError(error)) {
+      if (
+        artifactCommitSha !== undefined ||
+        !isMissingArtifactReadError(error)
+      ) {
         throw error;
       }
 
@@ -3912,6 +4166,83 @@ export class WorkflowApp implements WorkflowAppContract {
       ...(input.driveMode === "single-step" ? { stepBudget: 1 } : {}),
       transition: input.transition,
     });
+  }
+
+  private async loadCompletedExecutionFromLedger(input: {
+    readonly ledgerPhase: WorkflowDriveLedgerPhase;
+    readonly loadedPlan: DynamicWorkflowPlanDocument;
+    readonly request: WorkflowRunRequest;
+  }): Promise<CompletedExecutionLoadResult> {
+    const checkpoint =
+      await this.dependencies.contextCapsules.loadLatestCheckpoint({
+        runId: input.request.runId,
+        workItemId: input.request.workItemId,
+      });
+    if (checkpoint === null) {
+      throw new Error(
+        `Drive ledger marks execution complete for ${input.request.runId}, but no checkpoint exists.`
+      );
+    }
+    if (checkpoint.completedStepIds.length !== input.loadedPlan.steps.length) {
+      throw new Error(
+        `Drive ledger marks execution complete for ${input.request.runId}, but checkpoint only completed ${checkpoint.completedStepIds.length} of ${input.loadedPlan.steps.length} steps.`
+      );
+    }
+
+    const observabilityDocument = WorkflowObservabilityPackSchema.parse(
+      await this.dependencies.artifacts.readJson({
+        artifactCommitSha: input.ledgerPhase.artifactCommitSha,
+        artifactRef: input.ledgerPhase.artifactRef,
+      })
+    );
+    const { executionReceiptRef } = input.ledgerPhase.refs;
+    const { executionReceiptCommitSha } = input.ledgerPhase.refs;
+    const { executionReceiptHash } = input.ledgerPhase.refs;
+    const { executionReceiptMediaType } = input.ledgerPhase.refs;
+    if (
+      executionReceiptRef === undefined ||
+      executionReceiptCommitSha === undefined ||
+      executionReceiptHash === undefined ||
+      executionReceiptMediaType === undefined
+    ) {
+      throw new Error(
+        `Drive ledger execution phase for ${input.request.runId} is missing execution receipt refs.`
+      );
+    }
+
+    return {
+      execution: {
+        artifactRefs: [...checkpoint.executionArtifactRefs],
+        capabilityReceipts: [...checkpoint.capabilityReceipts],
+        completedStepIds: [...checkpoint.completedStepIds],
+        generatedStateSequence: [...checkpoint.generatedStateSequence],
+        ...(checkpoint.reviewSummaryPath === undefined
+          ? {}
+          : { reviewSummaryPath: checkpoint.reviewSummaryPath }),
+        status: "executed",
+        workerLaneReceipts: [...checkpoint.workerLaneReceipts],
+      },
+      executionReceiptEvidence: {
+        artifactCommitSha: executionReceiptCommitSha,
+        artifactRef: executionReceiptRef,
+        hash: executionReceiptHash,
+        mediaType: executionReceiptMediaType,
+        text: await this.readVerifierEvidenceText({
+          artifactCommitSha: executionReceiptCommitSha,
+          artifactRef: executionReceiptRef,
+        }),
+      },
+      observabilityPack: {
+        artifact: {
+          artifactCommitSha: input.ledgerPhase.artifactCommitSha,
+          artifactRef: input.ledgerPhase.artifactRef,
+          contentHash: input.ledgerPhase.artifactHash,
+          mediaType: input.ledgerPhase.mediaType,
+          redacted: true,
+        },
+        document: observabilityDocument,
+      },
+    };
   }
 
   /**
@@ -4498,6 +4829,7 @@ export class WorkflowApp implements WorkflowAppContract {
   }
 
   private async loadExistingVerificationResult(input: {
+    readonly artifactCommitSha?: string;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
     readonly verificationContract: VerificationContractDocument;
   }): Promise<
@@ -4515,11 +4847,19 @@ export class WorkflowApp implements WorkflowAppContract {
 
     try {
       const resultDocument = VerificationResultDocumentSchema.parse(
-        await this.dependencies.artifacts.readJson({ artifactRef })
+        input.artifactCommitSha === undefined
+          ? await this.dependencies.artifacts.readJson({ artifactRef })
+          : await this.dependencies.artifacts.readJson({
+              artifactCommitSha: input.artifactCommitSha,
+              artifactRef,
+            })
       );
 
       return {
         result: VerificationResultArtifactSchema.parse({
+          ...(input.artifactCommitSha === undefined
+            ? {}
+            : { artifactCommitSha: input.artifactCommitSha }),
           artifactRef,
           hash: hashJson(resultDocument),
           mediaType: "application/json",
@@ -4529,7 +4869,10 @@ export class WorkflowApp implements WorkflowAppContract {
         status: "loaded",
       };
     } catch (error) {
-      if (isMissingArtifactReadError(error)) {
+      if (
+        input.artifactCommitSha === undefined &&
+        isMissingArtifactReadError(error)
+      ) {
         return { status: "missing" };
       }
 
@@ -4649,6 +4992,9 @@ export class WorkflowApp implements WorkflowAppContract {
     });
 
     return {
+      ...(write.artifactCommitSha === undefined
+        ? {}
+        : { artifactCommitSha: write.artifactCommitSha }),
       artifactRef: write.artifactRef,
       hash: write.contentHash,
       mediaType: write.mediaType,
@@ -4656,15 +5002,19 @@ export class WorkflowApp implements WorkflowAppContract {
     };
   }
 
+  // oxlint-disable-next-line complexity -- Verifier selection is intentionally explicit for deterministic, agent-lane, and ledger-replay paths.
   private async verifyDynamicWorkflow(input: {
     readonly block: BlockRun;
     readonly execution: DynamicExecutionSuccess;
+    readonly executionReceiptEvidence: AgentVerifierOutputEvidence;
+    readonly ledgerDriven: boolean;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly observabilityPack: WorkflowObservabilityPackArtifact;
     readonly planArtifact: PlanArtifact;
     readonly transition: SafetyEnvelopeTransition;
     readonly verificationContract: VerificationContractDocument;
+    readonly verificationLedgerPhase: WorkflowDriveLedgerPhase | null;
   }): Promise<DynamicVerificationResult> {
     if (
       input.verificationContract.verifier.kind === "deterministic" &&
@@ -4714,13 +5064,6 @@ export class WorkflowApp implements WorkflowAppContract {
       return { status: "bypassed" };
     }
 
-    const executionReceiptEvidence =
-      await this.captureGeneratedWorkflowExecutionReceipt({
-        execution: input.execution,
-        loadedPlan: input.loadedPlan,
-        machine: input.machine,
-        planArtifact: input.planArtifact,
-      });
     const outputEvidence = await this.loadVerifierOutputEvidence({
       artifactRefs: input.execution.artifactRefs,
       workerLaneReceipts: input.execution.workerLaneReceipts,
@@ -4734,7 +5077,7 @@ export class WorkflowApp implements WorkflowAppContract {
     }
     const outputEvidenceWithObservability = [
       ...outputEvidence.outputEvidence,
-      executionReceiptEvidence,
+      input.executionReceiptEvidence,
       {
         artifactRef: input.observabilityPack.artifact.artifactRef,
         hash: input.observabilityPack.artifact.contentHash,
@@ -4744,7 +5087,7 @@ export class WorkflowApp implements WorkflowAppContract {
     ];
     const outputRefs = [
       ...input.execution.artifactRefs,
-      executionReceiptEvidence.artifactRef,
+      input.executionReceiptEvidence.artifactRef,
       input.observabilityPack.artifact.artifactRef,
     ];
 
@@ -4808,7 +5151,7 @@ export class WorkflowApp implements WorkflowAppContract {
       );
 
       return {
-        executionReceiptRef: executionReceiptEvidence.artifactRef,
+        executionReceiptRef: input.executionReceiptEvidence.artifactRef,
         resultArtifact,
         resultDocument,
         status: "verified",
@@ -4818,10 +5161,25 @@ export class WorkflowApp implements WorkflowAppContract {
       };
     };
 
-    const existingVerification = await this.loadExistingVerificationResult({
-      loadedPlan: input.loadedPlan,
-      verificationContract: input.verificationContract,
-    });
+    let existingVerification:
+      | {
+          readonly result: VerificationResultArtifact;
+          readonly resultDocument: VerificationResultDocument;
+          readonly status: "loaded";
+        }
+      | { readonly status: "missing" } = { status: "missing" };
+    if (input.verificationLedgerPhase !== null) {
+      existingVerification = await this.loadExistingVerificationResult({
+        artifactCommitSha: input.verificationLedgerPhase.artifactCommitSha,
+        loadedPlan: input.loadedPlan,
+        verificationContract: input.verificationContract,
+      });
+    } else if (!input.ledgerDriven) {
+      existingVerification = await this.loadExistingVerificationResult({
+        loadedPlan: input.loadedPlan,
+        verificationContract: input.verificationContract,
+      });
+    }
     if (existingVerification.status === "loaded") {
       return await acceptVerification({
         result: existingVerification.result,
@@ -5046,9 +5404,13 @@ export class WorkflowApp implements WorkflowAppContract {
     const completedAt = new Date().toISOString();
     const stepPath = safeArtifactPathSegment(input.step.stepId);
     const laneId = `lane:worker:${input.request.runId}:${input.step.stepId}`;
+    const outputArtifactCommitSha = input.outputPins?.at(0)?.artifactCommitSha;
 
     return this.pinAgentLaneEvidenceDraft({
       draft: {
+        ...(outputArtifactCommitSha === undefined
+          ? {}
+          : { artifactCommitSha: outputArtifactCommitSha }),
         completedAt,
         kind: "worker",
         laneId,

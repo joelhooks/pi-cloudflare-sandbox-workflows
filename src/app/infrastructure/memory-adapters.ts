@@ -1,3 +1,4 @@
+import { StaleDriveGenerationError } from "../application/ports.ts";
 import type {
   ArtifactStoreContract,
   CapabilityLeaseBrokerActorContract,
@@ -31,6 +32,12 @@ import {
   PinnedPackageSchema,
   ReviewSummaryDocumentSchema,
   RunStepCheckpointSchema,
+  StaleDriveGenerationRejectionSchema,
+  WorkflowDriveAdmissionSchema,
+  WorkflowDriveGenerationAssertionRequestSchema,
+  WorkflowDriveLedgerPhaseCompletionRequestSchema,
+  WorkflowDriveLedgerRequestSchema,
+  WorkflowDriveLedgerSchema,
   WzrrdPublishDeliveryResultSchema,
   WzrrdPublishPayloadSchema,
   WorkflowStatusProjectionSchema,
@@ -56,6 +63,7 @@ import type {
   PackageMetadata,
   PinnedPackage,
   RunStepCheckpoint,
+  WorkflowDriveLedger,
   WorkflowEvent,
   WorkflowStatusProjection,
   WzrrdPublishDeliveryResult,
@@ -82,6 +90,7 @@ export interface MemoryArtifactStore extends ArtifactStoreContract {
 export interface MemoryContextCapsuleActor extends ContextCapsuleActorContract {
   readonly capsules: Map<string, ContextCapsuleRecord>;
   readonly checkpoints: Map<string, RunStepCheckpoint>;
+  readonly driveLedgers: Map<string, WorkflowDriveLedger>;
   readonly events: Map<string, WorkflowEvent[]>;
 }
 
@@ -97,6 +106,11 @@ const artifactRefFor = (
   runId: string,
   path: string
 ): ArtifactRef => `artifact://${namespace}/runs/${runId}/${path}`;
+
+const driveLedgerKey = (input: {
+  readonly runId: string;
+  readonly workItemId: string;
+}): string => `${input.workItemId}:${input.runId}`;
 
 const denied = (
   code: CapabilityDenialCode,
@@ -190,6 +204,12 @@ export const createMemoryArtifactStore = (
   namespace = "workflow-app"
 ): MemoryArtifactStore => {
   const records = new Map<ArtifactRef, MemoryArtifactRecord>();
+  let commitCounter = 0;
+  const nextCommitSha = (): string => {
+    commitCounter += 1;
+
+    return commitCounter.toString(16).padStart(40, "0");
+  };
   const setJson = (artifactRef: ArtifactRef, value: unknown): void => {
     records.set(artifactRef, {
       kind: "json",
@@ -245,6 +265,7 @@ export const createMemoryArtifactStore = (
     writeJson(input) {
       const artifactRef = artifactRefFor(namespace, input.runId, input.path);
       const receipt = ArtifactWriteReceiptSchema.parse({
+        artifactCommitSha: nextCommitSha(),
         artifactRef,
         contentHash: hashJson(input.value),
         mediaType: "application/json",
@@ -257,6 +278,7 @@ export const createMemoryArtifactStore = (
     writeText(input) {
       const artifactRef = artifactRefFor(namespace, input.runId, input.path);
       const receipt = ArtifactWriteReceiptSchema.parse({
+        artifactCommitSha: nextCommitSha(),
         artifactRef,
         contentHash: sha256Hex(input.value),
         mediaType: input.mediaType,
@@ -273,18 +295,94 @@ export const createMemoryContextCapsuleActor =
   (): MemoryContextCapsuleActor => {
     const capsules = new Map<string, ContextCapsuleRecord>();
     const checkpoints = new Map<string, RunStepCheckpoint>();
+    const driveLedgers = new Map<string, WorkflowDriveLedger>();
     const events = new Map<string, WorkflowEvent[]>();
+    const emptyLedger = (input: {
+      readonly runId: string;
+      readonly workItemId: string;
+    }): WorkflowDriveLedger =>
+      WorkflowDriveLedgerSchema.parse({
+        driveGeneration: 0,
+        phases: {},
+        runId: input.runId,
+        schemaVersion: "workflow.drive-ledger.v1",
+        updatedAt: nowIso(),
+        workItemId: input.workItemId,
+      });
+    const loadLedger = (input: {
+      readonly runId: string;
+      readonly workItemId: string;
+    }): WorkflowDriveLedger =>
+      driveLedgers.get(driveLedgerKey(input)) ?? emptyLedger(input);
+    const putLedger = (ledger: WorkflowDriveLedger): WorkflowDriveLedger => {
+      const parsed = WorkflowDriveLedgerSchema.parse(ledger);
+      driveLedgers.set(driveLedgerKey(parsed), parsed);
+
+      return parsed;
+    };
+    const assertGeneration = (input: {
+      readonly driveGeneration: number;
+      readonly runId: string;
+      readonly workItemId: string;
+    }): void => {
+      const parsed = WorkflowDriveGenerationAssertionRequestSchema.parse(input);
+      const ledger = loadLedger(parsed);
+      if (ledger.driveGeneration === parsed.driveGeneration) {
+        return;
+      }
+
+      throw new StaleDriveGenerationError(
+        StaleDriveGenerationRejectionSchema.parse({
+          code: "stale_drive_generation",
+          currentGeneration: ledger.driveGeneration,
+          driveGeneration: parsed.driveGeneration,
+          message: `Drive generation ${parsed.driveGeneration} is stale for run ${parsed.runId}; current generation is ${ledger.driveGeneration}.`,
+          redacted: true,
+          runId: parsed.runId,
+          workItemId: parsed.workItemId,
+        })
+      );
+    };
 
     return {
+      admitDrive(input) {
+        const parsed = WorkflowDriveLedgerRequestSchema.parse(input);
+        const current = loadLedger(parsed);
+        const ledger = putLedger({
+          ...current,
+          driveGeneration: current.driveGeneration + 1,
+          updatedAt: nowIso(),
+        });
+
+        return Promise.resolve(
+          WorkflowDriveAdmissionSchema.parse({
+            driveGeneration: ledger.driveGeneration,
+            ledger,
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          })
+        );
+      },
       appendEvent(input) {
         const existing = events.get(input.workItemId) ?? [];
         events.set(input.workItemId, [...existing, input.event]);
 
         return Promise.resolve();
       },
+      assertActiveDriveGeneration(input) {
+        assertGeneration(input);
+
+        return Promise.resolve();
+      },
       capsules,
       checkpoints,
+      driveLedgers,
       events,
+      loadDriveLedger(input) {
+        const parsed = WorkflowDriveLedgerRequestSchema.parse(input);
+
+        return Promise.resolve(loadLedger(parsed));
+      },
       loadLatestCheckpoint(input) {
         let latest: RunStepCheckpoint | null = null;
         for (const checkpoint of checkpoints.values()) {
@@ -306,6 +404,28 @@ export const createMemoryContextCapsuleActor =
         );
 
         return Promise.resolve();
+      },
+      recordDrivePhaseCompletion(input) {
+        const parsed =
+          WorkflowDriveLedgerPhaseCompletionRequestSchema.parse(input);
+        assertGeneration(parsed);
+        const completedAt = nowIso();
+        const phase = {
+          ...parsed.phase,
+          completedAt,
+          driveGeneration: parsed.driveGeneration,
+        };
+        const current = loadLedger(parsed);
+        const ledger = putLedger({
+          ...current,
+          phases: {
+            ...current.phases,
+            [phase.phaseId]: phase,
+          },
+          updatedAt: completedAt,
+        });
+
+        return Promise.resolve(ledger);
       },
       resolve(input) {
         const existing = capsules.get(input.workItemId);

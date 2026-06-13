@@ -8,6 +8,7 @@ import type {
   ContextCapsuleActorContract,
   WorkerFrontDoorContract,
 } from "../application/ports.ts";
+import { StaleDriveGenerationError } from "../application/ports.ts";
 import {
   AgentLaneAdmissionDecisionSchema,
   AgentLaneAdmissionRequestSchema,
@@ -21,7 +22,13 @@ import {
   RunDurabilityRequestSchema,
   RunStepCheckpointSchema,
   StartRunRequestSchema,
+  StaleDriveGenerationRejectionSchema,
   WorkflowEventSchema,
+  WorkflowDriveAdmissionSchema,
+  WorkflowDriveGenerationAssertionRequestSchema,
+  WorkflowDriveLedgerPhaseCompletionRequestSchema,
+  WorkflowDriveLedgerRequestSchema,
+  WorkflowDriveLedgerSchema,
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type {
@@ -30,6 +37,7 @@ import type {
   ContextCapsuleRecord,
   RunDurabilityDump,
   RunStepCheckpoint,
+  WorkflowDriveLedger,
   StartRunRequest,
   WorkflowRunRequest,
 } from "../domain/schemas.ts";
@@ -148,6 +156,9 @@ const runStartStorageKey = (runId: string): string => `run-start:${runId}`;
 
 const runStartStoragePrefix = "run-start:";
 
+const driveLedgerStorageKey = (runId: string): string =>
+  `drive-ledger:${runId}`;
+
 /**
  * Storage key for the short-lived "driving" marker of a run (FIX 1). Holds the
  * timestamp the current driver started. A drive begins only when no marker
@@ -159,6 +170,7 @@ const runStartStoragePrefix = "run-start:";
 const drivingMarkerStorageKey = (runId: string): string => `driving:${runId}`;
 
 const DrivingMarkerSchema = z.object({
+  driveGeneration: z.number().int().min(0).optional(),
   startedAtMs: z.number().int().min(0),
 });
 
@@ -203,7 +215,7 @@ const appendUnique = (
  *   hung past the invocation budget). Keep the record; the watchdog/reaper
  *   backstop re-drives or sweeps it.
  */
-type DriveOutcome = "failed" | "paused" | "terminal";
+type DriveOutcome = "failed" | "paused" | "stale" | "terminal";
 
 /**
  * Delay before a paused single-step drive's next node fires (the resume re-arm).
@@ -223,6 +235,37 @@ type DriveOutcome = "failed" | "paused" | "terminal";
  */
 const RESUME_DELAY_MS = 250;
 
+const emptyDriveLedger = (input: {
+  readonly runId: string;
+  readonly workItemId: string;
+}): WorkflowDriveLedger =>
+  WorkflowDriveLedgerSchema.parse({
+    driveGeneration: 0,
+    phases: {},
+    runId: input.runId,
+    schemaVersion: "workflow.drive-ledger.v1",
+    updatedAt: nowIso(),
+    workItemId: input.workItemId,
+  });
+
+const staleDriveGeneration = (input: {
+  readonly currentGeneration: number;
+  readonly driveGeneration: number;
+  readonly runId: string;
+  readonly workItemId: string;
+}): StaleDriveGenerationError =>
+  new StaleDriveGenerationError(
+    StaleDriveGenerationRejectionSchema.parse({
+      code: "stale_drive_generation",
+      currentGeneration: input.currentGeneration,
+      driveGeneration: input.driveGeneration,
+      message: `Drive generation ${input.driveGeneration} is stale for run ${input.runId}; current generation is ${input.currentGeneration}.`,
+      redacted: true,
+      runId: input.runId,
+      workItemId: input.workItemId,
+    })
+  );
+
 /**
  * Drive one queued run through the front door from inside the alarm invocation,
  * in single-step mode: `WorkflowApp.run()` resumes from the latest checkpoint and
@@ -236,7 +279,8 @@ const RESUME_DELAY_MS = 250;
  */
 const driveOneQueuedRun = async (
   frontDoor: WorkerFrontDoorContract,
-  request: WorkflowRunRequest
+  request: WorkflowRunRequest,
+  driveGeneration: number
 ): Promise<DriveOutcome> => {
   try {
     // Single-step drive: resume from the latest checkpoint and execute EXACTLY
@@ -248,11 +292,16 @@ const driveOneQueuedRun = async (
     // mode that reaped run 14 at node 3. The paused path (driveQueuedRuns) re-arms
     // an imminent future alarm so the next node fires at work-speed.
     const result = await frontDoor.startRun(request, {
+      driveGeneration,
       driveMode: "single-step",
     });
 
     return result.status === "paused" ? "paused" : "terminal";
   } catch (error) {
+    if (error instanceof StaleDriveGenerationError) {
+      return "stale";
+    }
+
     console.error("queued run driver failed", request.runId, error);
 
     return "failed";
@@ -272,11 +321,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   override fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     const postRoutes: Record<string, () => Promise<Response>> = {
+      "/admit-drive": () => this.admitDrive(request),
       "/admit-lane": () => this.admitLane(request),
       "/append-event": () => this.appendEvent(request),
+      "/assert-drive-generation": () => this.assertDriveGeneration(request),
       "/get-durability": () => this.getDurability(request),
+      "/load-drive-ledger": () => this.loadDriveLedger(request),
       "/load-latest-checkpoint": () => this.loadLatestCheckpoint(request),
       "/persist-checkpoint": () => this.persistCheckpoint(request),
+      "/record-drive-phase": () => this.recordDrivePhase(request),
       "/release-lane": () => this.releaseLane(request),
       "/resolve": () => this.resolveCapsule(request),
       "/start-run": () => this.startRun(request),
@@ -290,6 +343,116 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     return handler
       ? handler()
       : Promise.resolve(json({ error: "not found" }, { status: 404 }));
+  }
+
+  private async getDriveLedger(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveLedger> {
+    return WorkflowDriveLedgerSchema.parse(
+      (await this.ctx.storage.get(driveLedgerStorageKey(input.runId))) ??
+        emptyDriveLedger(input)
+    );
+  }
+
+  private async putDriveLedger(
+    ledger: WorkflowDriveLedger
+  ): Promise<WorkflowDriveLedger> {
+    const parsed = WorkflowDriveLedgerSchema.parse(ledger);
+    await this.ctx.storage.put(driveLedgerStorageKey(parsed.runId), parsed);
+
+    return parsed;
+  }
+
+  private async assertActiveGeneration(input: {
+    readonly driveGeneration: number;
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<void> {
+    const ledger = await this.getDriveLedger(input);
+    if (ledger.driveGeneration !== input.driveGeneration) {
+      throw staleDriveGeneration({
+        currentGeneration: ledger.driveGeneration,
+        driveGeneration: input.driveGeneration,
+        runId: input.runId,
+        workItemId: input.workItemId,
+      });
+    }
+  }
+
+  private async admitDrive(request: Request): Promise<Response> {
+    const input = WorkflowDriveLedgerRequestSchema.parse(await request.json());
+    const current = await this.getDriveLedger(input);
+    const ledger = await this.putDriveLedger({
+      ...current,
+      driveGeneration: current.driveGeneration + 1,
+      updatedAt: nowIso(),
+    });
+
+    return json(
+      WorkflowDriveAdmissionSchema.parse({
+        driveGeneration: ledger.driveGeneration,
+        ledger,
+        runId: input.runId,
+        workItemId: input.workItemId,
+      })
+    );
+  }
+
+  private async assertDriveGeneration(request: Request): Promise<Response> {
+    const input = WorkflowDriveGenerationAssertionRequestSchema.parse(
+      await request.json()
+    );
+    try {
+      await this.assertActiveGeneration(input);
+    } catch (error) {
+      if (error instanceof StaleDriveGenerationError) {
+        return json(error.rejection, { status: 409 });
+      }
+
+      throw error;
+    }
+
+    return json({ ok: true });
+  }
+
+  private async loadDriveLedger(request: Request): Promise<Response> {
+    const input = WorkflowDriveLedgerRequestSchema.parse(await request.json());
+
+    return json(await this.getDriveLedger(input));
+  }
+
+  private async recordDrivePhase(request: Request): Promise<Response> {
+    const input = WorkflowDriveLedgerPhaseCompletionRequestSchema.parse(
+      await request.json()
+    );
+    try {
+      await this.assertActiveGeneration(input);
+    } catch (error) {
+      if (error instanceof StaleDriveGenerationError) {
+        return json(error.rejection, { status: 409 });
+      }
+
+      throw error;
+    }
+    const current = await this.getDriveLedger(input);
+    const completedAt = nowIso();
+    const phase = {
+      ...input.phase,
+      completedAt,
+      driveGeneration: input.driveGeneration,
+    };
+
+    return json(
+      await this.putDriveLedger({
+        ...current,
+        phases: {
+          ...current.phases,
+          [phase.phaseId]: phase,
+        },
+        updatedAt: completedAt,
+      })
+    );
   }
 
   private async admitLane(request: Request): Promise<Response> {
@@ -677,19 +840,34 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         continue;
       }
 
+      const admission = await this.admitDriveForRun({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      });
       if (frontDoor === undefined) {
         const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
         frontDoor = await driver(this.env);
       }
 
       await this.ctx.storage.put(drivingMarkerStorageKey(request.runId), {
+        driveGeneration: admission.driveGeneration,
         startedAtMs: now,
       });
-      const outcome = await driveOneQueuedRun(frontDoor, request);
+      const outcome = await driveOneQueuedRun(
+        frontDoor,
+        request,
+        admission.driveGeneration
+      );
       if (outcome === "terminal") {
         // Terminal: retire both the run-start record and the marker. A future
         // alarm finds nothing to re-drive.
         await this.ctx.storage.delete(runStartStorageKey(request.runId));
+      } else if (outcome === "stale") {
+        await this.clearDrivingMarkerIfOwned(
+          request.runId,
+          admission.driveGeneration
+        );
+        continue;
       } else if (outcome === "paused") {
         // Single-step drive paused after one node: KEEP the run-start record so
         // the next alarm resumes from the just-persisted checkpoint, and re-arm a
@@ -708,8 +886,43 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       // For terminal, paused, or a transient throw, clear our marker. On eviction
       // the invocation dies before reaching here, so the marker survives (stale)
       // and re-drive is gated by staleness rather than re-driven immediately.
-      await this.ctx.storage.delete(drivingMarkerStorageKey(request.runId));
+      await this.clearDrivingMarkerIfOwned(
+        request.runId,
+        admission.driveGeneration
+      );
     }
+  }
+
+  private async admitDriveForRun(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<{ readonly driveGeneration: number }> {
+    const current = await this.getDriveLedger(input);
+    const ledger = await this.putDriveLedger({
+      ...current,
+      driveGeneration: current.driveGeneration + 1,
+      updatedAt: nowIso(),
+    });
+
+    return { driveGeneration: ledger.driveGeneration };
+  }
+
+  private async clearDrivingMarkerIfOwned(
+    runId: string,
+    driveGeneration: number
+  ): Promise<void> {
+    const marker = DrivingMarkerSchema.nullable().parse(
+      (await this.ctx.storage.get(drivingMarkerStorageKey(runId))) ?? null
+    );
+    if (
+      marker !== null &&
+      marker.driveGeneration !== undefined &&
+      marker.driveGeneration !== driveGeneration
+    ) {
+      return;
+    }
+
+    await this.ctx.storage.delete(drivingMarkerStorageKey(runId));
   }
 
   /**
@@ -1054,6 +1267,12 @@ const postJson = async (
     })
   );
   if (!response.ok) {
+    if (response.status === 409) {
+      throw new StaleDriveGenerationError(
+        StaleDriveGenerationRejectionSchema.parse(await response.json())
+      );
+    }
+
     throw new Error(`Capsule supervisor request failed: ${path}`);
   }
 
@@ -1067,6 +1286,11 @@ export const createCloudflareCapsuleSupervisorClient = (
     namespace.get(namespace.idFromName(workItemId));
 
   return {
+    async admitDrive(input) {
+      return WorkflowDriveAdmissionSchema.parse(
+        await postJson(stubFor(input.workItemId), "/admit-drive", input)
+      );
+    },
     async admitLane(input): Promise<AgentLaneAdmissionDecision> {
       return AgentLaneAdmissionDecisionSchema.parse(
         await postJson(stubFor(input.workItemId), "/admit-lane", input)
@@ -1074,6 +1298,18 @@ export const createCloudflareCapsuleSupervisorClient = (
     },
     async appendEvent(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/append-event", input);
+    },
+    async assertActiveDriveGeneration(input): Promise<void> {
+      await postJson(
+        stubFor(input.workItemId),
+        "/assert-drive-generation",
+        input
+      );
+    },
+    async loadDriveLedger(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(stubFor(input.workItemId), "/load-drive-ledger", input)
+      );
     },
     async loadLatestCheckpoint(input): Promise<RunStepCheckpoint | null> {
       const resolution = LoadRunCheckpointResolutionSchema.parse(
@@ -1088,6 +1324,11 @@ export const createCloudflareCapsuleSupervisorClient = (
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
+    },
+    async recordDrivePhaseCompletion(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await postJson(stubFor(input.workItemId), "/record-drive-phase", input)
+      );
     },
     async releaseLane(input): Promise<AgentLaneReleaseReceipt> {
       return AgentLaneReleaseReceiptSchema.parse(

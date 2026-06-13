@@ -273,7 +273,7 @@ class CloudflareArtifactsGitStore implements ArtifactStoreContract {
     }
     await this.fs.promises.writeFile(`${this.dir}/${input.path}`, input.value);
     await add({ dir: this.dir, filepath: input.path, fs: this.fs });
-    await gitCommit({
+    const artifactCommitSha = await gitCommit({
       author: this.author,
       dir: this.dir,
       fs: this.fs,
@@ -289,6 +289,7 @@ class CloudflareArtifactsGitStore implements ArtifactStoreContract {
     });
 
     return ArtifactWriteReceiptSchema.parse({
+      artifactCommitSha,
       artifactRef: this.artifactRef({
         path: input.path,
         runId: input.runId,

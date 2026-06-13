@@ -10,6 +10,10 @@ import type {
   CapabilityLeaseRequest,
   ContextCapsuleRecord,
   RunStepCheckpoint,
+  StaleDriveGenerationRejection,
+  WorkflowDriveAdmission,
+  WorkflowDriveLedger,
+  WorkflowDriveLedgerPhase,
   DiscordDeliveryResult,
   DiscordMessagePayload,
   DiscordResource,
@@ -94,6 +98,50 @@ export interface ContextCapsuleActorContract {
     readonly runId: string;
     readonly workItemId: string;
   }): Promise<RunStepCheckpoint | null>;
+
+  admitDrive(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveAdmission>;
+
+  assertActiveDriveGeneration(input: {
+    readonly driveGeneration: number;
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<void>;
+
+  loadDriveLedger(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveLedger>;
+
+  recordDrivePhaseCompletion(input: {
+    readonly driveGeneration: number;
+    readonly phase: Omit<
+      WorkflowDriveLedgerPhase,
+      "completedAt" | "driveGeneration"
+    >;
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveLedger>;
+}
+
+export class StaleDriveGenerationError extends Error {
+  readonly currentGeneration: number;
+  readonly driveGeneration: number;
+  readonly rejection: StaleDriveGenerationRejection;
+  readonly runId: string;
+  readonly workItemId: string;
+
+  constructor(rejection: StaleDriveGenerationRejection) {
+    super(rejection.message);
+    this.name = "StaleDriveGenerationError";
+    this.currentGeneration = rejection.currentGeneration;
+    this.driveGeneration = rejection.driveGeneration;
+    this.rejection = rejection;
+    this.runId = rejection.runId;
+    this.workItemId = rejection.workItemId;
+  }
 }
 
 export interface PackageRegistryActorContract {
