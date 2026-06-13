@@ -23,7 +23,12 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      "image": "./Dockerfile",
+      // Stock public Cloudflare Sandbox image — referencing a registry image (not
+      // a Dockerfile) makes `wrangler deploy` skip local Docker entirely: no
+      // `docker build`, no `docker login`, no macOS keychain write. The pi-agent
+      // install + workspace/PI_* setup the Dockerfile used to bake in now runs at
+      // runtime inside the sandbox lane (cloudflare-sandbox-agent-lane-command.ts).
+      "image": "docker.io/cloudflare/sandbox:0.11.0",
       "instance_type": "lite",
       "max_instances": 5,
     },

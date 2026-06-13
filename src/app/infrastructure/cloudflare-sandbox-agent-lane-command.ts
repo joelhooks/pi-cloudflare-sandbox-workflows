@@ -4,6 +4,15 @@ import { jsonOutputNormalizerNodeScript } from "./agent-lane-json-output.ts";
 import { agentLanePackageMountWriterNodeScript } from "./agent-lane-package-mounts.ts";
 import { agentLaneTokenCostAccountingNodeScript } from "./agent-lane-token-cost-accounting.ts";
 
+/**
+ * Pinned `@earendil-works/pi-coding-agent` version installed into the sandbox at
+ * runtime. The deploy uses the stock public `cloudflare/sandbox` image (no custom
+ * Dockerfile), so the agent CLI the old Dockerfile baked in is installed on first
+ * use inside the lane instead. Keep in lockstep with the sandbox image tag in
+ * wrangler.jsonc.
+ */
+export const PI_CODING_AGENT_VERSION = "0.78.0";
+
 export interface SandboxCommandResult {
   readonly command: string;
   readonly duration: number;
@@ -82,6 +91,12 @@ process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringif
 NODE
 }
 trap emit_failure_marker EXIT
+current_step="install-pi-agent"
+export PATH="/workspace/.npm-global/bin:$PATH"
+if ! command -v pi >/dev/null 2>&1; then
+  npm install -g --prefix /workspace/.npm-global --ignore-scripts @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} > "$stderr_path" 2>&1
+fi
+mkdir -p "$agent_dir/sessions"
 current_step="prepare-auth"
 rm -rf /workspace/piwf-agent-lane
 mkdir -p "$agent_dir"

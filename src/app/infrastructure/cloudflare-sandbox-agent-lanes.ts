@@ -274,9 +274,16 @@ const prepareCloudflareSandboxPiAgentLane = (input: {
         Math.ceil(input.input.timeoutMs / 1000)
       ),
       PI_AUTH_JSON_B64: input.input.leasedPiAuthJsonBase64,
+      // PI_* runtime env the old Dockerfile baked in via ENV. The deploy now uses
+      // the stock public sandbox image, so the agent lane supplies these directly.
+      PI_CODING_AGENT_DIR: "/workspace/.pi/agent",
+      PI_CODING_AGENT_SESSION_DIR: "/workspace/.pi/agent/sessions",
       PI_MODEL: input.input.model,
       PI_PROVIDER: input.input.provider,
+      PI_SKIP_VERSION_CHECK: "1",
+      PI_TELEMETRY: "0",
       RUN_ID: input.input.runId,
+      TERM: "xterm-256color",
       WORKFLOW_PARENT_SPAN_ID: input.input.traceContext.parentSpanId ?? "",
       WORKFLOW_SPAN_ID: input.input.traceContext.spanId,
       WORKFLOW_TRACE_CONTEXT_JSON: JSON.stringify(input.input.traceContext),
