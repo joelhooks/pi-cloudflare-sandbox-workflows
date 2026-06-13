@@ -301,3 +301,96 @@ describe("memory-fabric capture-artifact node ref leash", () => {
     });
   });
 });
+
+// run-live-20260613T143420421Z-9079dc15 terminated `blocked`
+// (capture-generated-machine / stale_package) NOT for a budget reason but
+// because the capture-artifact resolver committed to the FIRST NON-NULL
+// candidate — a planner-emitted `config.artifactRef` that was never written —
+// without a readability check, then blocked instead of falling through to the
+// carrier-guaranteed machine refs that WERE readable on that exact drive. The
+// fix resolves an ordered candidate list and pins the first READABLE ref. These
+// cases are the chaos regression that would have caught the wound.
+describe("memory-fabric capture-artifact node carrier-readability chaos", () => {
+  // The exact wound: a stochastic planner names a concrete, well-formed, but
+  // never-written artifactRef. The node must skip the dead head candidate and
+  // capture the carrier-guaranteed machine config instead of blocking.
+  it("skips a planner-hallucinated unreadable artifactRef and captures the carrier machine ref", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "dream-chaos-capture-unreadable"
+    );
+    // Seed ONLY the carrier-guaranteed machine config; the planner's named ref
+    // is deliberately left unwritten to emulate a hallucinated capture target.
+    artifacts.setJson(machineArtifactRef, {
+      machineId: machine.machineId,
+      schemaVersion: "workflow.xstate-machine.v1",
+    });
+
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
+      artifacts,
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+    });
+    const result = await adapter.execute({
+      actor: integrationTestActor,
+      dependencyArtifactRefs: {},
+      machine,
+      plan,
+      step: {
+        ...captureArtifactStep,
+        config: {
+          // A concrete ref the planner invented; well-formed but never pushed.
+          artifactRef:
+            "artifact://dream-leash-test/runs/run-dream-leash-test/planner-hallucinated-machine.json",
+        },
+      } satisfies WorkflowNodeInvocationStep,
+    } satisfies Parameters<WorkflowNodeAdapterPort["execute"]>[0]);
+
+    if (result.status === "blocked") {
+      throw new Error(
+        `Expected fallback to the carrier machine ref, got blocked: ${result.blocker.message}`
+      );
+    }
+    const receiptRef = result.outputRefs.at(0);
+    if (receiptRef === undefined) {
+      throw new Error("Expected a capture-artifact receipt output ref.");
+    }
+    const receipt = MemoryCaptureReceiptDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: receiptRef })
+    );
+    // The dead planner ref is discarded; the readable carrier ref is captured.
+    expect(receipt.capturedRef.artifactRef).toBe(machineArtifactRef);
+  });
+
+  // The floor: over-correction would be silently capturing nothing. When NO
+  // candidate reads (nothing seeded), the node must still block terminally.
+  it("still blocks terminally when NONE of the resolved candidates are readable", async () => {
+    const artifacts = createMemoryArtifactStore("dream-chaos-capture-none");
+
+    const adapter = createMemoryFabricWorkflowNodeAdapter({
+      artifacts,
+      memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+    });
+    const result = await adapter.execute({
+      actor: integrationTestActor,
+      dependencyArtifactRefs: {},
+      machine,
+      plan,
+      step: {
+        ...captureArtifactStep,
+        config: {
+          artifactRef:
+            "artifact://dream-leash-test/runs/run-dream-leash-test/planner-hallucinated-machine.json",
+        },
+      } satisfies WorkflowNodeInvocationStep,
+    } satisfies Parameters<WorkflowNodeAdapterPort["execute"]>[0]);
+
+    if (result.status !== "blocked") {
+      throw new Error(
+        "Expected a terminal block when no capture candidate is readable."
+      );
+    }
+    expect({
+      code: result.blocker.code,
+      readable: /readable/u.test(result.blocker.message),
+    }).toStrictEqual({ code: "stale_package", readable: true });
+  });
+});

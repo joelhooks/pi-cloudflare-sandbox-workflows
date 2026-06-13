@@ -911,40 +911,114 @@ const upstreamRefByNodeType = (input: {
 // The planner's capture-artifact intent is "capture the generated machine and
 // harness" (it emits artifactKinds like workflow.xstate-machine.v1 /
 // workflow.generated-harness.v1 and a capturePurpose, both ignored by the strip
-// schema). When it omits the concrete artifactRef/artifactStepId we resolve that
-// intent to the run's pinned generated machine artifact (JSON, matching the
-// default mediaType), then any wired dependency ref, then the pinned harness.
-// This is shape tolerance only: the resolved ref is still hashed, pinned, and
-// leased through captureArtifactPinFor and the relay exactly as before.
-const captureArtifactRefFor = (input: {
+// schema). We resolve that intent to an ORDERED candidate list — planner intent
+// first, then the carrier-guaranteed generated machine artifacts — and pin the
+// FIRST READABLE one downstream (captureArtifactPinFor). A stochastic planner
+// can emit a well-formed but never-written `config.artifactRef`; committing to
+// the first NON-NULL candidate without a readability check is what stalled
+// run-live-20260613T143420421Z-9079dc15 terminally (capture-generated-machine /
+// stale_package) even though the machine config was readable that exact drive.
+// machine.config.json (artifactRef) and machine.ts (sourceArtifactRef) are
+// always written and pushed by pinDynamicWorkflowBlueprint during planning, so
+// the tail of this list is guaranteed to resolve on a healthy run. Shape
+// tolerance only: whichever ref reads is still hashed, pinned, and leased
+// through captureArtifactPinFor and the relay exactly as before.
+const captureArtifactRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof MemoryCaptureArtifactNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.artifactRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.artifactStepId,
-  }) ??
-  // A capture node placed AFTER a report renderer (capture-report-artifact)
-  // means to capture the report, not the generated machine. Resolve the
-  // upstream report first; it is null for an early capture-generated-artifacts
-  // node (no report yet), which then correctly falls through to the machine.
-  upstreamRefByNodeType({
-    completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "joelclaw.memory.hitl-report",
-    plan: input.plan,
-  }) ??
-  input.plan.machine.artifactRef ??
-  latestDependencyArtifactRef(input.dependencyArtifactRefs) ??
-  input.plan.harness.artifactRef ??
-  null;
+}): readonly ArtifactRef[] => {
+  const ordered: readonly (ArtifactRef | null)[] = [
+    input.config.artifactRef ?? null,
+    dependencyRefFor({
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      stepId: input.config.artifactStepId,
+    }),
+    // A capture node placed AFTER a report renderer (capture-report-artifact)
+    // means to capture the report, not the generated machine. Resolve the
+    // upstream report first; it is null for an early capture-generated-artifacts
+    // node (no report yet), which then correctly falls through to the machine.
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: "joelclaw.memory.hitl-report",
+      plan: input.plan,
+    }),
+    // Carrier-guaranteed tail: the pinned generated machine config (JSON,
+    // matching the default mediaType) and its TypeScript source. Both are
+    // written + pushed by the carrier on every healthy planning pass.
+    input.plan.machine.artifactRef,
+    input.plan.machine.sourceArtifactRef,
+    latestDependencyArtifactRef(input.dependencyArtifactRefs),
+    input.plan.harness.artifactRef,
+  ];
 
-const captureArtifactPinFor = async (input: {
+  const seen = new Set<string>();
+  const candidates: ArtifactRef[] = [];
+  for (const ref of ordered) {
+    if (ref === null || seen.has(ref)) {
+      continue;
+    }
+    seen.add(ref);
+    candidates.push(ref);
+  }
+
+  return candidates;
+};
+
+// Read one candidate ref into a pin, trying JSON first when the planner declared
+// application/json (its common default even for text artifacts), then text.
+// Returns null when the ref is unreadable — an unwritten path, or a ref outside
+// this store's namespace (parseArtifactRef throws) — so the caller can fall
+// through to the next candidate instead of stranding the run on one bad ref.
+const readArtifactPinOrNull = async (input: {
   readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+  readonly mediaType: string;
+}): Promise<ArtifactPin | null> => {
+  if (input.mediaType === "application/json") {
+    try {
+      const value = await input.artifacts.readJson({
+        artifactRef: input.artifactRef,
+      });
+
+      return ArtifactPinSchema.parse({
+        artifactRef: input.artifactRef,
+        hash: hashJson(value),
+        mediaType: input.mediaType,
+      });
+    } catch {
+      // The planner often defaults mediaType to application/json even when the
+      // captured artifact is text (a rendered report, the machine source). Fall
+      // through to a text read rather than discarding the candidate.
+    }
+  }
+
+  try {
+    const value = await input.artifacts.readText({
+      artifactRef: input.artifactRef,
+    });
+
+    return ArtifactPinSchema.parse({
+      artifactRef: input.artifactRef,
+      hash: sha256Hex(value),
+      mediaType: input.mediaType,
+    });
+  } catch {
+    return null;
+  }
+};
+
+// Pin the FIRST READABLE candidate from the ordered list. Only blocks when NONE
+// of the resolved candidates read — on a healthy run the carrier-guaranteed
+// machine refs at the tail always resolve, so a planner-hallucinated head ref no
+// longer strands the capture node (the wound behind
+// run-live-20260613T143420421Z-9079dc15). Reads within one invocation share the
+// store's single cloned worktree, so walking a few candidates is cheap.
+const captureArtifactPinFor = async (input: {
+  readonly artifactRefs: readonly ArtifactRef[];
   readonly artifacts: ArtifactStoreContract;
   readonly mediaType: string;
 }): Promise<
@@ -954,46 +1028,21 @@ const captureArtifactPinFor = async (input: {
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
-  try {
-    if (input.mediaType === "application/json") {
-      try {
-        const value = await input.artifacts.readJson({
-          artifactRef: input.artifactRef,
-        });
-
-        return {
-          pin: ArtifactPinSchema.parse({
-            artifactRef: input.artifactRef,
-            hash: hashJson(value),
-            mediaType: input.mediaType,
-          }),
-          status: "loaded",
-        };
-      } catch {
-        // The planner often defaults mediaType to application/json even when
-        // the captured artifact is text (a rendered report, the machine
-        // source). Fall through to a text read rather than blocking.
-      }
-    }
-
-    const value = await input.artifacts.readText({
-      artifactRef: input.artifactRef,
+  for (const artifactRef of input.artifactRefs) {
+    const pin = await readArtifactPinOrNull({
+      artifactRef,
+      artifacts: input.artifacts,
+      mediaType: input.mediaType,
     });
-
-    return {
-      pin: ArtifactPinSchema.parse({
-        artifactRef: input.artifactRef,
-        hash: sha256Hex(value),
-        mediaType: input.mediaType,
-      }),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory capture artifact node requires a readable generated artifact ref."
-    );
+    if (pin !== null) {
+      return { pin, status: "loaded" };
+    }
   }
+
+  return blocker(
+    "stale_package",
+    "Memory capture artifact node requires a readable generated artifact ref."
+  );
 };
 
 const searchRefFor = (input: {
@@ -3551,13 +3600,13 @@ const executeCaptureArtifactNode = async (
   const nodeConfig = MemoryCaptureArtifactNodeConfigSchema.parse(
     input.step.config
   );
-  const artifactRef = captureArtifactRefFor({
+  const artifactRefs = captureArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (artifactRef === null) {
+  if (artifactRefs.length === 0) {
     return blocker(
       "stale_package",
       "Memory capture artifact node requires a generated artifact ref."
@@ -3565,7 +3614,7 @@ const executeCaptureArtifactNode = async (
   }
 
   const capturedRef = await captureArtifactPinFor({
-    artifactRef,
+    artifactRefs,
     artifacts: config.artifacts,
     mediaType: nodeConfig.mediaType,
   });
