@@ -1,10 +1,19 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { submitFollowUpRun } from "../../scripts/workflow-app-submit-follow-up.ts";
+import { writeHitlDecisionToArtifacts } from "../../scripts/workflow-app-write-hitl-decision.ts";
 import type {
   WorkflowNodeAdapterPort,
   WorkflowNodeInvocationStep,
 } from "../../src/app/application/ports.ts";
-import { WorkflowNodeTypeSchema } from "../../src/app/domain/schemas.ts";
+import {
+  WorkflowNodeTypeSchema,
+  WorkflowRunRequestSchema,
+} from "../../src/app/domain/schemas.ts";
 import type {
   AgentLaneReceipt,
   ArtifactPin,
@@ -21,6 +30,7 @@ import {
   WorkflowHitlReportDocumentSchema,
 } from "../../src/cartridges/memory-fabric/schemas.ts";
 import { createMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
+import { createLifecycleFaithfulArtifactsRemote } from "./lifecycle-faithful-fakes.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
 
 const at = "2026-06-10T08:00:00.000Z";
@@ -466,6 +476,116 @@ const reportDocument = WorkflowHitlReportDocumentSchema.parse({
   workItemId: machine.workItemId,
 });
 
+const executeNode = async (
+  input: Parameters<WorkflowNodeAdapterPort["execute"]>[0],
+  artifacts: Parameters<
+    typeof createMemoryFabricWorkflowNodeAdapter
+  >[0]["artifacts"]
+) => {
+  const adapter = createMemoryFabricWorkflowNodeAdapter({
+    artifacts,
+    memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+  });
+  const result = await adapter.execute(input);
+  if (result.status === "blocked") {
+    throw new Error(result.blocker.message);
+  }
+
+  return result;
+};
+
+const writeFollowUpFile = async (
+  prefix: string,
+  value: unknown
+): Promise<string> => {
+  const dir = await mkdtemp(resolve(tmpdir(), prefix));
+  const path = resolve(dir, "hitl-follow-up-run-request.json");
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+
+  return path;
+};
+
+const fetchInputUrl = (input: Parameters<typeof fetch>[0]): string => {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+
+  return input.url;
+};
+
+const capturedRunFetch = (input: {
+  readonly existingRunIds?: ReadonlySet<string>;
+  readonly postBodies: unknown[];
+}): typeof fetch => {
+  const knownRunIds = new Set(input.existingRunIds);
+
+  return ((_url, init) => {
+    const url = fetchInputUrl(_url);
+    const method = init?.method ?? "GET";
+    if (method === "POST") {
+      if (typeof init?.body !== "string") {
+        throw new TypeError("Expected JSON request body.");
+      }
+
+      const request = WorkflowRunRequestSchema.parse(JSON.parse(init.body));
+      input.postBodies.push(request);
+      knownRunIds.add(request.runId);
+
+      return Promise.resolve(
+        Response.json(
+          {
+            runId: request.runId,
+            status: "accepted",
+          },
+          { status: 202 }
+        )
+      );
+    }
+
+    const match = /\/runs\/([^/]+)\/status$/u.exec(url);
+    const runId = match?.[1] === undefined ? "" : decodeURIComponent(match[1]);
+    if (!knownRunIds.has(runId)) {
+      return Promise.resolve(
+        Response.json(
+          {
+            error: {
+              code: "run_not_found",
+              message: "Run not found.",
+              redacted: true,
+            },
+          },
+          { status: 404 }
+        )
+      );
+    }
+
+    return Promise.resolve(
+      Response.json({
+        redacted: true,
+        runId,
+        status: "captured",
+        terminal: true,
+      })
+    );
+  }) as typeof fetch;
+};
+
+const assertNodeResultRef = (
+  refs: readonly string[],
+  index: number,
+  label: string
+): string => {
+  const ref = refs.at(index);
+  if (ref === undefined) {
+    throw new Error(`Expected ${label}.`);
+  }
+
+  return ref;
+};
+
 describe("Dream HITL decision workflow-seed node", () => {
   it("turns accepted HITL decisions into a next-workflow seed artifact", async () => {
     const artifacts = createMemoryArtifactStore("dream-hitl-seed-node");
@@ -860,5 +980,395 @@ describe("Dream HITL decision workflow-seed node", () => {
       schemaVersion: "memory.hitl-follow-up-run-request.v1",
       status: "drafted",
     });
+  });
+});
+
+describe("Dream HITL post-review loop", () => {
+  it("submits a generated-draft follow-up to captured without double-submitting", async () => {
+    const remote = createLifecycleFaithfulArtifactsRemote(
+      "dream-hitl-post-review-generated"
+    );
+    const firstDrive = remote.createDriveStore({
+      driveId: "generated-report-drive",
+      seedFromRemote: false,
+    });
+    const refinementStep = {
+      config: {},
+      dependsOn: [],
+      inputRefs: [],
+      kind: "workflow.node.invoke",
+      nodeType: WorkflowNodeTypeSchema.parse(
+        "joelclaw.memory.refinement-proposals"
+      ),
+      outputPath: "dream/refinement-proposals.json",
+      packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+      stepId: "propose-dream-refinements",
+      summary: "Propose source-backed Dream refinements.",
+    } satisfies WorkflowNodeInvocationStep;
+    const reportStep = {
+      config: {},
+      dependsOn: [refinementStep.stepId],
+      inputRefs: [],
+      kind: "workflow.node.invoke",
+      nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.hitl-report"),
+      outputPath: "report/hitl-report.mdsvx",
+      packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+      stepId: "render-memory-hitl-report",
+      summary: "Render the Dream HITL report.",
+    } satisfies WorkflowNodeInvocationStep;
+    const generatedSeedStep = {
+      ...step,
+      config: {
+        decisionRef: firstDrive.artifactRef({
+          path: "report/hitl-decision.json",
+          runId: machine.runId,
+        }),
+      },
+      dependsOn: [reportStep.stepId],
+      inputRefs: [],
+    } satisfies WorkflowNodeInvocationStep;
+    const generatedPlan = {
+      ...plan,
+      steps: [refinementStep, reportStep, generatedSeedStep, followUpStep],
+    } satisfies DynamicWorkflowPlanDocument;
+    const refinementWrite = await firstDrive.writeJson({
+      path: refinementStep.outputPath,
+      redacted: true,
+      runId: machine.runId,
+      value: refinementProposalDocument,
+    });
+    await firstDrive.writeJson({
+      path: "report/hitl-report.json",
+      redacted: true,
+      runId: machine.runId,
+      value: reportDocument,
+    });
+    const reportMdsvxWrite = await firstDrive.writeText({
+      mediaType: "text/mdsvx",
+      path: reportStep.outputPath,
+      redacted: true,
+      runId: machine.runId,
+      value: reportDocument.mdsvx,
+    });
+    const seedDrive = remote.createDriveStore({
+      driveId: "generated-seed-drive",
+      seedFromRemote: true,
+    });
+    const seedResult = await executeNode(
+      {
+        actor: integrationTestActor,
+        completedStepArtifactRefs: {
+          [refinementStep.stepId]: refinementWrite.artifactRef,
+          [reportStep.stepId]: reportMdsvxWrite.artifactRef,
+        },
+        dependencyArtifactRefs: {
+          [reportStep.stepId]: reportMdsvxWrite.artifactRef,
+        },
+        machine,
+        plan: generatedPlan,
+        step: {
+          ...generatedSeedStep,
+          inputRefs: [reportMdsvxWrite.artifactRef],
+        },
+      },
+      seedDrive
+    );
+    const seedRef = assertNodeResultRef(
+      seedResult.outputRefs,
+      0,
+      "generated draft seed ref"
+    );
+    const followUpDrive = remote.createDriveStore({
+      driveId: "generated-follow-up-drive",
+      seedFromRemote: true,
+    });
+    const followUpResult = await executeNode(
+      {
+        actor: integrationTestActor,
+        completedStepArtifactRefs: {
+          [generatedSeedStep.stepId]: seedRef,
+        },
+        dependencyArtifactRefs: {},
+        machine,
+        plan: generatedPlan,
+        step: followUpStep,
+      },
+      followUpDrive
+    );
+    const followUpRef = assertNodeResultRef(
+      followUpResult.outputRefs,
+      0,
+      "generated draft follow-up ref"
+    );
+    const seed = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
+      await followUpDrive.readJson({ artifactRef: seedRef })
+    );
+    const followUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
+      await followUpDrive.readJson({ artifactRef: followUpRef })
+    );
+    const followUpPath = await writeFollowUpFile(
+      "dream-hitl-generated-follow-up-",
+      followUp
+    );
+    const postBodies: unknown[] = [];
+    const fakeFetch = capturedRunFetch({ postBodies });
+
+    try {
+      const firstReceipt = await submitFollowUpRun({
+        checkedAt: "2026-06-12T23:00:00.000Z",
+        fetch: fakeFetch,
+        followUpPath,
+        pollIntervalMs: 1,
+        pollTimeoutMs: 1000,
+        processEnv: {},
+        workerUrl: "https://workflow.example.test",
+      });
+      const secondReceipt = await submitFollowUpRun({
+        checkedAt: "2026-06-12T23:00:01.000Z",
+        fetch: fakeFetch,
+        followUpPath,
+        pollIntervalMs: 1,
+        pollTimeoutMs: 1000,
+        processEnv: {},
+        workerUrl: "https://workflow.example.test",
+      });
+
+      expect({
+        cloneHistory: remote.cloneHistory,
+        decisionSource: seed.decisionSource,
+        firstExistingRunObserved: firstReceipt.existingRunObserved,
+        firstStatus: firstReceipt.status,
+        followUpDecisionSource: firstReceipt.decisionSource,
+        followUpSubmitted: followUp.submitted,
+        postCount: postBodies.length,
+        postedRunIds: postBodies.map(
+          (body) => WorkflowRunRequestSchema.parse(body).runId
+        ),
+        secondExistingRunObserved: secondReceipt.existingRunObserved,
+        secondStatus: secondReceipt.status,
+        secondSubmitAttempted: secondReceipt.submit.attempted,
+      }).toStrictEqual({
+        cloneHistory: [
+          {
+            driveId: "generated-report-drive",
+            recordCount: 0,
+            seedFromRemote: false,
+          },
+          {
+            driveId: "generated-seed-drive",
+            recordCount: 3,
+            seedFromRemote: true,
+          },
+          {
+            driveId: "generated-follow-up-drive",
+            recordCount: 5,
+            seedFromRemote: true,
+          },
+        ],
+        decisionSource: "generated-draft",
+        firstExistingRunObserved: false,
+        firstStatus: "captured",
+        followUpDecisionSource: "generated-draft",
+        followUpSubmitted: false,
+        postCount: 1,
+        postedRunIds: ["run-memory-hitl-follow-up-test"],
+        secondExistingRunObserved: true,
+        secondStatus: "captured",
+        secondSubmitAttempted: false,
+      });
+    } finally {
+      await rm(resolve(followUpPath, ".."), { force: true, recursive: true });
+    }
+  });
+
+  it("ingests a human-review decision then submits its follow-up to captured", async () => {
+    const remote = createLifecycleFaithfulArtifactsRemote(
+      "dream-hitl-post-review-human"
+    );
+    const reviewDrive = remote.createDriveStore({
+      driveId: "human-review-drive",
+      seedFromRemote: false,
+    });
+    const decisionReceipt = await writeHitlDecisionToArtifacts({
+      artifacts: reviewDrive,
+      decision: decisionDocument,
+    });
+    const seedDrive = remote.createDriveStore({
+      driveId: "human-seed-drive",
+      seedFromRemote: true,
+    });
+    const seedResult = await executeNode(
+      {
+        actor: integrationTestActor,
+        dependencyArtifactRefs: {},
+        machine,
+        plan: {
+          ...plan,
+          steps: [step, followUpStep],
+        },
+        step: {
+          ...step,
+          inputRefs: [decisionReceipt.artifactRef],
+        },
+      },
+      seedDrive
+    );
+    const seedRef = assertNodeResultRef(
+      seedResult.outputRefs,
+      0,
+      "human review seed ref"
+    );
+    const followUpDrive = remote.createDriveStore({
+      driveId: "human-follow-up-drive",
+      seedFromRemote: true,
+    });
+    const followUpResult = await executeNode(
+      {
+        actor: integrationTestActor,
+        completedStepArtifactRefs: {
+          [step.stepId]: seedRef,
+        },
+        dependencyArtifactRefs: {},
+        machine,
+        plan: {
+          ...plan,
+          steps: [step, followUpStep],
+        },
+        step: followUpStep,
+      },
+      followUpDrive
+    );
+    const followUpRef = assertNodeResultRef(
+      followUpResult.outputRefs,
+      0,
+      "human review follow-up ref"
+    );
+    const seed = MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
+      await followUpDrive.readJson({ artifactRef: seedRef })
+    );
+    const followUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse(
+      await followUpDrive.readJson({ artifactRef: followUpRef })
+    );
+    const followUpPath = await writeFollowUpFile(
+      "dream-hitl-human-follow-up-",
+      followUp
+    );
+    const postBodies: unknown[] = [];
+
+    try {
+      const receipt = await submitFollowUpRun({
+        checkedAt: "2026-06-12T23:05:00.000Z",
+        fetch: capturedRunFetch({ postBodies }),
+        followUpPath,
+        pollIntervalMs: 1,
+        pollTimeoutMs: 1000,
+        processEnv: {},
+        workerUrl: "https://workflow.example.test",
+      });
+
+      expect({
+        cloneHistory: remote.cloneHistory,
+        decisionIngestionRef: decisionReceipt.artifactRef,
+        decisionSource: seed.decisionSource,
+        followUpDecisionSource: receipt.decisionSource,
+        followUpRunId: followUp.request?.runId,
+        followUpSubmitted: followUp.submitted,
+        postCount: postBodies.length,
+        status: receipt.status,
+      }).toStrictEqual({
+        cloneHistory: [
+          {
+            driveId: "human-review-drive",
+            recordCount: 0,
+            seedFromRemote: false,
+          },
+          {
+            driveId: "human-seed-drive",
+            recordCount: 1,
+            seedFromRemote: true,
+          },
+          {
+            driveId: "human-follow-up-drive",
+            recordCount: 2,
+            seedFromRemote: true,
+          },
+        ],
+        decisionIngestionRef:
+          "artifact://dream-hitl-post-review-human/runs/run-dream-hitl-seed-test/report/hitl-decision.json",
+        decisionSource: "human-review",
+        followUpDecisionSource: "human-review",
+        followUpRunId: "run-memory-hitl-follow-up-test",
+        followUpSubmitted: false,
+        postCount: 1,
+        status: "captured",
+      });
+    } finally {
+      await rm(resolve(followUpPath, ".."), { force: true, recursive: true });
+    }
+  });
+
+  it("refuses non-drafted and already-submitted follow-up artifacts", async () => {
+    const noActionFollowUp = MemoryHitlFollowUpRunRequestDocumentSchema.parse({
+      actionableDecisionCount: 0,
+      artifactUpdateTargets: [],
+      decisionWorkflowSeedRef:
+        "artifact://dream-hitl-seed-test/report/hitl-decision-workflow-seed.json",
+      generatedAt: at,
+      redacted: true,
+      requestedPackageIds: [],
+      requiredCapabilityKinds: [],
+      runId: machine.runId,
+      schemaVersion: "memory.hitl-follow-up-run-request.v1",
+      sourceRefs: [
+        "artifact://dream-hitl-seed-test/report/hitl-decision-workflow-seed.json",
+      ],
+      status: "no-actionable-decisions",
+      submitted: false,
+      summary: "No follow-up workflow request was drafted.",
+      workItemId: machine.workItemId,
+    });
+    const submittedFollowUp = {
+      ...noActionFollowUp,
+      request: {
+        actor: integrationTestActor,
+        planProposal: {
+          intent: "Run the follow-up.",
+        },
+        runId: "run-memory-hitl-follow-up-test",
+        workItemId: "work-item:memory-hitl-follow-up-test",
+      },
+      status: "drafted",
+      submitted: true,
+    };
+    const noActionPath = await writeFollowUpFile(
+      "dream-hitl-no-action-follow-up-",
+      noActionFollowUp
+    );
+    const submittedPath = await writeFollowUpFile(
+      "dream-hitl-submitted-follow-up-",
+      submittedFollowUp
+    );
+
+    try {
+      await expect(
+        submitFollowUpRun({
+          fetch: capturedRunFetch({ postBodies: [] }),
+          followUpPath: noActionPath,
+          processEnv: {},
+          workerUrl: "https://workflow.example.test",
+        })
+      ).rejects.toThrow(/expected drafted/u);
+      await expect(
+        submitFollowUpRun({
+          fetch: capturedRunFetch({ postBodies: [] }),
+          followUpPath: submittedPath,
+          processEnv: {},
+          workerUrl: "https://workflow.example.test",
+        })
+      ).rejects.toThrow(/submitted is already true/u);
+    } finally {
+      await rm(resolve(noActionPath, ".."), { force: true, recursive: true });
+      await rm(resolve(submittedPath, ".."), { force: true, recursive: true });
+    }
   });
 });
