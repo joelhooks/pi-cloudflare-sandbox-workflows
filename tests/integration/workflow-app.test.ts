@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 import type {
+  ArtifactStoreContract,
   WorkflowNodeAdapterPort,
   WorkflowPostExecutionArtifactRecorderPort,
 } from "../../src/app/application/ports.ts";
@@ -39,6 +40,7 @@ import type {
   DynamicWorkflowBlueprint,
   DynamicWorkflowStep,
   WorkflowRunDriveResult,
+  WorkflowStatusProjection,
 } from "../../src/app/domain/schemas.ts";
 import {
   MemorySourcePackDispositionSchema,
@@ -88,6 +90,7 @@ import {
 } from "../../src/cartridges/memory-fabric/schemas.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 import { createMemoryFabricWorkflowNodeAdapter } from "../../src/cartridges/memory-fabric/workflow-node-adapter.ts";
+import { createLifecycleFaithfulArtifactsRemote } from "./lifecycle-faithful-fakes.ts";
 import {
   buildIntegrationTestDreamRunRequest,
   buildIntegrationTestRunRequest,
@@ -6003,5 +6006,383 @@ describe("workflow single-step drive (one node per alarm)", () => {
       plannerInvocations: 1,
       terminalStatus: "captured",
     });
+  });
+});
+
+type SafetyEnvelopeState = WorkflowStatusProjection["currentState"];
+
+const createCrashOnceStatusProjection = (
+  base: ReturnType<typeof createMemoryWorkflowStatusProjectionStore>,
+  input: {
+    readonly crashState: SafetyEnvelopeState;
+    readonly onCrash: (state: SafetyEnvelopeState) => void;
+  }
+): ReturnType<typeof createMemoryWorkflowStatusProjectionStore> => ({
+  latest: base.latest,
+  async record(recordInput) {
+    await base.record(recordInput);
+    if (recordInput.projection.currentState === input.crashState) {
+      input.onCrash(input.crashState);
+      throw new Error(
+        `simulated durable object eviction after ${input.crashState}`
+      );
+    }
+  },
+  records: base.records,
+});
+
+const createLifecycleFaithfulDreamWorkflow = (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly contextCapsules: ReturnType<typeof createMemoryContextCapsuleActor>;
+  readonly nodeExecutions: string[];
+  readonly onPlan: () => void;
+  readonly statusProjection: ReturnType<
+    typeof createMemoryWorkflowStatusProjectionStore
+  >;
+}): WorkflowApp => {
+  const planner = createIntegrationTestDynamicWorkflowPlanner();
+  const workflowNodeAdapter: WorkflowNodeAdapterPort = {
+    async execute(nodeInput) {
+      input.nodeExecutions.push(nodeInput.step.stepId);
+      return await createArtifactBackedWorkflowCartridgeAdapter({
+        artifacts: input.artifacts,
+        delegate: createMemoryFabricWorkflowNodeAdapter({
+          artifacts: input.artifacts,
+          memoryCapture: createIntegrationTestMemoryFabricAdapter(),
+          memoryCorrelation: createIntegrationTestMemoryCorrelationAdapter(),
+          memoryRetrieval: createIntegrationTestMemoryRetrievalAdapter(),
+          memorySignals: createIntegrationTestMemoryRetrievalAdapter(),
+        }),
+        now: () => "2026-06-12T22:00:00.000Z",
+      }).execute(nodeInput);
+    },
+  };
+
+  return new WorkflowApp({
+    artifacts: input.artifacts,
+    capabilityLeases: createPolicyCapabilityLeaseBroker(input.artifacts, {
+      discordSecretRef: "secretref:discord-bot",
+      policyId: "discord-message-policy",
+    }),
+    contextCapsules: input.contextCapsules,
+    discordMessages: createDryRunDiscordMessageAdapter(),
+    discordSecretRefs: {
+      dryRun: "secretref:discord-dry-run",
+      send: "secretref:discord-bot",
+    },
+    dynamicWorkflowPlanner: {
+      async proposePlan(planInput) {
+        input.onPlan();
+        return addDreamPreflightToBlueprint(
+          await planner.proposePlan(planInput)
+        );
+      },
+    },
+    executionMode: "integration-test",
+    installedSourceProfiles: [dreamTranscriptReviewSourceProfile],
+    observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+      artifacts: input.artifacts,
+    }),
+    packageRegistry: createMemoryPackageRegistryActor(dreamIntegrationPackages),
+    postExecutionArtifactRecorders: [
+      {
+        binding: {
+          kind: "profile-id",
+          packageId: dreamTranscriptReviewSourceProfile.packageId,
+          profileId: dreamTranscriptReviewSourceProfile.profileId,
+        },
+        recorder: createMemoryGeneratedWorkflowProofRecorder({
+          artifacts: input.artifacts,
+          buildAdditionalProofChecks: async ({ executionProof }) => [
+            await buildWorkflowHitlReportAuditProofCheck({
+              artifacts: input.artifacts,
+              executionProof,
+            }),
+          ],
+          expectedPackageRef: memoryWorkflowPackageRef,
+          expectedSourceProfile: dreamTranscriptReviewSourceProfile,
+          expectedSourceProfileExportId:
+            "dream-transcript-review-source-profile",
+          now: () => "2026-06-12T22:30:00.000Z",
+        }),
+      },
+    ],
+    reviewGate: createMemoryReviewGateActor(input.artifacts),
+    reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+      artifacts: input.artifacts,
+    }),
+    statusProjection: input.statusProjection,
+    workflowNodeAdapter,
+    wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+    wzrrdSecretRefs: {
+      dryRun: "secretref:wzrrd-dry-run",
+      publish: "secretref:wzrrd-api",
+    },
+    wzrrdSiteRef: "wzrrd:test",
+  });
+};
+
+const driveLifecycleDream = async (input: {
+  readonly crashState?: SafetyEnvelopeState;
+  readonly namespace: string;
+}): Promise<{
+  readonly driveStatuses: string[];
+  readonly nodeExecutions: string[];
+  readonly plannerInvocations: number;
+  readonly remote: ReturnType<typeof createLifecycleFaithfulArtifactsRemote>;
+  readonly result: WorkflowRunDriveResult;
+}> => {
+  const remote = createLifecycleFaithfulArtifactsRemote(input.namespace);
+  const contextCapsules = createMemoryContextCapsuleActor();
+  const baseStatusProjection = createMemoryWorkflowStatusProjectionStore();
+  const request = buildIntegrationTestDreamRunRequest();
+  const driveStatuses: string[] = [];
+  const nodeExecutions: string[] = [];
+  let crashed = false;
+  let plannerInvocations = 0;
+  const markCrashed = (): void => {
+    crashed = true;
+  };
+  const countPlannerInvocation = (): void => {
+    plannerInvocations += 1;
+  };
+
+  for (let driveIndex = 0; driveIndex < 32; driveIndex += 1) {
+    const artifacts = remote.createDriveStore({
+      driveId: `drive-${driveIndex}`,
+      seedFromRemote: driveIndex > 0,
+    });
+    const shouldCrash =
+      input.crashState !== undefined && !crashed
+        ? createCrashOnceStatusProjection(baseStatusProjection, {
+            crashState: input.crashState,
+            onCrash: markCrashed,
+          })
+        : baseStatusProjection;
+    const workflow = createLifecycleFaithfulDreamWorkflow({
+      artifacts,
+      contextCapsules,
+      nodeExecutions,
+      onPlan: countPlannerInvocation,
+      statusProjection: shouldCrash,
+    });
+
+    try {
+      // eslint-disable-next-line no-await-in-loop -- each simulated alarm must persist remote/checkpoint state before the next fresh drive.
+      const result = await workflow.run(request, { driveMode: "single-step" });
+      driveStatuses.push(result.status);
+      if (result.status !== "paused") {
+        return {
+          driveStatuses,
+          nodeExecutions,
+          plannerInvocations,
+          remote,
+          result,
+        };
+      }
+    } catch (error) {
+      if (
+        !(
+          error instanceof Error &&
+          error.message.startsWith("simulated durable object eviction after ")
+        )
+      ) {
+        throw error;
+      }
+      driveStatuses.push(`evicted:${input.crashState ?? "unknown"}`);
+    }
+  }
+
+  throw new Error("Lifecycle-faithful Dream drive did not reach terminal.");
+};
+
+describe("workflow lifecycle-faithful chaos resume", () => {
+  it("reproduces the run-17 wound shape: a fresh worktree must seed from the shared remote", async () => {
+    const remote = createLifecycleFaithfulArtifactsRemote(
+      "workflow-app-run17-wound"
+    );
+    const firstDrive = remote.createDriveStore({
+      driveId: "first-drive",
+      seedFromRemote: false,
+    });
+    const runId = "run-redrive-worktree";
+    await firstDrive.writeJson({
+      path: "run/plan.json",
+      redacted: true,
+      runId,
+      value: { planned: true, schemaVersion: "test.plan.v1" },
+    });
+    const artifactRef = firstDrive.artifactRef({
+      path: "run/plan.json",
+      runId,
+    });
+    const unseededRedrive = remote.createDriveStore({
+      driveId: "unseeded-redrive",
+      seedFromRemote: false,
+    });
+    const seededRedrive = remote.createDriveStore({
+      driveId: "seeded-redrive",
+      seedFromRemote: true,
+    });
+
+    await expect(
+      unseededRedrive.readJson({ artifactRef })
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(
+      seededRedrive.readJson({ artifactRef })
+    ).resolves.toStrictEqual({ planned: true, schemaVersion: "test.plan.v1" });
+    expect(remote.cloneHistory).toStrictEqual([
+      { driveId: "first-drive", recordCount: 0, seedFromRemote: false },
+      { driveId: "unseeded-redrive", recordCount: 0, seedFromRemote: false },
+      { driveId: "seeded-redrive", recordCount: 1, seedFromRemote: true },
+    ]);
+  });
+
+  it("kills after every Dream node boundary with fresh per-drive worktrees and captures exactly once", async () => {
+    const outcome = await driveLifecycleDream({
+      namespace: "workflow-app-dream-chaos-node-boundaries",
+    });
+    const nodeExecutionCounts = Object.fromEntries(
+      [...new Set(outcome.nodeExecutions)].map((stepId) => [
+        stepId,
+        outcome.nodeExecutions.filter((executed) => executed === stepId).length,
+      ])
+    );
+
+    expect({
+      driveStatuses: outcome.driveStatuses,
+      everyDriveAfterFirstSeeded: outcome.remote.cloneHistory
+        .slice(1)
+        .every((entry) => entry.seedFromRemote && entry.recordCount > 0),
+      nodeExecutionCounts,
+      plannerInvocations: outcome.plannerInvocations,
+      terminalBlocker:
+        outcome.result.status === "blocked"
+          ? outcome.result.blocker.message
+          : null,
+      terminalStatus: outcome.result.status,
+    }).toStrictEqual({
+      driveStatuses: [
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "captured",
+      ],
+      everyDriveAfterFirstSeeded: true,
+      nodeExecutionCounts: {
+        "capture-dream-report-artifact": 1,
+        "capture-dream-run": 1,
+        "correlate-dream-evidence": 1,
+        "draft-follow-up-run-request-from-hitl": 1,
+        "hydrate-dream-evidence": 1,
+        "mine-memory-signals": 1,
+        "propose-dream-refinements": 1,
+        "render-memory-hitl-report": 1,
+        "search-dream-memory": 1,
+        "seed-next-workflow-from-hitl": 1,
+      },
+      plannerInvocations: 1,
+      terminalBlocker: null,
+      terminalStatus: "captured",
+    });
+  });
+
+  it.each([
+    ["after submit/admission", "resolvingCapsule"],
+    ["after plan pinned", "loadingPinnedDynamicWorkflow"],
+    ["after verification", "recordingReceipts"],
+    ["before capture finalize", "captured"],
+  ] satisfies readonly (readonly [string, SafetyEnvelopeState])[])(
+    "redrives to captured after eviction %s",
+    async (_label, crashState) => {
+      const outcome = await driveLifecycleDream({
+        crashState,
+        namespace: `workflow-app-dream-chaos-${crashState}`,
+      });
+
+      expect({
+        duplicateReceiptKeys: [...outcome.remote.remoteRecords.keys()].filter(
+          (artifactRef) =>
+            artifactRef.includes("/receipts/") ||
+            artifactRef.includes("/review/")
+        ).length,
+        evicted: outcome.driveStatuses.includes(`evicted:${crashState}`),
+        plannerInvocations: outcome.plannerInvocations,
+        terminalBlocker:
+          outcome.result.status === "blocked"
+            ? outcome.result.blocker.message
+            : null,
+        terminalStatus: outcome.result.status,
+      }).toStrictEqual({
+        duplicateReceiptKeys: new Set(
+          [...outcome.remote.remoteRecords.keys()].filter(
+            (artifactRef) =>
+              artifactRef.includes("/receipts/") ||
+              artifactRef.includes("/review/")
+          )
+        ).size,
+        evicted: true,
+        plannerInvocations: 1,
+        terminalBlocker: null,
+        terminalStatus: "captured",
+      });
+    }
+  );
+
+  test.fails("rejects a stale drive stomping captured status", async () => {
+    // flips when phase1a drive ledger merges
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
+    const request = buildIntegrationTestDreamRunRequest();
+    const baseProjection = {
+      actorId: request.actor.id,
+      capsuleId: `capsule:${request.workItemId}`,
+      eventCount: 1,
+      redacted: true as const,
+      runId: request.runId,
+      schemaVersion: "workflow.status-projection.v1" as const,
+      updatedAt: "2026-06-12T22:00:00.000Z",
+      workItemId: request.workItemId,
+    };
+    await statusProjection.record({
+      projection: {
+        ...baseProjection,
+        currentState: "captured",
+        lastEvent: {
+          at: "2026-06-12T22:00:00.000Z",
+          refs: {},
+          state: "captured",
+          summary: "Newer drive captured.",
+        },
+      },
+    });
+    await statusProjection.record({
+      projection: {
+        ...baseProjection,
+        currentState: "blocked",
+        eventCount: 2,
+        lastEvent: {
+          at: "2026-06-12T21:59:00.000Z",
+          refs: {},
+          state: "blocked",
+          summary: "Stale drive blocked after a newer terminal write.",
+        },
+        terminalBlocker: {
+          code: "adapter_unavailable",
+          message: "stale generation should be fenced",
+          redacted: true,
+        },
+      },
+    });
+
+    expect(statusProjection.latest.get(request.runId)?.currentState).toBe(
+      "captured"
+    );
   });
 });
