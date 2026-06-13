@@ -1,0 +1,60 @@
+---
+title: "Phase 2 Deliverable 2 post-review loop implementation"
+type: "receipt"
+status: "active"
+created_at: "2026-06-13"
+tags:
+  - phase2
+  - hitl
+  - post-review
+  - implementation
+source: .brain/resources/phase2-deliverable2-post-review-loop-architecture-2026-06-12.svx
+---
+
+# Phase 2 Deliverable 2 post-review loop implementation
+
+This captures the implementation receipt for the HITL post-review loop closed
+on branch `phase2-d2-postreview`.
+
+## Decision
+
+The architecture verdict held: Deliverable 2 is a driver plus operator
+ingestion path. No branch was added to the core runner, supervisor Durable
+Object, or memory-fabric cartridge.
+
+## Built
+
+- `scripts/workflow-app-submit-follow-up.ts` reads a
+  `memory.hitl-follow-up-run-request.v1` artifact file, refuses non-`drafted`
+  or already-submitted artifacts, probes `GET /runs/:runId/status` for
+  idempotency, posts the artifact `request` to `POST /runs` only when the
+  follow-up run is not already known, then polls to terminal status.
+- `scripts/workflow-app-write-hitl-decision.ts` ingests a human-authored
+  `memory.hitl-decision.v1` by validating it and writing it through an
+  `ArtifactStoreContract`. The live CLI constructs the existing
+  Cloudflare git-backed artifacts store; tests use the lifecycle-faithful fake
+  store to prove the same write contract.
+- The follow-up submission receipt includes `decisionSource` when the drafted
+  request notes expose `generated-draft` or `human-review`.
+
+## Receipts
+
+- `tests/integration/dream-hitl-decision-seed-node.test.ts` now covers both
+  post-review paths with `createLifecycleFaithfulArtifactsRemote`: generated
+  draft and human review both seed, draft a follow-up request, submit to a
+  captured terminal status, and preserve `decisionSource`.
+- The generated-draft test reruns the submission driver against the same
+  `submitted:false` draft and asserts only one `POST /runs` happened for the
+  follow-up `runId`.
+- The human-review test writes `report/hitl-decision.json` into the run's
+  Artifacts repo via the ingestion helper before seeding the workflow, proving
+  the human review branch stays a boring artifact write.
+
+## Constraints Held
+
+- Planner remains one-shot for the original run; the follow-up is submitted as
+  a new `WorkflowRunRequest`.
+- Draft-only side-effect posture is unchanged. The follow-up request carries
+  planner notes that keep unleased updates as artifacts for human review.
+- Customer-private boundary is preserved: no AIHero support data, private
+  paths, credentials, or raw support threads were read or copied.
