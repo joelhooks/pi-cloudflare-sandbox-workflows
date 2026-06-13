@@ -79,12 +79,14 @@ const missingArtifactError = (
   });
 
 const writeReceiptFor = (input: {
+  readonly artifactCommitSha: string;
   readonly artifactRef: ArtifactRef;
   readonly mediaType: string;
   readonly redacted: true;
   readonly value: unknown;
 }): ArtifactWriteReceipt =>
   ArtifactWriteReceiptSchema.parse({
+    artifactCommitSha: input.artifactCommitSha,
     artifactRef: input.artifactRef,
     contentHash:
       typeof input.value === "string"
@@ -99,6 +101,14 @@ export const createLifecycleFaithfulArtifactsRemote = (
 ): LifecycleFaithfulArtifactsRemote => {
   const remoteRecords = new Map<ArtifactRef, LifecycleArtifactRecord>();
   const cloneHistory: LifecycleFaithfulArtifactsRemote["cloneHistory"] = [];
+  // One shared history: every write is a commit to the same Artifacts repo,
+  // so the sha sequence is monotonic across drive stores, like git.
+  let commitCounter = 0;
+  const nextCommitSha = (): string => {
+    commitCounter += 1;
+
+    return commitCounter.toString(16).padStart(40, "0");
+  };
 
   return {
     cloneHistory,
@@ -161,6 +171,7 @@ export const createLifecycleFaithfulArtifactsRemote = (
 
           return Promise.resolve(
             writeReceiptFor({
+              artifactCommitSha: nextCommitSha(),
               artifactRef,
               mediaType: "application/json",
               redacted: writeInput.redacted,
@@ -184,6 +195,7 @@ export const createLifecycleFaithfulArtifactsRemote = (
 
           return Promise.resolve(
             writeReceiptFor({
+              artifactCommitSha: nextCommitSha(),
               artifactRef,
               mediaType: writeInput.mediaType,
               redacted: writeInput.redacted,

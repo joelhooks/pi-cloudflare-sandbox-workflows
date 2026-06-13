@@ -5,6 +5,7 @@ import type {
   WorkflowNodeAdapterPort,
   WorkflowPostExecutionArtifactRecorderPort,
 } from "../../src/app/application/ports.ts";
+import { StaleDriveGenerationError } from "../../src/app/application/ports.ts";
 import { WorkflowApp } from "../../src/app/application/workflow-app.ts";
 import { hashJson, sha256Hex } from "../../src/app/domain/hash.ts";
 import {
@@ -6479,53 +6480,79 @@ describe("workflow lifecycle-faithful chaos resume", () => {
     }
   );
 
-  test.fails("rejects a stale drive stomping captured status", async () => {
-    // flips when phase1a drive ledger merges
+  test("rejects a stale drive stomping captured status", async () => {
+    const remote = createLifecycleFaithfulArtifactsRemote(
+      "workflow-app-stale-drive-fencing"
+    );
+    const contextCapsules = createMemoryContextCapsuleActor();
     const statusProjection = createMemoryWorkflowStatusProjectionStore();
     const request = buildIntegrationTestDreamRunRequest();
-    const baseProjection = {
-      actorId: request.actor.id,
-      capsuleId: `capsule:${request.workItemId}`,
-      eventCount: 1,
-      redacted: true as const,
+    const nodeExecutions: string[] = [];
+
+    // Drive A admits first, then hangs; drive B admits, making A stale.
+    const staleAdmission = await contextCapsules.admitDrive({
       runId: request.runId,
-      schemaVersion: "workflow.status-projection.v1" as const,
-      updatedAt: "2026-06-12T22:00:00.000Z",
       workItemId: request.workItemId,
-    };
-    await statusProjection.record({
-      projection: {
-        ...baseProjection,
-        currentState: "captured",
-        lastEvent: {
-          at: "2026-06-12T22:00:00.000Z",
-          refs: {},
-          state: "captured",
-          summary: "Newer drive captured.",
-        },
-      },
     });
-    await statusProjection.record({
-      projection: {
-        ...baseProjection,
-        currentState: "blocked",
-        eventCount: 2,
-        lastEvent: {
-          at: "2026-06-12T21:59:00.000Z",
-          refs: {},
-          state: "blocked",
-          summary: "Stale drive blocked after a newer terminal write.",
-        },
-        terminalBlocker: {
-          code: "adapter_unavailable",
-          message: "stale generation should be fenced",
-          redacted: true,
-        },
+    const activeAdmission = await contextCapsules.admitDrive({
+      runId: request.runId,
+      workItemId: request.workItemId,
+    });
+    const activeWorkflow = createLifecycleFaithfulDreamWorkflow({
+      artifacts: remote.createDriveStore({
+        driveId: "drive-active",
+        seedFromRemote: false,
+      }),
+      contextCapsules,
+      nodeExecutions,
+      onPlan: () => {},
+      statusProjection,
+    });
+    const activeResult = await activeWorkflow.run(request, {
+      driveGeneration: activeAdmission.driveGeneration,
+      driveMode: "whole-run",
+    });
+    expect(activeResult.status).toBe("captured");
+
+    // Drive A wakes up on a fresh worktree and tries to write.
+    const staleWorkflow = createLifecycleFaithfulDreamWorkflow({
+      artifacts: remote.createDriveStore({
+        driveId: "drive-stale",
+        seedFromRemote: true,
+      }),
+      contextCapsules,
+      nodeExecutions,
+      onPlan: () => {
+        throw new Error("stale drive must not replan");
       },
+      statusProjection,
     });
 
-    expect(statusProjection.latest.get(request.runId)?.currentState).toBe(
-      "captured"
+    await expect(
+      staleWorkflow.run(request, {
+        driveGeneration: staleAdmission.driveGeneration,
+        driveMode: "whole-run",
+      })
+    ).rejects.toBeInstanceOf(StaleDriveGenerationError);
+
+    const ledger = contextCapsules.driveLedgers.get(
+      `${request.workItemId}:${request.runId}`
     );
+    expect({
+      capturePhaseGeneration:
+        ledger?.phases["capture-completed"]?.driveGeneration,
+      latestProjectionState: statusProjection.latest.get(request.runId)
+        ?.currentState,
+      projectionStompedByStaleDrive: (
+        statusProjection.records.get(request.runId) ?? []
+      ).some(
+        (projection) =>
+          projection.driveGeneration === staleAdmission.driveGeneration
+      ),
+    }).toStrictEqual({
+      capturePhaseGeneration: activeAdmission.driveGeneration,
+      latestProjectionState: "captured",
+      projectionStompedByStaleDrive: false,
+    });
   });
 });
