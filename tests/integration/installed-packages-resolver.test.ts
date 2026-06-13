@@ -10,6 +10,7 @@ import {
   defaultWorkflowAppPackagesDir,
   installedPackageSourceProfileFileName,
 } from "../../src/app/domain/installed-packages.ts";
+import { aiHeroSupportSweepSourceProfile } from "../../src/cartridges/aihero-support-sweep/source-profile.ts";
 import { dreamTranscriptReviewSourceProfile } from "../../src/cartridges/memory-fabric/source-profile.ts";
 
 const profileArgs = [
@@ -51,11 +52,11 @@ describe("installed-packages profile resolution", () => {
         profile,
         secondStatuses: second.files.map((file) => file.status),
       }).toStrictEqual({
-        firstStatuses: ["written", "written"],
-        packageIds: ["workflow/memory-fabric"],
+        firstStatuses: ["written", "written", "written", "written"],
+        packageIds: ["workflow/memory-fabric", "workflow/aihero-support-sweep"],
         packagesDir: resolve(repoRoot, defaultWorkflowAppPackagesDir),
         profile: dreamTranscriptReviewSourceProfile,
-        secondStatuses: ["unchanged", "unchanged"],
+        secondStatuses: ["unchanged", "unchanged", "unchanged", "unchanged"],
       });
     });
   });
@@ -70,7 +71,7 @@ describe("installed-packages profile resolution", () => {
           repoRoot,
         })
       ).toThrow(
-        'Unknown source profile "joelhooks/unknown". Installed source profiles: joelhooks/dream-transcript-review.'
+        `Unknown source profile "joelhooks/unknown". Installed source profiles: ${aiHeroSupportSweepSourceProfile.profileId}, ${dreamTranscriptReviewSourceProfile.profileId}.`
       );
     });
   });

@@ -1620,12 +1620,13 @@ describe("Cloudflare Worker route", () => {
         ],
         schemaVersion: "workflow.package-seed.v1",
       },
-      defaultPackageCount: 4,
+      defaultPackageCount: 5,
       defaultPackageIds: [
         "badass-courses/claw-kernel",
         "joelhooks/configured-familiar-kernel",
         "workflow/research-review-discord",
         "workflow/memory-fabric",
+        "workflow/aihero-support-sweep",
       ],
       status: 200,
       subject: {
@@ -1787,7 +1788,7 @@ describe("Cloudflare Worker route", () => {
       },
       finalizeCallPackageCount: 1,
       finalizeStatus: 200,
-      prepareCallDefaultPackageCount: 4,
+      prepareCallDefaultPackageCount: 5,
       prepareStatus: 200,
       returnedWriteToken: "write-token",
     });

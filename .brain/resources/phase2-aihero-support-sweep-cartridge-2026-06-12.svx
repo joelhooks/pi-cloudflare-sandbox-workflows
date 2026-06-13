@@ -1,0 +1,52 @@
+---
+title: "Phase 2 AIHero Support Sweep Cartridge Receipt"
+type: receipt
+status: active
+created_at: 2026-06-12
+tags:
+  - phase2
+  - aihero-support-sweep
+  - workflow-cartridge
+  - customer-private
+  - receipt
+---
+
+# Phase 2 AIHero Support Sweep Cartridge Receipt
+
+Implemented the Phase 2 deliverable 1 cartridge for `workflow/aihero-support-sweep` in the `/tmp/piwf-phase2` worktree.
+
+## Decisions
+
+- Built `src/cartridges/aihero-support-sweep/` as a separate workflow cartridge. No AIHero conditionals were added to the core runner, capsule supervisor, Dream cartridge, or memory-fabric cartridge.
+- Mirrored the memory-fabric anatomy: package seed, source profile, schemas, workflow-node adapter, integration fakes, Cloudflare installer, and post-execution audit proof check.
+- Kept live data access fail-closed. `AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL` is optional; when absent the Cloudflare installer contributes no live adapter. When configured, relay calls still require `AIHERO_SUPPORT_SWEEP_RELAY_TOKEN`; missing token returns a redacted `secret_denied` blocker.
+- Integration tests use only offline fakes. The fakes synthesize customer-private source receipts and redacted evidence, but do not read customer-private local source roots.
+- Runtime-profile divergence from the saved candidate: the saved source profile has `requiredRuntimes: []`, but the current `MemorySourceProfileSchema` requires at least one runtime. I declared `cloudflare` as the required runtime because the generated workflow envelope runs under Cloudflare even though no Pi/agent runtime is required by the cartridge itself.
+- Source-root runtime profile data uses sanitized `sourceRootRef` identifiers, not filesystem authority roots. This keeps raw private paths out of workflow artifacts and reports.
+- All four source families are declared primary for the cartridge profile: `brain`, `support`, `comms`, and `people-org-memory`. A confident AIHero support sweep should not pretend it reviewed the workflow if one of the four configured customer-private source families produced no receipts.
+- Side effects are cartridge-local draft artifacts only. The domain capability enum does not include Front/Slack/Discord support actions, and I did not expand it. Draft action kinds are data in the AIHero cartridge, with `submitted: false`, `leaseRequired: true`, `leaseGranted: false`, and `reviewRequired: true`.
+- The side-effect node writes both a draft-side-effects summary document and one redacted draft artifact per action, so the draft refs are real Artifacts writes rather than placeholders.
+
+## Code Surfaces
+
+- `src/cartridges/aihero-support-sweep/schemas.ts` defines the AIHero node payload and receipt schemas, using discriminated unions over `schemaVersion`.
+- `src/cartridges/aihero-support-sweep/source-profile.ts` compiles the installed `MemorySourceProfile` for `badass-courses/aihero-support-sweep` from the saved candidate fields and sanitized source-root metadata.
+- `src/cartridges/aihero-support-sweep/package-seed.ts` defines the `workflow/aihero-support-sweep` package seed and six workflow-node exports.
+- `src/cartridges/aihero-support-sweep/workflow-node-adapter.ts` implements the six-step shape: source inventory, derived-index health, signal search, redacted evidence hydration, HITL recommendations, and draft-only side effects.
+- `src/cartridges/aihero-support-sweep/integration-test-adapters.ts` provides offline fakes for the full shape.
+- `src/cartridges/aihero-support-sweep/hitl-report-audit-proof-check.ts` checks that recommendations are receipt-backed and draft side effects remain unsubmitted behind lease gates.
+- `src/cartridges/aihero-support-sweep/cloudflare-installer.ts` wires optional relay-backed live adapter creation and post-execution proof recording.
+- `src/cartridges/cloudflare-workflow-cartridges.ts` registers the installer, package seed, source profile, and env-binding schema.
+- `tests/integration/aihero-support-sweep-cartridge.test.ts` drives the full six-step generated-node shape through the artifact-backed cartridge adapter and verifies HITL recommendations, customer-private output-boundary behavior, and lease-gated draft side effects.
+- Existing package/route expectation tests were updated for the additional installed cartridge: `tests/integration/cloudflare-worker-route.test.ts` and `tests/integration/installed-packages-resolver.test.ts`.
+
+## Verification
+
+- `pnpm exec vitest run tests/integration/aihero-support-sweep-cartridge.test.ts` passed: 1 file, 3 tests.
+- `pnpm exec vitest run tests/integration/aihero-support-sweep-cartridge.test.ts tests/integration/cloudflare-worker-route.test.ts tests/integration/installed-packages-resolver.test.ts` passed: 3 files, 49 tests.
+- `pnpm verify` passed: oxfmt check, oxlint, type-aware oxlint, and tsgo typecheck.
+- `pnpm exec vitest run` completed with only environmental sandbox failures: 50/52 test files passed and 351/353 tests passed. The two failures were `listen EPERM: operation not permitted 127.0.0.1` in `tests/integration/trusted-local-dream-memory-relay-http.test.ts` and `tests/integration/dream-relay-local-readiness.test.ts`.
+
+## Carrier Findings
+
+No carrier patch was required. One schema/product mismatch is recorded above: `MemorySourceProfileSchema` currently rejects the saved candidate's empty `requiredRuntimes` array, so this cartridge declares `cloudflare` as the runtime until the carrier explicitly supports runtime-free profiles.
