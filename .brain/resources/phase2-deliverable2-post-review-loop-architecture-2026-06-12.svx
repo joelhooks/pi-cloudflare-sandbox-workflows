@@ -1,0 +1,100 @@
+---
+title: "Phase 2 Deliverable 2: post-review loop architecture verdict"
+type: "decision"
+status: "active"
+created_at: "2026-06-12"
+tags:
+  - phase2
+  - hitl
+  - post-review
+  - decision-seed
+  - carrier-clean
+source: .brain/resources/aihero-support-sweep-phase2-spec.svx
+---
+
+# Phase 2 Deliverable 2: post-review loop architecture verdict
+
+Deliverable 2 closes the HITL decision-seed loop end to end: a run captures → a
+follow-up run is seeded from the decision (`human-review` or `generated-draft`)
+→ the follow-up reaches `captured` with `decisionSource` threaded through. This
+doc records the architecture investigation (2026-06-12) that decides **how** to
+close it, before any code is dispatched.
+
+## Verdict: carrier-clean. The gap is a driver + a decision-ingestion path, not a core-runner branch.
+
+Three load-bearing facts from the code (read at `fa41c1a`):
+
+1. **A follow-up is a normal run.** Submission is `POST /runs` with a
+   `WorkflowRunRequest` (`scripts/workflow-app-run.ts:549`, schema
+   `WorkflowRunRequestSchema` `src/app/domain/schemas.ts:2130`: `actor`,
+   `planProposal`, `runId`, `workItemId`).
+2. **The drafted follow-up already IS a valid `WorkflowRunRequest`.**
+   `hitlFollowUpRunRequestDocumentFor` (`workflow-node-adapter.ts:2347`) sets
+   `request = { actor, planProposal: { intent, requestedPackageIds,
+   stochasticNotes }, runId, workItemId }` whenever `status === "drafted"`.
+   `PlanProposalSchema` (`schemas.ts:629`) requires only `intent`;
+   `sourceProfileId` is optional. So `request` validates as-is — nothing in the
+   draft needs reshaping to be submittable.
+3. **The planner already emits the seed + follow-up nodes.** The Dream source
+   profile's planner guidance (`source-profile.ts`) instructs the generated
+   workflow to draft `memory.hitl-follow-up-run-request.v1` with
+   `submitted:false` as "planner input for the next run." So the seed
+   (`joelclaw.memory.hitl-decision-workflow-seed`) and follow-up
+   (`joelclaw.memory.hitl-follow-up-run-request`) node types enter a machine via
+   profile guidance, not via a branch in `workflow-app.ts` or the supervisor.
+
+Therefore Deliverable 2 adds **no new branch to the core runner or Dream
+cartridge** — same invariant Phase 2 holds for Deliverable 1. It is additive
+scripting plus (for the human-review path) a decision-ingestion mechanism.
+
+## The two paths
+
+### generated-draft (nearly closed)
+The first Dream run runs the seed node while **no** `memory.hitl-decision.v1`
+exists, so the seed takes the generated-draft branch
+(`deriveGeneratedDraftSeed`, `workflow-node-adapter.ts:3354`), labels
+`decisionSource: "generated-draft"`, and the follow-up node drafts a valid
+`request`. **Missing only the submission step**: read the drafted
+`memory.hitl-follow-up-run-request.v1`, POST `request` to `/runs`, poll to
+`captured`.
+
+### human-review (the real work)
+The seed node only takes the human-review branch when a
+`memory.hitl-decision.v1` artifact is already present. During the first run none
+exists, so human-review requires a **post-review pass**: after the first run
+captures, a human writes a decision artifact, then the seed node runs again
+against the now-present decision and drafts the follow-up with
+`decisionSource: "human-review"`. Needs:
+1. **Decision ingestion** — an operator path that writes a human-authored
+   `memory.hitl-decision.v1` into the run's Artifacts repo. This IS the human
+   review; keep it a boring script, not a Wzrrd callback (callback is
+   gold-plating for burn-in). Customer-private boundary still binds.
+2. **A post-review trigger** — a run/intent whose generated machine runs the
+   seed node pointed at the prior run's report + the freshly-written decision,
+   then drafts + (via the same driver) submits the follow-up.
+
+## What to build (the D2 codex dispatch, after D1 lands)
+
+1. A **follow-up submission driver** (e.g. `scripts/workflow-app-submit-follow-up.*`):
+   reads a `memory.hitl-follow-up-run-request.v1` artifact, validates
+   `status === "drafted"`, POSTs `request` to `/runs`, polls to terminal. Refuses
+   when `submitted` is already true or status is not `drafted`. Idempotent on
+   the follow-up `runId`.
+2. A **decision-ingestion path** for the human-review branch: write a
+   human-authored `memory.hitl-decision.v1` into a run's Artifacts repo. Reuse the
+   existing git-backed artifact write path; do not invent a second one.
+3. Optionally thread **`decisionSource`** into the captured follow-up run's
+   receipt for provenance (informative; flagged by the seed-path survey as
+   nice-to-have, not load-bearing).
+4. Integration coverage: both paths drive to `captured` through the
+   lifecycle-faithful harness; assert `decisionSource` is correct per path and
+   that `submitted:false` drafts are never double-submitted.
+
+## Boundaries (binding, restated)
+- No new core-runner / Dream-cartridge branch. If closure seems to need one,
+  STOP — it's a carrier finding.
+- Burn-in is draft-only: the follow-up is a real captured run, but its own
+  side-effect nodes stay lease-gated draft-only. No live Front/GitHub/Linear.
+- Customer-private boundary holds for any AIHero-shaped post-review content.
+- Planner stays one-shot; the follow-up is a *new* dynamically-planned run, not a
+  replay of the first run's pinned plan.
