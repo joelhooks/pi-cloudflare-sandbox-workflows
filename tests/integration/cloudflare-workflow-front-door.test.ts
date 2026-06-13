@@ -252,6 +252,9 @@ const createAdmissionCapsuleController = (): ContextCapsuleActorContract &
     persistCheckpoint(input) {
       return capsules.persistCheckpoint(input);
     },
+    recordDriveNodeAttempt(input) {
+      return capsules.recordDriveNodeAttempt(input);
+    },
     recordDrivePhaseCompletion(input) {
       return capsules.recordDrivePhaseCompletion(input);
     },

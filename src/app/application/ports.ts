@@ -14,6 +14,7 @@ import type {
   WorkflowDriveAdmission,
   WorkflowDriveLedger,
   WorkflowDriveLedgerPhase,
+  WorkflowDriveNodeAttempt,
   DiscordDeliveryResult,
   DiscordMessagePayload,
   DiscordResource,
@@ -54,6 +55,7 @@ import type {
   WorkflowRunRequest,
   WorkflowRunResult,
   WorkflowEvent,
+  WorkflowNodeType,
   WorkflowObservabilityPack,
   WorkflowStatusProjection,
   WorkflowStructuredLogRecord,
@@ -124,6 +126,15 @@ export interface ContextCapsuleActorContract {
     readonly runId: string;
     readonly workItemId: string;
   }): Promise<WorkflowDriveLedger>;
+
+  recordDriveNodeAttempt(input: {
+    readonly driveGeneration: number;
+    readonly nodeIndex: number;
+    readonly nodeType?: WorkflowNodeType;
+    readonly runId: string;
+    readonly stepId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveNodeAttempt>;
 }
 
 export class StaleDriveGenerationError extends Error {

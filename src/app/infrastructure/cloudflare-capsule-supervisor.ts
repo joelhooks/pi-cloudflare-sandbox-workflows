@@ -27,6 +27,8 @@ import {
   WorkflowDriveAdmissionSchema,
   WorkflowDriveGenerationAssertionRequestSchema,
   WorkflowDriveLedgerPhaseCompletionRequestSchema,
+  WorkflowDriveNodeAttemptRecordRequestSchema,
+  WorkflowDriveNodeAttemptSchema,
   WorkflowDriveLedgerRequestSchema,
   WorkflowDriveLedgerSchema,
   WorkflowRunRequestSchema,
@@ -38,6 +40,7 @@ import type {
   RunDurabilityDump,
   RunStepCheckpoint,
   WorkflowDriveLedger,
+  WorkflowDriveNodeAttempt,
   StartRunRequest,
   WorkflowRunRequest,
 } from "../domain/schemas.ts";
@@ -52,6 +55,7 @@ export interface WorkflowCapsuleSupervisorEnv {
   readonly WORKFLOW_APP_D1?: CloudflareD1PackageRegistryConfig["d1"];
   readonly WORKFLOW_APP_TIMEOUT_MS?: number | string;
   readonly WORKFLOW_CAPSULE_SUPERVISOR: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>;
+  readonly ZOMBIE_NODE_MAX_ATTEMPTS?: number | string;
 }
 
 /**
@@ -329,6 +333,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       "/load-drive-ledger": () => this.loadDriveLedger(request),
       "/load-latest-checkpoint": () => this.loadLatestCheckpoint(request),
       "/persist-checkpoint": () => this.persistCheckpoint(request),
+      "/record-drive-node-attempt": () => this.recordDriveNodeAttempt(request),
       "/record-drive-phase": () => this.recordDrivePhase(request),
       "/release-lane": () => this.releaseLane(request),
       "/resolve": () => this.resolveCapsule(request),
@@ -453,6 +458,47 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         updatedAt: completedAt,
       })
     );
+  }
+
+  private async recordDriveNodeAttempt(request: Request): Promise<Response> {
+    const input = WorkflowDriveNodeAttemptRecordRequestSchema.parse(
+      await request.json()
+    );
+    try {
+      await this.assertActiveGeneration(input);
+    } catch (error) {
+      if (error instanceof StaleDriveGenerationError) {
+        return json(error.rejection, { status: 409 });
+      }
+
+      throw error;
+    }
+
+    const current = await this.getDriveLedger(input);
+    const nodeAttemptKey = String(input.nodeIndex);
+    const existing = current.nodeAttempts[nodeAttemptKey];
+    const attemptedAt = nowIso();
+    const attempt: WorkflowDriveNodeAttempt =
+      WorkflowDriveNodeAttemptSchema.parse({
+        attemptCount: (existing?.attemptCount ?? 0) + 1,
+        firstAttemptedAt: existing?.firstAttemptedAt ?? attemptedAt,
+        lastAttemptedAt: attemptedAt,
+        lastDriveGeneration: input.driveGeneration,
+        nodeIndex: input.nodeIndex,
+        ...(input.nodeType === undefined ? {} : { nodeType: input.nodeType }),
+        stepId: input.stepId,
+      });
+
+    await this.putDriveLedger({
+      ...current,
+      nodeAttempts: {
+        ...current.nodeAttempts,
+        [nodeAttemptKey]: attempt,
+      },
+      updatedAt: attemptedAt,
+    });
+
+    return json(attempt);
   }
 
   private async admitLane(request: Request): Promise<Response> {
@@ -589,8 +635,42 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       checkpointStorageKey(checkpoint.runId, checkpoint.stepIndex),
       checkpoint
     );
+    await this.clearDriveNodeAttemptsThrough({
+      checkpointStepIndex: checkpoint.stepIndex,
+      runId: checkpoint.runId,
+    });
 
     return json({ ok: true });
+  }
+
+  private async clearDriveNodeAttemptsThrough(input: {
+    readonly checkpointStepIndex: number;
+    readonly runId: string;
+  }): Promise<void> {
+    const current = WorkflowDriveLedgerSchema.nullable().parse(
+      (await this.ctx.storage.get(driveLedgerStorageKey(input.runId))) ?? null
+    );
+    if (current === null) {
+      return;
+    }
+
+    const nodeAttempts = Object.fromEntries(
+      Object.entries(current.nodeAttempts).filter(
+        ([, attempt]) => attempt.nodeIndex > input.checkpointStepIndex
+      )
+    );
+    if (
+      Object.keys(nodeAttempts).length ===
+      Object.keys(current.nodeAttempts).length
+    ) {
+      return;
+    }
+
+    await this.putDriveLedger({
+      ...current,
+      nodeAttempts,
+      updatedAt: nowIso(),
+    });
   }
 
   /**
@@ -1324,6 +1404,15 @@ export const createCloudflareCapsuleSupervisorClient = (
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
+    },
+    async recordDriveNodeAttempt(input) {
+      return WorkflowDriveNodeAttemptSchema.parse(
+        await postJson(
+          stubFor(input.workItemId),
+          "/record-drive-node-attempt",
+          input
+        )
+      );
     },
     async recordDrivePhaseCompletion(input) {
       return WorkflowDriveLedgerSchema.parse(

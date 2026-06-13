@@ -1,0 +1,202 @@
+---
+title: "Fix B proposal: async sandbox lane polling"
+type: "proposal"
+status: "approved"
+created_at: "2026-06-13"
+resolved_at: "2026-06-12"
+tags:
+  - cloudflare
+  - durable-execution
+  - dynamic-workflows
+  - sandbox-lanes
+  - zombie-drive
+source: run-live-20260613T040321942Z-aabe6448
+---
+
+# Fix B proposal: async sandbox lane polling
+
+Fix A turns the zombie no-progress loop into a terminal blocked run. That is the
+right carrier backstop, but it does not make a genuinely heavy dynamic node
+finish. The dream/memory-fabric burn-in still needs a carrier path where a
+single dynamic node can continue outside the supervisor alarm invocation that
+started it.
+
+## Proposal
+
+Split sandbox lane execution into a durable two-phase carrier operation:
+
+1. On first admission for a dynamic node, dispatch the sandbox lane
+   asynchronously, persist a `lane-dispatched` receipt in the drive ledger, and
+   return `paused` immediately. The generated plan and machine remain pinned;
+   no `STEP_DONE` is sent yet.
+2. On later alarm drives, reload the same checkpoint and same drive ledger, poll
+   the lane receipt by deterministic lane/run/node identity, and keep returning
+   `paused` while the receipt is absent.
+3. When the receipt is present and valid, load the output artifact refs from the
+   receipt, send the generated actor `STEP_DONE`, write the normal
+   `RunStepCheckpoint`, clear the per-node attempt record, and preserve
+   single-step semantics by pausing before the next node.
+4. If the lane returns a terminal failed receipt or exceeds an explicit lane
+   timeout/attempt policy, block through the existing terminal `block()` path
+   with the same redacted terminal blocker shape used by Fix A.
+
+This keeps the planner one-shot, keeps the plan immutable, and keeps "one
+dynamic node per alarm" intact. The node is still the same generated node; only
+the carrier changes how it waits for the side-effect receipt.
+
+## Why not patch the Dream cartridge
+
+The defect is in the carrier. The Dream node is allowed to be heavy; the runner
+promised durable dynamic execution. Adding a Dream-only branch would make the
+generated-machine semantics lie about what the platform can execute. The proper
+boundary is the lane runtime and drive ledger.
+
+## Cloudflare runtime receipts
+
+Cloudflare's current docs say each container is managed by a Durable Object, and
+the container process runs the image inside a Linux VM while the DO handles
+routing, persistent state, and lifecycle hooks:
+
+- https://developers.cloudflare.com/durable-objects/api/container/
+- https://developers.cloudflare.com/containers/platform-details/architecture/
+
+The same docs say a container can stay alive for a configured `sleepAfter`
+window after requests, and that containers receive SIGTERM before shutdown.
+Cloudflare's limits docs also separate CPU time from wall time and state that DO
+alarm handlers have a 15 minute wall-time limit:
+
+- https://developers.cloudflare.com/durable-objects/platform/limits/
+- https://developers.cloudflare.com/workers/platform/limits/
+
+Implication: the sandbox/container is not just inline JavaScript inside the
+supervisor alarm. It is addressed through a container-backed DO and has its own
+runtime process/lifecycle. However, the current carrier still blocks the
+supervisor drive because `src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts`
+awaits `sandbox.exec()` in `runCommand`, then reads the receipt and destroys the
+sandbox before returning. The proposal depends on changing that carrier contract,
+not on assuming the current blocking call survives supervisor eviction.
+
+Open verification before implementation: confirm the Cloudflare Sandbox SDK
+offers a nonblocking process/job primitive or enough container shell control to
+start a detached lane command whose receipt can be recovered after the
+supervisor invocation returns. If it does not, we need a small container-side
+lane daemon or command wrapper that writes job status and receipt files.
+
+## Resolution (2026-06-12): SDK capability confirmed — architecture locked
+
+The open verification is answered by the installed type surface, not docs.
+`@cloudflare/sandbox@0.11.0` ships a genuine non-blocking process API
+(`node_modules/.pnpm/@cloudflare+sandbox@0.11.0/.../dist/sandbox-B9LOT0cg.d.ts`):
+
+- `startProcess(command, options?): Promise<Process>` — non-blocking dispatch;
+  returns a handle, NOT a result. Doc examples: `startProcess("python train.py")`,
+  `startProcess("npm run dev")` — the long-running background pattern.
+- `getProcess(id, sessionId?): Promise<Process | null>` — recovers the handle from
+  a *later* alarm invocation by id.
+- `Process.status: 'starting' | 'running' | 'completed' | 'failed' | 'killed' | 'error'`,
+  plus `exitCode?`, `endTime?`, `getStatus()` — clean in-flight vs terminal discrimination.
+
+No container-side lane daemon is needed; the SDK process API IS the daemon. The
+proposal's worst-case ("high: build a daemon") collapses to "medium: swap
+`exec`→`startProcess`, split into dispatch/poll, stop destroying the sandbox,
+persist `processId`+`sandboxId`+`sessionId` in the drive ledger."
+
+**Durability layering (mandatory).** The in-container process registry may not
+survive a container cold-restart (`sleepAfter` eviction + restart). So
+`getProcess(processId).status` is a *liveness hint*, not the authority. The lane
+wrapper commits its receipt to the git-backed Artifacts repo as its terminal
+action; the supervisor trusts **receipt-in-Artifacts** as final truth:
+
+- receipt present + output refs resolve → advance once (STEP_DONE, checkpoint,
+  clear attempt, pause before next node).
+- `getProcess` returns `failed`/`killed`/`error`, or `null` + no receipt past the
+  deadline → block (unrecoverable lane loss) via the same redacted terminal
+  blocker shape as Fix A.
+- otherwise (`running`/`starting`, or `null` but within deadline and no receipt) →
+  `paused`, poll again next alarm.
+
+Idempotency: when a `lane-dispatched` record exists for `(runId,nodeIndex,stepId)`,
+re-drives poll the existing `processId` — never `startProcess` again. Invariants
+held: planner one-shot, plan pinned immutable, one-node-per-alarm, carrier-only
+(no Dream-cartridge branch), draft-only.
+
+## Receipt recovery contract
+
+The async lane is viable only if a later alarm can recover the result without
+re-running the node. The minimal receipt contract:
+
+- Deterministic lane identity: `runId`, `nodeIndex`, `stepId`, `laneId`, and
+  sandbox id.
+- Dispatch receipt in the drive ledger: sandbox id, command id/process id when
+  available, prompt artifact ref, expected receipt artifact ref, expected output
+  artifact refs, dispatch timestamp, timeout deadline, and lane auth lease id.
+- Container-side durable marker: a small JSON status file in the sandbox
+  workspace, plus the existing artifact receipt committed to Artifacts when the
+  lane finishes.
+- Completion receipt: the existing `AgentLaneReceipt` schema remains the final
+  authority. The runner should trust completion only when the receipt can be
+  read from the sandbox or Artifacts and all declared output artifact refs
+  resolve.
+
+If the supervisor sees `lane-dispatched` but no receipt, it polls and pauses. If
+it sees the receipt, it advances once. If the sandbox is gone and no receipt
+exists, it blocks as an unrecoverable lane loss rather than re-running the node
+blindly.
+
+## File-level change surface
+
+- `src/app/application/ports.ts`: introduce an async lane runtime contract,
+  likely `dispatchLane`, `pollLane`, and `readLaneReceipt`, while keeping the
+  existing blocking runtime for local tests and non-Cloudflare adapters.
+- `src/app/infrastructure/cloudflare-sandbox-agent-lanes.ts`: split
+  `runCloudflareSandboxPiAgentLane` into dispatch/poll/receipt helpers; stop
+  destroying the sandbox until receipt recovery or terminal cleanup.
+- `src/app/application/workflow-app.ts`: in the carrier's dynamic node execution
+  path, recognize a persisted lane-dispatched record and poll it before deciding
+  whether to execute, pause, checkpoint, or block. This should be a runner
+  carrier branch around lane status, not a Dream cartridge branch.
+- `src/app/domain/schemas.ts`: add drive-ledger schema for lane dispatch and
+  lane status receipts.
+- `src/app/infrastructure/cloudflare-capsule-supervisor.ts`: expose the ledger
+  write/read endpoints for lane dispatch/status if the existing phase endpoints
+  are too coarse.
+- `tests/integration/workflow-app.test.ts`: add lifecycle-faithful chaos tests
+  for dispatch-then-poll, missing receipt, late receipt, and healthy one-node
+  single-step completion.
+
+Likely no changes:
+
+- Dream cartridge files.
+- Generated-machine schema or core planner semantics.
+- Relay configuration.
+- Deployment secrets.
+
+## Risks and open questions
+
+- SDK capability: `sandbox.exec()` is blocking today. We need either a supported
+  nonblocking command API, a long-running container daemon, or a shell-level
+  detached job pattern that Cloudflare permits and that leaves recoverable
+  status.
+- Lease lifetime: the Artifacts token and Pi auth lease must outlive the async
+  lane or be represented as scoped, refreshable lease references that the lane
+  can redeem without exposing secrets to the planner.
+- Cleanup: the sandbox must not be destroyed in the `finally` path after
+  dispatch. Cleanup moves to completion, terminal block, or a separate timeout
+  reaper.
+- Idempotency: re-dispatch must be forbidden when `lane-dispatched` exists for
+  the same `(runId,nodeIndex,stepId)` unless a human/operator explicitly marks
+  the prior lane unrecoverable.
+- Poll cost: imminent alarms that poll a long lane can become noisy. Use the
+  drive ledger to store next-poll-at/backoff while keeping the run visibly
+  active.
+- Terminal semantics: if the receipt proves failure, block. If the receipt is
+  absent past deadline, block. If the supervisor loses its own invocation, the
+  lane receipt must still be enough to checkpoint on the next alarm.
+
+## Burn-in call
+
+Fix B, or an equivalent async heavy-node completion mechanism, is necessary for
+the dream shape to capture reliably in burn-in if node 0 genuinely exceeds one
+supervisor invocation. Fix A prevents silent infinite loops; Fix B is the path
+from "blocked instead of zombie" to "captured without violating the generated
+workflow contract."

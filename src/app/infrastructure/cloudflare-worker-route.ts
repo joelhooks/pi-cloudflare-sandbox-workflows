@@ -226,6 +226,7 @@ const BaseWorkerEnvBindingSchema = z.object({
     .string()
     .min(1)
     .default("pi-cloudflare-sandbox-workflows/0.0.0"),
+  ZOMBIE_NODE_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(3),
 });
 
 const WorkerEnvBindingSchema = BaseWorkerEnvBindingSchema.extend(
@@ -416,6 +417,7 @@ export const createFrontDoorFromEnv = (
       publish: bindings.WZRRD_PUBLISH_SECRET_REF,
     },
     wzrrdSiteRef: bindings.WZRRD_SITE_REF,
+    zombieNodeMaxAttempts: bindings.ZOMBIE_NODE_MAX_ATTEMPTS,
   });
 };
 

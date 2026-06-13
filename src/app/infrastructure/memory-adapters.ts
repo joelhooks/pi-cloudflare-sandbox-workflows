@@ -36,6 +36,8 @@ import {
   WorkflowDriveAdmissionSchema,
   WorkflowDriveGenerationAssertionRequestSchema,
   WorkflowDriveLedgerPhaseCompletionRequestSchema,
+  WorkflowDriveNodeAttemptRecordRequestSchema,
+  WorkflowDriveNodeAttemptSchema,
   WorkflowDriveLedgerRequestSchema,
   WorkflowDriveLedgerSchema,
   WzrrdPublishDeliveryResultSchema,
@@ -64,6 +66,7 @@ import type {
   PinnedPackage,
   RunStepCheckpoint,
   WorkflowDriveLedger,
+  WorkflowDriveNodeAttempt,
   WorkflowEvent,
   WorkflowStatusProjection,
   WzrrdPublishDeliveryResult,
@@ -320,6 +323,35 @@ export const createMemoryContextCapsuleActor =
 
       return parsed;
     };
+    const clearNodeAttemptsThrough = (input: {
+      readonly checkpointStepIndex: number;
+      readonly runId: string;
+      readonly workItemId: string;
+    }): void => {
+      const key = driveLedgerKey(input);
+      const current = driveLedgers.get(key);
+      if (current === undefined) {
+        return;
+      }
+
+      const nodeAttempts = Object.fromEntries(
+        Object.entries(current.nodeAttempts).filter(
+          ([, attempt]) => attempt.nodeIndex > input.checkpointStepIndex
+        )
+      );
+      if (
+        Object.keys(nodeAttempts).length ===
+        Object.keys(current.nodeAttempts).length
+      ) {
+        return;
+      }
+
+      putLedger({
+        ...current,
+        nodeAttempts,
+        updatedAt: nowIso(),
+      });
+    };
     const assertGeneration = (input: {
       readonly driveGeneration: number;
       readonly runId: string;
@@ -402,8 +434,42 @@ export const createMemoryContextCapsuleActor =
           `${checkpoint.runId}:${checkpoint.stepIndex}`,
           checkpoint
         );
+        clearNodeAttemptsThrough({
+          checkpointStepIndex: checkpoint.stepIndex,
+          runId: checkpoint.runId,
+          workItemId: checkpoint.workItemId,
+        });
 
         return Promise.resolve();
+      },
+      recordDriveNodeAttempt(input): Promise<WorkflowDriveNodeAttempt> {
+        const parsed = WorkflowDriveNodeAttemptRecordRequestSchema.parse(input);
+        assertGeneration(parsed);
+        const current = loadLedger(parsed);
+        const key = String(parsed.nodeIndex);
+        const existing = current.nodeAttempts[key];
+        const attemptedAt = nowIso();
+        const attempt = WorkflowDriveNodeAttemptSchema.parse({
+          attemptCount: (existing?.attemptCount ?? 0) + 1,
+          firstAttemptedAt: existing?.firstAttemptedAt ?? attemptedAt,
+          lastAttemptedAt: attemptedAt,
+          lastDriveGeneration: parsed.driveGeneration,
+          nodeIndex: parsed.nodeIndex,
+          ...(parsed.nodeType === undefined
+            ? {}
+            : { nodeType: parsed.nodeType }),
+          stepId: parsed.stepId,
+        });
+        putLedger({
+          ...current,
+          nodeAttempts: {
+            ...current.nodeAttempts,
+            [key]: attempt,
+          },
+          updatedAt: attemptedAt,
+        });
+
+        return Promise.resolve(attempt);
       },
       recordDrivePhaseCompletion(input) {
         const parsed =

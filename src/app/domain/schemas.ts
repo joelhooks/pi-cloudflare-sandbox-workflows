@@ -2258,8 +2258,21 @@ export const WorkflowDriveLedgerPhaseSchema = z.object({
   refs: z.record(z.string().min(1), z.string().min(1)).default({}),
 });
 
+export const WorkflowDriveNodeAttemptSchema = z.object({
+  attemptCount: z.number().int().min(1),
+  firstAttemptedAt: IsoDateTimeSchema,
+  lastAttemptedAt: IsoDateTimeSchema,
+  lastDriveGeneration: z.number().int().min(0),
+  nodeIndex: z.number().int().min(0),
+  nodeType: WorkflowNodeTypeSchema.optional(),
+  stepId: z.string().min(1),
+});
+
 export const WorkflowDriveLedgerSchema = z.object({
   driveGeneration: z.number().int().min(0).default(0),
+  nodeAttempts: z
+    .record(z.string().min(1), WorkflowDriveNodeAttemptSchema)
+    .default({}),
   phases: z
     .record(z.string().min(1), WorkflowDriveLedgerPhaseSchema)
     .default({}),
@@ -2291,6 +2304,15 @@ export const WorkflowDriveLedgerPhaseCompletionRequestSchema = z.object({
     driveGeneration: true,
   }),
   runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+export const WorkflowDriveNodeAttemptRecordRequestSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  nodeIndex: z.number().int().min(0),
+  nodeType: WorkflowNodeTypeSchema.optional(),
+  runId: z.string().min(1),
+  stepId: z.string().min(1),
   workItemId: z.string().min(1),
 });
 
@@ -2371,6 +2393,9 @@ export type WorkflowDriveLedgerPhase = z.infer<
 >;
 export type WorkflowDriveLedgerPhaseId = z.infer<
   typeof WorkflowDrivePhaseIdSchema
+>;
+export type WorkflowDriveNodeAttempt = z.infer<
+  typeof WorkflowDriveNodeAttemptSchema
 >;
 export type PersistRunCheckpointRequest = z.infer<
   typeof PersistRunCheckpointRequestSchema

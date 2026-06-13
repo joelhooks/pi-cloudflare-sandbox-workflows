@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { describe, expect, it, test } from "vitest";
 
 import type {
@@ -3041,6 +3043,7 @@ describe("workflow app integration contract", () => {
     const transitionCommands: string[] = [];
     // oxlint-disable-next-line typescript/dot-notation -- Drive the private execution loop directly to prove the completion tripwire fires even if a future validator gap admits a skip-to-done machine.
     const execution = await workflow["executeDynamicWorkflow"]({
+      admitDynamicNodeAttempt: () => Promise.resolve({ status: "accepted" }),
       block: (blockedBy, summary) => {
         blockCalls.push({ blockedBy, summary });
 
@@ -5754,6 +5757,7 @@ const resumeExecution = (
 ) =>
   // oxlint-disable-next-line typescript/dot-notation -- Drive the private durable execution loop directly to prove alarm-style resume continues from a checkpoint without re-firing completed steps.
   rig.workflow["executeDynamicWorkflow"]({
+    admitDynamicNodeAttempt: () => Promise.resolve({ status: "accepted" }),
     block: (blockedBy) =>
       Promise.resolve({
         blocker: blockedBy,
@@ -6178,16 +6182,24 @@ const createCrashOnceStatusProjection = (
 const createLifecycleFaithfulDreamWorkflow = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly contextCapsules: ReturnType<typeof createMemoryContextCapsuleActor>;
+  readonly indefinitelyPendingStepIds?: ReadonlySet<string>;
   readonly nodeExecutions: string[];
   readonly onPlan: () => void;
   readonly statusProjection: ReturnType<
     typeof createMemoryWorkflowStatusProjectionStore
   >;
+  readonly zombieNodeMaxAttempts?: number;
 }): WorkflowApp => {
   const planner = createIntegrationTestDynamicWorkflowPlanner();
   const workflowNodeAdapter: WorkflowNodeAdapterPort = {
     async execute(nodeInput) {
       input.nodeExecutions.push(nodeInput.step.stepId);
+      if (
+        input.indefinitelyPendingStepIds?.has(nodeInput.step.stepId) === true
+      ) {
+        return await Promise.race<never>([]);
+      }
+
       return await createArtifactBackedWorkflowCartridgeAdapter({
         artifacts: input.artifacts,
         delegate: createMemoryFabricWorkflowNodeAdapter({
@@ -6257,6 +6269,9 @@ const createLifecycleFaithfulDreamWorkflow = (input: {
     }),
     statusProjection: input.statusProjection,
     workflowNodeAdapter,
+    ...(input.zombieNodeMaxAttempts === undefined
+      ? {}
+      : { zombieNodeMaxAttempts: input.zombieNodeMaxAttempts }),
     wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
     wzrrdSecretRefs: {
       dryRun: "secretref:wzrrd-dry-run",
@@ -6340,6 +6355,31 @@ const driveLifecycleDream = async (input: {
   throw new Error("Lifecycle-faithful Dream drive did not reach terminal.");
 };
 
+const waitForNodeAttemptCount = async (input: {
+  readonly contextCapsules: ReturnType<typeof createMemoryContextCapsuleActor>;
+  readonly expectedAttemptCount: number;
+  readonly nodeIndex: number;
+  readonly request: ReturnType<typeof buildIntegrationTestDreamRunRequest>;
+}): Promise<void> => {
+  const ledgerKey = `${input.request.workItemId}:${input.request.runId}`;
+  for (let poll = 0; poll < 25; poll += 1) {
+    const actual =
+      input.contextCapsules.driveLedgers.get(ledgerKey)?.nodeAttempts[
+        String(input.nodeIndex)
+      ]?.attemptCount ?? 0;
+    if (actual === input.expectedAttemptCount) {
+      return;
+    }
+
+    // eslint-disable-next-line no-await-in-loop -- polling a pending simulated drive until its pre-dispatch ledger write lands.
+    await sleep(0);
+  }
+
+  throw new Error(
+    `Expected node ${input.nodeIndex} attempt count ${input.expectedAttemptCount}.`
+  );
+};
+
 describe("workflow lifecycle-faithful chaos resume", () => {
   it("reproduces the run-17 wound shape: a fresh worktree must seed from the shared remote", async () => {
     const remote = createLifecycleFaithfulArtifactsRemote(
@@ -6381,6 +6421,178 @@ describe("workflow lifecycle-faithful chaos resume", () => {
       { driveId: "unseeded-redrive", recordCount: 0, seedFromRemote: false },
       { driveId: "seeded-redrive", recordCount: 1, seedFromRemote: true },
     ]);
+  });
+
+  it("blocks a first Dream node that repeatedly exceeds the single-invocation budget while healthy drives still capture", async () => {
+    const maxAttempts = 3;
+    const stuckStepId = "capture-dream-run";
+    const stuckRemote = createLifecycleFaithfulArtifactsRemote(
+      "workflow-app-dream-chaos-zombie-node"
+    );
+    const stuckContextCapsules = createMemoryContextCapsuleActor();
+    const stuckStatusProjection = createMemoryWorkflowStatusProjectionStore();
+    const stuckRequest = buildIntegrationTestDreamRunRequest();
+    const stuckNodeExecutions: string[] = [];
+    const pendingDrives: Promise<WorkflowRunDriveResult>[] = [];
+    let stuckPlannerInvocations = 0;
+    const countStuckPlan = (): void => {
+      stuckPlannerInvocations += 1;
+    };
+
+    for (let driveIndex = 0; driveIndex < maxAttempts; driveIndex += 1) {
+      const workflow = createLifecycleFaithfulDreamWorkflow({
+        artifacts: stuckRemote.createDriveStore({
+          driveId: `stuck-drive-${driveIndex}`,
+          seedFromRemote: driveIndex > 0,
+        }),
+        contextCapsules: stuckContextCapsules,
+        indefinitelyPendingStepIds: new Set([stuckStepId]),
+        nodeExecutions: stuckNodeExecutions,
+        onPlan: countStuckPlan,
+        statusProjection: stuckStatusProjection,
+        zombieNodeMaxAttempts: maxAttempts,
+      });
+      const admission = await stuckContextCapsules.admitDrive({
+        runId: stuckRequest.runId,
+        workItemId: stuckRequest.workItemId,
+      });
+
+      pendingDrives.push(
+        workflow.run(stuckRequest, {
+          driveGeneration: admission.driveGeneration,
+          driveMode: "single-step",
+        })
+      );
+      await waitForNodeAttemptCount({
+        contextCapsules: stuckContextCapsules,
+        expectedAttemptCount: driveIndex + 1,
+        nodeIndex: 0,
+        request: stuckRequest,
+      });
+    }
+
+    const blockingWorkflow = createLifecycleFaithfulDreamWorkflow({
+      artifacts: stuckRemote.createDriveStore({
+        driveId: "stuck-drive-blocking",
+        seedFromRemote: true,
+      }),
+      contextCapsules: stuckContextCapsules,
+      indefinitelyPendingStepIds: new Set([stuckStepId]),
+      nodeExecutions: stuckNodeExecutions,
+      onPlan: countStuckPlan,
+      statusProjection: stuckStatusProjection,
+      zombieNodeMaxAttempts: maxAttempts,
+    });
+    const blockingAdmission = await stuckContextCapsules.admitDrive({
+      runId: stuckRequest.runId,
+      workItemId: stuckRequest.workItemId,
+    });
+    const blocked = await blockingWorkflow.run(stuckRequest, {
+      driveGeneration: blockingAdmission.driveGeneration,
+      driveMode: "single-step",
+    });
+    if (blocked.status !== "blocked") {
+      throw new Error(`Expected zombie drive to block, got ${blocked.status}.`);
+    }
+
+    const healthyRemote = createLifecycleFaithfulArtifactsRemote(
+      "workflow-app-dream-chaos-zombie-node-healthy"
+    );
+    const healthyContextCapsules = createMemoryContextCapsuleActor();
+    const healthyStatusProjection = createMemoryWorkflowStatusProjectionStore();
+    const healthyRequest = buildIntegrationTestDreamRunRequest();
+    const healthyNodeExecutions: string[] = [];
+    const healthyDriveStatuses: string[] = [];
+    let healthyResult: WorkflowRunDriveResult | null = null;
+    for (let driveIndex = 0; driveIndex < 16; driveIndex += 1) {
+      const workflow = createLifecycleFaithfulDreamWorkflow({
+        artifacts: healthyRemote.createDriveStore({
+          driveId: `healthy-drive-${driveIndex}`,
+          seedFromRemote: driveIndex > 0,
+        }),
+        contextCapsules: healthyContextCapsules,
+        nodeExecutions: healthyNodeExecutions,
+        onPlan: () => {},
+        statusProjection: healthyStatusProjection,
+        zombieNodeMaxAttempts: maxAttempts,
+      });
+      const admission = await healthyContextCapsules.admitDrive({
+        runId: healthyRequest.runId,
+        workItemId: healthyRequest.workItemId,
+      });
+
+      // eslint-disable-next-line no-await-in-loop -- each simulated alarm must finish one checkpoint before the next drive resumes.
+      const result = await workflow.run(healthyRequest, {
+        driveGeneration: admission.driveGeneration,
+        driveMode: "single-step",
+      });
+      healthyDriveStatuses.push(result.status);
+      if (result.status !== "paused") {
+        healthyResult = result;
+        break;
+      }
+    }
+    if (healthyResult === null) {
+      throw new Error("Healthy single-step Dream run did not reach terminal.");
+    }
+
+    const stuckLedger = stuckContextCapsules.driveLedgers.get(
+      `${stuckRequest.workItemId}:${stuckRequest.runId}`
+    );
+    const healthyLedger = healthyContextCapsules.driveLedgers.get(
+      `${healthyRequest.workItemId}:${healthyRequest.runId}`
+    );
+    expect({
+      blockedMessage: blocked.blocker.message,
+      blockedProjection: stuckStatusProjection.latest.get(stuckRequest.runId)
+        ?.terminalBlocker,
+      healthyCheckpointCount: [
+        ...healthyContextCapsules.checkpoints.keys(),
+      ].filter((key) => key.startsWith(`${healthyRequest.runId}:`)).length,
+      healthyNodeAttemptsRemaining: Object.keys(
+        healthyLedger?.nodeAttempts ?? {}
+      ),
+      healthyStatuses: healthyDriveStatuses,
+      healthyTerminalStatus: healthyResult.status,
+      pendingDriveCount: pendingDrives.length,
+      stuckCheckpointCount: [...stuckContextCapsules.checkpoints.keys()].filter(
+        (key) => key.startsWith(`${stuckRequest.runId}:`)
+      ).length,
+      stuckNodeAttempts: stuckLedger?.nodeAttempts["0"]?.attemptCount,
+      stuckNodeExecutions,
+      stuckPlannerInvocations,
+    }).toStrictEqual({
+      blockedMessage:
+        "dynamic node 0 exceeded single-invocation budget after 3 drive attempts",
+      blockedProjection: {
+        code: "capability_denied",
+        message:
+          "dynamic node 0 exceeded single-invocation budget after 3 drive attempts",
+        nodeType: "joelclaw.memory.capture-run",
+        redacted: true,
+        stepId: stuckStepId,
+      },
+      healthyCheckpointCount: 10,
+      healthyNodeAttemptsRemaining: [],
+      healthyStatuses: [
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "paused",
+        "captured",
+      ],
+      healthyTerminalStatus: "captured",
+      pendingDriveCount: maxAttempts,
+      stuckCheckpointCount: 0,
+      stuckNodeAttempts: maxAttempts,
+      stuckNodeExecutions: [stuckStepId, stuckStepId, stuckStepId],
+      stuckPlannerInvocations: 1,
+    });
   });
 
   it("kills after every Dream node boundary with fresh per-drive worktrees and captures exactly once", async () => {

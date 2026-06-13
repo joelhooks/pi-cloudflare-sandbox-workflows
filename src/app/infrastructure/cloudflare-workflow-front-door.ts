@@ -31,6 +31,7 @@ import {
   StaleDriveGenerationRejectionSchema,
   WorkflowDriveAdmissionSchema,
   WorkflowDriveLedgerSchema,
+  WorkflowDriveNodeAttemptSchema,
   WorkflowRunRequestSchema,
 } from "../domain/schemas.ts";
 import type {
@@ -180,6 +181,7 @@ export interface CloudflareWorkflowFrontDoorConfig {
   readonly sandbox?: DurableObjectNamespace<SandboxDurableObject>;
   readonly timeoutMs: number;
   readonly workflowNodeAdapter?: WorkflowNodeAdapterPort;
+  readonly zombieNodeMaxAttempts?: number;
   readonly wzrrdPublishAdapter?: {
     readonly secretResolver: WzrrdApiTokenSecretResolver;
     readonly userAgent: string;
@@ -207,6 +209,13 @@ const workflowNodeAdapterDependency = (
 
   return {};
 };
+
+const zombieNodeAttemptDependency = (
+  config: CloudflareWorkflowFrontDoorConfig
+): { readonly zombieNodeMaxAttempts?: number } =>
+  config.zombieNodeMaxAttempts === undefined
+    ? {}
+    : { zombieNodeMaxAttempts: config.zombieNodeMaxAttempts };
 
 const installedSourceProfilesDependency = (
   config: CloudflareWorkflowFrontDoorConfig
@@ -332,6 +341,15 @@ const createCapsuleSupervisorClient = (
     },
     async persistCheckpoint(input): Promise<void> {
       await postJson(stubFor(input.workItemId), "/persist-checkpoint", input);
+    },
+    async recordDriveNodeAttempt(input) {
+      return WorkflowDriveNodeAttemptSchema.parse(
+        await postJson(
+          stubFor(input.workItemId),
+          "/record-drive-node-attempt",
+          input
+        )
+      );
     },
     async recordDrivePhaseCompletion(input) {
       return WorkflowDriveLedgerSchema.parse(
@@ -679,6 +697,7 @@ export const createCloudflareWorkflowFrontDoor = (
             })),
       wzrrdSecretRefs,
       wzrrdSiteRef: config.wzrrdSiteRef ?? "wzrrd:default",
+      ...zombieNodeAttemptDependency(config),
     });
 
     return await workflow.run(request, resolveDriveOptions(options));

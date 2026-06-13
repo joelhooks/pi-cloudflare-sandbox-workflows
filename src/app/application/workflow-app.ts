@@ -37,6 +37,7 @@ import {
   WorkflowRunPausedSchema,
   WorkflowRunReceiptSchema,
   WorkflowRunRequestSchema,
+  WorkflowDriveLedgerSchema,
   WorkflowStatusProjectionSchema,
   WzrrdPublishApprovalSchema,
   WzrrdPublishPayloadSchema,
@@ -83,6 +84,7 @@ import type {
   WorkflowRunDriveResult,
   WorkflowRunRequest,
   WorkflowRunResult,
+  WorkflowDriveNodeAttempt,
   WorkflowStatusProjection,
   WorkflowTerminalBlocker,
   WorkflowDriveLedgerPhase,
@@ -162,6 +164,7 @@ interface WorkflowDependencies {
   readonly reviewSurfacePublisher: ReviewSurfacePublisherPort;
   readonly statusProjection: WorkflowStatusProjectionPort;
   readonly workflowNodeAdapter?: WorkflowNodeAdapterPort;
+  readonly zombieNodeMaxAttempts?: number;
   readonly wzrrdPublisher: WzrrdPublishCapabilityAdapter;
   readonly wzrrdSiteRef: string;
   readonly wzrrdSecretRefs: {
@@ -169,6 +172,13 @@ interface WorkflowDependencies {
     readonly publish: string;
   };
 }
+
+const DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS = 3;
+
+const nodeTypeForAttempt = (
+  step: DynamicWorkflowStep
+): WorkflowNodeType | undefined =>
+  step.kind === "workflow.node.invoke" ? step.nodeType : undefined;
 
 interface PinnedDiscordPayload {
   readonly approvalRef: ArtifactRef | null;
@@ -258,6 +268,20 @@ type DynamicExecutionResult =
   | DynamicExecutionBlocked
   | DynamicExecutionPaused
   | DynamicExecutionSuccess;
+
+type DynamicNodeAttemptAdmission =
+  | {
+      readonly status: "accepted";
+    }
+  | {
+      readonly result: WorkflowRunResult;
+      readonly status: "blocked";
+    };
+
+type AdmitDynamicNodeAttempt = (input: {
+  readonly nodeIndex: number;
+  readonly step: DynamicWorkflowStep;
+}) => Promise<DynamicNodeAttemptAdmission>;
 
 type WorkflowNodeInvocationStep = Extract<
   DynamicWorkflowStep,
@@ -1256,6 +1280,13 @@ export class WorkflowApp implements WorkflowAppContract {
     return this.dependencies.executionMode === "integration-test";
   }
 
+  private zombieNodeMaxAttempts(): number {
+    return (
+      this.dependencies.zombieNodeMaxAttempts ??
+      DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS
+    );
+  }
+
   private shouldRecordIntegrationTestWorkerReceipts(): boolean {
     return (
       this.dependencies.executionMode === "integration-test" &&
@@ -1469,6 +1500,23 @@ export class WorkflowApp implements WorkflowAppContract {
         });
     };
 
+    const upsertLocalNodeAttempt = (
+      attempt: WorkflowDriveNodeAttempt
+    ): void => {
+      if (driveLedger === null) {
+        return;
+      }
+
+      driveLedger = WorkflowDriveLedgerSchema.parse({
+        ...driveLedger,
+        nodeAttempts: {
+          ...driveLedger.nodeAttempts,
+          [String(attempt.nodeIndex)]: attempt,
+        },
+        updatedAt: attempt.lastAttemptedAt,
+      });
+    };
+
     await assertActiveDrive();
     const capturedPhase = completedPhase("capture-completed");
     if (capturedPhase !== null) {
@@ -1536,6 +1584,46 @@ export class WorkflowApp implements WorkflowAppContract {
         runId: request.runId,
         status: "blocked",
       });
+    };
+
+    const admitDynamicNodeAttempt: AdmitDynamicNodeAttempt = async ({
+      nodeIndex,
+      step,
+    }) => {
+      if (driveGeneration === undefined) {
+        return { status: "accepted" };
+      }
+
+      const maxAttempts = this.zombieNodeMaxAttempts();
+      const currentAttemptCount =
+        driveLedger?.nodeAttempts[String(nodeIndex)]?.attemptCount ?? 0;
+      const nodeType = nodeTypeForAttempt(step);
+      if (currentAttemptCount >= maxAttempts) {
+        const message = `dynamic node ${nodeIndex} exceeded single-invocation budget after ${maxAttempts} drive attempts`;
+        const result = await block(
+          blocker("capability_denied", message),
+          "Dynamic workflow node exceeded its single-invocation budget.",
+          {
+            ...(nodeType === undefined ? {} : { nodeType }),
+            stepId: step.stepId,
+          }
+        );
+
+        return { result, status: "blocked" };
+      }
+
+      upsertLocalNodeAttempt(
+        await this.dependencies.contextCapsules.recordDriveNodeAttempt({
+          driveGeneration,
+          nodeIndex,
+          ...(nodeType === undefined ? {} : { nodeType }),
+          runId: request.runId,
+          stepId: step.stepId,
+          workItemId: request.workItemId,
+        })
+      );
+
+      return { status: "accepted" };
     };
 
     const persistCheckpoint: PersistRunCheckpoint = async (checkpointInput) => {
@@ -1714,6 +1802,7 @@ export class WorkflowApp implements WorkflowAppContract {
     let executionReceiptEvidence: AgentVerifierOutputEvidence;
     if (completedExecution === null) {
       const executionResult = await this.driveDynamicWorkflow({
+        admitDynamicNodeAttempt,
         block,
         driveMode,
         loadedPlan,
@@ -4147,6 +4236,7 @@ export class WorkflowApp implements WorkflowAppContract {
    * it under `exactOptionalPropertyTypes`.
    */
   private async driveDynamicWorkflow(input: {
+    readonly admitDynamicNodeAttempt: AdmitDynamicNodeAttempt;
     readonly block: BlockRun;
     readonly driveMode: WorkflowRunDriveOptions["driveMode"];
     readonly loadedPlan: DynamicWorkflowPlanDocument;
@@ -4157,6 +4247,7 @@ export class WorkflowApp implements WorkflowAppContract {
     readonly transition: SafetyEnvelopeTransition;
   }): Promise<DynamicExecutionResult> {
     return await this.executeDynamicWorkflow({
+      admitDynamicNodeAttempt: input.admitDynamicNodeAttempt,
       block: input.block,
       loadedPlan: input.loadedPlan,
       machine: input.machine,
@@ -4296,6 +4387,7 @@ export class WorkflowApp implements WorkflowAppContract {
   // oxlint-disable-next-line complexity -- Generated workflow dispatch is explicit until step handlers move behind the workflow-node registry.
   private async executeDynamicWorkflow(input: {
     readonly block: BlockRun;
+    readonly admitDynamicNodeAttempt: AdmitDynamicNodeAttempt;
     readonly loadedPlan: DynamicWorkflowPlanDocument;
     readonly machine: DynamicWorkflowMachineDocument;
     readonly persistCheckpoint: PersistRunCheckpoint;
@@ -4457,6 +4549,14 @@ export class WorkflowApp implements WorkflowAppContract {
           { stepId: step.stepId }
         );
         return { result, status: "blocked" };
+      }
+
+      const attemptAdmission = await input.admitDynamicNodeAttempt({
+        nodeIndex: checkpointStepIndex,
+        step,
+      });
+      if (attemptAdmission.status === "blocked") {
+        return { result: attemptAdmission.result, status: "blocked" };
       }
 
       if (step.kind === "workflow.node.invoke") {

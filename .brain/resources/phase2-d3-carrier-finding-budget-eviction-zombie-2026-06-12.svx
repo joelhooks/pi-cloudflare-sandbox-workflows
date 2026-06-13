@@ -1,0 +1,103 @@
+---
+title: "D3 carrier finding: the single-invocation-budget zombie (seventh carrier wound)"
+type: "decision"
+status: "active"
+created_at: "2026-06-12"
+tags:
+  - phase2
+  - d3
+  - burn-in
+  - carrier-finding
+  - zombie-drive
+  - single-step
+source: live run-live-20260613T040321942Z-aabe6448
+---
+
+# D3 carrier finding: the single-invocation-budget zombie
+
+Phase 2 Deliverable 3 is the 10-run live burn-in across both shapes
+(dream/memory-fabric + aihero-support-sweep), draft-only, **zero carrier patches
+between runs**. The gate (verbatim): *"Any failure is a carrier failure: fix the
+class in the carrier (with a chaos-suite test that would have caught it), reset
+the count."*
+
+**Run 1 failed. The burn-in count resets to zero.** This investigation/fix IS a
+carrier patch, so per the gate the count restarts after the fix lands and a
+dream-shape run reaches `captured` on the fixed code.
+
+## The wound (named)
+
+A dynamic node whose execution **cannot complete within a single Durable Object
+invocation budget** makes the run a permanent **zombie**: re-driven forever,
+never checkpointing, never reaching terminal.
+
+The dream/memory-fabric shape's **first dynamic node** is a heavy real-data
+retrieval/planning prologue (search/hydrate/correlate over the live JoelClaw
+index). It exceeds one invocation budget, so:
+
+1. Alarm fires → single-step drive resumes from checkpoint (none) → dispatches
+   node 0.
+2. workerd evicts the invocation mid-node before `STEP_DONE`.
+   `checkpointAfterStepDone` (`workflow-app.ts:4378`, the ONLY checkpoint writer,
+   fires only on `STEP_DONE`) never runs → `checkpoint` stays **null**.
+3. The run-start record (retained until terminal) makes the next alarm re-drive
+   from scratch → node 0 re-attempted → evicted again. **Infinite loop.**
+
+The single-step drive (introduced to fix "run 14 reaped at node 3" — a heavy
+node racing the reaper inside a shared whole-run invocation) isolated each node
+to its own budget, but traded that failure for: **a node that exceeds even ONE
+budget loops forever** — no checkpoint (can't resume), no block (not terminal).
+The code itself names the risk at
+`cloudflare-capsule-supervisor.ts:722-731` ("the very first dynamic node can be
+a multi-minute planning prologue that exceeds a single invocation budget").
+
+## Live receipts (deployed worker, run-live-20260613T040321942Z-aabe6448)
+
+- Parked at lifecycle `executingDynamicWorkflow` 45+ min (healthy runs cross to
+  `verifyingDynamicWorkflow` in ~0.1s, reach terminal in seconds).
+- `/runs/:id/events`: exactly 8 lifecycle events; the SAME 8 re-emit with fresh
+  timestamps every ~10 min (04:21→04:31→04:41→04:51→05:01 reaper cadence,
+  `alarmAtMs` deltas = exactly 600000ms). `eventCount` frozen at 8. Never
+  reaches step 9.
+- `/runs/:id/durability`: `checkpoint:null`, `activeLaneCount:0`,
+  `drivingMarker:null` on every sample. No worker exception in `wrangler tail`
+  (`exceptions:[]` throughout). Drive completes "cleanly" with zero forward
+  progress.
+- Memory relay healthy (tunnel + local both <0.5s) — NOT a relay outage.
+- This is the ONLY run on current (03:59) code. The 39 historical dream blocks
+  are older-deploy verifier-wall failures ("Verifier lane adapter failed."), a
+  different class. The 1/40 historical dream capture happened only when its
+  nodes were light enough to fit one budget.
+
+## The fix (dispatched to codex gpt-5.5 xhigh, background task-mqbvr127-joe3x5)
+
+- **FIX A (mandatory backstop):** per-(runId,nodeIndex) drive-attempt counter in
+  the DO drive ledger. After K no-progress drives (no checkpoint advance),
+  escalate to terminal `blocked` with a redacted blocker
+  ("dynamic node exceeded single-invocation budget after K drives"). Counter
+  resets on checkpoint advance so healthy single-step progress never trips it.
+  Carrier-only — no Dream-cartridge / generated-machine branch.
+- **Chaos test (gate requirement):** reproduce "node never completes in one
+  budget" (eviction mid-node, `STEP_DONE` never fires) in the lifecycle-faithful
+  chaos-resume harness; assert terminal `blocked` via the ceiling, not an
+  infinite loop; assert a healthy one-node-per-alarm run still reaches
+  `captured`.
+- **FIX B (proposal only — my architecture call pending codex's read):** the
+  backstop turns the zombie into BLOCKED but the dream shape still won't CAPTURE
+  if node 0 genuinely needs >1 budget. Candidate: dispatch the sandbox lane
+  ASYNC (return `paused` after starting the lane, poll the lane/sandbox receipt
+  on subsequent alarms, checkpoint+advance only when it lands) so node-exec time
+  is decoupled from the DO invocation budget. The Sandbox is a separate DO with
+  its own budget that survives supervisor eviction — viable iff the lane receipt
+  is recoverable (persisted to the Artifacts repo) for a later alarm to pick up.
+  Must hold all invariants: planner one-shot, plan pinned immutable, single-step
+  one-node-per-alarm, no new core/cartridge branch.
+
+## Why this matters for D3
+
+Without FIX B the dream shape goes BLOCKED instead of zombie — D3 still can't get
+10 captures. FIX B (or some heavy-node-completion mechanism) is **required** for
+the dream half of the burn-in to ever pass. The support-sweep half is unaffected
+by this wound. Do NOT launch burn-in runs 2-10 until: (1) FIX A + chaos test
+land, (2) the FIX B decision is made, (3) a dream-shape run reaches `captured` on
+fixed code. Then reset the count to zero and start clean.
