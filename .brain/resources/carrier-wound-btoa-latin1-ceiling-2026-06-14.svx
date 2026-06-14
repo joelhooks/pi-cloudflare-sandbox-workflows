@@ -12,7 +12,7 @@ tags:
   - chaos-suite
   - observe-dont-stare
 source: "wound-21-planner-adapter-unavailable"
-commit: "PENDING"
+commit: "da1b04d"
 ---
 
 # Carrier Wound #21: btoa() Latin1 Ceiling Forges a Planner Outage

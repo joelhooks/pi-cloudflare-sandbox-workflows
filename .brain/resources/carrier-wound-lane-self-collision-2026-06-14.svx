@@ -1,0 +1,143 @@
+---
+title: "Carrier Wound #22: A Re-Drive Collides With Its Own Orphaned Lane Owner"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - admission
+  - reaper
+  - recovery
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-22-planner-adapter-unavailable-self-collision"
+commit: "59838c8"
+---
+
+# Carrier Wound #22: A Re-Drive Collides With Its Own Orphaned Lane Owner
+
+Wound #21 (btoa) was fixed, tested, committed (`da1b04d`) and deployed. The
+re-drive it gated cleared the Latin1 ceiling — and then blocked terminal again,
+on a **different** wound. No "btoa" in the blocker this time; the planner agent
+still never ran:
+
+```
+[09:04:56Z] phase=None term=False dg=1 stale=True  activeLanes=1 dispatches=0 nodes=0 blk=None
+[09:05:37Z] phase=None term=True  dg=2 stale=False activeLanes=1 dispatches=0 nodes=0 blk=adapter_unavailable
+```
+
+```json
+"blocker": {
+  "code": "adapter_unavailable",
+  "message": "Agent lane admission deferred: lane:planner:run-live-20260614T085001608Z-91baf146 (already-active); retry after 1s."
+}
+```
+
+Generation 2's events: `planningDynamicWorkflow` at `09:05:37.326` → `blocked`
+at `09:05:37.395`. **69 milliseconds.** The planner is a ~213s sandbox agent;
+69ms means it never spun up. It died on admission — colliding with a lane owner
+**its own gen-1 drive left behind.** This is the sixth wound the live-observe
+mandate caught from the outside-invisible / node-by-node-obvious gap.
+
+## Mechanism
+
+Two layers; this receipt fixes the proven one (Layer A).
+
+**Layer A — admission can't reclaim its own orphan (PROVEN, fixed here).** The
+zombie-budget pre-admit (wound #16) reserves a lane's OWNER slot in
+`activeLaneOwners[laneId]` *before* dispatch, so a torn drive can be reaped. But
+a drive torn *after* that reservation and *before* it persists a lane release
+leaves the slot held with no live process behind it. Lane ids are run-scoped —
+`lane:planner:<runId>` — so the owner can **only ever be the same run.** Yet
+`admitLaneCore` blindly deferred any active laneId:
+
+```ts
+if (activeLaneIds.includes(input.laneId)) {
+  return { status: "deferred", reason: "already-active", retryAfterSeconds: 1, ... };
+}
+```
+
+`admitted-agent-lane-runtime.ts` throws on `deferred`; `workflow-app.ts`'s
+catch-all forges that throw into terminal `adapter_unavailable`. So the run's
+next drive asks to run its planner, collides with the ghost of its previous
+drive's planner, and **gets deferred against itself — permanently.** The
+generation fence + stall-generation reaper guarantee the gen-1 drive is already
+dead (`dg=1 stale=true` then `dg=2`) before gen-2's admission runs, so the slot
+is provably reclaimable. The deferral was never legitimate contention; for
+run-scoped ids it is **always** self-collision.
+
+**Layer B — gen-1's synchronous planner hung ~13.7 min (INFERRED, not yet
+fixed).** Gen 1 sat in `planningDynamicWorkflow` from `08:50:55` until the reaper
+marked it stale at `09:04:56` — `drivingMarker.stale:true`, `lastDriveFailure:
+null` = an uncaught isolate death, not a caught error. The de-dockered runtime
+pi install (task #15: stock image + runtime pi-agent install inside the sandbox)
+is the suspect. **Per "observe, don't guess," Layer B is NOT fixed blind.** Layer
+A is deployed first; the next re-drive watches the planner phase live. If it
+completes, Layer B was a cold-start transient. If it stalls ~13 min again, Layer
+B is structural and gets its own fix (bound the sandbox-prep timeout, or move the
+planner to the async dispatch/poll path) with live evidence + its own chaos test.
+
+## Fix — Reclaim the Self-Owned Slot, as a Class
+
+`admitLaneCore` now discriminates on owner identity before deferring:
+
+```ts
+const currentOwner = record.activeLaneOwners[input.laneId];
+if (currentOwner !== undefined) {
+  if (currentOwner === input.runId) {
+    await this.ensureReaperAlarm();      // keep the reclaimed lane watched
+    return { status: "admitted", admissionId, admittedAt: nowIso(), ... };
+  }
+  return { status: "deferred", reason: "already-active", retryAfterSeconds: 1, ... };
+}
+```
+
+Three properties:
+
+1. **Same run reclaims.** The owner mapping already names this run, so re-admit
+   is idempotent — no second owner is leaked, the active count is invariant.
+2. **Reaper stays armed.** `ensureReaperAlarm()` on the reclaim keeps the
+   watchdog alive so the re-driven lane is still bounded.
+3. **Different run still defers.** The safety branch holds even though
+   run-scoped ids make cross-run collision on a single laneId unreachable in
+   production. Defensive, not load-bearing.
+
+## Chaos Receipt (would have caught it)
+
+`tests/integration/cloudflare-run-reaper.test.ts` — 12 passing (2 new). The
+hostile double reproduces the production sequence against the real supervisor DO
+(fake D1 + fake DO storage), not a polite mock:
+
+- **re-admits a run colliding with its own orphaned lane owner**: admit reserves
+  the slot → the drive tears (slot persists, no release) → the same run
+  re-admits → `admitted`, with exactly one owner still held (no leak).
+- **still defers a DIFFERENT run colliding with an active lane owner**: a
+  foreign run on the same laneId → `deferred/already-active`, and it neither
+  steals nor duplicates ownership.
+
+Before the fix the first test returned `deferred` — the exact production
+blocker. A polite double that released the slot on teardown would have masked
+the orphan entirely; the test deliberately leaves the slot held.
+
+## Verification
+
+```bash
+pnpm typecheck   # clean
+pnpm check       # oxfmt + oxlint + type-aware, clean
+pnpm vitest run tests/integration/cloudflare-run-reaper.test.ts \
+  tests/integration/admitted-agent-lane-runtime.test.ts \
+  tests/integration/cloudflare-run-async-driver.test.ts   # 12 + 34 pass
+```
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. Layer A
+must deploy and a fresh dream-shape run must reach `captured` **observed live on
+deployed code** before the burn-in restarts — and that same re-drive is the live
+probe that decides whether Layer B is transient or structural. Wound #22 is the
+recovery-class sibling of the [[polite-fakes-franchise-wound]]: the carrier could
+reach `captured` once, but could not **recover** a torn drive to `captured`.
+Following [[carrier-wound-btoa-latin1-ceiling-2026-06-14]], both surfaced only
+because the run was watched node-by-node, not stared at.
