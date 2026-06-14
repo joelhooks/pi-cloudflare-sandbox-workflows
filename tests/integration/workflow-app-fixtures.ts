@@ -245,7 +245,6 @@ export const buildIntegrationTestDreamRunRequest = (): WorkflowRunRequest => {
       stochasticNotes: [
         ...request.planProposal.stochasticNotes,
         `Use source profile ${dreamTranscriptReviewSourceProfile.profileId}: families ${dreamTranscriptReviewSourceProfile.sourceFamiliesExpected.join(", ")}; runtimes ${dreamTranscriptReviewSourceProfile.requiredRuntimes.join(", ")}; horizons ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
-        `Generated Dream retrieval steps must declare memoryCoverageHorizons: ${dreamTranscriptReviewSourceProfile.timeHorizons.join(", ")}.`,
         "Generated Dream planning steps must declare memorySourcePackDispositions for every advertised source pack, including requiredCapabilityKinds, capabilityKinds, missingCapabilityKinds, and leaseRefs.",
       ],
     },

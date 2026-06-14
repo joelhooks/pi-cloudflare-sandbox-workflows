@@ -31,7 +31,6 @@ import {
   MemoryWorkflowEffectSchema,
 } from "../domain/source-profile.ts";
 import type {
-  MemoryCoverageHorizon,
   MemorySourcePack,
   MemorySourcePackDisposition,
   MemorySourceProfile,
@@ -63,10 +62,6 @@ export const MemoryGeneratedWorkflowProofDocumentSchema = z.object({
     harnessId: z.string().min(1),
     hash: Sha256HexSchema,
     language: z.literal("typescript"),
-  }),
-  horizonCoverage: z.object({
-    coveredHorizons: z.array(MemoryCoverageHorizonSchema),
-    requiredHorizons: z.array(MemoryCoverageHorizonSchema).min(1),
   }),
   machineArtifact: z.object({
     artifactRef: ArtifactRefSchema,
@@ -152,6 +147,7 @@ export interface MemoryGeneratedWorkflowProofRecorderConfig {
   readonly buildAdditionalProofChecks?: (input: {
     readonly executionProof: WorkflowExecutionProofDocument;
     readonly plan: DynamicWorkflowPlanDocument;
+    readonly planArtifact: PlanArtifact;
   }) => Promise<readonly MemoryGeneratedWorkflowAdditionalProofCheck[]>;
   readonly expectedPackageRef: ArtifactRef;
   readonly expectedSourceProfile: MemorySourceProfile;
@@ -272,38 +268,6 @@ const declaredMemoryEffectsFor = (
   return uniqueMemoryEffects(
     declaredEffects.flatMap((declaredEffect) => {
       const parsed = MemoryWorkflowEffectSchema.safeParse(declaredEffect);
-
-      return parsed.success ? [parsed.data] : [];
-    })
-  );
-};
-
-const memoryCoverageHorizonOrder = (horizon: MemoryCoverageHorizon): number =>
-  MemoryCoverageHorizonSchema.options.indexOf(horizon);
-
-const uniqueMemoryCoverageHorizons = (
-  horizons: readonly MemoryCoverageHorizon[]
-): MemoryCoverageHorizon[] =>
-  [...new Set(horizons)].toSorted(
-    (left, right) =>
-      memoryCoverageHorizonOrder(left) - memoryCoverageHorizonOrder(right)
-  );
-
-const memoryCoverageHorizonsFor = (
-  step: DynamicWorkflowStep
-): MemoryCoverageHorizon[] => {
-  if (step.kind !== "workflow.node.invoke") {
-    return [];
-  }
-
-  const declaredHorizons = step.config["memoryCoverageHorizons"];
-  if (!Array.isArray(declaredHorizons)) {
-    return [];
-  }
-
-  return uniqueMemoryCoverageHorizons(
-    declaredHorizons.flatMap((declaredHorizon) => {
-      const parsed = MemoryCoverageHorizonSchema.safeParse(declaredHorizon);
 
       return parsed.success ? [parsed.data] : [];
     })
@@ -521,14 +485,6 @@ const generatedPlanCoversMemoryEffects = (input: {
   );
 };
 
-const generatedPlanCoversHorizons = (input: {
-  readonly coveredHorizons: readonly MemoryCoverageHorizon[];
-  readonly requiredHorizons: readonly MemoryCoverageHorizon[];
-}): boolean =>
-  input.requiredHorizons.every((horizon) =>
-    input.coveredHorizons.includes(horizon)
-  );
-
 const pinnedPackageExportsSourceProfile = (input: {
   readonly exportId: string;
   readonly packageRef: ArtifactRef;
@@ -562,10 +518,6 @@ export const verifyMemoryGeneratedWorkflow = (
     input.plan.steps.flatMap((step) => memoryEffectsFor(step, nodeEffects))
   );
   const requiredEffects = requiredMemoryEffectsFor(input.expectedSourceProfile);
-  const coveredHorizons = uniqueMemoryCoverageHorizons(
-    input.plan.steps.flatMap(memoryCoverageHorizonsFor)
-  );
-  const requiredHorizons = input.expectedSourceProfile.timeHorizons;
   const sourcePackDisposition = sourcePackDispositionSummaryFor({
     dispositions: sourcePackDispositionsFor(input.plan),
     sourcePacks: input.expectedSourceProfile.sourcePacks,
@@ -631,16 +583,6 @@ export const verifyMemoryGeneratedWorkflow = (
       }),
       summary:
         "Generated plan uses artifact-backed package invocations and covers the installed source profile's required effects.",
-    },
-    {
-      checkId: "plan:horizon-coverage",
-      evidenceRefs: [input.planArtifact.artifactRef],
-      passed: generatedPlanCoversHorizons({
-        coveredHorizons,
-        requiredHorizons,
-      }),
-      summary:
-        "Generated plan declares coverage for every source-profile horizon so the run cannot collapse into recent-only retrieval.",
     },
     {
       checkId: "plan:source-profile-bound",
@@ -733,10 +675,6 @@ export const verifyMemoryGeneratedWorkflow = (
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     generatedStateSequence: input.executionProof.generatedStateSequence,
     harnessArtifact: input.harnessArtifact,
-    horizonCoverage: {
-      coveredHorizons,
-      requiredHorizons,
-    },
     machineArtifact: input.machineArtifact,
     nodeTypes,
     packageRef: input.expectedPackageRef,
@@ -777,6 +715,7 @@ export const createMemoryGeneratedWorkflowProofRecorder = (
       (await config.buildAdditionalProofChecks?.({
         executionProof: input.executionProofDocument,
         plan: input.plan,
+        planArtifact: input.planArtifact,
       })) ?? [];
     const proof = verifyMemoryGeneratedWorkflow({
       executionProof: input.executionProofDocument,

@@ -1,0 +1,216 @@
+---
+title: "Carrier Wound #36: The Platform Hardcoded a Cartridge's Horizon Model — and Knew It Wrong. A Phantom Config Key No Schema Declares."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - generated-workflow-proof
+  - horizon-coverage
+  - information-leakage
+  - wrong-abstraction
+  - phantom-key
+  - cartridge-boundary
+  - bounded-context
+  - effective-config
+  - schema-default
+  - latent-landmine
+  - legibility
+  - carrier-finding
+  - chaos-suite
+source: "wound-36-horizon-coverage-platform-leak"
+---
+
+# Carrier Wound #36: The Platform Hardcoded a Cartridge's Horizon Model — and Knew It Wrong. A Phantom Config Key No Schema Declares.
+
+Wound #35 cleared the meta-verifier's throat — the oversized verifier prompt
+finally rode `@file` to pi instead of E2BIG'ing on argv. So the next live drive
+got *past* the verifier and onto the post-execution proof recorder. And there,
+waiting since `759a87b`, was a check that could never pass.
+
+The deployed generated-workflow proof went terminal:
+
+```
+run-live-... → blocked:
+  generated-workflow proof failed check "plan:horizon-coverage":
+  "Generated workflow does not cover required memory horizons …"
+```
+
+The planner reached `captured`. All generated nodes executed. The execution
+proof was clean. The block came from the **platform's own** proof recorder
+asserting a horizon-coverage invariant against the generated plan — and that
+assertion was structurally unsatisfiable. It had been unsatisfiable for dozens
+of commits; it was simply unreachable until #35 removed the failure that fired
+first. A latent landmine, armed long ago, stepped on only once the path upstream
+of it was finally cleared.
+
+## The wound: the platform reached into a cartridge's domain — and got it wrong
+
+`src/app/workflow-nodes/generated-workflow-proof.ts` — *platform* code, shared by
+every cartridge — carried a hardcoded `plan:horizon-coverage` check. It read each
+step's `config["memoryCoverageHorizons"]`: a plural-array key that **no node
+config schema in the repo declares.** Not the dream memory nodes, not the
+support-sweep signal-search node. A phantom.
+
+Two cartridges, two distinct ways the phantom misfired:
+
+- **Dream (structurally unsatisfiable).** In the memory fabric, a horizon is a
+  runtime *output* — `horizonFor` buckets each captured signal into `24h / 7d /
+  30d / quarter / all-time` at execution time. It is never a *config input*; no
+  dream planning step declares horizons, because horizons aren't a thing the
+  planner chooses. So the platform check read `memoryCoverageHorizons` off every
+  dream step, found `undefined` every time, computed "covered: none," and failed.
+  There is no plan a Dream planner could emit that satisfies it. It demanded a
+  config key for a value the domain produces, not consumes.
+- **Support-sweep (miswired).** Here horizons *are* a config input — but the real
+  field on `aihero.support-sweep.signal-search` is `horizons` (singular usage),
+  defaulting to all five. The platform read `memoryCoverageHorizons` — the wrong
+  name — so it saw `undefined` here too and would fail a plan that genuinely
+  searches every horizon.
+
+The class is **information leakage**. The "horizon model" is a design decision —
+which horizons exist, what the config field is named, what the default coverage
+is — and that decision lived in *two* places: the cartridge's node config schema
+(`AiHeroSignalSearchNodeConfigSchema`, which got it right: `horizons`, all-five
+default) and the platform's proof check (which got it wrong: `memoryCoverageHorizons`,
+no default). Ousterhout's back-door leakage, the pernicious kind, because it
+isn't in any interface — two modules silently depending on the same concept, and
+when they disagree on its details, one of them is simply broken.
+
+> "The opposite of information hiding is information leakage. Information leakage
+> occurs when a design decision is reflected in multiple modules. This creates a
+> dependency between the modules… Back-door leakage like this is more pernicious
+> than leakage through an interface, because it isn't obvious. Information leakage
+> is one of the most important red flags in software design… ask yourself 'How
+> can I reorganize these classes so that this particular piece of knowledge only
+> affects a single class?'"
+> — John Ousterhout, *A Philosophy of Software Design*, §Information Leakage
+
+The platform never should have known what a horizon is. Horizons are a property
+of *retrieval-shaped* cartridges; the memory fabric has them as outputs,
+support-sweep has them as inputs, and a third cartridge might have none. A
+platform that hardcodes one cartridge's domain concept has leaked that concept
+across the boundary — and here it leaked a *corrupted copy*, a key spelled
+differently than any schema, so the leak failed loud the moment it became
+reachable.
+
+## The fix: pull the knowledge out of the platform so it affects a single module
+
+Ousterhout's prescription verbatim: reorganize so the horizon knowledge affects
+exactly one module. The platform (`generated-workflow-proof.ts`) now carries
+**zero** horizon model — the `plan:horizon-coverage` check and its
+`memoryCoverageHorizons` read are gone. Horizon coverage is relocated entirely to
+a **cartridge-injected** check through the proof recorder's existing
+`buildAdditionalProofChecks` hook, which already threads `{ executionProof, plan,
+planArtifact }` to each cartridge:
+
+- **Support-sweep injects** `buildAiHeroSupportSweepHorizonCoverageProofCheck`
+  (`src/cartridges/aihero-support-sweep/horizon-coverage-proof-check.ts`), reading
+  its own real `horizons` field.
+- **Dream injects nothing** — the memory-fabric installer destructures only
+  `executionProof` and adds no horizon check, because in that cartridge horizons
+  are an output and there is nothing to assert at plan time.
+
+The knowledge now lives in exactly one place per cartridge. Change the horizon
+set, change one module. The platform stays a deep, horizon-agnostic module that
+runs whatever checks a cartridge hands it.
+
+### Read EFFECTIVE horizons — executor-faithful, not raw planner output
+
+The relocated check does **not** read raw `step.config`. It parses each
+signal-search step config THROUGH `AiHeroSignalSearchNodeConfigSchema.safeParse`
+— the exact schema the executor parses with — so the `.default(["24h","7d",
+"30d","quarter","all-time"])` applies precisely as it does at run time. This is
+the whole point: the check must judge what the run *actually searches*, not what
+the planner literally typed.
+
+- **Omitted `horizons`** (`{ axes, maxSignals, query }`) → schema default → all
+  five → covered, PASS. The planner never needs to emit the key; omission means
+  "search everything," which is correct, so the check passes. *This is the exact
+  case the old phantom check could never pass.*
+- **Narrowed** (`{ horizons: ["24h"] }`) → covered `["24h"]`, missing the rest →
+  FAIL, naming the missing horizons. A genuine collapse into recent-only
+  retrieval, genuinely caught.
+- **Garbage merged token** (`{ horizons: ["quarter-all-time"] }`) →
+  `filterToValidHorizons` drops the invalid token, returns `undefined`, schema
+  applies its default → all five → PASS. A planner typo can't fabricate a
+  narrowing that the executor wouldn't actually honor.
+- **Union across steps** (`["24h","7d"]` + `["30d","quarter","all-time"]`) →
+  covered union = all five → PASS.
+
+### Legibility: the summary IS the operator-facing blocker
+
+`memoryGeneratedWorkflowProofBlocker` joins failed checks' `summary` strings
+verbatim, so the check's `summary` names *required*, *covered*, and *missing*
+horizons in every branch. A narrowed plan reads "Required: 24h, 7d, 30d, quarter,
+all-time; covered: 24h; missing: 7d, 30d, quarter, all-time" — the operator
+diagnoses from the blocker without opening the check.
+
+> "A good failure message contains much the same information as the test's name:
+> it should clearly express the desired outcome, the actual outcome, and any
+> relevant parameters… 'Expected an account in state CLOSED, but got account
+> <{name: "my-account", state: "OPEN"}>'"
+> — *Software Engineering at Google*, §Write Clear Failure Messages
+
+## The chaos test that would have caught it (hostile shapes, not polite mocks)
+
+`tests/integration/aihero-support-sweep-cartridge.test.ts` grows a new
+`describe("… horizon-coverage proof check (hostile planner shapes)")`. It builds
+**real** support-sweep plans — real `signal-search` steps, real `dependsOn`, real
+`PlanArtifact` — and runs them through the **real**
+`buildAiHeroSupportSweepHorizonCoverageProofCheck`, which parses configs through
+the **real** `AiHeroSignalSearchNodeConfigSchema`. Six cases cover the four
+effective-horizon branches above plus the no-signal-search-step case
+(`toBeFalsy` + "declares no") and the checkId/required-list contract.
+
+The keystone is the **omitted-horizons → PASS** case. That is precisely the
+false negative the old platform check produced: a plan that genuinely searches
+all five horizons (by omitting the key and taking the default) was failed by a
+check demanding a phantom `memoryCoverageHorizons` key. The new check passes it
+because it reads what the executor reads. The dream side is guarded in
+`tests/integration/workflow-app.test.ts`: the generated-workflow proof now reaches
+`verified` with **no** horizon check in its check-id set at all — the platform no
+longer asserts a horizon model against a cartridge that has none.
+
+This is a `[[polite-fakes-franchise-wound]]` instance, textbook. The old tests
+fed the check `memoryCoverageHorizons` directly — they handed the check the very
+phantom key it wanted, so they passed *green* while every production planner
+(which emits `horizons`, or omits it) would have the check fail *red*. The test
+double was politer than production: it spoke the check's private vocabulary
+instead of the schema's real one. The antidote is the hostile double — feed the
+check what real planners actually emit (`horizons`, or nothing), through the real
+schema, and watch the old check's logic fail the very plans it was meant to bless.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **439 passed / 55 files**
+(six new hostile cases over the prior 433).
+
+## What this does NOT claim (skepticism held)
+
+This removes a mis-generalized platform check and relocates horizon coverage to
+the one cartridge that owns the concept. It proves, in-suite, that the support-sweep
+check passes genuinely-covered plans and fails genuinely-narrowed ones, and that
+the dream proof path no longer carries a horizon assertion. It does **not**, by
+itself, prove the dream run reaches `captured` — only a live re-drive on the
+deployed fix does. The hypothesis is concrete and falsifiable: the dream proof
+recorder failed because the platform asserted an unsatisfiable horizon invariant;
+with that invariant removed from the platform and absent from the dream cartridge,
+the generated-workflow proof reaches `verified` and the run proceeds to `captured`.
+If instead a *different* proof check now blocks, that is a new, distinct signal —
+not this one assumed away. One fresh deploy carries the change; the next live
+drive says which.
+
+## The carrier discipline (sixteenth carrier wound)
+
+#34 fixed *what you can see when the verifier says nothing.* #35 fixed *whether
+the verifier could speak at all.* #36 fixes *a check that, once the verifier
+finally spoke, refused every answer.* The class is not "horizon coverage was
+wrong" — it's "**the platform encoded a domain concept that belongs to a
+cartridge, encoded it wrong (a phantom key matching no schema), and hid the
+defect behind an earlier failure until that failure was cleared.**" The fix is
+Ousterhout's information-hiding as a carrier invariant: a platform module must not
+know a cartridge's domain decisions; relocate the knowledge so it affects exactly
+one module, and read *effective* config (through the executor's own schema) so the
+check judges what the run does, not what the planner typed. A latent
+unsatisfiable check is the worst landmine of all — it costs nothing until the day
+the path reaches it, and then it fails a system that was, by every other measure,
+working.

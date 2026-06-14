@@ -275,7 +275,6 @@ const profileStochasticNotesFor = (
     `Use source profile ${profile.profileId}: families ${profile.sourceFamiliesExpected.join(", ")}; runtimes ${profile.requiredRuntimes.join(", ")}; horizons ${horizons}.`,
     ...sourcePackNotes,
     "Generate a task-specific workflow.xstate-machine.v1 artifact and generated harness source before execution. Verifier proof must show Cloudflare executed the generated machine artifacts.",
-    `Generated retrieval and signal-mining steps must declare memoryCoverageHorizons covering: ${horizons}.`,
     "Report runtime, machine, and source-family coverage gaps as explicit caveats in the run report; coverage caveats never block the run. Memory-fabric repair is a separate workflow.",
     `Search across horizons: ${horizons}. Do not collapse the run into a recent-only summary.`,
     "Cloudflare must access memory only through the trusted Memory relay. Do not request raw local paths, raw transcripts, raw credentials, or direct Typesense access.",

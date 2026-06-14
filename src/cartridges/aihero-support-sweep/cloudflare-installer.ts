@@ -7,6 +7,7 @@ import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastruct
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
 import { createMemoryGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/generated-workflow-proof.ts";
 import { buildAiHeroSupportSweepAuditProofCheck } from "./hitl-report-audit-proof-check.ts";
+import { buildAiHeroSupportSweepHorizonCoverageProofCheck } from "./horizon-coverage-proof-check.ts";
 import { aiHeroSupportSweepPackageMetadata } from "./package-seed.ts";
 import {
   AiHeroSupportSweepHydrationDocumentSchema,
@@ -207,10 +208,18 @@ export const aiHeroSupportSweepCloudflareCartridgeInstaller: CloudflareWorkflowC
             },
             recorder: createMemoryGeneratedWorkflowProofRecorder({
               artifacts,
-              buildAdditionalProofChecks: async ({ executionProof }) => [
+              buildAdditionalProofChecks: async ({
+                executionProof,
+                plan,
+                planArtifact,
+              }) => [
                 await buildAiHeroSupportSweepAuditProofCheck({
                   artifacts,
                   executionProof,
+                }),
+                buildAiHeroSupportSweepHorizonCoverageProofCheck({
+                  plan,
+                  planArtifact,
                 }),
               ],
               expectedPackageRef: aiHeroPackageRef,

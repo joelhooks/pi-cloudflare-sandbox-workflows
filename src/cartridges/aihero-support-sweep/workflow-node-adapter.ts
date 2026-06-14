@@ -175,7 +175,7 @@ const AiHeroIndexHealthNodeConfigSchema = z.object({
   recoveryOnly: z.literal(true).default(true),
 });
 
-const AiHeroSignalSearchNodeConfigSchema = z.object({
+export const AiHeroSignalSearchNodeConfigSchema = z.object({
   axes: AiHeroSearchAxesConfigSchema,
   horizons: AiHeroHorizonsConfigSchema,
   indexHealthRef: ArtifactRefSchema.optional(),

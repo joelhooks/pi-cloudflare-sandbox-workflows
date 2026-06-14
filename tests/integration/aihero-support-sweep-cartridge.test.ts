@@ -11,9 +11,11 @@ import type {
   DynamicWorkflowMachineDocument,
   DynamicWorkflowPlanDocument,
   PinnedPackage,
+  PlanArtifact,
 } from "../../src/app/domain/schemas.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../src/app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
+import { buildAiHeroSupportSweepHorizonCoverageProofCheck } from "../../src/cartridges/aihero-support-sweep/horizon-coverage-proof-check.ts";
 import { createIntegrationTestAiHeroSupportSweepAdapter } from "../../src/cartridges/aihero-support-sweep/integration-test-adapters.ts";
 import { aiHeroSupportSweepPackageMetadata } from "../../src/cartridges/aihero-support-sweep/package-seed.ts";
 import {
@@ -21,6 +23,7 @@ import {
   AiHeroSupportSweepHydrationDocumentSchema,
   AiHeroSupportSweepRecommendationDocumentSchema,
 } from "../../src/cartridges/aihero-support-sweep/schemas.ts";
+import { aiHeroSupportSweepSourceProfile } from "../../src/cartridges/aihero-support-sweep/source-profile.ts";
 import { createAiHeroSupportSweepWorkflowNodeAdapter } from "../../src/cartridges/aihero-support-sweep/workflow-node-adapter.ts";
 import { integrationTestActor } from "./workflow-app-fixtures.ts";
 
@@ -445,5 +448,134 @@ describe("AIHero support-sweep cartridge", () => {
           action.leaseGate.reviewRequired
       )
     ).toBeTruthy();
+  });
+});
+
+const horizonProofPlanArtifact = {
+  artifactRef: "artifact://aihero-support-sweep-test/run/plan.json",
+  hash,
+  pinnedAt: at,
+  runId: machine.runId,
+} satisfies PlanArtifact;
+
+const signalSearchStep = (input: {
+  readonly config: Record<string, unknown>;
+  readonly stepId: string;
+}): WorkflowNodeInvocationStep =>
+  step({
+    config: input.config,
+    dependsOn: ["check-derived-index-health"],
+    nodeType: "aihero.support-sweep.signal-search",
+    outputPath: `aihero/${input.stepId}.json`,
+    stepId: input.stepId,
+    summary: "Search support signals across time horizons.",
+  });
+
+/**
+ * Builds the cartridge horizon-coverage proof check against a plan whose only
+ * signal-search steps are the hostile shapes under test. Every other base step
+ * is retained so the plan stays well-formed, but they are inert to the check.
+ */
+const horizonProofCheckFor = (
+  signalSearchSteps: readonly WorkflowNodeInvocationStep[]
+) => {
+  const variantPlan: DynamicWorkflowPlanDocument = {
+    ...plan,
+    steps: [
+      ...plan.steps.filter(
+        (candidate) =>
+          candidate.nodeType !== "aihero.support-sweep.signal-search"
+      ),
+      ...signalSearchSteps,
+    ],
+  };
+
+  return buildAiHeroSupportSweepHorizonCoverageProofCheck({
+    plan: variantPlan,
+    planArtifact: horizonProofPlanArtifact,
+  });
+};
+
+/**
+ * Hostile double for wound #36. The old platform check demanded a phantom
+ * `memoryCoverageHorizons` config key no node schema declares, so it fired on
+ * shapes the executor actually retrieves all five horizons for. These cases
+ * feed REAL signal-search configs through the REAL
+ * `AiHeroSignalSearchNodeConfigSchema` (the same parse the executor runs) so the
+ * check verdict tracks what the run genuinely searches — not what the planner
+ * happened to spell out.
+ */
+describe("AIHero support-sweep horizon-coverage proof check (hostile planner shapes)", () => {
+  it("rejects a planner narrowing to recent-only and names the dropped horizons", () => {
+    const check = horizonProofCheckFor([
+      signalSearchStep({
+        config: { horizons: ["24h"], query: "AIHero recent" },
+        stepId: "search-support-signals",
+      }),
+    ]);
+
+    expect(check.passed).toBeFalsy();
+    expect(check.summary).toMatch(/missing:.*7d.*30d.*quarter.*all-time/u);
+    expect(check.evidenceRefs).toContain(horizonProofPlanArtifact.artifactRef);
+  });
+
+  it("passes a plan that omits horizons because the executor defaults to all five", () => {
+    const check = horizonProofCheckFor([
+      signalSearchStep({
+        config: { axes: ["issue"], maxSignals: 12, query: "AIHero" },
+        stepId: "search-support-signals",
+      }),
+    ]);
+
+    expect(check.passed).toBeTruthy();
+    expect(check.summary).toContain("every required time horizon");
+  });
+
+  it("passes a plan whose horizons collapsed into one invalid merged token", () => {
+    const check = horizonProofCheckFor([
+      signalSearchStep({
+        config: { horizons: ["quarter-all-time"], query: "AIHero" },
+        stepId: "search-support-signals",
+      }),
+    ]);
+
+    expect(check.passed).toBeTruthy();
+    expect(check.summary).toContain("every required time horizon");
+  });
+
+  it("passes when horizon coverage is split across two signal-search steps", () => {
+    const check = horizonProofCheckFor([
+      signalSearchStep({
+        config: { horizons: ["24h", "7d"], query: "recent" },
+        stepId: "search-recent-signals",
+      }),
+      signalSearchStep({
+        config: { horizons: ["30d", "quarter", "all-time"], query: "deep" },
+        stepId: "search-deep-signals",
+      }),
+    ]);
+
+    expect(check.passed).toBeTruthy();
+  });
+
+  it("fails a plan that declares no signal-search step at all", () => {
+    const check = horizonProofCheckFor([]);
+
+    expect(check.passed).toBeFalsy();
+    expect(check.summary).toContain("declares no");
+  });
+
+  it("emits a stable cartridge-scoped check id naming the required horizons", () => {
+    const check = horizonProofCheckFor([
+      signalSearchStep({
+        config: { horizons: ["24h"], query: "AIHero" },
+        stepId: "search-support-signals",
+      }),
+    ]);
+
+    expect(check.checkId).toBe("aihero-support-sweep:horizon-coverage");
+    expect(check.summary).toContain(
+      aiHeroSupportSweepSourceProfile.timeHorizons.join(", ")
+    );
   });
 });

@@ -319,9 +319,6 @@ const addDreamPreflightToBlueprint = (
     readonly hitlDecisionInputRef?: ArtifactRef;
   } = {}
 ): DynamicWorkflowBlueprint => {
-  const memoryCoverageHorizons = [
-    ...dreamTranscriptReviewSourceProfile.timeHorizons,
-  ];
   const memorySourcePackDispositions =
     dreamTranscriptReviewSourceProfile.sourcePacks.map((pack) => {
       let capabilityKinds: string[] = [];
@@ -372,7 +369,6 @@ const addDreamPreflightToBlueprint = (
   const signalsStep = DynamicWorkflowStepSchema.parse({
     config: {
       maxSignals: 3,
-      memoryCoverageHorizons,
       query: "dynamic workflow proof across Codex Cloudflare Brain",
       sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
     },
@@ -388,7 +384,6 @@ const addDreamPreflightToBlueprint = (
   const searchStep = DynamicWorkflowStepSchema.parse({
     config: {
       maxHits: 3,
-      memoryCoverageHorizons,
       query: "dynamic workflow proof across Codex Cloudflare Brain",
       sourceFamilies: ["agent-transcripts", "brain", "cloudflare-runs"],
     },
@@ -955,7 +950,6 @@ describe("workflow app integration contract", () => {
     }).toStrictEqual({
       failedCheckIds: [
         "plan:profile-effect-coverage",
-        "plan:horizon-coverage",
         "plan:source-profile-bound",
       ],
       status: "failed",
@@ -4059,45 +4053,6 @@ describe("workflow app integration contract", () => {
         hash: hashJson(planWithoutSourceProfile),
       },
     });
-    const planWithoutHorizonCoverage = DynamicWorkflowPlanDocumentSchema.parse({
-      ...plan,
-      steps: plan.steps.map((step) => {
-        if (step.kind !== "workflow.node.invoke") {
-          return step;
-        }
-
-        return {
-          ...step,
-          config: Object.fromEntries(
-            Object.entries(step.config).filter(
-              ([key]) => key !== "memoryCoverageHorizons"
-            )
-          ),
-        };
-      }),
-    });
-    const proofWithoutHorizonCoverage = verifyMemoryGeneratedWorkflow({
-      executionProof,
-      executionProofRef: result.executionProofArtifact.artifactRef,
-      expectedPackageRef: memoryWorkflowPackageRef,
-      expectedSourceProfile: dreamTranscriptReviewSourceProfile,
-      expectedSourceProfileExportId: "dream-transcript-review-source-profile",
-      generatedAt: "2026-06-09T21:46:30.000Z",
-      harnessArtifact: result.harnessArtifact,
-      harnessSource: await artifacts.readText({
-        artifactRef: result.harnessArtifact.artifactRef,
-      }),
-      machine,
-      machineArtifact: result.machineArtifact,
-      machineSource: await artifacts.readText({
-        artifactRef: result.machineArtifact.sourceArtifactRef,
-      }),
-      plan: planWithoutHorizonCoverage,
-      planArtifact: {
-        ...result.planArtifact,
-        hash: hashJson(planWithoutHorizonCoverage),
-      },
-    });
     const planWithoutSourcePackDispositions =
       DynamicWorkflowPlanDocumentSchema.parse({
         ...plan,
@@ -4380,8 +4335,6 @@ describe("workflow app integration contract", () => {
       ),
       memoryGeneratedProofEffectCoverage: generatedWorkflowProof.effectCoverage,
       memoryGeneratedProofFailures: generatedWorkflowProof.failures,
-      memoryGeneratedProofHorizonCoverage:
-        generatedWorkflowProof.horizonCoverage,
       memoryGeneratedProofNodeTypes: generatedWorkflowProof.nodeTypes,
       memoryGeneratedProofRawTranscriptsReturned:
         generatedWorkflowProof.rawTranscriptsReturned,
@@ -4405,11 +4358,6 @@ describe("workflow app integration contract", () => {
           .map((check) => check.checkId),
       proofWithUnleasedSourcePackSelectedStatus:
         proofWithUnleasedSourcePackSelected.status,
-      proofWithoutHorizonCoverageFailedChecks:
-        proofWithoutHorizonCoverage.checks
-          .filter((check) => check.status === "failed")
-          .map((check) => check.checkId),
-      proofWithoutHorizonCoverageStatus: proofWithoutHorizonCoverage.status,
       proofWithoutSourcePackDispositionsFailedChecks:
         proofWithoutSourcePackDispositions.checks
           .filter((check) => check.status === "failed")
@@ -4756,7 +4704,6 @@ describe("workflow app integration contract", () => {
         "machine:hash-pinned",
         "harness:hash-pinned",
         "plan:profile-effect-coverage",
-        "plan:horizon-coverage",
         "plan:source-profile-bound",
         "plan:source-pack-disposition",
         "machine:step-order-bound",
@@ -4792,10 +4739,6 @@ describe("workflow app integration contract", () => {
         ],
       },
       memoryGeneratedProofFailures: [],
-      memoryGeneratedProofHorizonCoverage: {
-        coveredHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
-        requiredHorizons: ["24h", "7d", "30d", "quarter", "all-time"],
-      },
       memoryGeneratedProofNodeTypes: [
         "joelclaw.memory.capture-run",
         "joelclaw.memory.signals",
@@ -4912,8 +4855,6 @@ describe("workflow app integration contract", () => {
       missingSignalsEffectProofStatus: "failed",
       proofWithUnleasedSourcePackSelectedFailedChecks: [],
       proofWithUnleasedSourcePackSelectedStatus: "verified",
-      proofWithoutHorizonCoverageFailedChecks: ["plan:horizon-coverage"],
-      proofWithoutHorizonCoverageStatus: "failed",
       proofWithoutSourcePackDispositionsFailedChecks: [],
       proofWithoutSourcePackDispositionsStatus: "verified",
       proofWithoutSourceProfileFailedChecks: ["plan:source-profile-bound"],
