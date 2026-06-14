@@ -86,6 +86,15 @@ type BlockedWorkflowNodeExecutionResult = Extract<
 type AiHeroSupportSweepExecutionInput = Parameters<
   WorkflowNodeAdapterPort["execute"]
 >[0];
+interface LoadedArtifactDocument<TDocument> {
+  readonly artifactRef: ArtifactRef;
+  readonly document: TDocument;
+  readonly status: "loaded";
+}
+type ArtifactLoadResult<TDocument> =
+  | LoadedArtifactDocument<TDocument>
+  | BlockedWorkflowNodeExecutionResult;
+type ArtifactLoadFailureCause = "not_found" | "read_error" | "schema_mismatch";
 
 const AIHERO_FALLBACK_QUERY = "AIHero support sweep";
 const AIHERO_SIGNAL_MAX_CEILING = 20;
@@ -319,6 +328,110 @@ const blocker = (
   status: "blocked",
 });
 
+const artifactRefTail = (artifactRef: ArtifactRef): string => {
+  const tail = artifactRef.split("/").at(-1);
+
+  return tail === undefined || tail.length === 0 ? "<unknown>" : tail;
+};
+
+const errorMessageFor = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === "string" ? error : "";
+};
+
+const errorNameFor = (error: unknown): string =>
+  error instanceof Error ? error.name : "";
+
+const errorCodeFor = (error: unknown): unknown =>
+  typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : undefined;
+
+const artifactReadFailureCauseFor = (
+  error: unknown
+): ArtifactLoadFailureCause => {
+  const code = errorCodeFor(error);
+  if (code === "ENOENT" || code === "NOT_FOUND" || code === "not_found") {
+    return "not_found";
+  }
+
+  const message = errorMessageFor(error).toLowerCase();
+  const name = errorNameFor(error);
+  if (
+    name === "NotFoundError" ||
+    message.includes("not found") ||
+    message.includes("no such file") ||
+    message.includes("outside this store")
+  ) {
+    return "not_found";
+  }
+
+  return "read_error";
+};
+
+const zodIssuePath = (issues: readonly z.core.$ZodIssue[]): string => {
+  const issue = issues.at(0);
+  if (issue === undefined) {
+    return "<root>";
+  }
+
+  const path = issue.path.map(String).join(".");
+
+  return path.length > 0 ? path : "<root>";
+};
+
+const artifactLoadBlocker = (input: {
+  readonly artifactRef: ArtifactRef;
+  readonly cause: ArtifactLoadFailureCause;
+  readonly label: string;
+  readonly zodPath?: string;
+}): BlockedWorkflowNodeExecutionResult => {
+  const schemaPath =
+    input.zodPath === undefined ? "" : `, zod_path: ${input.zodPath}`;
+
+  return blocker(
+    "stale_package",
+    `${input.label} artifact could not be loaded by the support-sweep node (cause: ${input.cause}, ref_tail: ${artifactRefTail(input.artifactRef)}${schemaPath}).`
+  );
+};
+
+const loadJsonDocument = async <TDocument>(input: {
+  readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+  readonly label: string;
+  readonly schema: z.ZodType<TDocument>;
+}): Promise<ArtifactLoadResult<TDocument>> => {
+  let value: unknown;
+  try {
+    value = await input.artifacts.readJson({ artifactRef: input.artifactRef });
+  } catch (error) {
+    return artifactLoadBlocker({
+      artifactRef: input.artifactRef,
+      cause: artifactReadFailureCauseFor(error),
+      label: input.label,
+    });
+  }
+
+  const parsed = input.schema.safeParse(value);
+  if (!parsed.success) {
+    return artifactLoadBlocker({
+      artifactRef: input.artifactRef,
+      cause: "schema_mismatch",
+      label: input.label,
+      zodPath: zodIssuePath(parsed.error.issues),
+    });
+  }
+
+  return {
+    artifactRef: input.artifactRef,
+    document: parsed.data,
+    status: "loaded",
+  };
+};
+
 const writeDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly document: AiHeroSupportSweepNodeOutputDocument;
@@ -343,6 +456,14 @@ const dependencyRefFor = (input: {
   }
 
   return input.dependencyArtifactRefs[input.stepId] ?? null;
+};
+
+const latestDependencyArtifactRef = (
+  dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>
+): ArtifactRef | null => {
+  const refs = Object.values(dependencyArtifactRefs);
+
+  return refs.at(-1) ?? null;
 };
 
 const upstreamRefByNodeType = (input: {
@@ -372,170 +493,155 @@ const upstreamRefByNodeType = (input: {
   return resolved;
 };
 
-const loadInventory = async (input: {
-  readonly artifactRef: ArtifactRef;
-  readonly artifacts: ArtifactStoreContract;
-}): Promise<
-  | {
-      readonly document: AiHeroSupportSweepInventoryDocument;
-      readonly status: "loaded";
+const uniqueArtifactRefs = (
+  artifactRefs: readonly (ArtifactRef | null | undefined)[]
+): readonly ArtifactRef[] => {
+  const seen = new Set<string>();
+  const candidates: ArtifactRef[] = [];
+  for (const ref of artifactRefs) {
+    if (ref === null || ref === undefined || seen.has(ref)) {
+      continue;
     }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: AiHeroSupportSweepInventoryDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "AIHero inventory artifact could not be loaded by the support-sweep node."
-    );
+    seen.add(ref);
+    candidates.push(ref);
   }
+
+  return candidates;
 };
 
-const loadIndexHealth = async (input: {
-  readonly artifactRef: ArtifactRef;
-  readonly artifacts: ArtifactStoreContract;
-}): Promise<
-  | {
-      readonly document: AiHeroSupportSweepIndexHealthDocument;
-      readonly status: "loaded";
+const upstreamArtifactRefCandidatesFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly explicitRef: ArtifactRef | undefined;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly stepId: string | undefined;
+  readonly upstreamNodeType: string;
+}): readonly ArtifactRef[] =>
+  uniqueArtifactRefs([
+    input.explicitRef,
+    dependencyRefFor({
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      stepId: input.stepId,
+    }),
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: input.upstreamNodeType,
+      plan: input.plan,
+    }),
+    latestDependencyArtifactRef(input.dependencyArtifactRefs),
+  ]);
+
+const loadFirstArtifactCandidate = async <TDocument>(input: {
+  readonly artifactRefs: readonly ArtifactRef[];
+  readonly load: (
+    artifactRef: ArtifactRef
+  ) => Promise<ArtifactLoadResult<TDocument>>;
+  readonly missingBlockerMessage: string;
+}): Promise<ArtifactLoadResult<TDocument>> => {
+  let lastBlocker: BlockedWorkflowNodeExecutionResult | null = null;
+  for (const artifactRef of input.artifactRefs) {
+    const loaded = await input.load(artifactRef);
+    if (loaded.status === "loaded") {
+      return loaded;
     }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: AiHeroSupportSweepIndexHealthDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "AIHero index-health artifact could not be loaded by the support-sweep node."
-    );
+    lastBlocker = loaded;
   }
+
+  return lastBlocker ?? blocker("stale_package", input.missingBlockerMessage);
 };
 
-const loadSignalSearch = async (input: {
+const loadInventory = (input: {
   readonly artifactRef: ArtifactRef;
   readonly artifacts: ArtifactStoreContract;
-}): Promise<
-  | {
-      readonly document: AiHeroSupportSweepSignalSearchDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: AiHeroSupportSweepSignalSearchDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "AIHero signal-search artifact could not be loaded by the support-sweep node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<AiHeroSupportSweepInventoryDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "AIHero inventory",
+    schema: AiHeroSupportSweepInventoryDocumentSchema,
+  });
 
-const loadHydration = async (input: {
+const loadIndexHealth = (input: {
   readonly artifactRef: ArtifactRef;
   readonly artifacts: ArtifactStoreContract;
-}): Promise<
-  | {
-      readonly document: AiHeroSupportSweepHydrationDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: AiHeroSupportSweepHydrationDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "AIHero hydration artifact could not be loaded by the support-sweep node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<AiHeroSupportSweepIndexHealthDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "AIHero index-health",
+    schema: AiHeroSupportSweepIndexHealthDocumentSchema,
+  });
 
-const loadRecommendations = async (input: {
+const loadSignalSearch = (input: {
   readonly artifactRef: ArtifactRef;
   readonly artifacts: ArtifactStoreContract;
-}): Promise<
-  | {
-      readonly document: AiHeroSupportSweepRecommendationDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: AiHeroSupportSweepRecommendationDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "AIHero recommendations artifact could not be loaded by the support-sweep node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<AiHeroSupportSweepSignalSearchDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "AIHero signal-search",
+    schema: AiHeroSupportSweepSignalSearchDocumentSchema,
+  });
 
-const inventoryRefFor = (input: {
+const loadHydration = (input: {
+  readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+}): Promise<ArtifactLoadResult<AiHeroSupportSweepHydrationDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "AIHero hydration",
+    schema: AiHeroSupportSweepHydrationDocumentSchema,
+  });
+
+const loadRecommendations = (input: {
+  readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+}): Promise<ArtifactLoadResult<AiHeroSupportSweepRecommendationDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "AIHero recommendations",
+    schema: AiHeroSupportSweepRecommendationDocumentSchema,
+  });
+
+const inventoryRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof AiHeroIndexHealthNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.inventoryRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.inventoryStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "aihero.support-sweep.source-inventory",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.inventoryRef,
     plan: input.plan,
+    stepId: input.config.inventoryStepId,
+    upstreamNodeType: "aihero.support-sweep.source-inventory",
   });
 
-const indexHealthRefFor = (input: {
+const indexHealthRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof AiHeroSignalSearchNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.indexHealthRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.indexHealthStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "aihero.support-sweep.derived-index-health",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.indexHealthRef,
     plan: input.plan,
+    stepId: input.config.indexHealthStepId,
+    upstreamNodeType: "aihero.support-sweep.derived-index-health",
   });
 
-const signalSearchRefFor = (input: {
+const signalSearchRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -544,54 +650,48 @@ const signalSearchRefFor = (input: {
     | z.infer<typeof AiHeroRecommendationsNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.signalSearchRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.signalSearchStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "aihero.support-sweep.signal-search",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.signalSearchRef,
     plan: input.plan,
+    stepId: input.config.signalSearchStepId,
+    upstreamNodeType: "aihero.support-sweep.signal-search",
   });
 
-const hydrationRefFor = (input: {
+const hydrationRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof AiHeroRecommendationsNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.hydrationRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.hydrationStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "aihero.support-sweep.evidence-hydration",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.hydrationRef,
     plan: input.plan,
+    stepId: input.config.hydrationStepId,
+    upstreamNodeType: "aihero.support-sweep.evidence-hydration",
   });
 
-const recommendationsRefFor = (input: {
+const recommendationsRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof AiHeroDraftSideEffectsNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.recommendationsRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.recommendationsStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "aihero.support-sweep.hitl-recommendations",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.recommendationsRef,
     plan: input.plan,
+    stepId: input.config.recommendationsStepId,
+    upstreamNodeType: "aihero.support-sweep.hitl-recommendations",
   });
 
 const receiptKey = (receipt: AiHeroSupportSweepReceipt): string =>
@@ -837,22 +937,28 @@ const executeIndexHealthNode = async (
   }
 
   const nodeConfig = AiHeroIndexHealthNodeConfigSchema.parse(input.step.config);
-  const inventoryRef = inventoryRefFor({
+  const inventoryRefs = inventoryRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (inventoryRef === null) {
+  if (inventoryRefs.length === 0) {
     return blocker(
       "stale_package",
       "AIHero index-health node requires an inventory artifact ref."
     );
   }
 
-  const inventory = await loadInventory({
-    artifactRef: inventoryRef,
-    artifacts: config.artifacts,
+  const inventory = await loadFirstArtifactCandidate({
+    artifactRefs: inventoryRefs,
+    load: (artifactRef) =>
+      loadInventory({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero index-health node requires an inventory artifact ref.",
   });
   if (inventory.status === "blocked") {
     return inventory;
@@ -862,7 +968,7 @@ const executeIndexHealthNode = async (
     AiHeroSupportSweepIndexHealthPayloadSchema.parse({
       actor: input.actor,
       inventory: inventory.document,
-      inventoryRef,
+      inventoryRef: inventory.artifactRef,
       recoveryOnly: nodeConfig.recoveryOnly,
       runId: input.plan.runId,
       workItemId: input.plan.workItemId,
@@ -895,22 +1001,28 @@ const executeSignalSearchNode = async (
   const nodeConfig = AiHeroSignalSearchNodeConfigSchema.parse(
     input.step.config
   );
-  const indexHealthRef = indexHealthRefFor({
+  const indexHealthRefs = indexHealthRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (indexHealthRef === null) {
+  if (indexHealthRefs.length === 0) {
     return blocker(
       "stale_package",
       "AIHero signal-search node requires an index-health artifact ref."
     );
   }
 
-  const indexHealth = await loadIndexHealth({
-    artifactRef: indexHealthRef,
-    artifacts: config.artifacts,
+  const indexHealth = await loadFirstArtifactCandidate({
+    artifactRefs: indexHealthRefs,
+    load: (artifactRef) =>
+      loadIndexHealth({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero signal-search node requires an index-health artifact ref.",
   });
   if (indexHealth.status === "blocked") {
     return indexHealth;
@@ -922,7 +1034,7 @@ const executeSignalSearchNode = async (
       axes: nodeConfig.axes,
       horizons: nodeConfig.horizons,
       indexHealth: indexHealth.document,
-      indexHealthRef,
+      indexHealthRef: indexHealth.artifactRef,
       maxSignals: nodeConfig.maxSignals,
       query: nodeConfig.query,
       runId: input.plan.runId,
@@ -954,22 +1066,28 @@ const executeHydrationNode = async (
   }
 
   const nodeConfig = AiHeroHydrationNodeConfigSchema.parse(input.step.config);
-  const signalSearchRef = signalSearchRefFor({
+  const signalSearchRefs = signalSearchRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (signalSearchRef === null) {
+  if (signalSearchRefs.length === 0) {
     return blocker(
       "stale_package",
       "AIHero hydration node requires a signal-search artifact ref."
     );
   }
 
-  const signalSearch = await loadSignalSearch({
-    artifactRef: signalSearchRef,
-    artifacts: config.artifacts,
+  const signalSearch = await loadFirstArtifactCandidate({
+    artifactRefs: signalSearchRefs,
+    load: (artifactRef) =>
+      loadSignalSearch({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero hydration node requires a signal-search artifact ref.",
   });
   if (signalSearch.status === "blocked") {
     return signalSearch;
@@ -993,7 +1111,7 @@ const executeHydrationNode = async (
       receipts,
       runId: input.plan.runId,
       signalSearch: signalSearch.document,
-      signalSearchRef,
+      signalSearchRef: signalSearch.artifactRef,
       workItemId: input.plan.workItemId,
     })
   );
@@ -1015,36 +1133,48 @@ const executeRecommendationsNode = async (
   const nodeConfig = AiHeroRecommendationsNodeConfigSchema.parse(
     input.step.config
   );
-  const signalSearchRef = signalSearchRefFor({
+  const signalSearchRefs = signalSearchRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  const hydrationRef = hydrationRefFor({
+  const hydrationRefs = hydrationRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (signalSearchRef === null || hydrationRef === null) {
+  if (signalSearchRefs.length === 0 || hydrationRefs.length === 0) {
     return blocker(
       "stale_package",
       "AIHero recommendations node requires signal-search and hydration artifact refs."
     );
   }
 
-  const signalSearch = await loadSignalSearch({
-    artifactRef: signalSearchRef,
-    artifacts: config.artifacts,
+  const signalSearch = await loadFirstArtifactCandidate({
+    artifactRefs: signalSearchRefs,
+    load: (artifactRef) =>
+      loadSignalSearch({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero recommendations node requires a signal-search artifact ref.",
   });
   if (signalSearch.status === "blocked") {
     return signalSearch;
   }
 
-  const hydration = await loadHydration({
-    artifactRef: hydrationRef,
-    artifacts: config.artifacts,
+  const hydration = await loadFirstArtifactCandidate({
+    artifactRefs: hydrationRefs,
+    load: (artifactRef) =>
+      loadHydration({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero recommendations node requires a hydration artifact ref.",
   });
   if (hydration.status === "blocked") {
     return hydration;
@@ -1054,10 +1184,10 @@ const executeRecommendationsNode = async (
     artifacts: config.artifacts,
     document: recommendationDocumentFor({
       hydration: hydration.document,
-      hydrationRef,
+      hydrationRef: hydration.artifactRef,
       maxRecommendations: nodeConfig.maxRecommendations,
       signalSearch: signalSearch.document,
-      signalSearchRef,
+      signalSearchRef: signalSearch.artifactRef,
     }),
     step: input.step,
   });
@@ -1070,22 +1200,28 @@ const executeDraftSideEffectsNode = async (
   const nodeConfig = AiHeroDraftSideEffectsNodeConfigSchema.parse(
     input.step.config
   );
-  const recommendationsRef = recommendationsRefFor({
+  const recommendationsRefs = recommendationsRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (recommendationsRef === null) {
+  if (recommendationsRefs.length === 0) {
     return blocker(
       "stale_package",
       "AIHero draft side-effects node requires a recommendations artifact ref."
     );
   }
 
-  const recommendations = await loadRecommendations({
-    artifactRef: recommendationsRef,
-    artifacts: config.artifacts,
+  const recommendations = await loadFirstArtifactCandidate({
+    artifactRefs: recommendationsRefs,
+    load: (artifactRef) =>
+      loadRecommendations({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "AIHero draft side-effects node requires a recommendations artifact ref.",
   });
   if (recommendations.status === "blocked") {
     return recommendations;
@@ -1094,7 +1230,7 @@ const executeDraftSideEffectsNode = async (
   const document = draftSideEffectDocumentFor({
     artifacts: config.artifacts,
     recommendations: recommendations.document,
-    recommendationsRef,
+    recommendationsRef: recommendations.artifactRef,
   });
   const draftWrites = await Promise.all(
     document.draftActions.map((action, index) =>
@@ -1110,7 +1246,7 @@ const executeDraftSideEffectsNode = async (
           actionKind: action.actionKind,
           leaseGate: action.leaseGate,
           recommendationId: action.recommendationId,
-          recommendationRef: recommendationsRef,
+          recommendationRef: recommendations.artifactRef,
           redacted: true,
           schemaVersion: "aihero.support-sweep.side-effect-draft.v1",
           submitted: false,

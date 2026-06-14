@@ -148,6 +148,15 @@ type BlockedWorkflowNodeExecutionResult = Extract<
 type MemoryWorkflowNodeExecutionInput = Parameters<
   WorkflowNodeAdapterPort["execute"]
 >[0];
+interface LoadedArtifactDocument<TDocument> {
+  readonly artifactRef: ArtifactRef;
+  readonly document: TDocument;
+  readonly status: "loaded";
+}
+type ArtifactLoadResult<TDocument> =
+  | LoadedArtifactDocument<TDocument>
+  | BlockedWorkflowNodeExecutionResult;
+type ArtifactLoadFailureCause = "not_found" | "read_error" | "schema_mismatch";
 
 const CAPTURABLE_ARTIFACT_MEDIA_TYPES = [
   "application/json",
@@ -559,6 +568,110 @@ const blocker = (
   status: "blocked",
 });
 
+const artifactRefTail = (artifactRef: ArtifactRef): string => {
+  const tail = artifactRef.split("/").at(-1);
+
+  return tail === undefined || tail.length === 0 ? "<unknown>" : tail;
+};
+
+const errorMessageFor = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return typeof error === "string" ? error : "";
+};
+
+const errorNameFor = (error: unknown): string =>
+  error instanceof Error ? error.name : "";
+
+const errorCodeFor = (error: unknown): unknown =>
+  typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : undefined;
+
+const artifactReadFailureCauseFor = (
+  error: unknown
+): ArtifactLoadFailureCause => {
+  const code = errorCodeFor(error);
+  if (code === "ENOENT" || code === "NOT_FOUND" || code === "not_found") {
+    return "not_found";
+  }
+
+  const message = errorMessageFor(error).toLowerCase();
+  const name = errorNameFor(error);
+  if (
+    name === "NotFoundError" ||
+    message.includes("not found") ||
+    message.includes("no such file") ||
+    message.includes("outside this store")
+  ) {
+    return "not_found";
+  }
+
+  return "read_error";
+};
+
+const zodIssuePath = (issues: readonly z.core.$ZodIssue[]): string => {
+  const issue = issues.at(0);
+  if (issue === undefined) {
+    return "<root>";
+  }
+
+  const path = issue.path.map(String).join(".");
+
+  return path.length > 0 ? path : "<root>";
+};
+
+const artifactLoadBlocker = (input: {
+  readonly artifactRef: ArtifactRef;
+  readonly cause: ArtifactLoadFailureCause;
+  readonly label: string;
+  readonly zodPath?: string;
+}): BlockedWorkflowNodeExecutionResult => {
+  const schemaPath =
+    input.zodPath === undefined ? "" : `, zod_path: ${input.zodPath}`;
+
+  return blocker(
+    "stale_package",
+    `${input.label} artifact could not be loaded by the memory-fabric node (cause: ${input.cause}, ref_tail: ${artifactRefTail(input.artifactRef)}${schemaPath}).`
+  );
+};
+
+const loadJsonDocument = async <TDocument>(input: {
+  readonly artifactRef: ArtifactRef;
+  readonly artifacts: ArtifactStoreContract;
+  readonly label: string;
+  readonly schema: z.ZodType<TDocument>;
+}): Promise<ArtifactLoadResult<TDocument>> => {
+  let value: unknown;
+  try {
+    value = await input.artifacts.readJson({ artifactRef: input.artifactRef });
+  } catch (error) {
+    return artifactLoadBlocker({
+      artifactRef: input.artifactRef,
+      cause: artifactReadFailureCauseFor(error),
+      label: input.label,
+    });
+  }
+
+  const parsed = input.schema.safeParse(value);
+  if (!parsed.success) {
+    return artifactLoadBlocker({
+      artifactRef: input.artifactRef,
+      cause: "schema_mismatch",
+      label: input.label,
+      zodPath: zodIssuePath(parsed.error.issues),
+    });
+  }
+
+  return {
+    artifactRef: input.artifactRef,
+    document: parsed.data,
+    status: "loaded",
+  };
+};
+
 const siblingArtifactPath = (input: {
   readonly extension: string;
   readonly outputPath: string;
@@ -667,207 +780,93 @@ const dependencyRefFor = (input: {
   return input.dependencyArtifactRefs[input.stepId] ?? null;
 };
 
-const loadSearch = async (input: {
+const loadSearch = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemorySearchDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemorySearchDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory search artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemorySearchDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory search",
+    schema: MemorySearchDocumentSchema,
+  });
 
-const loadHydration = async (input: {
+const loadHydration = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemoryHydrationDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemoryHydrationDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory hydration artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemoryHydrationDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory hydration",
+    schema: MemoryHydrationDocumentSchema,
+  });
 
-const loadSignals = async (input: {
+const loadSignals = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemorySignalDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemorySignalDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory signals artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemorySignalDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory signals",
+    schema: MemorySignalDocumentSchema,
+  });
 
-const loadCorrelation = async (input: {
+const loadCorrelation = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemoryCorrelationGraphDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemoryCorrelationGraphDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory correlation graph artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemoryCorrelationGraphDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory correlation graph",
+    schema: MemoryCorrelationGraphDocumentSchema,
+  });
 
-const loadRefinementProposals = async (input: {
+const loadRefinementProposals = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemoryRefinementProposalDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemoryRefinementProposalDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory refinement proposal artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemoryRefinementProposalDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory refinement proposal",
+    schema: MemoryRefinementProposalDocumentSchema,
+  });
 
-const loadHitlDecision = async (input: {
+const loadHitlDecision = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemoryHitlDecisionDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemoryHitlDecisionDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory HITL decision artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemoryHitlDecisionDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory HITL decision",
+    schema: MemoryHitlDecisionDocumentSchema,
+  });
 
-const loadHitlReport = async (input: {
+const loadHitlReport = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: WorkflowHitlReportDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: WorkflowHitlReportDocumentSchema.parse(
-        await input.artifacts.readJson({
-          artifactRef: hitlReportJsonArtifactRefFor(input.artifactRef),
-        })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory HITL report artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<WorkflowHitlReportDocument>> =>
+  loadJsonDocument({
+    artifactRef: hitlReportJsonArtifactRefFor(input.artifactRef),
+    artifacts: input.artifacts,
+    label: "Memory HITL report",
+    schema: WorkflowHitlReportDocumentSchema,
+  });
 
-const loadHitlDecisionWorkflowSeed = async (input: {
+const loadHitlDecisionWorkflowSeed = (input: {
   readonly artifacts: ArtifactStoreContract;
   readonly artifactRef: ArtifactRef;
-}): Promise<
-  | {
-      readonly document: MemoryHitlDecisionWorkflowSeedDocument;
-      readonly status: "loaded";
-    }
-  | BlockedWorkflowNodeExecutionResult
-> => {
-  try {
-    return {
-      document: MemoryHitlDecisionWorkflowSeedDocumentSchema.parse(
-        await input.artifacts.readJson({ artifactRef: input.artifactRef })
-      ),
-      status: "loaded",
-    };
-  } catch {
-    return blocker(
-      "stale_package",
-      "Memory HITL decision workflow seed artifact could not be loaded by the memory-fabric node."
-    );
-  }
-};
+}): Promise<ArtifactLoadResult<MemoryHitlDecisionWorkflowSeedDocument>> =>
+  loadJsonDocument({
+    artifactRef: input.artifactRef,
+    artifacts: input.artifacts,
+    label: "Memory HITL decision workflow seed",
+    schema: MemoryHitlDecisionWorkflowSeedDocumentSchema,
+  });
 
 // Latest dependency artifact ref, ignoring order-insensitive map iteration by
 // taking the last inserted value. Used as a fallback for the capture-artifact
@@ -906,6 +905,68 @@ const upstreamRefByNodeType = (input: {
   }
 
   return resolved;
+};
+
+const uniqueArtifactRefCandidates = (
+  artifactRefs: readonly (ArtifactRef | null | undefined)[]
+): readonly ArtifactRef[] => {
+  const seen = new Set<string>();
+  const candidates: ArtifactRef[] = [];
+  for (const ref of artifactRefs) {
+    if (ref === null || ref === undefined || seen.has(ref)) {
+      continue;
+    }
+    seen.add(ref);
+    candidates.push(ref);
+  }
+
+  return candidates;
+};
+
+const upstreamArtifactRefCandidatesFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly explicitRef: ArtifactRef | undefined;
+  readonly includeLatestDependency?: boolean;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly stepId: string | undefined;
+  readonly upstreamNodeType: string;
+}): readonly ArtifactRef[] =>
+  uniqueArtifactRefCandidates([
+    input.explicitRef,
+    dependencyRefFor({
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      stepId: input.stepId,
+    }),
+    upstreamRefByNodeType({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      nodeType: input.upstreamNodeType,
+      plan: input.plan,
+    }),
+    input.includeLatestDependency === false
+      ? null
+      : latestDependencyArtifactRef(input.dependencyArtifactRefs),
+  ]);
+
+const loadFirstArtifactCandidate = async <TDocument>(input: {
+  readonly artifactRefs: readonly ArtifactRef[];
+  readonly load: (
+    artifactRef: ArtifactRef
+  ) => Promise<ArtifactLoadResult<TDocument>>;
+  readonly missingBlockerMessage: string;
+}): Promise<ArtifactLoadResult<TDocument>> => {
+  let lastBlocker: BlockedWorkflowNodeExecutionResult | null = null;
+  for (const artifactRef of input.artifactRefs) {
+    const loaded = await input.load(artifactRef);
+    if (loaded.status === "loaded") {
+      return loaded;
+    }
+    lastBlocker = loaded;
+  }
+
+  return lastBlocker ?? blocker("stale_package", input.missingBlockerMessage);
 };
 
 // The planner's capture-artifact intent is "capture the generated machine and
@@ -955,17 +1016,7 @@ const captureArtifactRefCandidatesFor = (input: {
     input.plan.harness.artifactRef,
   ];
 
-  const seen = new Set<string>();
-  const candidates: ArtifactRef[] = [];
-  for (const ref of ordered) {
-    if (ref === null || seen.has(ref)) {
-      continue;
-    }
-    seen.add(ref);
-    candidates.push(ref);
-  }
-
-  return candidates;
+  return uniqueArtifactRefCandidates(ordered);
 };
 
 // Read one candidate ref into a pin, trying JSON first when the planner declared
@@ -1045,26 +1096,24 @@ const captureArtifactPinFor = async (input: {
   );
 };
 
-const searchRefFor = (input: {
+const searchRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
   readonly config: z.infer<typeof MemoryHydrationNodeConfigSchema>;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.searchRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.searchStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "joelclaw.memory.search",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.searchRef,
     plan: input.plan,
+    stepId: input.config.searchStepId,
+    upstreamNodeType: "joelclaw.memory.search",
   });
 
-const correlationRefsFor = (input: {
+const correlationRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1072,39 +1121,28 @@ const correlationRefsFor = (input: {
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
 }): {
-  readonly hydrationRef: ArtifactRef | null;
-  readonly searchRef: ArtifactRef | null;
-} => {
-  const searchRef =
-    input.config.searchRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.searchStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.search",
-      plan: input.plan,
-    });
-  const hydrationRef =
-    input.config.hydrationRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.hydrationStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.hydrate",
-      plan: input.plan,
-    });
+  readonly hydrationRefs: readonly ArtifactRef[];
+  readonly searchRefs: readonly ArtifactRef[];
+} => ({
+  hydrationRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.hydrationRef,
+    plan: input.plan,
+    stepId: input.config.hydrationStepId,
+    upstreamNodeType: "joelclaw.memory.hydrate",
+  }),
+  searchRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.searchRef,
+    plan: input.plan,
+    stepId: input.config.searchStepId,
+    upstreamNodeType: "joelclaw.memory.search",
+  }),
+});
 
-  return {
-    hydrationRef,
-    searchRef,
-  };
-};
-
-const refinementProposalRefsFor = (input: {
+const refinementProposalRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1112,58 +1150,46 @@ const refinementProposalRefsFor = (input: {
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
 }): {
-  readonly correlationRef: ArtifactRef | null;
-  readonly hydrationRef: ArtifactRef | null;
-  readonly searchRef: ArtifactRef | null;
-  readonly signalsRef: ArtifactRef | null;
+  readonly correlationRefs: readonly ArtifactRef[];
+  readonly hydrationRefs: readonly ArtifactRef[];
+  readonly searchRefs: readonly ArtifactRef[];
+  readonly signalsRefs: readonly ArtifactRef[];
 } => ({
-  correlationRef:
-    input.config.correlationRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.correlationStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.correlate",
-      plan: input.plan,
-    }),
-  hydrationRef:
-    input.config.hydrationRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.hydrationStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.hydrate",
-      plan: input.plan,
-    }),
-  searchRef:
-    input.config.searchRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.searchStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.search",
-      plan: input.plan,
-    }),
-  signalsRef:
-    input.config.signalsRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.signalsStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.signals",
-      plan: input.plan,
-    }),
+  correlationRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.correlationRef,
+    plan: input.plan,
+    stepId: input.config.correlationStepId,
+    upstreamNodeType: "joelclaw.memory.correlate",
+  }),
+  hydrationRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.hydrationRef,
+    plan: input.plan,
+    stepId: input.config.hydrationStepId,
+    upstreamNodeType: "joelclaw.memory.hydrate",
+  }),
+  searchRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.searchRef,
+    plan: input.plan,
+    stepId: input.config.searchStepId,
+    upstreamNodeType: "joelclaw.memory.search",
+  }),
+  signalsRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.signalsRef,
+    plan: input.plan,
+    stepId: input.config.signalsStepId,
+    upstreamNodeType: "joelclaw.memory.signals",
+  }),
 });
 
-const reportRefsFor = (input: {
+const reportRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1171,55 +1197,44 @@ const reportRefsFor = (input: {
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
 }): {
-  readonly correlationRef: ArtifactRef | null;
-  readonly hydrationRef: ArtifactRef | null;
-  readonly refinementProposalRef: ArtifactRef | null;
-  readonly searchRef: ArtifactRef | null;
+  readonly correlationRefs: readonly ArtifactRef[];
+  readonly hydrationRefs: readonly ArtifactRef[];
+  readonly refinementProposalRefs: readonly ArtifactRef[];
+  readonly searchRefs: readonly ArtifactRef[];
 } => ({
-  correlationRef:
-    input.config.correlationRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.correlationStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.correlate",
-      plan: input.plan,
-    }),
-  hydrationRef:
-    input.config.hydrationRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.hydrationStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.hydrate",
-      plan: input.plan,
-    }),
-  refinementProposalRef:
-    input.config.refinementProposalRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.refinementProposalStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.refinement-proposals",
-      plan: input.plan,
-    }),
-  searchRef:
-    input.config.searchRef ??
-    dependencyRefFor({
-      dependencyArtifactRefs: input.dependencyArtifactRefs,
-      stepId: input.config.searchStepId,
-    }) ??
-    upstreamRefByNodeType({
-      completedStepArtifactRefs: input.completedStepArtifactRefs,
-      nodeType: "joelclaw.memory.search",
-      plan: input.plan,
-    }),
+  correlationRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.correlationRef,
+    plan: input.plan,
+    stepId: input.config.correlationStepId,
+    upstreamNodeType: "joelclaw.memory.correlate",
+  }),
+  hydrationRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.hydrationRef,
+    plan: input.plan,
+    stepId: input.config.hydrationStepId,
+    upstreamNodeType: "joelclaw.memory.hydrate",
+  }),
+  refinementProposalRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.refinementProposalRef,
+    includeLatestDependency: false,
+    plan: input.plan,
+    stepId: input.config.refinementProposalStepId,
+    upstreamNodeType: "joelclaw.memory.refinement-proposals",
+  }),
+  searchRefs: upstreamArtifactRefCandidatesFor({
+    completedStepArtifactRefs: input.completedStepArtifactRefs,
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.searchRef,
+    plan: input.plan,
+    stepId: input.config.searchStepId,
+    upstreamNodeType: "joelclaw.memory.search",
+  }),
 });
 
 const hitlDecisionRefFor = (input: {
@@ -1239,7 +1254,7 @@ const hitlDecisionRefFor = (input: {
   ) ??
   null;
 
-const hitlReportRefFor = (input: {
+const hitlReportRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1248,19 +1263,17 @@ const hitlReportRefFor = (input: {
   >;
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.reportRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.reportStepId,
-  }) ??
-  upstreamRefByNodeType({
+}): readonly ArtifactRef[] =>
+  upstreamArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "joelclaw.memory.hitl-report",
+    dependencyArtifactRefs: input.dependencyArtifactRefs,
+    explicitRef: input.config.reportRef,
     plan: input.plan,
+    stepId: input.config.reportStepId,
+    upstreamNodeType: "joelclaw.memory.hitl-report",
   });
 
-const hitlRefinementProposalRefFor = (input: {
+const hitlRefinementProposalRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1270,21 +1283,21 @@ const hitlRefinementProposalRefFor = (input: {
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly plan: DynamicWorkflowPlanDocument;
   readonly report: WorkflowHitlReportDocument;
-}): ArtifactRef | null =>
-  input.config.refinementProposalRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.refinementProposalStepId,
-  }) ??
-  upstreamRefByNodeType({
-    completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "joelclaw.memory.refinement-proposals",
-    plan: input.plan,
-  }) ??
-  input.report.refinementProposalRef ??
-  null;
+}): readonly ArtifactRef[] =>
+  uniqueArtifactRefCandidates([
+    ...upstreamArtifactRefCandidatesFor({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      explicitRef: input.config.refinementProposalRef,
+      includeLatestDependency: false,
+      plan: input.plan,
+      stepId: input.config.refinementProposalStepId,
+      upstreamNodeType: "joelclaw.memory.refinement-proposals",
+    }),
+    input.report.refinementProposalRef ?? null,
+  ]);
 
-const hitlDecisionWorkflowSeedRefFor = (input: {
+const hitlDecisionWorkflowSeedRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
     | undefined;
@@ -1292,41 +1305,37 @@ const hitlDecisionWorkflowSeedRefFor = (input: {
   readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
   readonly inputRefs: readonly ArtifactRef[];
   readonly plan: DynamicWorkflowPlanDocument;
-}): ArtifactRef | null =>
-  input.config.seedRef ??
-  dependencyRefFor({
-    dependencyArtifactRefs: input.dependencyArtifactRefs,
-    stepId: input.config.seedStepId,
-  }) ??
-  input.inputRefs.find((artifactRef) =>
-    artifactRef.includes("/hitl-decision-workflow-seed.json")
-  ) ??
-  upstreamRefByNodeType({
-    completedStepArtifactRefs: input.completedStepArtifactRefs,
-    nodeType: "joelclaw.memory.hitl-decision-seed",
-    plan: input.plan,
-  }) ??
-  null;
-
-interface RequiredReportRefs {
-  readonly correlationRef: ArtifactRef;
-  readonly hydrationRef: ArtifactRef;
-  readonly searchRef: ArtifactRef;
-}
+}): readonly ArtifactRef[] =>
+  uniqueArtifactRefCandidates([
+    ...upstreamArtifactRefCandidatesFor({
+      completedStepArtifactRefs: input.completedStepArtifactRefs,
+      dependencyArtifactRefs: input.dependencyArtifactRefs,
+      explicitRef: input.config.seedRef,
+      plan: input.plan,
+      stepId: input.config.seedStepId,
+      upstreamNodeType: "joelclaw.memory.hitl-decision-seed",
+    }),
+    input.inputRefs.find((artifactRef) =>
+      artifactRef.includes("/hitl-decision-workflow-seed.json")
+    ) ?? null,
+  ]);
 
 interface LoadedReportInputs {
   readonly correlation: MemoryCorrelationGraphDocument;
+  readonly correlationRef: ArtifactRef;
   readonly hydration: MemoryHydrationDocument;
+  readonly hydrationRef: ArtifactRef;
   readonly search: MemorySearchDocument;
+  readonly searchRef: ArtifactRef;
 }
 
-const requiredReportRefsFor = (
-  refs: ReturnType<typeof reportRefsFor>
-): RequiredReportRefs | BlockedWorkflowNodeExecutionResult => {
+const requiredReportRefsPresent = (
+  refs: ReturnType<typeof reportRefCandidatesFor>
+): BlockedWorkflowNodeExecutionResult | null => {
   if (
-    refs.correlationRef === null ||
-    refs.hydrationRef === null ||
-    refs.searchRef === null
+    refs.correlationRefs.length === 0 ||
+    refs.hydrationRefs.length === 0 ||
+    refs.searchRefs.length === 0
   ) {
     return blocker(
       "stale_package",
@@ -1334,36 +1343,38 @@ const requiredReportRefsFor = (
     );
   }
 
-  return {
-    correlationRef: refs.correlationRef,
-    hydrationRef: refs.hydrationRef,
-    searchRef: refs.searchRef,
-  };
+  return null;
 };
 
 const loadRequiredReportInputs = async (
   artifacts: ArtifactStoreContract,
-  refs: RequiredReportRefs
+  refs: ReturnType<typeof reportRefCandidatesFor>
 ): Promise<LoadedReportInputs | BlockedWorkflowNodeExecutionResult> => {
-  const search = await loadSearch({
-    artifactRef: refs.searchRef,
-    artifacts,
+  const search = await loadFirstArtifactCandidate({
+    artifactRefs: refs.searchRefs,
+    load: (artifactRef) => loadSearch({ artifactRef, artifacts }),
+    missingBlockerMessage:
+      "Memory HITL report node requires a memory search artifact ref.",
   });
   if (search.status === "blocked") {
     return search;
   }
 
-  const hydration = await loadHydration({
-    artifactRef: refs.hydrationRef,
-    artifacts,
+  const hydration = await loadFirstArtifactCandidate({
+    artifactRefs: refs.hydrationRefs,
+    load: (artifactRef) => loadHydration({ artifactRef, artifacts }),
+    missingBlockerMessage:
+      "Memory HITL report node requires a memory hydration artifact ref.",
   });
   if (hydration.status === "blocked") {
     return hydration;
   }
 
-  const correlation = await loadCorrelation({
-    artifactRef: refs.correlationRef,
-    artifacts,
+  const correlation = await loadFirstArtifactCandidate({
+    artifactRefs: refs.correlationRefs,
+    load: (artifactRef) => loadCorrelation({ artifactRef, artifacts }),
+    missingBlockerMessage:
+      "Memory HITL report node requires a memory correlation artifact ref.",
   });
   if (correlation.status === "blocked") {
     return correlation;
@@ -1371,31 +1382,42 @@ const loadRequiredReportInputs = async (
 
   return {
     correlation: correlation.document,
+    correlationRef: correlation.artifactRef,
     hydration: hydration.document,
+    hydrationRef: hydration.artifactRef,
     search: search.document,
+    searchRef: search.artifactRef,
   };
 };
 
 const loadOptionalRefinementProposalDocument = async (input: {
   readonly artifacts: ArtifactStoreContract;
-  readonly refinementProposalRef: ArtifactRef | null;
+  readonly refinementProposalRefs: readonly ArtifactRef[];
 }): Promise<
   | {
       readonly document: MemoryRefinementProposalDocument | null;
+      readonly refinementProposalRef: ArtifactRef | null;
       readonly status: "loaded";
     }
   | BlockedWorkflowNodeExecutionResult
 > => {
-  if (input.refinementProposalRef === null) {
+  if (input.refinementProposalRefs.length === 0) {
     return {
       document: null,
+      refinementProposalRef: null,
       status: "loaded",
     };
   }
 
-  const refinementProposals = await loadRefinementProposals({
-    artifactRef: input.refinementProposalRef,
-    artifacts: input.artifacts,
+  const refinementProposals = await loadFirstArtifactCandidate({
+    artifactRefs: input.refinementProposalRefs,
+    load: (artifactRef) =>
+      loadRefinementProposals({
+        artifactRef,
+        artifacts: input.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory refinement proposal artifact ref could not be resolved.",
   });
   if (refinementProposals.status === "blocked") {
     return refinementProposals;
@@ -1403,6 +1425,7 @@ const loadOptionalRefinementProposalDocument = async (input: {
 
   return {
     document: refinementProposals.document,
+    refinementProposalRef: refinementProposals.artifactRef,
     status: "loaded",
   };
 };
@@ -2911,22 +2934,28 @@ const executeHydrationNode = async (
   }
 
   const nodeConfig = MemoryHydrationNodeConfigSchema.parse(input.step.config);
-  const searchRef = searchRefFor({
+  const searchRefs = searchRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (searchRef === null) {
+  if (searchRefs.length === 0) {
     return blocker(
       "stale_package",
       "Memory hydration node requires a memory search artifact ref."
     );
   }
 
-  const search = await loadSearch({
-    artifactRef: searchRef,
-    artifacts: config.artifacts,
+  const search = await loadFirstArtifactCandidate({
+    artifactRefs: searchRefs,
+    load: (artifactRef) =>
+      loadSearch({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory hydration node requires a memory search artifact ref.",
   });
   if (search.status === "blocked") {
     return search;
@@ -2975,30 +3004,42 @@ const executeCorrelationNode = async (
   }
 
   const nodeConfig = MemoryCorrelationNodeConfigSchema.parse(input.step.config);
-  const refs = correlationRefsFor({
+  const refs = correlationRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  if (refs.searchRef === null || refs.hydrationRef === null) {
+  if (refs.searchRefs.length === 0 || refs.hydrationRefs.length === 0) {
     return blocker(
       "stale_package",
       "Memory correlation node requires memory search and hydration artifact refs."
     );
   }
 
-  const search = await loadSearch({
-    artifactRef: refs.searchRef,
-    artifacts: config.artifacts,
+  const search = await loadFirstArtifactCandidate({
+    artifactRefs: refs.searchRefs,
+    load: (artifactRef) =>
+      loadSearch({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory correlation node requires a memory search artifact ref.",
   });
   if (search.status === "blocked") {
     return search;
   }
 
-  const hydration = await loadHydration({
-    artifactRef: refs.hydrationRef,
-    artifacts: config.artifacts,
+  const hydration = await loadFirstArtifactCandidate({
+    artifactRefs: refs.hydrationRefs,
+    load: (artifactRef) =>
+      loadHydration({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory correlation node requires a memory hydration artifact ref.",
   });
   if (hydration.status === "blocked") {
     return hydration;
@@ -3008,10 +3049,10 @@ const executeCorrelationNode = async (
     MemoryRelayCorrelationPayloadSchema.parse({
       actor: input.actor,
       hydration: hydration.document,
-      hydrationRef: refs.hydrationRef,
+      hydrationRef: hydration.artifactRef,
       runId: input.plan.runId,
       search: search.document,
-      searchRef: refs.searchRef,
+      searchRef: search.artifactRef,
       workItemId: input.plan.workItemId,
     })
   );
@@ -3133,17 +3174,17 @@ const executeRefinementProposalsNode = async (
   const nodeConfig = MemoryRefinementProposalNodeConfigSchema.parse(
     input.step.config
   );
-  const refs = refinementProposalRefsFor({
+  const refs = refinementProposalRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
   if (
-    refs.correlationRef === null ||
-    refs.hydrationRef === null ||
-    refs.searchRef === null ||
-    refs.signalsRef === null
+    refs.correlationRefs.length === 0 ||
+    refs.hydrationRefs.length === 0 ||
+    refs.searchRefs.length === 0 ||
+    refs.signalsRefs.length === 0
   ) {
     return blocker(
       "stale_package",
@@ -3151,43 +3192,67 @@ const executeRefinementProposalsNode = async (
     );
   }
 
-  const search = await loadSearch({
-    artifactRef: refs.searchRef,
-    artifacts: config.artifacts,
+  const search = await loadFirstArtifactCandidate({
+    artifactRefs: refs.searchRefs,
+    load: (artifactRef) =>
+      loadSearch({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory refinement proposal node requires a memory search artifact ref.",
   });
   if (search.status === "blocked") {
     return search;
   }
 
-  const signals = await loadSignals({
-    artifactRef: refs.signalsRef,
-    artifacts: config.artifacts,
+  const signals = await loadFirstArtifactCandidate({
+    artifactRefs: refs.signalsRefs,
+    load: (artifactRef) =>
+      loadSignals({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory refinement proposal node requires a memory signals artifact ref.",
   });
   if (signals.status === "blocked") {
     return signals;
   }
 
-  const hydration = await loadHydration({
-    artifactRef: refs.hydrationRef,
-    artifacts: config.artifacts,
+  const hydration = await loadFirstArtifactCandidate({
+    artifactRefs: refs.hydrationRefs,
+    load: (artifactRef) =>
+      loadHydration({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory refinement proposal node requires a memory hydration artifact ref.",
   });
   if (hydration.status === "blocked") {
     return hydration;
   }
 
-  const correlation = await loadCorrelation({
-    artifactRef: refs.correlationRef,
-    artifacts: config.artifacts,
+  const correlation = await loadFirstArtifactCandidate({
+    artifactRefs: refs.correlationRefs,
+    load: (artifactRef) =>
+      loadCorrelation({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory refinement proposal node requires a memory correlation artifact ref.",
   });
   if (correlation.status === "blocked") {
     return correlation;
   }
 
   const sourceRefs = [
-    refs.signalsRef,
-    refs.searchRef,
-    refs.hydrationRef,
-    refs.correlationRef,
+    signals.artifactRef,
+    search.artifactRef,
+    hydration.artifactRef,
+    correlation.artifactRef,
   ];
   // Reason first (the dream thinks), fall back to template-fill (the dream stays
   // honest). The deterministic envelope — hash-pin, redaction, schema parse —
@@ -3208,14 +3273,14 @@ const executeRefinementProposalsNode = async (
     agenticDocument ??
     refinementProposalDocumentFor({
       correlation: correlation.document,
-      correlationRef: refs.correlationRef,
+      correlationRef: correlation.artifactRef,
       hydration: hydration.document,
-      hydrationRef: refs.hydrationRef,
+      hydrationRef: hydration.artifactRef,
       maxProposals: nodeConfig.maxProposals,
       search: search.document,
-      searchRef: refs.searchRef,
+      searchRef: search.artifactRef,
       signals: signals.document,
-      signalsRef: refs.signalsRef,
+      signalsRef: signals.artifactRef,
     });
 
   return await writeDocument({
@@ -3232,21 +3297,18 @@ const executeHitlReportNode = async (
   const nodeConfig = WorkflowHitlReportNodeConfigSchema.parse(
     input.step.config
   );
-  const refs = reportRefsFor({
+  const refs = reportRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     plan: input.plan,
   });
-  const requiredRefs = requiredReportRefsFor(refs);
-  if ("status" in requiredRefs) {
-    return requiredRefs;
+  const missingRequiredRefs = requiredReportRefsPresent(refs);
+  if (missingRequiredRefs !== null) {
+    return missingRequiredRefs;
   }
 
-  const reportInputs = await loadRequiredReportInputs(
-    config.artifacts,
-    requiredRefs
-  );
+  const reportInputs = await loadRequiredReportInputs(config.artifacts, refs);
   if ("status" in reportInputs) {
     return reportInputs;
   }
@@ -3280,7 +3342,7 @@ const executeHitlReportNode = async (
 
   const refinementProposals = await loadOptionalRefinementProposalDocument({
     artifacts: config.artifacts,
-    refinementProposalRef: refs.refinementProposalRef,
+    refinementProposalRefs: refs.refinementProposalRefs,
   });
   if (refinementProposals.status === "blocked") {
     return refinementProposals;
@@ -3301,12 +3363,12 @@ const executeHitlReportNode = async (
     machineArtifact: input.plan.machine,
   });
   const sourceRefs = [
-    requiredRefs.searchRef,
-    requiredRefs.hydrationRef,
-    requiredRefs.correlationRef,
-    ...(refs.refinementProposalRef === null
+    reportInputs.searchRef,
+    reportInputs.hydrationRef,
+    reportInputs.correlationRef,
+    ...(refinementProposals.refinementProposalRef === null
       ? []
-      : [refs.refinementProposalRef]),
+      : [refinementProposals.refinementProposalRef]),
   ];
   const hitlDecisionContract = hitlDecisionContractFor(sourceRefs);
   const generatedAt = new Date().toISOString();
@@ -3366,9 +3428,9 @@ const executeHitlReportNode = async (
     receiptCount,
     redacted: true,
     refinementProposalCount: refinementProposals.document?.proposalCount ?? 0,
-    ...(refs.refinementProposalRef === null
+    ...(refinementProposals.refinementProposalRef === null
       ? {}
-      : { refinementProposalRef: refs.refinementProposalRef }),
+      : { refinementProposalRef: refinementProposals.refinementProposalRef }),
     refinementProposals: refinementProposals.document?.proposals ?? [],
     refinementReasoningMode,
     runId: input.plan.runId,
@@ -3402,29 +3464,34 @@ const executeHitlDecisionWorkflowSeedNode = async (
   );
   const deriveGeneratedDraftSeed =
     async (): Promise<WorkflowNodeExecutionResult> => {
-      const reportRef = hitlReportRefFor({
+      const reportRefs = hitlReportRefCandidatesFor({
         completedStepArtifactRefs: input.completedStepArtifactRefs,
         config: nodeConfig,
         dependencyArtifactRefs: input.dependencyArtifactRefs,
         plan: input.plan,
       });
-      if (reportRef === null) {
+      if (reportRefs.length === 0) {
         return blocker(
           "stale_package",
           "Memory HITL decision seed node requires either a memory.hitl-decision.v1 artifact ref or a workflow.hitl-report.v1 artifact ref to derive a generated draft seed."
         );
       }
 
-      const reportJsonRef = hitlReportJsonArtifactRefFor(reportRef);
-      const report = await loadHitlReport({
-        artifactRef: reportJsonRef,
-        artifacts: config.artifacts,
+      const report = await loadFirstArtifactCandidate({
+        artifactRefs: reportRefs,
+        load: (artifactRef) =>
+          loadHitlReport({
+            artifactRef,
+            artifacts: config.artifacts,
+          }),
+        missingBlockerMessage:
+          "Memory HITL decision seed node requires a workflow.hitl-report.v1 artifact ref.",
       });
       if (report.status === "blocked") {
         return report;
       }
 
-      const refinementProposalRef = hitlRefinementProposalRefFor({
+      const refinementProposalRefs = hitlRefinementProposalRefCandidatesFor({
         completedStepArtifactRefs: input.completedStepArtifactRefs,
         config: nodeConfig,
         dependencyArtifactRefs: input.dependencyArtifactRefs,
@@ -3433,7 +3500,7 @@ const executeHitlDecisionWorkflowSeedNode = async (
       });
       const refinementProposals = await loadOptionalRefinementProposalDocument({
         artifacts: config.artifacts,
-        refinementProposalRef,
+        refinementProposalRefs,
       });
       if (refinementProposals.status === "blocked") {
         return refinementProposals;
@@ -3448,10 +3515,10 @@ const executeHitlDecisionWorkflowSeedNode = async (
       const draftDecision = generatedDraftHitlDecisionDocumentFor({
         actor: input.actor,
         generatedAt,
-        refinementProposalRef,
+        refinementProposalRef: refinementProposals.refinementProposalRef,
         refinementProposals: refinementProposals.document,
         report: report.document,
-        reportRef: reportJsonRef,
+        reportRef: report.artifactRef,
       });
       const seed = hitlDecisionWorkflowSeedDocumentFor({
         decision: draftDecision,
@@ -3512,23 +3579,29 @@ const executeHitlFollowUpRunRequestNode = async (
   const nodeConfig = MemoryHitlFollowUpRunRequestNodeConfigSchema.parse(
     input.step.config
   );
-  const seedRef = hitlDecisionWorkflowSeedRefFor({
+  const seedRefs = hitlDecisionWorkflowSeedRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     config: nodeConfig,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     inputRefs: input.step.inputRefs,
     plan: input.plan,
   });
-  if (seedRef === null) {
+  if (seedRefs.length === 0) {
     return blocker(
       "stale_package",
       "Memory HITL follow-up run request node requires a memory.hitl-decision-workflow-seed.v1 artifact ref."
     );
   }
 
-  const seed = await loadHitlDecisionWorkflowSeed({
-    artifactRef: seedRef,
-    artifacts: config.artifacts,
+  const seed = await loadFirstArtifactCandidate({
+    artifactRefs: seedRefs,
+    load: (artifactRef) =>
+      loadHitlDecisionWorkflowSeed({
+        artifactRef,
+        artifacts: config.artifacts,
+      }),
+    missingBlockerMessage:
+      "Memory HITL follow-up run request node requires a memory.hitl-decision-workflow-seed.v1 artifact ref.",
   });
   if (seed.status === "blocked") {
     return seed;
@@ -3540,7 +3613,7 @@ const executeHitlFollowUpRunRequestNode = async (
       actor: input.actor,
       config: nodeConfig,
       seed: seed.document,
-      seedRef,
+      seedRef: seed.artifactRef,
     }),
     step: input.step,
   });

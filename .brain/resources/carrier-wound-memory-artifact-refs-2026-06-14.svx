@@ -1,0 +1,84 @@
+---
+title: "Carrier Wound: Memory Artifact Ref Resolution"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - durable-execution
+  - carrier-finding
+  - memory-fabric
+  - chaos-suite
+source: "run-live-20260614T053346030Z-574f20a6"
+---
+
+# Carrier Wound: Memory Artifact Ref Resolution
+
+Live Dream/memory-fabric run `run-live-20260614T053346030Z-574f20a6` executed nine nodes cleanly, then blocked at `hydrate-agent-transcripts` with `stale_package`: the preceding `search-agent-transcripts` node completed and recorded an output ref, but the hydrate node tried a planner-wired search ref that did not load.
+
+## Mechanism
+
+The memory-fabric adapter already had carrier-recoverable upstream fallbacks (`dependencyRefFor`, `upstreamRefByNodeType`, and `latestDependencyArtifactRef`), but several consumers selected one ref before proving it was readable. A stochastic planner could emit a plausible `searchRef` or `searchStepId` that was never written under that name; hydrate then blocked on the first selected ref instead of falling through to the completed `joelclaw.memory.search` output.
+
+The old `load*` helpers also collapsed not-found, schema mismatch, malformed JSON/transport, and other read failures into the same opaque message:
+
+```txt
+Memory search artifact could not be loaded by the memory-fabric node.
+```
+
+That made the operator guess whether the wound was wrong-ref/read-consistency, producer/consumer schema drift, or transport failure.
+
+## Fix
+
+`src/cartridges/memory-fabric/workflow-node-adapter.ts` now classifies artifact load blockers with a stable `stale_package` code and redaction-safe message fields:
+
+- `cause: not_found` for refs that do not resolve, including not-found storage errors and refs outside the current store namespace.
+- `cause: schema_mismatch` when `readJson` returns bytes/JSON but the expected Zod document schema rejects it; the message includes only the first Zod issue path.
+- `cause: read_error` for other read/JSON/transport failures.
+
+Messages may include the artifact ref tail and the Zod path. They do not include raw artifact bytes, full customer content, secrets, or full private paths.
+
+The memory-fabric consumers now walk ordered candidate lists and load the first schema-valid artifact before pinning the ref into downstream payloads:
+
+- hydrate: search artifact candidates.
+- correlate: search and hydration candidates.
+- refinement proposals: search, signals, hydration, and correlation candidates.
+- HITL report: search, hydration, correlation, and optional refinement proposal candidates.
+- HITL decision seed: report and optional refinement proposal candidates; explicit human HITL decision still keeps its draft-generation fallback.
+- HITL follow-up run request: HITL decision workflow seed candidates.
+
+The ordered shape preserves the happy path: explicit planner ref first, then declared dependency step ref, then completed upstream node output, then `latestDependencyArtifactRef` only where that is a legitimate carrier fallback. Optional refinement proposal loading deliberately does not use `latestDependencyArtifactRef`; a correlation doc is not a valid optional refinement fallback.
+
+`src/cartridges/aihero-support-sweep/workflow-node-adapter.ts` received the same taxonomy and candidate-walk treatment for its analogous upstream-produced refs: inventory, index health, signal search, hydration, and recommendations.
+
+## Chaos Receipts
+
+Added `tests/integration/memory-fabric-workflow-node-adapter.test.ts`:
+
+- Hostile store throws not-found for the planner-declared `searchRef` and dependency ref, while the completed upstream `joelclaw.memory.search` output is readable. Hydrate recovers and executes after reading the upstream output.
+- Hostile store returns a malformed `memory.search.v1` document. Hydrate blocks with `cause: schema_mismatch` and `zod_path: hits.0.score`, without echoing the bad value.
+- Hostile store throws not-found for every hydrate search candidate. Hydrate blocks with `cause: not_found` and the last candidate ref tail.
+
+These tests reproduce the carrier wound with hostile doubles instead of polite in-memory reads.
+
+## Verification
+
+Local verification in this Codex sandbox:
+
+```bash
+pnpm exec vitest run tests/integration/memory-fabric-workflow-node-adapter.test.ts
+pnpm exec vitest run tests/integration/dream-source-criticality-report.test.ts
+pnpm typecheck
+pnpm check
+```
+
+All passed.
+
+Full `pnpm exec vitest run` reached `376` passing tests and failed only on the two local relay HTTP tests because this sandbox rejects `listen` on `127.0.0.1` with `EPERM`:
+
+- `tests/integration/trusted-local-dream-memory-relay-http.test.ts`
+- `tests/integration/dream-relay-local-readiness.test.ts`
+
+## Read
+
+Best read of the live wound after this fix: **not_found / planner ref hallucination** is more likely than `schema_mismatch`. The live search node completed and recorded an output artifact ref, while the immediately following hydrate node said the search artifact could not be loaded. The hardened code would now fall through from stale planner refs to the completed upstream `joelclaw.memory.search` output before blocking. If the upstream output itself fails the schema contract, the new blocker will say `cause: schema_mismatch` with the Zod path.
