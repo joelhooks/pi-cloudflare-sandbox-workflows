@@ -333,3 +333,31 @@ export const parseLaneResultMarker = (
 
   return SandboxLaneResultMarkerSchema.parse(JSON.parse(atob(marker[1])));
 };
+
+/**
+ * Pick the diagnostic that names WHICH actor halted when a lane aborts.
+ *
+ * `stderrTail` is pi's own stderr (the agent's voice — including the
+ * `[pi-invoke self-bound]` notice on a 124); `gitLogTail` is the clone log.
+ * When pi RAN (`piStatus` is a number) pi's stderr is the cause and the clone
+ * log is benign context — yet the old `gitLogTail || stderrTail` precedence
+ * MASKED pi's stderr behind a "Cloning into… empty repository…" line, which is
+ * exactly how wound #22's self-bound planner lost its voice in the blocker. So:
+ * pi ran → lead with stderr, append the git log; pi never ran (a pre-pi
+ * clone/checkout failure) → lead with the git log. The application itself has
+ * to announce WHICH halted, not just THAT it halted.
+ */
+export const selectLaneAbortDiagnostic = (marker: {
+  readonly gitLogTail: string;
+  readonly piStatus: number | null;
+  readonly stderrTail: string;
+}): string => {
+  const piRan = marker.piStatus !== null;
+  const primary = piRan
+    ? marker.stderrTail || marker.gitLogTail
+    : marker.gitLogTail || marker.stderrTail;
+  const appendGitLog =
+    piRan && marker.stderrTail !== "" && marker.gitLogTail !== "";
+  const suffix = appendGitLog ? ` [git log: ${marker.gitLogTail}]` : "";
+  return `${primary === "" ? "no diagnostic output" : primary}${suffix}`;
+};

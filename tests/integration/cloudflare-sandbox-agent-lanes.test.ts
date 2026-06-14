@@ -31,7 +31,10 @@ import {
   buildAgentLanePackageMountIndex,
   mountedPackagePathFor,
 } from "../../src/app/infrastructure/agent-lane-package-mounts.ts";
-import { buildPiAgentLaneCommand } from "../../src/app/infrastructure/cloudflare-sandbox-agent-lane-command.ts";
+import {
+  buildPiAgentLaneCommand,
+  selectLaneAbortDiagnostic,
+} from "../../src/app/infrastructure/cloudflare-sandbox-agent-lane-command.ts";
 import { integrationTestPackageMetadata } from "./workflow-app-fixtures.ts";
 
 const buildPinnedPackageFixture = (
@@ -878,5 +881,47 @@ describe(agentLanePackageMountWriterNodeScript, () => {
     } finally {
       rmSync(cwd, { force: true, recursive: true });
     }
+  });
+});
+
+describe("selectLaneAbortDiagnostic — the blocker names WHICH actor halted", () => {
+  it("leads with pi's stderr (not the clone log) when pi self-bound", () => {
+    // The exact masking from wound #22's live re-drive: pi ran 285s, self-bound
+    // (124), then the post-pi tail got SIGTERM'd at normalize-output. The git
+    // log only holds the benign clone output; pi's stderr holds the cause.
+    const diagnostic = selectLaneAbortDiagnostic({
+      gitLogTail:
+        "Cloning into '/workspace/piwf-agent-lane'... Switched to a new branch 'planner'",
+      piStatus: 124,
+      stderrTail:
+        "[pi-invoke self-bound] pi exceeded its 283s budget and was terminated by timeout",
+    });
+    expect(diagnostic).toMatch(/^\[pi-invoke self-bound\]/u);
+    expect(diagnostic).toContain("283s budget");
+    // The clone log is still appended as context, never as the headline.
+    expect(diagnostic).toContain("[git log: Cloning into");
+  });
+
+  it("leads with the git log when pi never ran (a pre-pi clone failure)", () => {
+    const diagnostic = selectLaneAbortDiagnostic({
+      gitLogTail: "fatal: could not read from remote repository",
+      piStatus: null,
+      stderrTail: "",
+    });
+    expect(diagnostic).toBe("fatal: could not read from remote repository");
+  });
+
+  it("falls back across tails and never emits an empty diagnostic", () => {
+    expect(
+      selectLaneAbortDiagnostic({ gitLogTail: "", piStatus: 1, stderrTail: "" })
+    ).toBe("no diagnostic output");
+    // pi ran but wrote nothing to stderr — surface the git log rather than blank.
+    expect(
+      selectLaneAbortDiagnostic({
+        gitLogTail: "error: failed to push some refs",
+        piStatus: 0,
+        stderrTail: "",
+      })
+    ).toBe("error: failed to push some refs");
   });
 });

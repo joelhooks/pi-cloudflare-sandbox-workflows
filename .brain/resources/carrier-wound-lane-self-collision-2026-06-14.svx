@@ -392,3 +392,101 @@ why*, which is the whole point. Wound #22 is the recovery-class sibling of the
 could not **recover** a torn drive to `captured`. Following
 [[carrier-wound-btoa-latin1-ceiling-2026-06-14]], both surfaced only because the
 run was watched node-by-node, not stared at.
+
+## Layer C.2 — The Budget Was Mis-Sized For The Whole Operation (probe)
+
+Layer C shipped. The next observed-live re-drive,
+`run-live-20260614T120131363Z-fe5634ee`, did exactly what C promised: it did
+**not** block causelessly. It blocked, and the cause was legible:
+
+```
+[12:01:46Z] status=planningDynamicWorkflow lanes=1 dg=1 nodes=0 blk=None
+[12:09:19Z] status=blocked            lanes=0 dg=1 nodes=0 blk=adapter_unavailable
+[12:09:19Z] === TERMINAL ===
+```
+
+~453s wall (`12:01:46`→`12:09:19`). That is not a hang — it is the OLD
+`WORKFLOW_APP_TIMEOUT_MS=600000` derivation's shell reaper firing:
+`laneExecTimeoutMs = max(60_000, 600_000 − 120_000) = 480_000`;
+`PIWF_COMMAND_TIMEOUT_SECONDS = floor(480_000/1000) − 30 = 450`. The 453s
+observed ≈ the 450s shell reaper + a few seconds of tail. `proposePlan` threw on
+the killed lane, and `workflow-app.ts:1430` wraps **any** planner throw as
+`adapter_unavailable` — so the short code lied about the class, but the new
+`selectLaneAbortDiagnostic` payload now rides inside `error.message` and will
+carry pi's own stderr on the next blocker detail instead of the masked clone log.
+
+The heartbeat decomposition (Layer B's instrument) read the lane from the
+inside: **137s** cold `npm install -g` of the pi agent (`install-pi-agent` →
+`prepare-auth`), then **285s** of genuine pi runtime ending at exit **124**
+(`pi-invoke` → `normalize-output`, self-bound). pi's budget was
+`450 − 137 − 30 = 283s`; it used all 285s of real work and the reaper took the
+tail. **Slow-but-real, not a hang.**
+
+The root cause is a budget that no longer accounts for the whole operation.
+De-docker (#15, `131bfe8`) moved the pi-agent install **out** of the baked image
+and **into** the lane at runtime — but `WORKFLOW_APP_TIMEOUT_MS` stayed at
+`600000`, sized for a world where the lane only ran pi. The variable cold-install
+tax (25–137s) now eats 30% of the planner's budget before pi gets a token.
+
+> Building Microservices, 2nd ed. (Sam Newman), Ch. 12 — Retries:
+> "having a budget for how long an operation is allowed to take can be a useful
+> idea… If you are going to retry, you need to take this into account when
+> considering your time-out threshold."
+
+The install is not a retry, but the lesson is the same shape: the **overall**
+budget has to cover every actor that holds the clock — install **and** pi **and**
+the commit/push tail — not just the headline work. The budget was set for one
+actor and three moved in.
+
+**Probe (this commit), honestly labelled:** `WORKFLOW_APP_TIMEOUT_MS`
+`600000 → 900000`. Re-derived: `laneExecTimeoutMs → 780_000`;
+`PIWF_COMMAND_TIMEOUT_SECONDS → 750`; planner pi budget → `750 − 137 − 30 ≈ 583s`
+(2× the 283s it had), absorbing the worst-case install tax with tail headroom.
+The reaper deadline moves to 15 min. This is a **mitigation + a correctly-resized
+budget**, not the final class fix. It is also a **high-information probe**: a
+single sync `sandbox.exec` now asked to hold a 780s ceiling will either (a) carry
+the planner to a real plan and let the rest of the pipeline run — teaching us the
+budget was the only wall — or (b) hit a Cloudflare request/DO wall below 780s,
+which is itself the proof that the sync planner cannot hold the budget and forces
+the reserved class fix.
+
+**Reserved class fixes (NOT yet applied):**
+1. **Wire the planner to the async dispatch/poll/receipt path** (FIX B, already
+   built + tested for worker lanes — `dispatchStep`/`pollStep`/`readStepReceipt`,
+   multi-alarm budget). The planner adapter `proposePlan` is the lone sync
+   holdout on a single held `sandbox.exec` ceiling. This is the durable answer if
+   the probe hits a platform wall.
+2. **Pre-baked registry image** carrying the pi agent, killing the runtime
+   install tax at the source (the inverse of #15's de-docker, but via a published
+   image instead of a local `./Dockerfile` that re-introduces the macOS keychain
+   deploy hell).
+
+### Observability fix shipped alongside the probe
+
+`selectLaneAbortDiagnostic` (in the pure `cloudflare-sandbox-agent-lane-command.ts`,
+so the test graph never drags in the Cloudflare SDK). The old blocker used
+`gitLogTail || stderrTail` — which **masked** pi's stderr behind a benign
+"Cloning into… empty repository…" line exactly when pi had run and self-bound.
+The selector keys on `piStatus`: pi ran (number) → lead with **stderr**, append
+the git log as context; pi never ran (null, a pre-pi clone/checkout failure) →
+lead with the **git log**. The application announces WHICH actor halted, not just
+THAT one did. Three unit tests pin it (pi self-bound 124 leads with
+`[pi-invoke self-bound]` + appends `[git log: …]`; pi-never-ran leads with the
+clone failure; empty/empty → "no diagnostic output").
+
+### Verification (this commit)
+
+```bash
+pnpm vitest run tests/integration/cloudflare-sandbox-agent-lanes.test.ts  # 28 pass (25 + 3 selector)
+pnpm typecheck   # clean
+pnpm check       # oxfmt + oxlint + type-aware, clean
+```
+
+### Burn-In Gate (unchanged)
+
+D3 stays at **zero**. The probe redeploys, then ONE dream-shape run is watched
+node-by-node. Captured on deployed code → fire the operator Discord ping with the
+wzrrd HITL URL, reset D3, start the 10-run burn-in. Still planner-blocked at ~583s
+→ pi is pathologically slow or the sync exec hit a platform wall; pursue the
+reserved class fix (async planner / pre-baked image) with its own chaos test,
+pdf-brain quote, and receipt. The probe's job is to tell us **which**.

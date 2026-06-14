@@ -24,6 +24,7 @@ import { buildAgentLanePackageMountIndex } from "./agent-lane-package-mounts.ts"
 import {
   buildPiAgentLaneCommand,
   parseLaneResultMarker,
+  selectLaneAbortDiagnostic,
 } from "./cloudflare-sandbox-agent-lane-command.ts";
 import type { SandboxCommandResult } from "./cloudflare-sandbox-agent-lane-command.ts";
 import { encodeCommandToBase64 } from "./sandbox-command-encoding.ts";
@@ -348,7 +349,7 @@ const runCloudflareSandboxPiAgentLane = async (input: {
     const marker = parseLaneResultMarker(result);
     if (marker.status === "error") {
       throw new Error(
-        `Cloudflare Sandbox Pi lane aborted at step "${marker.failingStep ?? "unknown"}" (exit ${marker.exitCode}, pi ${marker.piStatus ?? "n/a"}): ${marker.gitLogTail || marker.stderrTail || "no diagnostic output"}`
+        `Cloudflare Sandbox Pi lane aborted at step "${marker.failingStep ?? "unknown"}" (exit ${marker.exitCode}, pi ${marker.piStatus ?? "n/a"}): ${selectLaneAbortDiagnostic(marker)}`
       );
     }
     // An "ok" marker means the receipt was committed and pushed. The command

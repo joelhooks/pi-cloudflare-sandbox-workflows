@@ -79,7 +79,7 @@
     "WORKFLOW_APP_MAX_ACTIVE_LANES": "3",
     "WORKFLOW_APP_REPO_PREFIX": "piwf",
     "WORKFLOW_APP_TELEMETRY_DATASET": "pi_cloudflare_sandbox_workflows_telemetry",
-    "WORKFLOW_APP_TIMEOUT_MS": "600000",
+    "WORKFLOW_APP_TIMEOUT_MS": "900000",
     "ZOMBIE_NODE_MAX_ATTEMPTS": "3",
     "WZRRD_DRY_RUN_SECRET_REF": "secretref:wzrrd-dry-run",
     "WZRRD_PUBLISH_SECRET_REF": "secretref:wzrrd-api",
