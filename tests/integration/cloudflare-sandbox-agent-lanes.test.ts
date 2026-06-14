@@ -637,7 +637,7 @@ describe(buildPiAgentLaneCommand, () => {
     // byte-for-byte; only the pi binary is faked. A pre-fix unbounded `pi` would run
     // the fake's full sleep and exit 0 with no attribution line, failing all three
     // signals. That is exactly the regression this guards.
-    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockStart = command.indexOf("pi_generation_lane=0");
     const blockEnd = command.indexOf("\nmark normalize-output");
     if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
       throw new Error(
@@ -720,7 +720,7 @@ describe(buildPiAgentLaneCommand, () => {
     // `pi ... > "$raw_output_path"`: it wrote the FULL 512 KiB (1 GB in prod) with no
     // cap, no truncation notice, and no diagnostic — flipping every signal below, and
     // on the lite disk poisoning every downstream cp/hash/git step with ENOSPC.
-    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockStart = command.indexOf("pi_generation_lane=0");
     const blockEnd = command.indexOf("\nmark normalize-output");
     if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
       throw new Error(
@@ -814,25 +814,35 @@ describe(buildPiAgentLaneCommand, () => {
     }
   }, 15_000);
 
-  it("muzzles ONLY the planner with --no-tools so the no-tools contract is enforced at the CLI, never begged in the prompt — verifier/source-grounded lanes keep their tools (wound #31)", () => {
-    // Hostile double for wound #31 ([[polite-fakes-franchise-wound]]): slice the REAL
+  it("muzzles pure-generation lanes (planner + verifier) with --no-tools at the CLI — agentic lanes (worker) keep read/bash to inspect real artifacts (wound #31, #33)", () => {
+    // Hostile double for wound #31/#33 ([[polite-fakes-franchise-wound]]): slice the REAL
     // pi-invoke block out of buildPiAgentLaneCommand() and run it verbatim with a `pi`
-    // that RECORDS its own argv, once per lane kind. The live transport for the failure:
-    // the planner prompt said "Do not call tools" while the invocation passed NO tool
-    // constraint and pi ships read/bash/edit/write ON by default — so under --mode json
-    // the planner tool-looped into a 64 MiB+ runaway (4 live runs in a row,
-    // a8bc84dc/f9a37a09/53cc30a4/fa5a3189, terminal planner_lane_incomplete). A polite
-    // mock that asserted on a JS variable would never prove the FLAG reaches the pi
-    // process; this runs the emitted bash and reads pi's real argv off disk.
+    // that RECORDS its own argv, once per lane kind. Two live transports for the failure:
+    //   #31 — the planner prompt said "Do not call tools" while the invocation passed NO
+    //   tool constraint and pi ships read/bash/edit/write ON by default, so under --mode
+    //   json the planner tool-looped into a 64 MiB+ runaway (a8bc84dc/f9a37a09/53cc30a4/
+    //   fa5a3189, terminal planner_lane_incomplete).
+    //   #33 — the verifier had tools ON too, took its prompt's "the verification output
+    //   path ... writes it" as license to use its write tool, and ended OFF-stdout: the
+    //   normalizer found no verdict and the run went terminal blocked / no_parseable_output.
+    // The verifier's evidence is INLINED in its prompt (Output Evidence Snapshots; the
+    // artifact refs are NOT local files), so read/bash add zero grounding and only let the
+    // verdict escape the stdout channel — it is pure generation, the same kind as the
+    // planner. A polite mock asserting on a JS variable would never prove the FLAG reaches
+    // the pi process; this runs the emitted bash and reads pi's real argv off disk.
     //
-    // Two runs, IDENTICAL except LANE_KIND, so only the tool gate can differ:
-    //   planner  → argv MUST contain --no-tools (the impossible state made impossible)
-    //   verifier → argv MUST NOT contain --no-tools, and pi MUST still run (a verifier
-    //              with no read/bash reviews nothing → a hollow capture, the worse bug).
-    // Pre-fix (no gate at all): planner never gets the flag → plannerMuzzled flips false.
-    // Blanket-apply regression (--no-tools unconditionally): verifier gets muzzled →
-    // verifierKeepsTools flips false. Only the LANE_KIND=planner gate satisfies both.
-    const blockStart = command.indexOf('pi_mode_args=""');
+    // Three runs, IDENTICAL except LANE_KIND, so only the tool gate can differ:
+    //   planner  → argv MUST contain --no-tools (pure generation, muzzled).
+    //   verifier → argv MUST contain --no-tools (pure generation over inlined evidence —
+    //              wound #33's reclassification; with no write tool its verdict cannot leave
+    //              stdout).
+    //   worker   → argv MUST NOT contain --no-tools, and pi MUST still run (a genuinely
+    //              agentic lane that inspects real artifacts; muzzling it would forge a
+    //              hollow capture — the worse bug).
+    // Pre-fix (planner-only gate): verifier never gets the flag → verifierMuzzled flips
+    // false. Blanket-apply regression (--no-tools on every lane): worker gets muzzled →
+    // workerKeepsTools flips false. Only the generation-axis gate satisfies all three.
+    const blockStart = command.indexOf("pi_generation_lane=0");
     const blockEnd = command.indexOf("\nmark normalize-output");
     if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
       throw new Error(
@@ -904,46 +914,59 @@ describe(buildPiAgentLaneCommand, () => {
 
     const planner = runLane("planner");
     const verifier = runLane("verifier");
+    const worker = runLane("worker");
 
     expect({
       // The planner — pure generation — is muzzled at the CLI, not asked nicely.
       plannerMuzzled: planner.sawNoTools,
       plannerRan: planner.piActuallyRan,
-      // The source-grounded verifier keeps read/bash; muzzling it would forge a
-      // hollow capture (a verifier that reviews nothing), which is worse than a runaway.
-      verifierKeepsTools: !verifier.sawNoTools,
+      // The verifier reviews INLINED evidence (wound #33): pure generation too, so it is
+      // muzzled — with no write tool its verdict cannot leave stdout. Pre-fix it kept tools
+      // and the verdict went off-stdout → no_parseable_output.
+      verifierMuzzled: verifier.sawNoTools,
       verifierRan: verifier.piActuallyRan,
+      // The genuinely-agentic worker keeps read/bash; muzzling it would forge a hollow
+      // capture (a worker that inspects nothing), which is worse than a runaway.
+      workerKeepsTools: !worker.sawNoTools,
+      workerRan: worker.piActuallyRan,
     }).toStrictEqual({
       plannerMuzzled: true,
       plannerRan: true,
-      verifierKeepsTools: true,
+      verifierMuzzled: true,
       verifierRan: true,
+      workerKeepsTools: true,
+      workerRan: true,
     });
-  }, 20_000);
+  }, 30_000);
 
-  it("runs the planner in pi's text mode (NO --mode json) while keeping --mode json for verifier/agentic JSON lanes, so the planner's stdout cannot balloon into a streamed runaway (wound #32)", () => {
-    // Hostile double for wound #32 ([[polite-fakes-franchise-wound]]): slice the REAL
+  it("runs pure-generation lanes (planner + verifier) in pi's text mode (NO --mode json) while keeping --mode json for genuinely-agentic JSON lanes (worker), so a generation lane's stdout cannot balloon into a streamed runaway (wound #32, #33)", () => {
+    // Hostile double for wound #32/#33 ([[polite-fakes-franchise-wound]]): slice the REAL
     // pi-invoke block and run it verbatim with a `pi` that RECORDS its own argv, once per
     // lane kind. The live transport for the failure: --mode json streams EVERY lifecycle
-    // event to stdout, so a pure-generation planner's buffer grew with its internal
-    // iteration and ballooned to the 64 MiB cap — FIVE terminal planner_lane_incomplete
-    // runs in a row (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools,
-    // which proved tools were never the cause). Text mode echoes only the final assistant
+    // event to stdout, so a pure-generation lane's buffer grew with its internal iteration
+    // and ballooned to the 64 MiB cap — FIVE terminal planner_lane_incomplete runs in a row
+    // (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools, which proved
+    // tokens — not tools — drive the balloon). Text mode echoes only the final assistant
     // message, so the buffer stays small no matter how much the model thinks — the exact
-    // config of the one run that ever reached "captured" (06-12, pre --mode json). A
-    // polite mock asserting on a JS variable would never prove the FLAG (or its absence)
+    // config of the one run that ever reached "captured" (06-12, pre --mode json). Wound #33
+    // reclassified the verifier as pure generation (its evidence is inlined in the prompt),
+    // so leaving it on --mode json would re-arm the same balloon — it must run text-mode too.
+    // A polite mock asserting on a JS variable would never prove the FLAG (or its absence)
     // reaches the pi process; this reads pi's real argv off disk.
     //
-    // Two runs, IDENTICAL except LANE_KIND (both application/json), so only the mode gate
+    // Three runs, IDENTICAL except LANE_KIND (all application/json), so only the mode gate
     // can differ:
     //   planner  → argv MUST NOT contain --mode (text mode), AND MUST keep --no-tools
-    //              (the proven-captured planner config: text channel + zero tools).
-    //   verifier → argv MUST contain --mode (the event stream the normalizer reads to
-    //              recover a verdict produced on a tool turn — wound #20's promise kept).
-    // Pre-fix (mode gated on media type only): planner gets --mode json → plannerTextMode
-    // flips false. Over-correction (a verifier also loses --mode): verifierStreams flips
-    // false. Only the LANE_KIND!=planner gate satisfies both.
-    const blockStart = command.indexOf('pi_mode_args=""');
+    //              (the proven-captured generation config: text channel + zero tools).
+    //   verifier → same as planner (text + no-tools): pure generation over inlined evidence,
+    //              so its verdict is the final assistant message text mode echoes (wound #33).
+    //   worker   → argv MUST contain --mode (the event stream the normalizer reads to recover
+    //              a verdict produced on a tool turn — wound #20's promise, kept for the lanes
+    //              that genuinely end agentically).
+    // Pre-fix (mode gated on media type only): verifier gets --mode json → verifierTextMode
+    // flips false. Over-correction (the worker also loses --mode): workerStreams flips false.
+    // Only the generation-axis gate satisfies all three.
+    const blockStart = command.indexOf("pi_generation_lane=0");
     const blockEnd = command.indexOf("\nmark normalize-output");
     if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
       throw new Error(
@@ -1016,6 +1039,7 @@ describe(buildPiAgentLaneCommand, () => {
 
     const planner = runLane("planner");
     const verifier = runLane("verifier");
+    const worker = runLane("worker");
 
     expect({
       // The planner keeps --no-tools, which makes text mode lossless (it cannot end on a
@@ -1025,18 +1049,230 @@ describe(buildPiAgentLaneCommand, () => {
       // ...and runs in pi's text mode: stdout is only the final blueprint, so it cannot
       // balloon into a streamed runaway (the proven-captured 06-12 config).
       plannerTextMode: !planner.sawModeFlag,
+      // The verifier is reclassified pure generation (wound #33): same text + no-tools
+      // config — its verdict IS the final assistant message, so text mode loses nothing,
+      // and dropping --mode json defuses the c08aba9c balloon it used to re-arm.
+      verifierKeepsNoTools: verifier.sawNoTools,
       verifierRan: verifier.piActuallyRan,
-      // The source-grounded verifier keeps --mode json: its verdict can land on a tool
+      verifierTextMode: !verifier.sawModeFlag,
+      // The genuinely-agentic worker keeps --mode json: its verdict can land on a tool
       // turn that text mode would drop, so it must read the event stream (wound #20).
-      verifierStreams: verifier.sawModeFlag,
+      workerRan: worker.piActuallyRan,
+      workerStreams: worker.sawModeFlag,
     }).toStrictEqual({
       plannerKeepsNoTools: true,
       plannerRan: true,
       plannerTextMode: true,
+      verifierKeepsNoTools: true,
       verifierRan: true,
-      verifierStreams: true,
+      verifierTextMode: true,
+      workerRan: true,
+      workerStreams: true,
     });
-  }, 20_000);
+  }, 30_000);
+
+  it("a verifier whose model would divert its verdict off-stdout is muzzled so the verdict lands in-band and normalize recovers it — reverting the gate reproduces no_parseable_output (wound #33)", () => {
+    // Hostile double for wound #33 ([[polite-fakes-franchise-wound]]): the polite-mock
+    // version would assert a JS flag and call it done. This runs the REAL pi-invoke AND the
+    // REAL normalizer (genuine `node`, the jsonOutputNormalizerNodeScript heredoc) end to
+    // end, against a `pi` that reproduces the EXACT prod transport.
+    //
+    // The live failure (run-live ...fccee972, terminal blocked / no_parseable_output ~78s
+    // into a ~690s budget): the verifier ran with tools ON + --mode json. Its evidence is
+    // INLINED in its prompt, so it had nothing to read — but the prompt said "the
+    // verification output path ... this verifier lane writes it", so the model used its
+    // write tool to put the verdict at that path and ended its stdout turn on prose. The
+    // normalizer scans STDOUT (raw_output_path); it found no JSON value there → reason
+    // no_parseable_output. Worse, LANE_OUTPUT_PATH == contract.outputPath == the very file
+    // the model wrote, and the recovery copy (persist_unnormalized_output) then CLOBBERED
+    // that file with the prose — so even reading the agent's file would not have saved it.
+    // The only repair is to force the verdict in-band: a verifier is pure generation, so
+    // muzzle it (--no-tools) and its one JSON document ALWAYS reaches stdout.
+    //
+    // The fake `pi` keys on its own argv: with --no-tools it CANNOT divert, so it emits the
+    // verdict JSON on stdout (the fix's world); without --no-tools it writes the verdict to
+    // $LANE_OUTPUT_PATH (the write-tool diversion) and emits prose on stdout (the prod
+    // world). Two runs, BOTH LANE_KIND=verifier, identical except the gate:
+    //   post-fix → the real generation-axis block muzzles the verifier → verdict in-band →
+    //              normalize recovers it into LANE_OUTPUT_PATH.
+    //   pre-fix  → the SAME block with wound #33's `|| verifier` reverted → verifier keeps
+    //              tools + --mode json → verdict diverts off-stdout → no_parseable_output,
+    //              and the recovery copy clobbers the agent's own verdict file.
+    // Same lane kind, one gate flipped: this would have failed RED on the pre-fix carrier
+    // and proves the fix is the load-bearing discriminator, not an incidental nicety.
+    const blockStart = command.indexOf("pi_generation_lane=0");
+    const blockEnd = command.indexOf("\ncompleted_at=");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke + normalize block in the lane command."
+      );
+    }
+    const piNormalizeBlock = command.slice(blockStart, blockEnd);
+    // Revert ONLY wound #33's reclassification: drop the verifier from the generation axis
+    // so it falls back to the pre-fix tools-on + --mode json config. If this mutation finds
+    // nothing the gate has drifted and the A/B is vacuous — fail loudly rather than green.
+    const preFixBlock = piNormalizeBlock.replace(
+      '[ "$LANE_KIND" = "planner" ] || [ "$LANE_KIND" = "verifier" ]',
+      '[ "$LANE_KIND" = "planner" ]'
+    );
+    if (preFixBlock === piNormalizeBlock) {
+      throw new Error(
+        "Could not locate the wound #33 generation-axis gate to revert; the A/B would be vacuous."
+      );
+    }
+
+    const runVerifier = (revertGate: boolean, label: string) => {
+      // Capture the two real-source blocks from the enclosing scope; the only difference is
+      // whether wound #33's `|| verifier` clause is present (pre-fix) or reverted (post-fix).
+      const block = revertGate ? preFixBlock : piNormalizeBlock;
+      const dir = mkdtempSync(join(tmpdir(), `piwf-pi-w33-${label}-`));
+      try {
+        const binDir = join(dir, "bin");
+        mkdirSync(binDir);
+        const argvPath = join(dir, "argv.txt");
+        const verdictJson =
+          '{"verdict":"approve","status":"pass","summary":"inlined evidence reviewed"}';
+        // Hostile pi: records argv, then either emits the verdict in-band (muzzled) or
+        // diverts it to $LANE_OUTPUT_PATH and ends on prose (tools on — the #33 transport).
+        // The prose carries NO JSON value, so the whole-buffer scan finds no verdict.
+        const fakePi = join(binDir, "pi");
+        writeFileSync(
+          fakePi,
+          [
+            "#!/usr/bin/env bash",
+            `printf '%s\\n' "$@" > "${argvPath}"`,
+            "no_tools=0",
+            'for a in "$@"; do [ "$a" = "--no-tools" ] && no_tools=1; done',
+            'if [ "$no_tools" = "1" ]; then',
+            `  printf '%s\\n' '${verdictJson}'`,
+            "else",
+            `  printf '%s\\n' '${verdictJson}' > "$LANE_OUTPUT_PATH"`,
+            "  printf '%s\\n' 'Verdict written to the verification output path. Review complete.'",
+            "fi",
+            "",
+          ].join("\n")
+        );
+        chmodSync(fakePi, 0o755);
+
+        const promptPath = join(dir, "prompt.txt");
+        writeFileSync(
+          promptPath,
+          "review the inlined evidence and emit a verdict"
+        );
+        const rawOutputPath = join(dir, "raw.txt");
+        const stderrPath = join(dir, "stderr.txt");
+        const diagPath = join(dir, "diag.txt");
+        const outputPath = join(dir, "verifier-verdict.json");
+        const normalizationOutcomePath = join(dir, "normalization.json");
+
+        const harness = [
+          "set -u",
+          "script_start_s=$(date +%s)",
+          "mark() { :; }",
+          `diag() { printf '%s\\n' "$*" >> "${diagPath}"; }`,
+          "scrub_credentials() { cat; }",
+          block,
+          "printf 'POST_NORMALIZE_REACHED normalized=%s\\n' \"$output_normalized\"",
+        ].join("\n");
+
+        const stdout = execFileSync("bash", ["-c", harness], {
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            LANE_KIND: "verifier",
+            LANE_OUTPUT_MEDIA_TYPE: "application/json",
+            LANE_OUTPUT_NORMALIZATION_PATH: normalizationOutcomePath,
+            LANE_OUTPUT_PATH: outputPath,
+            LANE_PROMPT_PATH: promptPath,
+            PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+            PIWF_COMMAND_TIMEOUT_SECONDS: "600",
+            PIWF_NORMALIZE_MAX_SECONDS: "60",
+            PIWF_NORMALIZE_TAIL_MARGIN_SECONDS: "20",
+            PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+            PI_MODEL: "fake-model",
+            PI_PROVIDER: "fake-provider",
+            raw_output_path: rawOutputPath,
+            stderr_path: stderrPath,
+          },
+          timeout: 20_000,
+        });
+
+        const argv = existsSync(argvPath)
+          ? readFileSync(argvPath, "utf-8").split("\n")
+          : [];
+        const normalizationRaw: unknown = existsSync(normalizationOutcomePath)
+          ? JSON.parse(readFileSync(normalizationOutcomePath, "utf-8"))
+          : null;
+        const normalizationReason =
+          isRecord(normalizationRaw) &&
+          typeof normalizationRaw["reason"] === "string"
+            ? normalizationRaw["reason"]
+            : null;
+        let laneOutputVerdict: string | null = null;
+        if (existsSync(outputPath)) {
+          try {
+            const verdictRaw: unknown = JSON.parse(
+              readFileSync(outputPath, "utf-8")
+            );
+            if (
+              isRecord(verdictRaw) &&
+              typeof verdictRaw["verdict"] === "string"
+            ) {
+              laneOutputVerdict = verdictRaw["verdict"];
+            }
+          } catch {
+            laneOutputVerdict = null;
+          }
+        }
+        return {
+          diagText: existsSync(diagPath) ? readFileSync(diagPath, "utf-8") : "",
+          laneOutputVerdict,
+          normalizationReason,
+          outputNormalized: stdout.includes(
+            "POST_NORMALIZE_REACHED normalized=1"
+          ),
+          sawModeFlag: argv.includes("--mode"),
+          sawNoTools: argv.includes("--no-tools"),
+        };
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    };
+
+    const postFix = runVerifier(false, "postfix");
+    const preFix = runVerifier(true, "prefix");
+
+    // POST-FIX: the gate muzzles the verifier (pure generation), so its verdict cannot leave
+    //   stdout — text mode delivers the one JSON document and normalize recovers it.
+    // PRE-FIX (gate reverted): the verifier keeps tools + --mode json, diverts the verdict
+    //   off-stdout → the exact terminal no_parseable_output; the recovery copy then clobbers
+    //   the agent's own verdict file (so reading it would not have helped); and Edit 2's
+    //   non-capped diagnostic samples the raw output so the next re-drive is not blind.
+    expect({
+      postFixMuzzled: postFix.sawNoTools,
+      postFixNormalized: postFix.outputNormalized,
+      postFixTextMode: !postFix.sawModeFlag,
+      postFixVerdictRecovered: postFix.laneOutputVerdict === "approve",
+      preFixDiagnosedRawOutput:
+        /raw_output_head_sample/u.test(preFix.diagText) &&
+        /raw_output_tail_sample/u.test(preFix.diagText) &&
+        /Verdict written/u.test(preFix.diagText),
+      preFixKeptTools: !preFix.sawNoTools,
+      preFixNoParseable: preFix.normalizationReason === "no_parseable_output",
+      preFixStreamed: preFix.sawModeFlag,
+      preFixVerdictClobbered: preFix.laneOutputVerdict !== "approve",
+    }).toStrictEqual({
+      postFixMuzzled: true,
+      postFixNormalized: true,
+      postFixTextMode: true,
+      postFixVerdictRecovered: true,
+      preFixDiagnosedRawOutput: true,
+      preFixKeptTools: true,
+      preFixNoParseable: true,
+      preFixStreamed: true,
+      preFixVerdictClobbered: true,
+    });
+  }, 40_000);
 
   it("a failed normalize whose recovery copy also fails does NOT abort the lane blind (wound #25)", () => {
     // Hostile double for wound #25: slice the REAL normalize-output recovery block
@@ -1095,6 +1331,13 @@ describe(buildPiAgentLaneCommand, () => {
       const harness = [
         "set -eu",
         "mark() { :; }",
+        // Ambient context production defines BEFORE the normalize block (wound #33's
+        // non-capped-failure diagnostic reads these). The hostile-double prelude
+        // mirrors that context the same way it already stubs `mark`/`script_start_s`.
+        "diag() { :; }",
+        "scrub_credentials() { cat; }",
+        "raw_output_cap_bytes=67108864",
+        "raw_output_capture_bytes=0",
         "script_start_s=$(date +%s)",
         normalizeBlock,
         "printf 'POST_RECOVERY_REACHED normalized=%s\\n' \"$output_normalized\"",
@@ -1242,6 +1485,13 @@ describe(buildPiAgentLaneCommand, () => {
       const harness = [
         "set -eu",
         "mark() { :; }",
+        // Ambient context production defines BEFORE the normalize block (wound #33's
+        // non-capped-failure diagnostic reads these). The hostile-double prelude
+        // mirrors that context the same way it already stubs `mark`/`script_start_s`.
+        "diag() { :; }",
+        "scrub_credentials() { cat; }",
+        "raw_output_cap_bytes=67108864",
+        "raw_output_capture_bytes=0",
         "script_start_s=$(date +%s)",
         normalizeBlock,
         "printf 'POST_RECOVERY_REACHED normalized=%s\\n' \"$output_normalized\"",

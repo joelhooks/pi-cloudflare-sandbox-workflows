@@ -1,0 +1,221 @@
+---
+title: "Carrier Wound #33: The Verifier Had Nothing to Read. Its Tools Were the Wound."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - verifier
+  - pi-invoke
+  - no-tools
+  - text-mode
+  - mode-json
+  - least-privilege
+  - in-band-protocol
+  - generation-lane
+  - no-parseable-output
+  - reclassification
+  - observability
+  - diagnostics
+  - carrier-finding
+  - chaos-suite
+source: "wound-33-verifier-diverted-verdict-off-stdout"
+---
+
+# Carrier Wound #33: The Verifier Had Nothing to Read. Its Tools Were the Wound.
+
+Wound #32 muzzled the planner and reverted it to the proven-captured config —
+and the dream-shape run **got past the planner.** It planned, executed, loaded
+the pinned workflow, and reached `verifyingDynamicWorkflow`. Then, ~78s into a
+~690s budget, it went terminal:
+
+```
+run-live-20260614T201540967Z-fccee972
+  planningDynamicWorkflow ×24 → executingDynamicWorkflow → verifyingDynamicWorkflow
+  → blocked / adapter_unavailable:
+    "Configured verifier lane adapter failed: Verifier lane did not return a
+     completed receipt for the requested lane: agent produced no parseable
+     verdict (reason: no_parseable_output)."
+```
+
+The carrier wound moved one lane downstream — from the planner to the verifier —
+and changed shape: not a runaway this time, the opposite. The verifier produced
+*nothing* on stdout. `no_parseable_output` at 78s is not a grind to a cap; it is
+a fast, clean, empty channel. The verdict went somewhere the normalizer doesn't
+read.
+
+## Mechanism — the verdict left the channel the lane reads
+
+The verifier ran the same config Wound #20/#32 left it: **tools ON, `--mode
+json`.** Its prompt (`createCloudflarePiVerifierLaneAdapter`) ends with the line
+that the verification output path is where "this verifier lane writes it." With a
+**write tool in hand**, the model did the literal thing: it *wrote the verdict to
+a file* — or it ended its run on a tool turn — and either way the verdict never
+crossed stdout. The normalizer (`agent-lane-json-output.ts`) walked every
+`agent_end` message in the event stream, found no JSON verdict, and recorded
+`no_parseable_output`. The lane committed `status:"failed"`; the driver mapped it
+to `adapter_unavailable`.
+
+The cruel irony: `LANE_OUTPUT_PATH == contract.outputPath == input.outputPath`,
+so the agent's written verdict file *is* sitting at the exact path the lane wants
+its verdict — and then `persist_unnormalized_output` **clobbers it with prose**,
+because normalize "failed" and the recovery copy overwrites the destination. So
+the verdict existed, at the right path, and the lane destroyed it. A naive "read
+the file instead" fix would have raced the clobber and lost. The only durable fix
+is to stop the verdict leaving stdout in the first place.
+
+## The class — a misclassification, corrected by least privilege
+
+Wound #32's own receipt asserted, in good faith, that the verifier "legitimately
+ends on a tool turn, so text mode would drop the verdict it produced; the event
+stream's `agent_end` message is how the normalizer recovers it." **That premise
+was false for this verifier**, and Wound #33 is its correction.
+
+`createCloudflarePiVerifierLaneAdapter` inlines **all** of the verifier's
+evidence *into the prompt*: the Output Evidence Snapshots, the Capability Receipt
+Evidence, the full contract and plan. The prompt states outright that the
+artifact refs are **not present as local files in the sandbox** and that the
+snapshots **are** the source of artifact content. So there is nothing for
+`read`/`bash` to read. The verifier is judgment over inlined evidence —
+structurally identical to the planner, which Wound #31/#32 already proved is pure
+generation. It only *looked* agentic because it shares the worker's lane plumbing.
+
+That makes the fix a textbook application of Nygard's first general-design rule:
+
+> The principle of "least privilege" mandates that a process should have the
+> lowest level of privilege needed to accomplish its task.
+>
+> — Michael Nygard, *Release It!*, §12.1, "The Principle of Least Privilege"
+
+The verifier's task is: read the inlined evidence, emit one JSON verdict. The
+lowest privilege that accomplishes it is **zero tools**. Every tool beyond that —
+`write`, `edit`, `bash`, `read` — was privilege it did not need, and one of them
+(`write`) is precisely what let it divert the verdict off the channel the lane
+reads. Tools added **zero grounding** (the evidence is inlined; there is nothing
+to fetch) and **subtracted reliability** (a write tool is an off-stdout escape
+hatch). Least privilege is not a security nicety here — it is the load-bearing
+correctness property: with no write tool the verdict has nowhere to go *but*
+stdout.
+
+This also resolves the standing "no hollow capture" tension. The constraint that
+protects source-grounded lanes — *"a verifier with no tools reviews nothing —
+strictly worse than a runaway"* — guards lanes that reach their sources THROUGH
+tools. **This** verifier reaches its sources through the inlined prompt, so
+stripping its tools removes zero grounding. The constraint's intent is satisfied,
+not violated.
+
+## Fix — one generation axis governs both the wire protocol AND the tool grant
+
+`cloudflare-sandbox-agent-lane-command.ts`, the `pi-invoke` block. Wound #32 gated
+on `LANE_KIND != "planner"`. Wound #33 replaces that with a single named axis that
+classifies BOTH pure-generation lanes together, and drives BOTH the mode gate and
+the tool gate from it:
+
+```bash
+pi_generation_lane=0
+if [ "$LANE_KIND" = "planner" ] || [ "$LANE_KIND" = "verifier" ]; then
+  pi_generation_lane=1
+fi
+# wire protocol: stream only for the agentic lanes
+pi_mode_args=""
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ] && [ "$pi_generation_lane" = "0" ]; then
+  pi_mode_args="--mode json"
+fi
+# least privilege: muzzle the pure-generation lanes
+pi_tool_args=""
+if [ "$pi_generation_lane" = "1" ]; then
+  pi_tool_args="--no-tools"
+fi
+```
+
+Load-bearing properties:
+
+1. **The verifier now runs the planner's proven config** — text mode + `--no-tools`,
+   the exact channels the 06-12 capture used. The verdict ends on one plain
+   assistant message text mode delivers in full; the normalizer is shape-driven
+   and falls through to the whole-buffer JSON scan exactly as it does for the
+   planner.
+2. **Wound #20 is preserved for the lanes it was actually built for.**
+   worker/analysis lanes still genuinely execute steps, can end on a tool turn,
+   and keep `--mode json` + tools. The fix narrows "agentic" to the lanes that
+   are agentic; it does not revert #20, it corrects #20's misclassification of the
+   verifier.
+3. **One concept, one axis.** The wire protocol and the tool grant were two
+   separate gates keyed on two near-identical conditions. `pi_generation_lane`
+   names the single property both depend on — *is this lane pure generation?* —
+   so they can never drift apart (a future lane added to one gate but not the
+   other was the latent third bug).
+
+### Plus: a non-capped normalize-failure diagnostic
+
+When normalize fails and the raw output was **not** capped (so it is small enough
+to sample safely), the failure branch now rides head AND tail samples of the raw
+stdout out on the `diag` channel (control chars flattened, git creds scrubbed).
+The cap branch (Wound #32) diagnoses the *runaway* failure mode; this diagnoses
+its opposite — the *empty/diverted* one. On `fccee972` the channel was silent and
+we had to reason from the lane plumbing to find the write-tool diversion. Next
+time the raw stdout's head/tail settles "did the model emit prose? end on a tool
+turn? write elsewhere?" from the blocker, without another blind re-drive. (Joel's
+standing demand: *"we should be able to observe the run in progress and not guess
+… instead of waiting and staring at it like fucking dummies."*)
+
+## Chaos test that would have caught it (hostile double, not a polite mock)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — the Wound #33 case.
+It SLICES the REAL combined pi-invoke+normalize block out of the emitted bash
+(`command.indexOf("pi_generation_lane=0")` → `command.indexOf("\ncompleted_at=")`)
+and runs it verbatim end-to-end — **real pi-invoke, real `node` normalizer** —
+against a hostile `pi` keyed on `--no-tools`:
+
+- **with `--no-tools`** (post-fix): emits the verdict JSON on **stdout** →
+  normalize recovers it in-band, `postFixVerdictRecovered`.
+- **without `--no-tools`** (pre-fix): does exactly what `fccee972`'s model did —
+  **writes the verdict JSON to `$LANE_OUTPUT_PATH`** and emits only prose on
+  stdout → normalize finds `no_parseable_output`, then `persist_unnormalized_output`
+  **clobbers** the written verdict with the recovery placeholder.
+
+The A/B is forced to be non-vacuous: the test reverts ONLY wound #33's
+`|| [ "$LANE_KIND" = "verifier" ]` clause to build the pre-fix block, and throws
+if that substitution changed nothing. So the test proves the `|| verifier` gate
+is the single load-bearing discriminator — green only when the verifier is
+muzzled. A polite mock asserting on a TS variable would prove nothing about what
+the spawned process emits or where the verdict lands; this reproduces the exact
+production transport — the write-tool diversion, the off-stdout verdict, the
+recovery clobber, and the real normalizer's `no_parseable_output`. The reclassified
+wound #31 (tools) and wound #32 (mode) tests were also extended: each now asserts
+the **verifier** joins the planner (muzzled + text) and a new **worker** control
+keeps tools + streams, so the agentic lanes are pinned against an over-broad muzzle.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **430 passed / 55 files**.
+
+## What this does NOT claim (skepticism held)
+
+The write-tool diversion is the strongest hypothesis: the prompt explicitly tells
+the model the output path is where it writes, the model had a write tool, the
+verdict file landed at exactly that path, and the channel was empty at 78s — a
+clean, fast, *non*-runaway failure that rules out the Wound #32 balloon mechanism.
+The fix reverts the verifier to the one config that has reached `captured`. It is
+NOT yet re-proven to reach `captured` on deployed code — that is the live
+re-drive's job, the final step of this wound's discipline. If the verifier still
+fails empty in text+no-tools (it should not — with no write tool and one plain
+message, the verdict has nowhere to go but stdout), the new non-capped diagnostic
+now shows the raw head/tail from the blocker. One axis changed (the generation
+gate now includes the verifier), so the next run's signal is clean.
+
+## The carrier discipline (thirteenth carrier wound)
+
+#31 ruled tools out as the *planner's* runaway cause and, in doing so, pointed at
+the wire protocol. #32 fixed the wire protocol and got the run past the planner —
+exposing the next lane. #33 is what #32's success uncovered: the verifier was
+never agentic. Wound #20/#32 carried an inherited assumption — "the verifier ends
+on a tool turn" — that this verifier's own adapter contradicts: it inlines every
+byte of evidence into the prompt and tells the model there are no local files. The
+fix is Nygard's least privilege applied as a correctness rule, not a security one:
+grant the lowest privilege the task needs, and a verdict that has no tool to divert
+it lands in-band by construction. The planner and the verifier are the same kind
+of process — pure generation over inlined input — so they share one axis, one wire
+protocol, one tool grant. The agentic lanes, which genuinely reach their sources
+through tools, keep both. Two kinds of lane, gated on the one property that
+actually distinguishes them: *does this process need to reach out, or does
+everything it needs already sit in the prompt?*

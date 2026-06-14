@@ -190,43 +190,58 @@ NODE
 mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(dirname "$LANE_TRANSCRIPT_PATH")" "$(dirname "$LANE_RECEIPT_PATH")"
 cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"
 mark pi-invoke
-# JSON lanes capture pi's machine event stream (--mode json), not its human text
-# channel: text mode only echoes the final assistant message and goes silent when
-# the run ends on a tool call, error, or abort — so a verifier/agentic JSON lane that
-# scraped text mode would lose the verdict the agent produced on a tool turn. The
-# normalizer reads the event stream's agent_end message to recover it.
+# Pure-generation vs agentic is the ONE axis that governs BOTH pi's wire protocol AND its
+# tool grant below. A pure-generation lane (planner, verifier) emits ONE JSON document and
+# ENDS ON A PLAIN ASSISTANT MESSAGE — it has nothing to read and no tool turn to lose. An
+# agentic lane (worker/analysis) genuinely executes steps: it reads, runs bash, and can END
+# ITS RUN ON A TOOL TURN, producing its output/verdict there.
 #
-# EXCLUDE the planner. --mode json streams EVERY lifecycle event (turn/message/token)
-# to stdout, so the buffer grows with the model's internal iteration; text mode emits
-# ONLY the final message no matter how much the model thinks. The planner is pure
-# generation that ends on one plain assistant message — it has no tools (see the gate
-# below) so it CANNOT end on a tool turn, the one ending text mode drops — so it has no
-# reason to pay the event stream's cost and every reason to avoid it: under --mode json
-# the planner's stream ballooned to the 64 MiB cap and ran away on FIVE consecutive live
-# runs (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools), while the
-# one run that reached "captured" (06-12, text mode) predates --mode json entirely. Mode
-# — not tools — was the lone discriminator; --no-tools alone could not fix it. The
-# normalizer is shape-driven (it falls back to a whole-buffer JSON scan when the output
-# is not an event stream — see agent-lane-json-output.ts), so a text-mode planner
-# blueprint normalizes exactly as it did on 06-12. (wound #32.)
+# The verifier LOOKS agentic but is NOT: createCloudflarePiVerifierLaneAdapter inlines ALL
+# of its evidence INTO THE PROMPT — the Output Evidence Snapshots, Capability Receipt
+# Evidence, the full contract and plan — and the prompt states outright that the artifact
+# refs are NOT present as local files in the sandbox and that the snapshots ARE the source
+# of artifact content. There is nothing for read/bash to read; it is judgment over inlined
+# evidence, structurally identical to the planner. Treating it as agentic (tools ON, event
+# stream) was wound #20/#32's inherited assumption — wound #33 disproved it: WITH tools +
+# --mode json the verifier ended OFF-stdout (it took the prompt's "the verification output
+# path ... this verifier lane writes it" as license to use its write tool, or ended on a
+# tool turn), the normalizer walked every agent_end message, found no verdict, and the run
+# went terminal blocked / no_parseable_output ~78s into a ~690s budget. Tools added ZERO
+# grounding (the evidence is inlined) and SUBTRACTED reliability (the verdict left the
+# stdout channel the lane reads). Reclassify it as the pure-generation lane it is.
+pi_generation_lane=0
+if [ "$LANE_KIND" = "planner" ] || [ "$LANE_KIND" = "verifier" ]; then
+  pi_generation_lane=1
+fi
+# Wire protocol. --mode json streams EVERY lifecycle event (turn/message/token/tool) to
+# stdout, so the buffer grows with the model's internal iteration; text mode emits ONLY the
+# final assistant message no matter how much the model thinks. An agentic lane NEEDS the
+# stream: it can end on a tool turn whose verdict text mode would drop, and the normalizer
+# recovers it from the agent_end message (wound #20). A pure-generation lane does NOT — it
+# ends on one plain message text mode delivers in full — and it MUST avoid the stream: under
+# --mode json the planner's buffer ballooned to the 64 MiB cap and ran away on FIVE
+# consecutive live runs (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools,
+# proving the stream balloons on token-deltas REGARDLESS of tools), while the one run that
+# reached "captured" (06-12, text mode) predates --mode json. So gate the stream on the
+# agentic axis, NOT the output media type: planner and verifier both commit JSON but neither
+# ends agentically, so neither pays the stream's cost (wound #32, extended to the verifier by
+# wound #33). The normalizer is shape-driven — a text-mode JSON document is not an event
+# stream, so it falls through to the whole-buffer JSON scan (agent-lane-json-output.ts) and
+# normalizes exactly as the 06-12 captured planner did.
 pi_mode_args=""
-if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ] && [ "$LANE_KIND" != "planner" ]; then
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ] && [ "$pi_generation_lane" = "0" ]; then
   pi_mode_args="--mode json"
 fi
-# Least privilege at the CLI: the planner is pure generation that emits one JSON
-# blueprint and needs nothing from the filesystem, so grant it zero tools. pi ships
-# read/bash/edit/write ON by default; --no-tools removes them at the process boundary.
-# Retained from wound #31, but its role is now correctly understood: it is NOT what stops
-# the runaway — the --mode json gate above is (wound #32 proved --no-tools alone did not;
-# run c08aba9c ran away WITH it). It is defense-in-depth that also makes text mode
-# LOSSLESS for the planner: with no tools the planner CANNOT end on a tool turn (the one
-# ending text mode drops), so its final blueprint always reaches stdout. Scoped to
-# LANE_KIND=planner ONLY: worker/analysis/verifier lanes are source-grounded and MUST
-# keep read/bash to inspect artifacts — disabling tools there would forge hollow captures
-# (a verifier that reviews nothing). LANE_KIND is always set (lanes.ts), same as
-# LANE_OUTPUT_MEDIA_TYPE above, so it is safe under set -u.
+# Least privilege at the CLI. pi ships read/bash/edit/write ON by default; --no-tools removes
+# them at the process boundary. A pure-generation lane needs nothing from the filesystem, so
+# grant it zero tools — which ALSO makes its output channel lossless: with no write/edit tool
+# it CANNOT divert the verdict to a file, and with no tool at all it CANNOT end on a tool turn,
+# so its one JSON document ALWAYS reaches stdout where the lane reads it (planner: wound #31;
+# verifier: wound #33 — the diverted-verdict fix). Agentic lanes (worker/analysis) KEEP
+# read/bash: they inspect real artifacts and execute steps, and disabling their tools WOULD
+# forge a hollow capture. Same generation axis as the wire protocol — one concept, one flag.
 pi_tool_args=""
-if [ "$LANE_KIND" = "planner" ]; then
+if [ "$pi_generation_lane" = "1" ]; then
   pi_tool_args="--no-tools"
 fi
 set +e
@@ -371,6 +386,26 @@ NODE
         "$normalize_budget_s" >> "$stderr_path" 2>>"$stderr_path" || true
     fi
     persist_unnormalized_output
+    # A NON-capped normalize failure (no_parseable_output / agent_error / normalize_timeout on
+    # a COMPLETE, small stream) used to leave NO diagnostic: the cap branch's tail-sample fires
+    # ONLY when the stream hit the 64 MiB cap, so a lane that ended cleanly but put its verdict
+    # somewhere OTHER than its final assistant message (diverted to a file, ended on a tool turn,
+    # wrapped it in prose) committed status:"failed" with a reason code and ZERO bytes of
+    # evidence — re-driven BLIND (wound #33: the verifier's no_parseable block cost a full live
+    # run to diagnose from receipts alone). Sample the HEAD and TAIL of the bounded raw output so
+    # the next re-drive reads WHAT the agent emitted, not just THAT it failed. Head AND tail (the
+    # cap branch samples the tail only, because a capped stream's head is identical preamble): a
+    # complete small stream's failure mode lives anywhere in it — opening prose with no JSON, a
+    # stray Markdown fence, a final tool-call event with no verdict. Skip when capped (the cap
+    # branch already rode its tail out on the diag channel). Control chars flattened to one line;
+    # git creds scrubbed; the diag channel survives a SIGTERM and reaches the operator blocker.
+    # (Joel's standing demand: observe the run, do not stare and guess.)
+    if [ "$raw_output_capture_bytes" -lt "$raw_output_cap_bytes" ] 2>/dev/null; then
+      normfail_head_sample="$(head -c 2048 "$raw_output_path" 2>/dev/null | tr '\n\r\t' '   ' | tr -cd '[:print:]' | scrub_credentials)"
+      normfail_tail_sample="$(tail -c 2048 "$raw_output_path" 2>/dev/null | tr '\n\r\t' '   ' | tr -cd '[:print:]' | scrub_credentials)"
+      diag "normalize-output failed (output_normalized=0, $raw_output_capture_bytes bytes, not capped); raw_output_head_sample (first 2048 bytes, sanitized): $normfail_head_sample"
+      diag "normalize-output failed; raw_output_tail_sample (last 2048 bytes, sanitized): $normfail_tail_sample"
+    fi
   fi
 else
   persist_unnormalized_output
