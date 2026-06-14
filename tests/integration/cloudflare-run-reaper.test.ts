@@ -529,3 +529,69 @@ describe("Capsule supervisor reaper alarm", () => {
     });
   });
 });
+
+// Wound #22: a re-drive must RECLAIM its own orphaned lane-owner reservation.
+// The zombie-budget pre-admit (wound #16) reserves a lane's owner slot before
+// dispatch; a drive torn between that reservation and the matching lane release
+// leaves the slot held with no live process behind it. Lane ids are run-scoped
+// (`lane:<kind>:<runId>...`), so the only thing that can ever collide with that
+// slot is the SAME run's next drive — admission must re-admit it, not defer
+// `already-active`. The deferral was converted by the planner into a terminal
+// `adapter_unavailable`, which killed every re-drive's recovery (proven live:
+// run-live-20260614T085001608Z planning -> blocked in 69ms, planner never ran).
+const readDecision = async (response: Response) =>
+  z
+    .object({ reason: z.string().optional(), status: z.string() })
+    .parse(await response.json());
+
+describe("Capsule supervisor lane admission reclaim", () => {
+  it("re-admits a run colliding with its own orphaned lane owner", async () => {
+    const d1 = createFakeD1({ runs: [buildRun()] });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+    const laneId = "lane:planner:run-reaper-test";
+
+    // First admission reserves the owner slot.
+    const first = await readDecision(await admit(supervisor, laneId));
+    expect(first.status).toBe("admitted");
+
+    // The drive tears here: the owner slot persists with no release. The run's
+    // next drive re-admits the SAME lane and must reclaim its own orphan rather
+    // than be deferred against itself.
+    const reclaim = await readDecision(await admit(supervisor, laneId));
+    expect(reclaim.status).toBe("admitted");
+
+    // The reclaim does not leak a second owner: exactly one slot stays held.
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneIds).toStrictEqual([laneId]);
+    expect(record.activeLaneOwners).toStrictEqual({
+      [laneId]: "run-reaper-test",
+    });
+  });
+
+  it("still defers a DIFFERENT run colliding with an active lane owner", async () => {
+    const d1 = createFakeD1({ runs: [buildRun()] });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+    const laneId = "lane:planner:run-owner";
+
+    const owner = await readDecision(
+      await admit(supervisor, laneId, "run-owner")
+    );
+    expect(owner.status).toBe("admitted");
+
+    // A different run must NOT reclaim someone else's slot — the safety branch
+    // holds even though run-scoped lane ids make this impossible in production.
+    const intruder = await readDecision(
+      await admit(supervisor, laneId, "run-intruder")
+    );
+    expect(intruder).toStrictEqual({
+      reason: "already-active",
+      status: "deferred",
+    });
+
+    // The intruder neither stole nor duplicated ownership.
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneOwners).toStrictEqual({ [laneId]: "run-owner" });
+  });
+});

@@ -1105,7 +1105,39 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       });
     }
 
-    if (activeLaneIds.includes(input.laneId)) {
+    const currentOwner = record.activeLaneOwners[input.laneId];
+    if (currentOwner !== undefined) {
+      // Wound #22: reclaim our OWN orphaned reservation. The zombie-budget
+      // pre-admit (wound #16) reserves this lane's OWNER slot before dispatch; a
+      // drive torn after that reservation but before it persists a lane
+      // dispatch/release leaves the slot held with no live process behind it.
+      // Lane ids are run-scoped (`lane:<kind>:<runId>...`), so the owner can only
+      // ever be THIS run — an "already-active" collision is never cross-run
+      // contention, only the run colliding with its own zombie from a dead prior
+      // drive generation. The drive-generation fence plus the stall-generation
+      // reaper guarantee that prior drive is gone before this admission runs (a
+      // new generation is armed only once the previous driving marker goes
+      // stale), so the run's next drive must be able to RECLAIM the slot rather
+      // than be deferred against itself — the deferral was converted into a
+      // terminal `adapter_unavailable` and killed every re-drive's recovery.
+      // Re-admit idempotently (the owner mapping already names this run); keep
+      // the reaper armed so the reclaimed lane stays watched.
+      if (currentOwner === input.runId) {
+        await this.ensureReaperAlarm();
+
+        return AgentLaneAdmissionDecisionSchema.parse({
+          activeLaneIds,
+          admissionId: `admission:${input.runId}:${input.laneId}:${crypto.randomUUID()}`,
+          admittedAt: nowIso(),
+          kind: input.kind,
+          laneId: input.laneId,
+          maxActiveLanes: input.maxActiveLanes,
+          runId: input.runId,
+          status: "admitted",
+          workItemId: input.workItemId,
+        });
+      }
+
       return AgentLaneAdmissionDecisionSchema.parse({
         activeLaneIds,
         kind: input.kind,
