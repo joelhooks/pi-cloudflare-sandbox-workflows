@@ -214,8 +214,43 @@ pi_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - pi_elapsed_s - PIWF_PI_INVOKE_TAI
 if [ "$pi_budget_s" -lt 1 ]; then
   pi_budget_s=1
 fi
-timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
-pi_status=$?
+# Steady State at the SOURCE bucket. pi's raw stdout is the resource every later step
+# accumulates from — normalize copies it, build-transcript samples it, build-receipt
+# reads + hashes it. A runaway/looping model (amplified under --mode json, where every
+# token and tool call is a stream event) emits an UNBOUNDED stream that fills the lite
+# instance's small disk DURING the run, and wound #29's downstream caps cannot save it
+# because the disk is already dead before they run (live a8bc84dc/53cc30a4:
+# raw_output_bytes 1084434255 on a 1.81 GB disk left ~30 MB free → build-receipt's
+# cp planner-blueprint ENOSPC, exit 143 — the lane burned 546s and committed nothing).
+# Cap what reaches disk with head -c so the bucket can NEVER overflow: head closes the
+# pipe at the cap, so pi takes SIGPIPE on its next write and a runaway is bounded in
+# BOTH disk and wall-clock. PIPESTATUS[0] preserves pi's real exit (124 timeout / 0 ok)
+# past head. The cap is generous (64 MiB — orders of magnitude over any real planner
+# blueprint or event stream) so only the pathological runaway is ever truncated, and a
+# capped run commits an honest status:"failed" receipt with the truncated head instead
+# of cascading ENOSPC through every disk-touching step downstream.
+# Bash brace param-expansion defaults collide with this String.raw template's JS
+# interpolation, so default the (test-only) cap override under a brief set +u.
+raw_output_cap_bytes=67108864
+set +u
+if [ -n "$PIWF_RAW_OUTPUT_CAP_BYTES" ]; then
+  raw_output_cap_bytes="$PIWF_RAW_OUTPUT_CAP_BYTES"
+fi
+set -u
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" 2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
+# Bare \$PIPESTATUS expands to the FIRST pipe element in bash — the left-of-pipe
+# (timeout pi) exit. The braced array-index form collides with this String.raw
+# template's JS interpolation (it throws "PIPESTATUS is not defined" at build time —
+# even inside a comment), so the bare form is load-bearing here, NOT a style choice.
+# It preserves pi's real exit (124 timeout / 141 SIGPIPE-on-cap / 0 ok) past head,
+# which always exits 0.
+pi_status=$PIPESTATUS
+raw_output_capture_bytes="$(wc -c < "$raw_output_path" 2>/dev/null | tr -d '[:space:]')"
+[ -n "$raw_output_capture_bytes" ] || raw_output_capture_bytes=0
+if [ "$raw_output_capture_bytes" -ge "$raw_output_cap_bytes" ] 2>/dev/null; then
+  printf '\n[pi-invoke output cap] pi raw output reached the %s-byte capture cap and was truncated — the agent produced a runaway/oversized stream. The full stream is intentionally discarded (retaining it would ENOSPC the lite instance disk and poison every downstream step); the committed receipt is status:"failed" with the truncated head.\n' "$raw_output_cap_bytes" >> "$stderr_path"
+  diag "pi-invoke raw_output_capped: reached $raw_output_cap_bytes byte cap (runaway/oversized stream; full stream discarded to protect disk)"
+fi
 if [ "$pi_status" -eq 124 ]; then
   printf '\n[pi-invoke self-bound] pi exceeded its %ss budget and was terminated by timeout; the heartbeat names pi-invoke as the wedge step.\n' "$pi_budget_s" >> "$stderr_path"
 fi

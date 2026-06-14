@@ -1,0 +1,203 @@
+---
+title: "Carrier Wound #30: The Agent Dictated How Many Bytes Hit The Disk"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - pi-invoke
+  - ensoc
+  - disk
+  - unbounded-result-set
+  - handshaking
+  - steady-state
+  - head-c
+  - pipestatus
+  - string-raw
+  - observability
+  - diagnostics
+  - carrier-finding
+  - chaos-suite
+source: "wound-30-pi-output-unbounded-ensoc-source"
+---
+
+# Carrier Wound #30: The Agent Dictated How Many Bytes Hit The Disk
+
+Wound #29 bounded the debug transcript and added the `diag()` channel that
+survives an abort. We shipped it, deployed it, and re-drove a dream-shape run on
+the fixed code. The lane advanced PAST `build-transcript` (`write_exit: 0`,
+exactly the #29 receipt's called shot) and died one step later at
+`build-receipt` — and this time the diagnostics channel rode out on the operator
+blocker carrying the numbers, no staring:
+
+```
+run-live-20260614T183519765Z-53cc30a4  →  blocked
+Agent lane reached step "build-receipt"
+[lane diagnostics:
+  build-transcript disk: 30168 KB free of 1900000-ish KB ...
+  build-transcript raw_output_bytes: 1084434255            ← 1.08 GB
+  build-transcript lane_output_bytes: 112                  ← ENOSPC stub
+  build-transcript write_exit: 0
+  ...
+  cp: error writing 'run/planner-blueprint.json': No space left on device ]
+```
+
+The #29 receipt's "What this does NOT claim" predicted this verbatim: *"If the
+next honest run shows the lane now advances to `build-receipt` and dies THERE,
+that is the next wound."* The diagnostics named the true culprit, and it was not
+the transcript at all — it was **the raw pi output itself: 1.08 GB on a 1.81 GB
+`lite` disk**. The transcript bound (#29) worked perfectly and was never the real
+hog; #29 was defensive-under-every-hypothesis on purpose, which is why it
+advanced the ball even though my root-cause guess (4× transcript double-write)
+was wrong. The diagnostics corrected the guess. That is the whole point of the
+channel.
+
+## Mechanism — the lane let the agent decide how many bytes to write
+
+`pi`'s stdout is the SOURCE bucket every later step draws from: `normalize-output`
+copies it to `LANE_OUTPUT_PATH`, `build-transcript` samples it, `build-receipt`
+reads + hashes + `cp`s it. The capture was a bare redirect with no ceiling:
+
+```bash
+timeout "$pi_budget_s" pi ... -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
+```
+
+A runaway/looping planner — amplified under `--mode json`, where every token and
+tool call is a stream event — produced a **1.08 GB** raw file. (It also blew its
+546s budget and was timeout-killed, exit 124; whether the spew caused the loop or
+the loop caused the spew is the deeper question below.) On the `lite` disk that
+left ~30 MB free, and then every downstream consumer inherited the dead disk:
+`normalize-output` timed out trying to parse 1 GB → `persist_unnormalized_output`'s
+`cp` ENOSPC'd to a 112-byte stub (`lane_output_bytes: 112` is the fingerprint) →
+`build-transcript` (capped by #29) squeaked through in the last 30 MB →
+`build-receipt`'s `cp run/planner-blueprint.json` hit ENOSPC and aborted exit 143.
+546s burned, nothing committed.
+
+> In the abstract, an unbounded result set occurs when the caller allows the
+> other system to dictate terms. It is a failure in handshaking. In any API or
+> protocol, the caller should always indicate how much of a response it is
+> prepared to accept. […] beware any relationship that can accumulate unbounded
+> results.
+>
+> — Michael Nygard, *Release It!*, §4.2 Unbounded Result Sets
+
+That is this wound exactly. The lane was the caller; `pi` was the other system;
+the lane indicated NO limit on how much it would accept, so a misbehaving agent
+dictated the terms — and the terms were 1 GB. Wound #29 drained the transcript
+bucket one consumer deep; this is the SAME pattern one bucket deeper, at the
+source that fills all of them. Bound the source and every downstream bucket
+drains with it.
+
+## Fix — the caller states how much it will accept, at the source
+
+`cloudflare-sandbox-agent-lane-command.ts`, the `pi-invoke` block. Cap what
+reaches disk with `head -c`, which is the lane's half of the handshake:
+
+```bash
+raw_output_cap_bytes=67108864            # 64 MiB; test-overridable via PIWF_RAW_OUTPUT_CAP_BYTES
+timeout "$pi_budget_s" pi ... -p "$(cat "$LANE_PROMPT_PATH")" 2> "$stderr_path" \
+  | head -c "$raw_output_cap_bytes" > "$raw_output_path"
+pi_status=$PIPESTATUS
+raw_output_capture_bytes="$(wc -c < "$raw_output_path" ...)"
+if [ "$raw_output_capture_bytes" -ge "$raw_output_cap_bytes" ]; then
+  printf '\n[pi-invoke output cap] pi raw output reached the %s-byte capture cap ...' ...
+  diag "pi-invoke raw_output_capped: reached $raw_output_cap_bytes byte cap ..."
+fi
+```
+
+Three properties, all load-bearing:
+
+1. **Disk can never overflow.** `head -c` writes at most the cap to the file no
+   matter what pi emits. A 1 GB (or 1 TB) spew lands as 64 MiB on disk; every
+   downstream `cp`/hash/`git add` now runs against a healthy disk. The cascade is
+   cut at the root — one bound drains all four buckets.
+2. **A runaway is bounded in wall-clock too, not just disk.** `head` closes the
+   pipe at the cap, so pi takes SIGPIPE on its next write and stops. The runaway
+   no longer rides its full timeout budget; it dies when it overflows the cap.
+3. **Honest, named, diagnosable failure instead of a blind ENOSPC cascade.** When
+   the cap is hit, the truncation is announced in pi's stderr tail (which the
+   receipt carries) AND in the `diag()` channel (which rides out on the operator
+   blocker). The committed receipt is `status:"failed"` with the truncated head —
+   not a 143 abort with nothing committed. Runaway detection keys on FILE SIZE
+   (`>= cap`), not on `pi_status`, so it is correct whether pi exits 0 (fully
+   buffered then truncated), 141 (SIGPIPE on cap), or 124 (timeout).
+
+The cap is generous — 64 MiB is orders of magnitude over any real planner
+blueprint or event stream (the live runaway was 1.08 GB, ~16,000× the cap), so
+only the pathological case is ever truncated. A legitimate run is untouched.
+
+### String.raw note (the convention bit twice this time — record it harder)
+
+`buildPiAgentLaneCommand()` is a `String.raw` template, so JS `${...}`
+interpolation fires ANYWHERE in the template — including inside bash comments. The
+first cut wrote `pi_status=${PIPESTATUS[0]}` and threw `ReferenceError:
+PIPESTATUS is not defined` at build time. The fix is **bare `$PIPESTATUS`**, which
+in bash expands to `${PIPESTATUS[0]}` (an array referenced with no subscript is
+element 0) — same value, no brace, no collision. Then the EXPLANATORY COMMENT I
+added still contained a literal `${PIPESTATUS[0]}` and threw the SAME error from
+inside a comment. Lesson, now triple-paid (this wound + #29's two PARSE_ERRORs):
+**no `${...}` of any kind in this template's bash, not in code, not in comments.**
+Bare `$var` only; defaults under `set +u`/`set -u`.
+
+## Chaos test that would have caught it (hostile double, not a polite mock)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` —
+*"bounds the raw pi-output capture at the source so a runaway stream cannot
+ENOSPC the lane (wound #30)"*. It SLICES the REAL pi-invoke capture block out of
+`buildPiAgentLaneCommand()`'s emitted bash (`command.indexOf('pi_mode_args=""')`
+→ `command.indexOf("\nmark normalize-output")`, throwing if either anchor moves)
+and runs it verbatim under a faithful harness (real `diag()`, real budget
+arithmetic, real `timeout`/`head` pipe) against a `pi` that **spews 512 KiB**
+into a **4096-byte** cap. Asserts: the raw capture file is bounded to exactly the
+cap (`rawBytes === 4096` — a 1 GB spew can't reach disk), the stderr carries the
+`[pi-invoke output cap]` notice, the diagnostics record `pi-invoke
+raw_output_capped`, and the script reaches a `POST_PI_REACHED` sentinel instead
+of dying in an ENOSPC cascade.
+
+**Pre-fix:** the bare `> "$raw_output_path"` writes the FULL 512 KiB (1 GB in
+prod), with no notice and no diag → `rawBytes` is 524288 not 4096, and every
+signal flips false. This is a hostile double in the franchise sense
+([[polite-fakes-franchise-wound]]): it reproduces the production transport — the
+real emitted bash, a real oversized stream through a real `head -c` pipe — rather
+than a polite mock that emits a few tidy bytes and never overflows anything.
+
+`pnpm typecheck` clean · `pnpm check` clean · `pnpm vitest run` =
+**55 files / 427 passed** (incl. the new chaos test). The pre-existing pi-invoke
+hung-test (`pi_status=124`) stays green: an empty capture (`0 -ge cap` is false)
+skips the runaway branch and the SIGPIPE/timeout semantics are unchanged.
+
+## What this does NOT claim (skepticism held — and this is the load-bearing part)
+
+**The carrier bound makes failure honest and disk-safe. It does NOT, by itself,
+make a dream run reach `captured`.** If the planner pi genuinely loops and never
+emits a valid blueprint, capping its output converts an ENOSPC cascade into a
+clean `planner_output_invalid`/runaway receipt — better, observable, committed —
+but still not a capture. The actual path to `captured` (Joel's stated goal: *"a
+dream shaped run actually reaches captured"*) needs the DEEPER answer: **why does
+the planner pi produce 1 GB and blow its 546s budget?** Three live runs in a row
+now exhibit it (a8bc84dc, f9a37a09, 53cc30a4). The bounded re-drive is the probe:
+
+- If the lane now reaches `captured`, the 1 GB was stream bloat that starved
+  `normalize-output`; capping the source freed the disk AND let normalize parse a
+  64 MiB head that contains the blueprint. Goal met by the carrier fix alone.
+- If it commits a `status:"failed"` runaway receipt, the disk is healthy and we
+  can finally READ the truncated head (and the stderr tail) to see WHAT pi was
+  spewing — a tool-call loop, an error-retry storm, or a legitimately enormous
+  event stream. That diagnosis is the next move (prompt fix, budget change, or a
+  pi flag), made WITH the head in hand, not on a guess.
+
+Either way the lane stops burning 546s to commit nothing, and the operator stops
+guessing. We did NOT touch the budget, the prompt, or any pi flag on speculation
+— one variable changed, so the next run's signal is clean.
+
+## The carrier discipline (tenth carrier wound, same shape)
+
+Observability + boundedness are carrier properties, and they compound. #28 made
+the lane say WHERE it died. #29 made it say WHY with the disk numbers, even when
+the failing write was the one that would have recorded them. #30 stops the lane
+from ever letting a misbehaving agent dictate how many bytes hit the disk in the
+first place — the handshake the lane was missing. A resource that accumulates
+must drain (#29); a resource that ARRIVES must be bounded at the door (#30). The
+bucket has a hole in the bottom and now a valve on the inlet.

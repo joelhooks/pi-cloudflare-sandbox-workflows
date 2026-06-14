@@ -705,6 +705,102 @@ describe(buildPiAgentLaneCommand, () => {
     }
   }, 15_000);
 
+  it("bounds the raw pi-output capture at the source so a runaway stream cannot ENOSPC the lane (wound #30)", () => {
+    // Hostile double for wound #30 ([[polite-fakes-franchise-wound]]): slice the REAL
+    // pi-invoke capture block out of buildPiAgentLaneCommand() and run it verbatim
+    // against a `pi` that SPEWS far more than the cap — the production transport for
+    // the live failure (a8bc84dc/53cc30a4: raw_output_bytes 1084434255 on a 1.81 GB
+    // lite disk → build-receipt cp ENOSPC, exit 143). A polite mock that emitted a few
+    // bytes would never exercise the bound; this fake emits 512 KiB against a 4096-byte
+    // cap so head -c MUST truncate to disk. The pre-fix capture was a bare
+    // `pi ... > "$raw_output_path"`: it wrote the FULL 512 KiB (1 GB in prod) with no
+    // cap, no truncation notice, and no diagnostic — flipping every signal below, and
+    // on the lite disk poisoning every downstream cp/hash/git step with ENOSPC.
+    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockEnd = command.indexOf("\nmark normalize-output");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke block in the lane command."
+      );
+    }
+    const piInvokeBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-pi-runaway-"));
+    try {
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      // A runaway/looping agent: spew 512 KiB — orders of magnitude over the 4096-byte
+      // test cap and over a 64 KiB pipe buffer, so head -c definitively bounds the file
+      // regardless of whether pi exits 0 (fully buffered) or takes SIGPIPE mid-stream.
+      const fakePi = join(binDir, "pi");
+      writeFileSync(
+        fakePi,
+        "#!/usr/bin/env bash\nhead -c 524288 /dev/zero | tr '\\0' 'x'\n"
+      );
+      chmodSync(fakePi, 0o755);
+
+      const promptPath = join(dir, "prompt.txt");
+      writeFileSync(promptPath, "verify the primary source");
+      const rawOutputPath = join(dir, "raw.txt");
+      const stderrPath = join(dir, "stderr.txt");
+      const diagnosticsPath = join(dir, "diagnostics.txt");
+
+      const harness = [
+        "set -u",
+        "script_start_s=$(date +%s)",
+        `diag() { printf '%s\\n' "$1" >> "${diagnosticsPath}" 2>/dev/null || true; }`,
+        piInvokeBlock,
+        "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
+      ].join("\n");
+
+      const stdout = execFileSync("bash", ["-c", harness], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_OUTPUT_MEDIA_TYPE: "application/json",
+          LANE_PROMPT_PATH: promptPath,
+          PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+          PIWF_COMMAND_TIMEOUT_SECONDS: "5",
+          PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+          PIWF_RAW_OUTPUT_CAP_BYTES: "4096",
+          PI_MODEL: "fake-model",
+          PI_PROVIDER: "fake-provider",
+          raw_output_path: rawOutputPath,
+          stderr_path: stderrPath,
+        },
+        timeout: 15_000,
+      });
+
+      const rawBytes = existsSync(rawOutputPath)
+        ? readFileSync(rawOutputPath).length
+        : -1;
+      const stderr = existsSync(stderrPath)
+        ? readFileSync(stderrPath, "utf-8")
+        : "";
+      const diagnostics = existsSync(diagnosticsPath)
+        ? readFileSync(diagnosticsPath, "utf-8")
+        : "";
+
+      expect({
+        // The capture is bounded to the cap — a 1 GB spew can never reach disk.
+        boundedRawCaptureToCap: rawBytes === 4096,
+        // The runaway is named in the diagnostics channel that rides out on the blocker.
+        diagnosedRunaway: diagnostics.includes("pi-invoke raw_output_capped"),
+        // The runaway is named in pi's stderr tail that the receipt carries.
+        namedRunawayInStderr: stderr.includes("[pi-invoke output cap]"),
+        // The lane reaches the post-pi steps instead of dying in an ENOSPC cascade.
+        reachedPostPiSteps: stdout.includes("POST_PI_REACHED"),
+      }).toStrictEqual({
+        boundedRawCaptureToCap: true,
+        diagnosedRunaway: true,
+        namedRunawayInStderr: true,
+        reachedPostPiSteps: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 15_000);
+
   it("a failed normalize whose recovery copy also fails does NOT abort the lane blind (wound #25)", () => {
     // Hostile double for wound #25: slice the REAL normalize-output recovery block
     // out of buildPiAgentLaneCommand() and run it verbatim under production's
