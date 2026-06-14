@@ -1,0 +1,169 @@
+---
+title: "Carrier Wound #27: A Deterministic Planner-Output Miss Wore A Transient Label"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - error-handling
+  - error-classification
+  - observability
+  - set-eu
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+  - fail-fast
+source: "wound-27-planner-output-contract-miss-mislabeled-adapter-unavailable"
+---
+
+# Carrier Wound #27: A Deterministic Planner-Output Miss Wore A Transient Label
+
+Wound #26 (the unbounded normalize grind that rode a blind SIGKILL) shipped and
+deployed. We re-drove a dream-shape run on the fixed code —
+`run-live-20260614T154437382Z-3ad88e36` — and the planner LANE ran clean:
+`sandbox.exec` exited 0, pi finished, normalize-output returned. **Wound #26 is
+confirmed dead.** The lane did its job and pinned an output.
+
+Then the run BLOCKED anyway with:
+
+```
+blocker.code    = adapter_unavailable
+blocker.message = "Dynamic workflow planner failed"
+```
+
+…carrying a ZodError that reported all four top-level blueprint keys —
+`harness`, `machine`, `plan`, `verificationContract` — as **undefined**. The lane
+ran, returned, and what it returned was **schema-invalid**: pi emitted some JSON
+object that was not a blueprint.
+
+That is a *content* failure, and it is **deterministic**. Re-driving cannot fix
+it — the planner runs only on the first drive (idempotent via `run/plan.json`),
+and a planner failure pins no plan.json, so every DO-alarm re-drive re-runs the
+planner, gets the same wrong-shape output, and re-fails identically. The
+"re-drove for 40 minutes" loop. The carrier had two lies stacked on top of a
+recoverable truth:
+
+1. **Misclassification.** It labeled a deterministic content failure as
+   `adapter_unavailable` — the code reserved for transient transport faults, the
+   one that invites blind retry. This UNDID Wound #25's adapter honesty: the
+   adapter named the failure correctly, then `workflow-app.ts` caught *every*
+   planner error and flattened it back to `adapter_unavailable`.
+2. **Discarded diagnostic.** The blocker threw away *which* keys pi actually
+   emitted. The operator saw "planner failed," not "pi emitted `{result}` where
+   the contract wanted `{harness, machine, plan, verificationContract}`." Blind.
+
+> If the system can determine in advance that it will fail at an operation, it's
+> always better to fail fast. That way, the caller doesn't have to tie up any of
+> its capacity waiting; it can get on with other work. […] Can there be any
+> bigger waste of system resources than burning cycles and clock time only to
+> throw away the result?
+>
+> — Michael Nygard, *Release It!*, §5.5 Fail Fast
+
+A schema-invalid blueprint IS a fail-we-can-determine-in-advance. We were burning
+40 minutes of clock re-throwing the same dice.
+
+## Mechanism — honest at the adapter, flattened at the application
+
+The ZodError originated at the adapter's FIRST parse site
+(`cloudflare-agent-lane-adapters.ts`):
+
+```ts
+PlannerLaneBlueprintDocumentSchema.parse(readJson(outputPin))
+```
+
+The normalizer "succeeded" (it found *some* JSON object) but that object wasn't a
+blueprint. The bare `.parse()` threw a ZodError. Upstream,
+`workflow-app.ts` had a single catch that mapped EVERY thrown planner error to
+`blocker("adapter_unavailable", "Dynamic workflow planner failed: …")`. One
+flatten erased the distinction between "the sandbox couldn't be reached" and "the
+sandbox returned garbage."
+
+## Fix — a typed contract error that names present-vs-missing keys
+
+New denial code in `schemas.ts`: `planner_output_invalid` (between
+`plan_node_config_invalid` and `drive_stall_reaped`).
+
+**Application layer** (`ports.ts`, zod-free, precedent
+`StaleDriveGenerationError`): a typed `PlannerBlueprintContractError` carrying
+`stage` (`"planner-output" | "blueprint-assembly"`), `presentKeys`,
+`missingKeys`, `issuePaths`, `runId`, `workItemId`. Its message names the present
+top-level keys, the missing required keys, and the schema issue paths, and marks
+the failure **deterministic**. `redactionSafeTopLevelKeyNames` returns only
+`Object.keys(value)` — NAMES, never values; safe to surface to the operator.
+
+**Infrastructure layer** (`cloudflare-agent-lane-adapters.ts`): both parse sites
+converted from `.parse()` to `.safeParse()` + a typed throw via the
+`plannerBlueprintContractError` factory (which derives present/missing keys from
+the REAL schema error, not a hand-craft). Site 1 = `planner-output` (pi's raw
+pinned output); site 2 = `blueprint-assembly` (after the supervisor attaches
+`plannerLane`).
+
+**Application catch** (`workflow-app.ts`): discriminated —
+`PlannerBlueprintContractError` → `block("planner_output_invalid", error.message)`;
+`z.ZodError` (defense-in-depth, in case any unconverted site leaks) →
+`planner_output_invalid` with computed `issuePaths`; everything else → keeps
+`adapter_unavailable` (genuine transport). The dependency arrow stays correct:
+infra throws the application-layer typed error; application keys on it.
+
+The reclassification is load-bearing because `block()` writes
+`terminalBlocker.code = blockedBy.code` → the operator status endpoint's
+`blocker.code` flips directly from `adapter_unavailable` to
+`planner_output_invalid`. The status page now tells the truth.
+
+## Chaos tests that would have caught it (4 new, faithful doubles)
+
+`tests/integration/workflow-app.test.ts`:
+
+- **"blocks a deterministic planner-output contract miss as
+  planner_output_invalid (not adapter_unavailable)"** — planner double rejects
+  with a real `PlannerBlueprintContractError`; asserts blocker + terminal blocker
+  both `planner_output_invalid`, message marked deterministic and naming the keys.
+- **"keeps a generic planner transport failure classified as
+  adapter_unavailable"** — planner double rejects with a bare
+  `Error("sandbox dispatch failed: connection reset")`; asserts the transport
+  path still maps to `adapter_unavailable`. Guards against over-reclassifying.
+
+`tests/integration/cloudflare-agent-lane-adapters.test.ts`:
+
+- **end-to-end, faithful hostile double** — pins a wrong-shape `{result:{…}}`
+  object as the REAL lane output through the REAL `createPlannerRuntimeHarness`,
+  drives the REAL `createCloudflarePiPlannerLaneAdapter.proposePlan`, asserts it
+  throws a `PlannerBlueprintContractError` with `stage:"planner-output"`,
+  `presentKeys:["result"]`, `missingKeys:[harness, machine, plan,
+  verificationContract]`. No polite mock — the production schema does the
+  rejecting. (Polite-fakes franchise wound: doubles politer than prod reproduce
+  nothing.)
+- **unit, factory** — feeds the REAL schema's parse error from a real wrong-shape
+  object to `plannerBlueprintContractError`; asserts it derives present/missing
+  keys from the actual schema error.
+
+`pnpm typecheck` clean · `pnpm check` clean · `pnpm vitest run` = **418 passed**.
+
+## What this does NOT claim (skepticism held)
+
+The root cause of *why pi emitted a non-blueprint object* is still UNCONFIRMED.
+The `{result:{…}}` shape was observed once; it could be a wrong-extraction header,
+a refusal envelope, a truncation, or a prompt-contract drift. This fix is correct
+under ALL of those hypotheses: it stops the blind retry loop and surfaces the
+REAL `presentKeys` pi emitted. The NEXT live run's honest diagnostic will name the
+true root cause instead of us guessing. We did NOT reclassify all ~19
+`adapter_unavailable` sites — only the class with a live receipt.
+
+## Follow-ups (carried, not yet done)
+
+- Deterministic re-drive fast-fail: a `planner_output_invalid` block should not
+  re-run the planner on the next DO-alarm — fold into the pause/re-arm seam so a
+  deterministic content block stops re-driving entirely (true Fail Fast).
+- Pre-existing zombie run (separate).
+- Input-size fast-cap for normalize (Wound #26 follow-up).
+
+## The carrier discipline (sixth+seventh wound, same shape)
+
+Read consistency (#26 follow-up) and now error *classification* are both carrier
+properties: the lane can run perfectly and the carrier still lies about the
+outcome. "Observe the run, don't stare at a status page" only works if the status
+page is HONEST. A transient label on a deterministic failure is the carrier
+telling the operator to keep waiting for something that will never change.

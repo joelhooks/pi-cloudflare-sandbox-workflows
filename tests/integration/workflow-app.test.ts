@@ -8,7 +8,10 @@ import type {
   WorkflowNodeAdapterPort,
   WorkflowPostExecutionArtifactRecorderPort,
 } from "../../src/app/application/ports.ts";
-import { StaleDriveGenerationError } from "../../src/app/application/ports.ts";
+import {
+  PlannerBlueprintContractError,
+  StaleDriveGenerationError,
+} from "../../src/app/application/ports.ts";
 import { WorkflowApp } from "../../src/app/application/workflow-app.ts";
 import { hashJson, sha256Hex } from "../../src/app/domain/hash.ts";
 import {
@@ -2715,6 +2718,160 @@ describe("workflow app integration contract", () => {
       },
       status: "blocked",
     });
+  });
+
+  // Wound #27: the planner lane RAN and pinned an output; the output just was
+  // not a blueprint. That is a DETERMINISTIC content miss — re-driving the same
+  // prompt re-produces the same wrong shape forever. The carrier used to flatten
+  // it into the transient `adapter_unavailable`, which blind-re-drove for ~40
+  // minutes. A typed PlannerBlueprintContractError must surface as the
+  // deterministic `planner_output_invalid` carrying the present/missing keys, so
+  // the operator status endpoint reads the real cause instead of a guess.
+  it("blocks a deterministic planner-output contract miss as planner_output_invalid (not adapter_unavailable)", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-planner-output-contract-miss"
+    );
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        // Hostile double: pi ran-and-returned schema-invalid output. The adapter
+        // would have diagnosed exactly this — present `result`, all four required
+        // top-level keys missing — and thrown the typed contract error.
+        proposePlan() {
+          return Promise.reject(
+            new PlannerBlueprintContractError({
+              issuePaths: [
+                "machine",
+                "harness",
+                "plan",
+                "verificationContract",
+              ],
+              missingKeys: [
+                "machine",
+                "harness",
+                "plan",
+                "verificationContract",
+              ],
+              presentKeys: ["result"],
+              runId: "run-planner-output-contract-miss",
+              stage: "planner-output",
+              workItemId: "work-planner-output-contract-miss",
+            })
+          );
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection,
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    const result = await workflow.run(buildIntegrationTestRunRequest());
+    const latestProjection = statusProjection.latest.get(result.runId);
+    const blocker = result.status === "blocked" ? result.blocker : undefined;
+
+    // The block must NAME what pi emitted vs what the contract required (the
+    // diagnostic discarded by the old blanket adapter_unavailable), classify the
+    // failure as the DETERMINISTIC planner_output_invalid, and the status
+    // endpoint's terminalBlocker.code must agree.
+    expect({
+      blockerCode: blocker?.code,
+      namesDeterministic: blocker?.message.includes("deterministic") ?? false,
+      namesMissingKeys:
+        blocker?.message.includes(
+          "missing required keys [machine, harness, plan, verificationContract]"
+        ) ?? false,
+      namesPresentKeys:
+        blocker?.message.includes("present top-level keys [result]") ?? false,
+      status: result.status,
+      terminalBlockerCode: latestProjection?.terminalBlocker?.code,
+    }).toStrictEqual({
+      blockerCode: "planner_output_invalid",
+      namesDeterministic: true,
+      namesMissingKeys: true,
+      namesPresentKeys: true,
+      status: "blocked",
+      terminalBlockerCode: "planner_output_invalid",
+    });
+  });
+
+  // The discriminator must NOT over-reach: a genuine transport outage (the
+  // planner adapter could not reach the sandbox at all) is still transient and
+  // must stay `adapter_unavailable` so the supervisor may legitimately re-drive.
+  it("keeps a generic planner transport failure classified as adapter_unavailable", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-planner-transport-outage"
+    );
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        proposePlan() {
+          return Promise.reject(
+            new Error("sandbox dispatch failed: connection reset")
+          );
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection,
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    const result = await workflow.run(buildIntegrationTestRunRequest());
+    const blocker = result.status === "blocked" ? result.blocker : undefined;
+
+    expect(result.status).toBe("blocked");
+    expect(blocker?.code).toBe("adapter_unavailable");
   });
 
   it("blocks schema-valid generated machines that violate the executor event protocol", async () => {

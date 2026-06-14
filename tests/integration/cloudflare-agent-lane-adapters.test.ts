@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AgentLaneAlreadyCompletedError } from "../../src/app/application/admitted-agent-lane-runtime.ts";
+import { PlannerBlueprintContractError } from "../../src/app/application/ports.ts";
 import type {
   AgentLaneRuntimePort,
   AgentLaneRuntimeRequest,
@@ -24,6 +25,7 @@ import {
   createCloudflarePiPlannerLaneAdapter,
   createCloudflarePiVerifierLaneAdapter,
   createCloudflarePiWorkerLaneAdapter,
+  plannerBlueprintContractError,
 } from "../../src/app/infrastructure/cloudflare-agent-lane-adapters.ts";
 import {
   createIntegrationTestDynamicWorkflowPlanner,
@@ -129,7 +131,12 @@ const agentAuthLeaseFor = (input: {
 
 const createPlannerRuntimeHarness = (input: {
   readonly artifacts: ReturnType<typeof createMemoryArtifactStore>;
-  readonly plannerOutput: PlannerLaneBlueprintDocument;
+  // Widened to a plain JSON object so a faithful hostile double can pin a
+  // wrong-shape (non-blueprint) lane output without an unsafe cast — the harness
+  // only ever JSON-serializes/hashes this value, never reads blueprint fields.
+  readonly plannerOutput:
+    | PlannerLaneBlueprintDocument
+    | Record<string, unknown>;
   readonly realAgent?: boolean;
 }) => {
   const capturedRequests: AgentLaneRuntimeRequest[] = [];
@@ -696,6 +703,101 @@ describe("Cloudflare Pi planner lane adapter", () => {
     await expect(adapter.proposePlan(fixture.plannerInput)).rejects.toThrow(
       "Agent runtime lane receipts must be marked realAgent"
     );
+  });
+
+  // Wound #27, faithful end-to-end hostile double: the lane RAN and pinned an
+  // output, but pi emitted a non-blueprint object (here the `{ result: ... }`
+  // shape observed live, where all four required top-level keys were undefined).
+  // The adapter reads the REAL pinned artifact through the REAL schema's
+  // safeParse and must throw a typed PlannerBlueprintContractError naming what pi
+  // emitted vs what the contract required — never a bare ZodError that upstream
+  // flattens into a transient adapter_unavailable and blind-re-drives.
+  it("throws a diagnostic PlannerBlueprintContractError when the pinned planner output is not a blueprint", async () => {
+    const fixture = await buildPlannerLaneFixture();
+    const wrongShapeOutput: Record<string, unknown> = {
+      result: {
+        summary: "pi emitted a result envelope instead of the flat blueprint",
+      },
+    };
+    const harness = createPlannerRuntimeHarness({
+      ...fixture,
+      plannerOutput: wrongShapeOutput,
+    });
+    const adapter = createCloudflarePiPlannerLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture.plannerInput),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    const rejection = await adapter.proposePlan(fixture.plannerInput).then(
+      () => {
+        throw new Error("expected proposePlan to reject");
+      },
+      (error: unknown) => error
+    );
+
+    expect(rejection).toBeInstanceOf(PlannerBlueprintContractError);
+    if (!(rejection instanceof PlannerBlueprintContractError)) {
+      throw new Error("expected a PlannerBlueprintContractError");
+    }
+    const contractError = rejection;
+    expect({
+      deterministic: contractError.message.includes("deterministic"),
+      missingKeys: [...contractError.missingKeys].toSorted(),
+      namesPresentKeys: contractError.message.includes(
+        "present top-level keys [result]"
+      ),
+      presentKeys: contractError.presentKeys,
+      runId: contractError.runId,
+      stage: contractError.stage,
+      workItemId: contractError.workItemId,
+    }).toStrictEqual({
+      deterministic: true,
+      missingKeys: ["harness", "machine", "plan", "verificationContract"],
+      namesPresentKeys: true,
+      presentKeys: ["result"],
+      runId: fixture.plannerInput.runId,
+      stage: "planner-output",
+      workItemId: fixture.plannerInput.workItemId,
+    });
+  });
+
+  // Unit-level faithful double for the factory: feed the REAL schema's parse
+  // error from the REAL wrong-shape object. A polite double would hand-craft a
+  // ZodError; this runs the production schema so the diagnostic stays bound to
+  // what the schema actually rejects.
+  it("plannerBlueprintContractError derives present/missing keys from the real schema error", () => {
+    const raw = { notes: ["x"], result: { summary: "not a blueprint" } };
+    const parsed = PlannerLaneBlueprintDocumentSchema.safeParse(raw);
+    expect(parsed.success).toBeFalsy();
+    if (parsed.success) {
+      return;
+    }
+
+    const error = plannerBlueprintContractError({
+      raw,
+      requiredKeys: Object.keys(PlannerLaneBlueprintDocumentSchema.shape),
+      runId: "run-x",
+      stage: "planner-output",
+      workItemId: "work-x",
+      zodError: parsed.error,
+    });
+
+    expect({
+      hasIssuePaths: error.issuePaths.length > 0,
+      missingKeys: [...error.missingKeys].toSorted(),
+      presentKeys: [...error.presentKeys].toSorted(),
+    }).toStrictEqual({
+      hasIssuePaths: true,
+      missingKeys: ["harness", "machine", "plan", "verificationContract"],
+      presentKeys: ["notes", "result"],
+    });
   });
 });
 

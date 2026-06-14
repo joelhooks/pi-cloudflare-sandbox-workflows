@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import { AgentLaneAlreadyCompletedError } from "../application/admitted-agent-lane-runtime.ts";
+import {
+  PlannerBlueprintContractError,
+  redactionSafeTopLevelKeyNames,
+} from "../application/ports.ts";
 import type {
   AgentAnalysisReasoningLanePort,
   AgentLaneRuntimeRequest,
@@ -11,6 +15,7 @@ import type {
   AgentWorkerLanePort,
   ArtifactStoreContract,
   DynamicWorkflowNotificationInput,
+  PlannerBlueprintContractStage,
 } from "../application/ports.ts";
 import { hashJson } from "../domain/hash.ts";
 import {
@@ -61,6 +66,58 @@ interface CloudflarePiLaneAdapterConfig {
 
 const safePathSegment = (value: string): string =>
   value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
+
+/** Required top-level keys, derived from the production schemas (no drift). */
+const PLANNER_OUTPUT_REQUIRED_KEYS = Object.keys(
+  PlannerLaneBlueprintDocumentSchema.shape
+);
+const BLUEPRINT_REQUIRED_KEYS = Object.keys(
+  DynamicWorkflowBlueprintSchema.shape
+);
+
+/**
+ * Build a {@link PlannerBlueprintContractError} from a failed blueprint parse —
+ * the place the carrier turns a raw `ZodError` (which upstream flattened into a
+ * transient `adapter_unavailable` and re-drove for ~40 minutes, wound #27) into
+ * a DETERMINISTIC, redaction-safe diagnostic naming what pi actually emitted.
+ *
+ * Only key NAMES and zod issue PATHS cross the boundary — never values — so the
+ * surfaced block is safe to read yet self-diagnoses wrong-extraction (a session
+ * header), an envelope (`result`), or a refusal (no object) without staring.
+ *
+ * @param input.raw - The parsed planner output that failed the schema.
+ * @param input.requiredKeys - The schema's required top-level keys.
+ * @param input.stage - Which parse failed: planner-output vs blueprint-assembly.
+ * @param input.zodError - The schema failure, mined for issue paths only.
+ * @returns A typed deterministic contract error for the application catch.
+ */
+export const plannerBlueprintContractError = (input: {
+  readonly raw: unknown;
+  readonly requiredKeys: readonly string[];
+  readonly runId: string;
+  readonly stage: PlannerBlueprintContractStage;
+  readonly workItemId: string;
+  readonly zodError: z.ZodError;
+}): PlannerBlueprintContractError => {
+  const presentKeys = redactionSafeTopLevelKeyNames(input.raw);
+  const presentSet = new Set(presentKeys);
+  const missingKeys = input.requiredKeys.filter((key) => !presentSet.has(key));
+  const issuePaths = [
+    ...new Set(
+      input.zodError.issues
+        .map((issue) => issue.path.map(String).join("."))
+        .filter((path) => path.length > 0)
+    ),
+  ].slice(0, 12);
+  return new PlannerBlueprintContractError({
+    issuePaths,
+    missingKeys,
+    presentKeys,
+    runId: input.runId,
+    stage: input.stage,
+    workItemId: input.workItemId,
+  });
+};
 
 const plannerBlueprintJsonSchema = JSON.stringify(
   z.toJSONSchema(PlannerLaneBlueprintDocumentSchema, {
@@ -374,17 +431,33 @@ export const createCloudflarePiPlannerLaneAdapter = (
       throw new Error("Planner lane did not return a pinned blueprint output.");
     }
 
-    const plannerOutput = PlannerLaneBlueprintDocumentSchema.parse(
-      await config.artifactStore.readJson({
-        artifactCommitSha,
-        artifactRef: outputPin.artifactRef,
-      })
-    );
+    // The lane RAN and pinned an output; whether that output IS a blueprint is a
+    // deterministic content question. A raw `.parse` throw here was flattened
+    // upstream into transient `adapter_unavailable` and blind-re-driven for ~40
+    // minutes (wound #27). `safeParse` + a typed contract error names what pi
+    // actually emitted so the next read is a diagnosis, not a guess.
+    const plannerOutputRaw = await config.artifactStore.readJson({
+      artifactCommitSha,
+      artifactRef: outputPin.artifactRef,
+    });
+    const plannerOutputResult =
+      PlannerLaneBlueprintDocumentSchema.safeParse(plannerOutputRaw);
+    if (!plannerOutputResult.success) {
+      throw plannerBlueprintContractError({
+        raw: plannerOutputRaw,
+        requiredKeys: PLANNER_OUTPUT_REQUIRED_KEYS,
+        runId: input.runId,
+        stage: "planner-output",
+        workItemId: input.workItemId,
+        zodError: plannerOutputResult.error,
+      });
+    }
+    const plannerOutput = plannerOutputResult.data;
     const transcript = await config.artifactStore.readText({
       artifactCommitSha,
       artifactRef: receipt.transcript.artifactRef,
     });
-    const blueprint = DynamicWorkflowBlueprintSchema.parse({
+    const assembledBlueprint = {
       ...plannerOutput,
       plannerLane: {
         ...(receipt.completedAt === undefined
@@ -428,7 +501,23 @@ export const createCloudflarePiPlannerLaneAdapter = (
           value: transcript,
         },
       },
-    });
+    };
+    // Second deterministic contract gate: the planner output parsed, but the
+    // assembled blueprint (output + supervisor-attached plannerLane) must also
+    // satisfy the full schema. Same honest-vs-flattened distinction as above.
+    const blueprintResult =
+      DynamicWorkflowBlueprintSchema.safeParse(assembledBlueprint);
+    if (!blueprintResult.success) {
+      throw plannerBlueprintContractError({
+        raw: assembledBlueprint,
+        requiredKeys: BLUEPRINT_REQUIRED_KEYS,
+        runId: input.runId,
+        stage: "blueprint-assembly",
+        workItemId: input.workItemId,
+        zodError: blueprintResult.error,
+      });
+    }
+    const blueprint = blueprintResult.data;
     assertPlannerBlueprintBoundToRequest({
       actor: input.actor,
       blueprint,

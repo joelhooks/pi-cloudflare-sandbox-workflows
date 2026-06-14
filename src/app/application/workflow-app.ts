@@ -1,4 +1,5 @@
 import { createActor } from "xstate";
+import { z } from "zod";
 
 import { hashJson, sha256Hex } from "../domain/hash.ts";
 import { resolveKernelSkills } from "../domain/kernel-skills.ts";
@@ -133,6 +134,7 @@ import type {
   WzrrdPublishCapabilityAdapter,
   WorkflowAppContract,
 } from "./ports.ts";
+import { PlannerBlueprintContractError } from "./ports.ts";
 import { DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS } from "./workflow-drive-constants.ts";
 
 interface WorkflowDependencies {
@@ -1428,6 +1430,40 @@ export class WorkflowApp implements WorkflowAppContract {
         status: "planned",
       };
     } catch (error) {
+      // The lane RAN and pinned an output; the output was just not a blueprint.
+      // That is a DETERMINISTIC content failure — re-driving the same prompt
+      // re-produces the same wrong shape forever. Classifying it as the transient
+      // `adapter_unavailable` is what blind-re-drove wound #27 for ~40 minutes.
+      // Name it `planner_output_invalid` and carry the present/missing keys the
+      // adapter already diagnosed, so the operator status endpoint reads the
+      // real cause instead of a guess.
+      if (error instanceof PlannerBlueprintContractError) {
+        return {
+          blocker: blocker("planner_output_invalid", error.message),
+          status: "blocked",
+          summary: "Planner output failed the blueprint contract.",
+        };
+      }
+      // Defense-in-depth: any raw Zod parse failure escaping the planner path is
+      // likewise a deterministic content miss, not a transport outage.
+      if (error instanceof z.ZodError) {
+        const issuePaths = [
+          ...new Set(
+            error.issues
+              .map((issue) => issue.path.map(String).join("."))
+              .filter((path) => path.length > 0)
+          ),
+        ].slice(0, 12);
+        return {
+          blocker: blocker(
+            "planner_output_invalid",
+            `Planner output failed dynamic workflow validation (deterministic); ` +
+              `schema issue paths [${issuePaths.join(", ") || "<none>"}].`
+          ),
+          status: "blocked",
+          summary: "Planner output failed the blueprint contract.",
+        };
+      }
       return {
         blocker: blocker(
           "adapter_unavailable",

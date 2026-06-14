@@ -170,6 +170,80 @@ export class StaleDriveGenerationError extends Error {
   }
 }
 
+export type PlannerBlueprintContractStage =
+  | "planner-output"
+  | "blueprint-assembly";
+
+/**
+ * Redaction-safe top-level key NAMES of a planner output value — never values.
+ *
+ * Returns `[]` for a non-object (a scalar, JSON array, or `null` pi might emit
+ * instead of a blueprint object). Capped so a pathological object cannot flood
+ * the surfaced blocker message. Key *names* are structural (`result`, `session`,
+ * `harness`) — not secrets — so they are safe to name in a `redacted: true`
+ * blocker, and naming them is exactly what turns a blind re-drive into a read.
+ *
+ * @param value - The parsed planner output (typed `unknown`; pi controls it).
+ * @returns Up to 24 top-level key names, in insertion order.
+ */
+export const redactionSafeTopLevelKeyNames = (
+  value: unknown
+): readonly string[] => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value).slice(0, 24);
+};
+
+/**
+ * Thrown by a {@link DynamicWorkflowPlannerPort} when the planner lane RAN and
+ * returned output, but that output failed the blueprint contract.
+ *
+ * This is a DETERMINISTIC content failure — re-driving the same lane yields the
+ * same invalid shape — NOT a transient transport/adapter outage. The
+ * application catch keys on this type to surface the deterministic
+ * `planner_output_invalid` blocker instead of the transient `adapter_unavailable`
+ * that re-drove the same wrong shape for ~40 minutes (carrier wound #27). It
+ * carries only top-level key NAMES (present vs missing) and schema issue PATHS —
+ * never values — so the block stays redaction-safe while naming exactly what pi
+ * emitted (a wrong-extraction header, an envelope, or a refusal) for the next
+ * read instead of staring at a blind re-drive.
+ */
+// eslint-disable-next-line max-classes-per-file -- typed lane errors are colocated with the ports they cross (sibling of StaleDriveGenerationError).
+export class PlannerBlueprintContractError extends Error {
+  readonly issuePaths: readonly string[];
+  readonly missingKeys: readonly string[];
+  readonly presentKeys: readonly string[];
+  readonly runId: string;
+  readonly stage: PlannerBlueprintContractStage;
+  readonly workItemId: string;
+
+  constructor(input: {
+    readonly issuePaths: readonly string[];
+    readonly missingKeys: readonly string[];
+    readonly presentKeys: readonly string[];
+    readonly runId: string;
+    readonly stage: PlannerBlueprintContractStage;
+    readonly workItemId: string;
+  }) {
+    super(
+      `Planner lane returned output that failed the blueprint contract ` +
+        `(${input.stage}, deterministic): present top-level keys [${
+          input.presentKeys.join(", ") || "<none>"
+        }], missing required keys [${
+          input.missingKeys.join(", ") || "<none>"
+        }], schema issue paths [${input.issuePaths.join(", ") || "<none>"}].`
+    );
+    this.name = "PlannerBlueprintContractError";
+    this.issuePaths = input.issuePaths;
+    this.missingKeys = input.missingKeys;
+    this.presentKeys = input.presentKeys;
+    this.runId = input.runId;
+    this.stage = input.stage;
+    this.workItemId = input.workItemId;
+  }
+}
+
 export interface PackageRegistryActorContract {
   discoverMetadata(input: {
     readonly actor: Actor;
