@@ -165,6 +165,12 @@ const runStartStoragePrefix = "run-start:";
 const driveLedgerStorageKey = (runId: string): string =>
   `drive-ledger:${runId}`;
 
+/** Order durability ledger projections by execution order (node index). */
+const byNodeIndex = (
+  left: { readonly nodeIndex: number },
+  right: { readonly nodeIndex: number }
+): number => left.nodeIndex - right.nodeIndex;
+
 /**
  * Storage key for the short-lived "driving" marker of a run (FIX 1). Holds the
  * timestamp the current driver started. A drive begins only when no marker
@@ -829,6 +835,42 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       (runId) => runId === input.runId
     ).length;
 
+    // Read the drive ledger so the dump can expose the zombie-node attempt
+    // budget and the async-lane dispatch deadlines — the two pieces of state
+    // that make a wedged run legible ("is the 3-attempt budget accumulating?",
+    // "is a research.review poll past its deadline yet still not terminal?")
+    // instead of leaving an observer to guess from the high-water checkpoint.
+    const ledger = WorkflowDriveLedgerSchema.nullable().parse(
+      (await this.ctx.storage.get(driveLedgerStorageKey(input.runId))) ?? null
+    );
+    const nodeAttempts = (
+      ledger === null ? [] : Object.values(ledger.nodeAttempts)
+    )
+      .map((attempt) => ({
+        attemptCount: attempt.attemptCount,
+        firstAttemptedAt: attempt.firstAttemptedAt,
+        lastAttemptedAt: attempt.lastAttemptedAt,
+        lastDriveGeneration: attempt.lastDriveGeneration,
+        nodeIndex: attempt.nodeIndex,
+        nodeType: attempt.nodeType,
+        stepId: attempt.stepId,
+      }))
+      .toSorted(byNodeIndex);
+    const laneDispatches = (
+      ledger === null ? [] : Object.values(ledger.laneDispatches)
+    )
+      .map((dispatch) => ({
+        deadline: dispatch.deadline,
+        dispatchKey: dispatch.dispatchKey,
+        dispatchedAt: dispatch.dispatchedAt,
+        kind: dispatch.kind,
+        nodeIndex: dispatch.nodeIndex,
+        nodeType: dispatch.nodeType,
+        status: dispatch.status,
+        stepId: dispatch.stepId,
+      }))
+      .toSorted(byNodeIndex);
+
     const dump: RunDurabilityDump = RunDurabilityDumpSchema.parse({
       activeLaneCount,
       alarmAtMs,
@@ -843,6 +885,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
               persistedAt: latest.persistedAt,
               stepIndex: latest.stepIndex,
             },
+      driveGeneration: ledger === null ? null : ledger.driveGeneration,
       drivingMarker:
         marker === null
           ? null
@@ -854,10 +897,12 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
             },
       generatedAt: nowIso(),
       hasRunStartRecord,
+      laneDispatches,
+      nodeAttempts,
       reaperDueAtMs,
       redacted: true,
       runId: input.runId,
-      schemaVersion: "workflow.run-durability.v1",
+      schemaVersion: "workflow.run-durability.v2",
       workItemId: input.workItemId,
     });
 

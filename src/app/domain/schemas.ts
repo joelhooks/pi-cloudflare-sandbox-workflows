@@ -2154,17 +2154,59 @@ export const RunDurabilityDrivingMarkerSchema = z.object({
  * owns. Carries no raw snapshot bodies and no secrets — counts/keys/timestamps
  * only.
  */
+/**
+ * Redacted projection of a single drive-ledger node-attempt entry for the
+ * durability dump. Carries only the diagnostic fields needed to read the
+ * zombie-node attempt budget from outside — `attemptCount` against the
+ * `DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS` ceiling, the node it belongs to, and when
+ * it last advanced — never any lane command, prompt, credential, or path. Lets
+ * an observer answer "is the 3-attempt budget accumulating or stuck?" without
+ * guessing. Defined inline (not reusing `WorkflowDriveNodeAttemptSchema`, which
+ * is declared later in this file) to avoid a temporal-dead-zone reference.
+ */
+export const RunDurabilityNodeAttemptSchema = z.object({
+  attemptCount: z.number().int().min(1),
+  firstAttemptedAt: IsoDateTimeSchema,
+  lastAttemptedAt: IsoDateTimeSchema,
+  lastDriveGeneration: z.number().int().min(0),
+  nodeIndex: z.number().int().min(0),
+  nodeType: WorkflowNodeTypeSchema.optional(),
+  stepId: z.string().min(1),
+});
+
+/**
+ * Redacted projection of a single drive-ledger lane-dispatch entry for the
+ * durability dump. Exposes only the async-lane diagnostic fields — `deadline`
+ * vs `dispatchedAt` (so an observer can tell if a research.review poll loop is
+ * past its deadline yet still not terminal), the node it belongs to, and the
+ * lane kind — and deliberately drops `laneAuthLeaseId`, `processId`,
+ * `sandboxId`, and artifact refs so the dump stays `redacted: true`.
+ */
+export const RunDurabilityLaneDispatchSchema = z.object({
+  deadline: IsoDateTimeSchema,
+  dispatchKey: z.string().min(1),
+  dispatchedAt: IsoDateTimeSchema,
+  kind: AgentLaneKindSchema,
+  nodeIndex: z.number().int().min(0),
+  nodeType: WorkflowNodeTypeSchema.optional(),
+  status: z.literal("lane-dispatched"),
+  stepId: z.string().min(1),
+});
+
 export const RunDurabilityDumpSchema = z.object({
   activeLaneCount: z.number().int().min(0),
   alarmAtMs: z.number().int().min(0).nullable(),
   checkpoint: RunDurabilityCheckpointSchema.nullable(),
+  driveGeneration: z.number().int().min(0).nullable(),
   drivingMarker: RunDurabilityDrivingMarkerSchema.nullable(),
   generatedAt: IsoDateTimeSchema,
   hasRunStartRecord: z.boolean(),
+  laneDispatches: z.array(RunDurabilityLaneDispatchSchema).default([]),
+  nodeAttempts: z.array(RunDurabilityNodeAttemptSchema).default([]),
   reaperDueAtMs: z.number().int().min(0).nullable(),
   redacted: z.literal(true),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.run-durability.v1"),
+  schemaVersion: z.literal("workflow.run-durability.v2"),
   workItemId: z.string().min(1),
 });
 

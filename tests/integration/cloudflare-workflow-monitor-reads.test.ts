@@ -246,7 +246,7 @@ describe("Capsule supervisor run durability dump", () => {
       reaperDueAtMs: 1_700_000_900_000,
       redacted: true,
       runId: "run-dur",
-      schemaVersion: "workflow.run-durability.v1",
+      schemaVersion: "workflow.run-durability.v2",
       workItemId: "work-item:durability-test",
     });
   });
@@ -266,17 +266,147 @@ describe("Capsule supervisor run durability dump", () => {
       activeLaneCount: dump.activeLaneCount,
       alarmAtMs: dump.alarmAtMs,
       checkpoint: dump.checkpoint,
+      driveGeneration: dump.driveGeneration,
       drivingMarker: dump.drivingMarker,
       hasRunStartRecord: dump.hasRunStartRecord,
+      laneDispatches: dump.laneDispatches,
+      nodeAttempts: dump.nodeAttempts,
       reaperDueAtMs: dump.reaperDueAtMs,
     }).toStrictEqual({
       activeLaneCount: 0,
       alarmAtMs: null,
       checkpoint: null,
+      driveGeneration: null,
       drivingMarker: null,
       hasRunStartRecord: false,
+      laneDispatches: [],
+      nodeAttempts: [],
       reaperDueAtMs: null,
     });
+  });
+
+  it("projects the drive ledger's node-attempt budget and lane dispatches, redacting lane infra ids", async () => {
+    const state = createFakeDurableObjectState(1_700_000_500_000);
+    const supervisor = createSupervisor(state, {
+      WORKFLOW_APP_TIMEOUT_MS: "600000",
+    });
+    // A wedged-shape ledger: node 3 is a research.review lane sitting at attempt
+    // 2 of 3 with a dispatch whose deadline has passed — exactly the state an
+    // observer must be able to read to tell the zombie budget is accumulating
+    // (or stuck) without guessing from the high-water checkpoint.
+    state.store.set("drive-ledger:run-dur", {
+      driveGeneration: 12,
+      laneDispatches: {
+        "node-3:review-generated-plan": {
+          deadline: "2026-06-11T00:20:00.000Z",
+          dispatchKey: "node-3:review-generated-plan",
+          dispatchedAt: "2026-06-11T00:10:00.000Z",
+          expectedOutputArtifactRefs: [
+            "artifact://workflow-app/runs/run-dur/node-3/output",
+          ],
+          expectedReceiptArtifactRef:
+            "artifact://workflow-app/runs/run-dur/node-3/receipt",
+          kind: "worker",
+          laneAuthLeaseId: "lease-secret-abc",
+          laneId: "lane-research-review",
+          nodeIndex: 3,
+          nodeType: "joelclaw.research.review",
+          processId: "proc-secret-xyz",
+          promptArtifactRef:
+            "artifact://workflow-app/runs/run-dur/node-3/prompt",
+          runId: "run-dur",
+          sandboxId: "sandbox-secret-1",
+          schemaVersion: "workflow.drive-lane-dispatch.v1",
+          status: "lane-dispatched",
+          stepId: "review-generated-plan",
+          workItemId: "work-item:durability-test",
+        },
+      },
+      laneStatuses: {},
+      nodeAttempts: {
+        "2": {
+          attemptCount: 1,
+          firstAttemptedAt: "2026-06-11T00:05:00.000Z",
+          lastAttemptedAt: "2026-06-11T00:05:00.000Z",
+          lastDriveGeneration: 5,
+          nodeIndex: 2,
+          nodeType: "joelclaw.memory.capture-artifact",
+          stepId: "capture-generated-plan",
+        },
+        "3": {
+          attemptCount: 2,
+          firstAttemptedAt: "2026-06-11T00:10:00.000Z",
+          lastAttemptedAt: "2026-06-11T00:15:00.000Z",
+          lastDriveGeneration: 11,
+          nodeIndex: 3,
+          nodeType: "joelclaw.research.review",
+          stepId: "review-generated-plan",
+        },
+      },
+      phases: {},
+      runId: "run-dur",
+      schemaVersion: "workflow.drive-ledger.v1",
+      updatedAt: "2026-06-11T00:15:00.000Z",
+      workItemId: "work-item:durability-test",
+    });
+
+    const dump = RunDurabilityDumpSchema.parse(
+      await getDurability(supervisor, {
+        runId: "run-dur",
+        workItemId: "work-item:durability-test",
+      })
+    );
+
+    // driveGeneration surfaces, and node attempts come back sorted by nodeIndex
+    // so the trail reads in execution order.
+    expect(dump.driveGeneration).toBe(12);
+    expect(dump.nodeAttempts).toStrictEqual([
+      {
+        attemptCount: 1,
+        firstAttemptedAt: "2026-06-11T00:05:00.000Z",
+        lastAttemptedAt: "2026-06-11T00:05:00.000Z",
+        lastDriveGeneration: 5,
+        nodeIndex: 2,
+        nodeType: "joelclaw.memory.capture-artifact",
+        stepId: "capture-generated-plan",
+      },
+      {
+        attemptCount: 2,
+        firstAttemptedAt: "2026-06-11T00:10:00.000Z",
+        lastAttemptedAt: "2026-06-11T00:15:00.000Z",
+        lastDriveGeneration: 11,
+        nodeIndex: 3,
+        nodeType: "joelclaw.research.review",
+        stepId: "review-generated-plan",
+      },
+    ]);
+
+    // The lane-dispatch projection carries the deadline diagnostic but drops the
+    // infra identifiers so the dump stays redacted.
+    expect(dump.laneDispatches).toStrictEqual([
+      {
+        deadline: "2026-06-11T00:20:00.000Z",
+        dispatchKey: "node-3:review-generated-plan",
+        dispatchedAt: "2026-06-11T00:10:00.000Z",
+        kind: "worker",
+        nodeIndex: 3,
+        nodeType: "joelclaw.research.review",
+        status: "lane-dispatched",
+        stepId: "review-generated-plan",
+      },
+    ]);
+    const projectedKeys = Object.keys(dump.laneDispatches[0] ?? {});
+    for (const leaked of [
+      "laneAuthLeaseId",
+      "processId",
+      "sandboxId",
+      "promptArtifactRef",
+      "expectedReceiptArtifactRef",
+      "expectedOutputArtifactRefs",
+      "laneId",
+    ]) {
+      expect(projectedKeys).not.toContain(leaked);
+    }
   });
 });
 
