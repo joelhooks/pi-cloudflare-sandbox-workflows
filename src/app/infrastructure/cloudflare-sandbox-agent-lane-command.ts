@@ -234,13 +234,53 @@ persist_unnormalized_output() {
   fi
 }
 if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
-  if node <<'NODE'
+  # Self-bound the normalizer exactly like pi-invoke. It is the one heavy post-pi
+  # step and was the ONLY one with no inner time bound. On a pathologically large or
+  # truncated pi output the node normalizer grinds for minutes under memory pressure
+  # on the lite instance (see agent-lane-json-output.ts — the O(n) scan budget bounds
+  # CPU, not the readFileSync + split-into-array memory that drives the grind). bash
+  # cannot service the MIDDLE whole-script 'timeout' SIGTERM while it is blocked on a
+  # busy FOREGROUND 'node', so that grind rode PAST the recoverable SIGTERM into the
+  # OUTER sandbox.exec SIGKILL — which fires no trap, emits no marker, and the planner
+  # got a blind 'no result marker' with no cause (wound #26, observed live: an 872s
+  # lane SIGKILLed at the 780s ceiling with the heartbeat frozen on normalize-output).
+  # A real verdict normalizes in well under a second; cap the attempt small so a slow
+  # normalize fails FAST with a NAMED reason and the recovery path commits an honest
+  # status:"failed" receipt. SIGKILL (-s KILL), not the default TERM: a node wedged in
+  # a synchronous parse/GC grind cannot service a TERM between event-loop ticks.
+  rm -f "$LANE_OUTPUT_NORMALIZATION_PATH" 2>>"$stderr_path" || true
+  normalize_elapsed_s=$(( $(date +%s) - script_start_s ))
+  normalize_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - normalize_elapsed_s - PIWF_NORMALIZE_TAIL_MARGIN_SECONDS ))
+  if [ "$normalize_budget_s" -gt "$PIWF_NORMALIZE_MAX_SECONDS" ]; then
+    normalize_budget_s="$PIWF_NORMALIZE_MAX_SECONDS"
+  fi
+  if [ "$normalize_budget_s" -lt 1 ]; then
+    normalize_budget_s=1
+  fi
+  set +e
+  timeout -s KILL "$normalize_budget_s" node <<'NODE'
 ${jsonOutputNormalizerNodeScript}
 NODE
-  then
+  normalize_status=$?
+  set -e
+  if [ "$normalize_status" -eq 0 ]; then
     output_normalized=1
   else
     output_normalized=0
+    # A timeout/OOM SIGKILL aborts node BEFORE it records an outcome, so the outcome
+    # file is absent; a normal parse failure (oversized/no_parseable/agent_error)
+    # writes the file with its own reason. The build-receipt step DEFAULTS
+    # outputNormalization to { normalized: true } and only overrides if this file
+    # exists — so a killed normalize that left no file would forge a CLEAN receipt
+    # over unnormalized output. Stamp the honest named cause from the shell ONLY when
+    # node left no outcome behind, so a slow/killed normalize commits status:"failed"
+    # with reason:"normalize_timeout" instead of going blind.
+    if [ ! -s "$LANE_OUTPUT_NORMALIZATION_PATH" ]; then
+      printf '{"normalized":false,"reason":"normalize_timeout","agentStopReason":null,"detail":"normalize-output exceeded its %ss budget (or was OOM-killed) and was terminated before recording an outcome; raw pi output was likely oversized or truncated."}\n' \
+        "$normalize_budget_s" > "$LANE_OUTPUT_NORMALIZATION_PATH" 2>>"$stderr_path" || true
+      printf '[normalize-output self-bound] node normalizer exceeded its %ss budget and was terminated (reason: normalize_timeout); the heartbeat names normalize-output as the wedge step.\n' \
+        "$normalize_budget_s" >> "$stderr_path" 2>>"$stderr_path" || true
+    fi
     persist_unnormalized_output
   fi
 else

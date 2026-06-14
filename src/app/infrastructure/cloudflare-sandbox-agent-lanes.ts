@@ -291,6 +291,18 @@ const prepareCloudflareSandboxPiAgentLane = (input: {
             WHOLE_SCRIPT_REAPER_GUARD_SECONDS
         )
       ),
+      // normalize-output self-bounds to at most this many seconds (wound #26). A real
+      // verdict normalizes in well under a second; a multi-minute grind means the raw
+      // pi output is pathologically large or truncated. Capping it small makes a slow
+      // normalize fail FAST with reason:"normalize_timeout" and a committed failed
+      // receipt, instead of riding past the MIDDLE shell timeout's SIGTERM — which
+      // bash cannot service while blocked on the busy foreground node — into the OUTER
+      // sandbox.exec SIGKILL that fires no trap and leaves the blocker blind.
+      PIWF_NORMALIZE_MAX_SECONDS: "60",
+      // Seconds reserved after normalize for the rest of the tail (transcript, hash,
+      // receipt, git add/commit/push, emit-marker) so normalize's own budget can never
+      // eat the time those steps need before the MIDDLE shell timeout fires.
+      PIWF_NORMALIZE_TAIL_MARGIN_SECONDS: "20",
       // Seconds reserved at the end of the lane budget for the post-pi steps
       // (normalize, transcript, hash, receipt, git add/commit/push, emit-marker).
       // pi-invoke self-bounds to `PIWF_COMMAND_TIMEOUT_SECONDS - elapsed - this`, so

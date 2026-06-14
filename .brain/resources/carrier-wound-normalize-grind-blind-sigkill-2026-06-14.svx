@@ -1,0 +1,214 @@
+---
+title: "Carrier Wound #26: The Unbounded Normalize Grind Rode To A Blind SIGKILL"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - timeouts
+  - error-handling
+  - observability
+  - set-eu
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-26-normalize-output-unbounded-vs-outer-sigkill"
+---
+
+# Carrier Wound #26: The Unbounded Normalize Grind Rode To A Blind SIGKILL
+
+Wound #25 (the recovery copy aborted the lane blind) shipped and we re-drove a
+dream run watching it node-by-node over a live `wrangler tail` — not staring at a
+status page, *reading the worker*. The lane did NOT block at a step with a named
+cause this time. It went **further** and died worse: the worker logged
+
+```
+Command timeout after 780000ms (872879ms)
+```
+
+— the OUTER server-side `sandbox.exec` ceiling SIGKILLed the whole lane after it
+ran **872 seconds**, past the 750s MIDDLE shell `timeout` that was supposed to reap
+it first. And the recoverable MIDDLE SIGTERM left **no failure marker at all**: the
+last heartbeat line was `normalize-output`, frozen, written 413s after pi-invoke
+started. pi had finished. normalize-output started and never returned. The planner
+got a blind *"no result marker"* — no step cause, no stderr, nothing. The exact
+failure shape the whole week's work exists to kill, one layer deeper than #25.
+
+## Mechanism — the one heavy post-pi step had no inner time bound
+
+The lane runs three nested timeouts (`cloudflare-sandbox-agent-lanes.ts`):
+
+- **OUTER** = `sandbox.exec`'s hard ceiling = `input.input.timeoutMs` (780,000ms
+  observed). On expiry the SDK throws and **discards the command's stdout** — so
+  anything not already flushed to a captured channel is gone.
+- **MIDDLE** = the whole-script `timeout "$PIWF_COMMAND_TIMEOUT_SECONDS" bash`
+  (=750s), decoupled BELOW the OUTER by the reaper guard so its SIGTERM fires first
+  and runs the INT/TERM trap → `emit_failure_marker` BEFORE the OUTER SIGKILL.
+- **INNER** = a per-step `timeout`. Wound #22-B gave **pi-invoke** one
+  (`timeout "$pi_budget_s" pi`). **normalize-output had none.**
+
+normalize-output was a bare `node <<'NODE' … NODE` — the ONE heavy post-pi step
+with no inner bound. On a pathological pi output (oversized or truncated event
+stream) the node normalizer grinds for minutes. Not on CPU — the O(n)
+`scanBudget = raw.length * 4 + 1_000_000` in `extractFirstJsonValueText` bounds
+*iterations*, and even tens of MB scan in seconds. It grinds on **memory**:
+`readFileSync` of the whole raw output + `raw.split("\n")` into a giant array +
+slices, on the memory-starved `lite` instance → GC thrash / swap. The line-22
+comment in `agent-lane-json-output.ts` literally predicted it: *"grinds for minutes
+on the lite sandbox … under the memory pressure that grind creates."*
+
+Here is the part that made it **blind** instead of merely slow. The MIDDLE
+`timeout` sent SIGTERM to bash at 750s. **bash cannot run a trap while it is
+blocked on a busy FOREGROUND `node`.** The pending SIGTERM sat unserviced — the
+shell was parked in `wait()` on a child pegging the event loop — until the OUTER
+780s SIGKILL erased bash *and* node together. SIGKILL runs no trap. So:
+`emit_failure_marker` never fired, no heartbeat-derived cause reached stdout, and
+the stdout that might have carried something was discarded by the OUTER throw. A
+slow step with no inner bound doesn't just take long — it **denies the supervisor
+its own reaping window** and converts a recoverable SIGTERM into an unrecoverable
+SIGKILL.
+
+pi-invoke survives this class because it self-bounds: `timeout "$pi_budget_s" pi`
+returns control to bash *before* the MIDDLE timeout, so the trap can run.
+normalize-output was its un-bounded twin — exactly the wound #22-B shape, one step
+to the right.
+
+> Release It! (Michael Nygard), "Timeouts" / Ch. 4, Stability Antipatterns:
+>
+> > Networks failures can hit you in two ways: fast or slow. … Slow failures, such
+> > as a dropped ACK, let threads block for minutes before throwing exceptions. The
+> > blocked thread can't process other transactions, so overall capacity is
+> > reduced. … Clearly, a slow response is a lot worse than no response.
+
+A blocking call you do not bound yourself will block for as long as something below
+you allows — here, until the OUTER kill. *A slow response is a lot worse than no
+response*: a fast NAMED failure the receipt can commit beats a silent grind that
+rides to a blind SIGKILL. Bound every blocking call at the level that owns it.
+
+## Fix — self-bound normalize-output exactly like pi-invoke
+
+`cloudflare-sandbox-agent-lane-command.ts`. The bare `node` becomes a bounded,
+attributable step, mirroring the pi-invoke pattern byte-for-byte:
+
+```bash
+rm -f "$LANE_OUTPUT_NORMALIZATION_PATH" 2>>"$stderr_path" || true
+normalize_elapsed_s=$(( $(date +%s) - script_start_s ))
+normalize_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - normalize_elapsed_s - PIWF_NORMALIZE_TAIL_MARGIN_SECONDS ))
+if [ "$normalize_budget_s" -gt "$PIWF_NORMALIZE_MAX_SECONDS" ]; then
+  normalize_budget_s="$PIWF_NORMALIZE_MAX_SECONDS"
+fi
+if [ "$normalize_budget_s" -lt 1 ]; then
+  normalize_budget_s=1
+fi
+set +e
+timeout -s KILL "$normalize_budget_s" node <<'NODE'
+${jsonOutputNormalizerNodeScript}
+NODE
+normalize_status=$?
+set -e
+```
+
+Three deliberate choices:
+
+1. **A small fixed cap, not "all remaining budget."** A real verdict normalizes in
+   well under a second. When pi finishes early (it ran 413s of 750s) the remaining
+   budget is ~322s — *exactly the grind window to avoid*. So the budget is
+   `min(remaining, PIWF_NORMALIZE_MAX_SECONDS=60)`, clamped ≥1. 60s is pure safety
+   margin, not a work budget; a healthy normalize never approaches it.
+
+2. **`-s KILL`, not the default TERM.** A node wedged in a synchronous parse/GC
+   grind cannot service a TERM between event-loop ticks — the same reason bash
+   couldn't service the MIDDLE TERM. SIGKILL reliably stops it.
+
+3. **Synthesize the named outcome when the kill left none.** A `timeout`/OOM
+   SIGKILL aborts node BEFORE it records its outcome file, so the file is absent;
+   a normal parse failure writes the file with its own reason. The build-receipt
+   step DEFAULTS `outputNormalization` to `{ normalized: true }` and only overrides
+   if that file exists — so a killed normalize that left no file would forge a
+   **clean** receipt over unnormalized output. The shell now stamps the honest
+   cause itself, only when node left nothing behind:
+
+```bash
+if [ ! -s "$LANE_OUTPUT_NORMALIZATION_PATH" ]; then
+  printf '{"normalized":false,"reason":"normalize_timeout",...}\n' \
+    > "$LANE_OUTPUT_NORMALIZATION_PATH" 2>>"$stderr_path" || true
+  printf '[normalize-output self-bound] node normalizer exceeded its %ss budget…\n' \
+    "$normalize_budget_s" >> "$stderr_path" 2>>"$stderr_path" || true
+fi
+persist_unnormalized_output
+```
+
+So a slow/killed normalize now commits `status:"failed"` with
+`outputNormalization.reason: "normalize_timeout"` and a stderr line naming
+normalize-output as the wedge — the next re-drive decision is made on a named
+cause, not a blind SIGKILL. Two env vars carry the bound (`cloudflare-sandbox-agent-lanes.ts`):
+`PIWF_NORMALIZE_MAX_SECONDS=60`, `PIWF_NORMALIZE_TAIL_MARGIN_SECONDS=20`.
+
+## Chaos Receipt (would have caught it)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — **414 passing** (2
+new, +1 hardened). Both new tests are hostile doubles in the file's established
+style:
+
+- **Shape** — asserts the real command string carries the `timeout -s KILL
+  "$normalize_budget_s" node` wrapper, the elapsed/cap/clamp budget arithmetic, the
+  pre-run `rm -f` of the outcome file, and the `normalize_timeout` stamp. Fails
+  against the pre-fix bare `node`.
+- **Hostile double** — slices the REAL normalize-output block out of
+  `buildPiAgentLaneCommand()` and runs it verbatim under production's `set -eu`
+  with a `node` that NEVER returns (`sleep 20`, far past the 2s test budget) and
+  writes no outcome — exactly an OOM/timeout SIGKILL. It asserts the grind is
+  **bounded to ~2s** (not the full 20s), the outcome is the NAMED
+  `reason:"normalize_timeout"`, `LANE_OUTPUT_PATH` is left for the downstream
+  steps, and the wedge is attributed to normalize-output in captured stderr.
+  Against the pre-fix unbounded `node` it runs the full sleep, leaves no outcome,
+  and goes blind. A polite test would have fed a small parseable blob that
+  normalizes instantly; this one constructs the multi-minute grind the production
+  lane actually got into.
+
+The #25 hostile double was hardened to supply the production normalize env
+(`LANE_OUTPUT_NORMALIZATION_PATH`, the budget vars, `script_start_s`) and to make
+its fake node record its outcome before exiting — faithful to production, so the
+two wounds stay cleanly separated (a failing *copy* vs a killed *normalize*).
+
+## Verification
+
+```bash
+pnpm vitest run tests/integration/cloudflare-sandbox-agent-lanes.test.ts  # 33 pass (2 new)
+pnpm vitest run                                                            # 414 pass, 55 files
+pnpm typecheck   # clean (tsgo)
+pnpm check       # oxfmt + oxlint + type-aware, clean
+```
+
+## Known follow-ups (not in this fix)
+
+- **Input-size fast-cap.** An O(1) `if (raw.length > CAP) throw OVERSIZED` would
+  reject a giant blob in milliseconds instead of after a (now-bounded) 60s grind.
+  Deferred until a live run yields a real raw-output size to calibrate CAP without
+  rejecting legit large event streams; the `timeout` bound is mechanism-agnostic
+  and sufficient now.
+- **Deterministic re-drive should fail fast.** Inherited from #25 — a planner that
+  fails deterministically (now with a named cause) should not be re-driven for
+  generations. Fold into the pause/re-arm seam.
+- **`adapter_unavailable` overload.** Still conflates a planner-no-plan with a
+  transport outage. Reclassify alongside the backpressure pause work.
+- **The deeper question this now lets us READ:** *why* did this run's normalize
+  grind — is pi emitting an oversized event stream, or a truncated one? The next
+  live run's committed `reason` (`normalize_timeout` vs `oversized_output` vs
+  `no_parseable_output`) names it. Diagnose from the reason — do not guess.
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. This fix
+deploys, then ONE dream-shape run is watched node-by-node over `wrangler tail` —
+either to `captured` (pi produced a real blueprint, the carrier carried it) or to
+an **honest, named** block that tells us the next carrier move without staring.
+Only a `captured` on fixed, deployed code fires the operator Discord ping with the
+wzrrd HITL URL, resets D3, and starts the serial burn-in. Sibling of
+[[carrier-wound-recovery-cp-blind-abort-2026-06-14]]: #25 made the recovery copy
+stop killing the lane in silence; #26 makes the one heavy step that had no clock of
+its own stop riding past the supervisor into a blind kill. *Any failure is a
+carrier failure: fix the class in the carrier, with a chaos test that would have
+caught it, reset the count.*

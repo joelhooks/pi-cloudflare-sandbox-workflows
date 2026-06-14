@@ -731,20 +731,34 @@ describe(buildPiAgentLaneCommand, () => {
       const binDir = join(dir, "bin");
       mkdirSync(binDir);
       // A `node` that fails so the JSON-lane normalizer takes the recovery branch.
+      // Faithful to production: the normalizer RECORDS its outcome, THEN exits
+      // non-zero — so wound #26's "no outcome file => normalize_timeout" shim does not
+      // fire here. This wound is the recovery COPY failing, not a killed normalize.
       const fakeNode = join(binDir, "node");
-      writeFileSync(fakeNode, "#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n");
+      writeFileSync(
+        fakeNode,
+        [
+          "#!/usr/bin/env bash",
+          "cat >/dev/null",
+          `printf '{"normalized":false,"reason":"no_parseable_output","agentStopReason":null,"detail":"fake parse failure"}\\n' > "$LANE_OUTPUT_NORMALIZATION_PATH"`,
+          "exit 1",
+          "",
+        ].join("\n")
+      );
       chmodSync(fakeNode, 0o755);
 
       const stderrPath = join(dir, "stderr.txt");
       // Dest lives under a not-yet-created subdir to also exercise the recovery's
       // `mkdir -p "$(dirname ...)"`, matching production's relative run/ output path.
       const outputPath = join(dir, "run", "planner-blueprint.json");
+      const normalizationOutcomePath = join(dir, "normalization.json");
       // Source is intentionally MISSING so the recovery copy fails like production.
       const missingRawPath = join(dir, "raw-MISSING.txt");
 
       const harness = [
         "set -eu",
         "mark() { :; }",
+        "script_start_s=$(date +%s)",
         normalizeBlock,
         "printf 'POST_RECOVERY_REACHED normalized=%s\\n' \"$output_normalized\"",
       ].join("\n");
@@ -754,8 +768,12 @@ describe(buildPiAgentLaneCommand, () => {
         env: {
           ...process.env,
           LANE_OUTPUT_MEDIA_TYPE: "application/json",
+          LANE_OUTPUT_NORMALIZATION_PATH: normalizationOutcomePath,
           LANE_OUTPUT_PATH: outputPath,
           PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+          PIWF_COMMAND_TIMEOUT_SECONDS: "600",
+          PIWF_NORMALIZE_MAX_SECONDS: "60",
+          PIWF_NORMALIZE_TAIL_MARGIN_SECONDS: "20",
           raw_output_path: missingRawPath,
           stderr_path: stderrPath,
         },
@@ -791,6 +809,163 @@ describe(buildPiAgentLaneCommand, () => {
       rmSync(dir, { force: true, recursive: true });
     }
   }, 15_000);
+
+  it("self-bounds the normalize-output node to a small budget so a runaway grind cannot ride to the SIGKILL (wound #26)", () => {
+    // Wound #26 was structural and the twin of #22-B: normalize-output was a BARE
+    // `node <<NODE` with no inner bound — the ONE heavy post-pi step with no timeout.
+    // On a pathological pi output the normalizer grinds for minutes under memory
+    // pressure on the lite instance, and because bash cannot service the MIDDLE
+    // whole-script SIGTERM while blocked on that busy FOREGROUND node, the grind rode
+    // PAST the recoverable SIGTERM into the OUTER sandbox.exec SIGKILL: no trap, no
+    // marker, a blind blocker. The fix wraps node in a `timeout -s KILL` derived from
+    // the remaining budget but capped small, and stamps a NAMED reason when the killed
+    // node leaves no outcome file. These assertions fail against the pre-fix bare node.
+    expect({
+      attributesTimeoutToNormalize:
+        command.includes("[normalize-output self-bound]") &&
+        command.includes(
+          "the heartbeat names normalize-output as the wedge step"
+        ),
+      boundsNormalizeWithKillTimeout: command.includes(
+        'timeout -s KILL "$normalize_budget_s" node'
+      ),
+      capsBudgetToTheMax: command.includes(
+        'if [ "$normalize_budget_s" -gt "$PIWF_NORMALIZE_MAX_SECONDS" ]; then'
+      ),
+      clampsBudgetToAtLeastOneSecond: command.includes(
+        'if [ "$normalize_budget_s" -lt 1 ]; then'
+      ),
+      clearsStaleOutcomeBeforeRun: command.includes(
+        'rm -f "$LANE_OUTPUT_NORMALIZATION_PATH"'
+      ),
+      derivesBudgetFromElapsed: command.includes(
+        "normalize_elapsed_s=$(( $(date +%s) - script_start_s ))"
+      ),
+      stampsNamedTimeoutWhenNodeLeftNoOutcome:
+        command.includes(
+          'if [ ! -s "$LANE_OUTPUT_NORMALIZATION_PATH" ]; then'
+        ) && command.includes('"reason":"normalize_timeout"'),
+      subtractsTailMarginFromCeiling: command.includes(
+        "normalize_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - normalize_elapsed_s - PIWF_NORMALIZE_TAIL_MARGIN_SECONDS ))"
+      ),
+    }).toStrictEqual({
+      attributesTimeoutToNormalize: true,
+      boundsNormalizeWithKillTimeout: true,
+      capsBudgetToTheMax: true,
+      clampsBudgetToAtLeastOneSecond: true,
+      clearsStaleOutcomeBeforeRun: true,
+      derivesBudgetFromElapsed: true,
+      stampsNamedTimeoutWhenNodeLeftNoOutcome: true,
+      subtractsTailMarginFromCeiling: true,
+    });
+  });
+
+  it("converts a runaway normalize into a bounded, named normalize_timeout failure that reaches the post-pi steps (wound #26)", () => {
+    // Hostile double for wound #26: slice the REAL normalize-output block out of
+    // buildPiAgentLaneCommand() and run it verbatim under production's `set -eu` with a
+    // `node` that NEVER returns (sleep 20 dwarfs the 2s budget). Production transport —
+    // the budget arithmetic, the `timeout -s KILL` wrapper, the absent-outcome stamp —
+    // is exercised byte-for-byte; only the node binary is faked. A pre-fix unbounded
+    // `node` would run the full 20s grind (and in production keep grinding until the
+    // OUTER SIGKILL), leaving no outcome and a blind blocker. The fix must (1) bound the
+    // grind to ~2s, (2) stamp reason:"normalize_timeout" so the receipt commits
+    // status:"failed" honestly, (3) leave LANE_OUTPUT_PATH for the downstream steps, and
+    // (4) attribute the wedge to normalize-output in the captured stderr.
+    const blockStart = command.indexOf("mark normalize-output");
+    const blockEnd = command.indexOf("\ncompleted_at=");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the normalize-output block in the lane command."
+      );
+    }
+    const normalizeBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-normalize-timeout-"));
+    try {
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      // A `node` that never returns on its own — the grind that wedged the lane. It
+      // drains stdin (the heredoc normalizer script) then sleeps far past the budget,
+      // and it writes NO outcome file, exactly like a real OOM/timeout SIGKILL.
+      const fakeNode = join(binDir, "node");
+      writeFileSync(
+        fakeNode,
+        "#!/usr/bin/env bash\ncat >/dev/null\nsleep 20\n"
+      );
+      chmodSync(fakeNode, 0o755);
+
+      const stderrPath = join(dir, "stderr.txt");
+      const outputPath = join(dir, "run", "planner-blueprint.json");
+      const normalizationOutcomePath = join(dir, "normalization.json");
+      // Raw output EXISTS so the recovery copy succeeds — this test is about the
+      // timeout, not the copy failure (#25 covers the failing copy).
+      const rawOutputPath = join(dir, "raw.txt");
+      writeFileSync(rawOutputPath, '{"unparseable":"event stream"}\n');
+
+      const harness = [
+        "set -eu",
+        "mark() { :; }",
+        "script_start_s=$(date +%s)",
+        normalizeBlock,
+        "printf 'POST_RECOVERY_REACHED normalized=%s\\n' \"$output_normalized\"",
+      ].join("\n");
+
+      const startedAt = Date.now();
+      const stdout = execFileSync("bash", ["-c", harness], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_OUTPUT_MEDIA_TYPE: "application/json",
+          LANE_OUTPUT_NORMALIZATION_PATH: normalizationOutcomePath,
+          LANE_OUTPUT_PATH: outputPath,
+          PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+          // Huge remaining budget so the MAX cap (2s), not the ceiling, bounds it.
+          PIWF_COMMAND_TIMEOUT_SECONDS: "600",
+          PIWF_NORMALIZE_MAX_SECONDS: "2",
+          PIWF_NORMALIZE_TAIL_MARGIN_SECONDS: "5",
+          raw_output_path: rawOutputPath,
+          stderr_path: stderrPath,
+        },
+        timeout: 18_000,
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      const stderr = existsSync(stderrPath)
+        ? readFileSync(stderrPath, "utf-8")
+        : "";
+      const outcomeRaw: unknown = existsSync(normalizationOutcomePath)
+        ? JSON.parse(readFileSync(normalizationOutcomePath, "utf-8"))
+        : null;
+      const outcome = isRecord(outcomeRaw) ? outcomeRaw : null;
+      const output = existsSync(outputPath)
+        ? readFileSync(outputPath, "utf-8")
+        : null;
+
+      expect({
+        // (4) the wedge is attributed to normalize-output, not a blind step
+        attributedToNormalize: stderr.includes("[normalize-output self-bound]"),
+        // (1) the grind is bounded far under the fake's 20s sleep
+        boundedWellUnderTheGrind: elapsedMs < 12_000,
+        // (3) LANE_OUTPUT_PATH exists so downstream hash/add/commit never abort
+        leftOutputFile: output !== null,
+        // (2) a NAMED, honest failure the receipt can commit as status:"failed"
+        namedNormalizeTimeout:
+          outcome?.["normalized"] === false &&
+          outcome?.["reason"] === "normalize_timeout",
+        reachedPostRecovery: stdout.includes(
+          "POST_RECOVERY_REACHED normalized=0"
+        ),
+      }).toStrictEqual({
+        attributedToNormalize: true,
+        boundedWellUnderTheGrind: true,
+        leftOutputFile: true,
+        namedNormalizeTimeout: true,
+        reachedPostRecovery: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 25_000);
 
   it("runs the failure marker on a whole-script SIGTERM, not just a clean exit", () => {
     // Wound #22 Layer C: the self-bound pi-invoke fires, but pi can eat its whole
