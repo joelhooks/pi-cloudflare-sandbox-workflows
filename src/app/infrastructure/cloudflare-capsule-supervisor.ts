@@ -1087,8 +1087,8 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   private async admitLaneCore(
     input: z.infer<typeof AgentLaneAdmissionRequestSchema>
   ): Promise<AgentLaneAdmissionDecision> {
-    const record = await this.getRecord();
-    const activeLaneIds = activeLaneIdsOf(record);
+    let record = await this.getRecord();
+    let activeLaneIds = activeLaneIdsOf(record);
 
     if (record.completedLaneIds.includes(input.laneId)) {
       const releaseCommitSha =
@@ -1149,6 +1149,22 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         status: "deferred",
         workItemId: input.workItemId,
       });
+    }
+
+    if (activeLaneIds.length >= input.maxActiveLanes) {
+      // Wound #24: before treating a full cap as backpressure, reclaim slots
+      // whose owning run has already gone TERMINAL but was never released. The
+      // reaper only frees slots for runs IT transitions
+      // (releaseAdmissionSlotsAfterReap); a run that blocked/captured on its own —
+      // or whose record was retired by driveQueuedRuns once D1 showed it terminal
+      // — leaves its lane-owner slot squatting in `activeLaneOwners` with no live
+      // process behind it. The DO is keyed by workItemId, so every dream run
+      // shares ONE owner map and a cap of three; three such leaks jam the cap
+      // permanently and every new run dies right here at planner admission with
+      // `concurrency-cap-full`. Reclaim dead owners and re-check: only a cap full
+      // of LIVE owners is genuine backpressure worth deferring.
+      record = await this.reclaimTerminalOwnerSlots(record);
+      activeLaneIds = activeLaneIdsOf(record);
     }
 
     if (activeLaneIds.length >= input.maxActiveLanes) {
@@ -1551,6 +1567,14 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       }
     }
 
+    // Wound #24 safety net: the reaper above only releases slots for runs IT just
+    // transitioned, but a run can reach a terminal status without the reaper ever
+    // touching it (self-block, or driveQueuedRuns retiring its record once D1 went
+    // terminal). Sweep any owner whose run is already terminal so a cap jammed by
+    // leaked owners drains here even when no admission is currently probing — the
+    // periodic complement to the admission-time reclaim in admitLaneCore.
+    await this.reclaimTerminalOwnerSlots(await this.getRecord());
+
     await this.rearmReaperAlarmIfSlotsRemain();
   }
 
@@ -1904,6 +1928,78 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         failedLaneIds,
       })
     );
+  }
+
+  /**
+   * Reclaim admission slots whose owning run has gone TERMINAL in the
+   * authoritative run store but was never released (Wound #24 — the cap death
+   * spiral). The reaper only frees slots for runs IT transitions
+   * (releaseAdmissionSlotsAfterReap); two paths leak otherwise: a run that
+   * reaches `blocked`/`captured` on its own never gets reaped, and
+   * driveQueuedRuns retires a run's record the moment D1 shows it terminal —
+   * neither path touches `activeLaneOwners`, so the dead run's lane-owner slot
+   * squats forever with no live process behind it. The DO is keyed by
+   * workItemId, so every dream run shares ONE owner map against a cap of three;
+   * three such leaks jam the cap permanently and every new run dies at planner
+   * admission with `concurrency-cap-full`.
+   *
+   * The reclaim is mechanism-agnostic: it does not care HOW the slot leaked, only
+   * whether the owner is still alive. Dedupe the owner runIds, ask the status
+   * reader for each, and drop ONLY owners whose snapshot is explicitly terminal
+   * ({@link TERMINAL_RUN_STATES}). A `null` snapshot means the run has no
+   * authoritative row yet (in-flight) — KEEP its slot; never free a slot on
+   * absence of evidence (the alive run would lose its reservation mid-flight).
+   * Returns the record unchanged when nothing is reclaimable, or when no D1
+   * binding exists to judge terminality (the conservative no-op — better a stuck
+   * cap than a wrongly-freed slot). Mirrors releaseAdmissionSlotsAfterReap:
+   * reclaimed lanes are recorded in `failedLaneIds` (the force-released ledger).
+   */
+  private async reclaimTerminalOwnerSlots(
+    record: SupervisorRecord
+  ): Promise<SupervisorRecord> {
+    const d1 = this.env.WORKFLOW_APP_D1;
+    if (d1 === undefined) {
+      return record;
+    }
+    const ownerRunIds = [...new Set(Object.values(record.activeLaneOwners))];
+    if (ownerRunIds.length === 0) {
+      return record;
+    }
+
+    const statusReader = createCloudflareWorkflowRunStatusReader({ d1 });
+    const terminalRunIds = new Set<string>();
+    for (const runId of ownerRunIds) {
+      const snapshot = await statusReader.read({ runId });
+      if (snapshot !== null && TERMINAL_RUN_STATES.has(snapshot.status)) {
+        terminalRunIds.add(runId);
+      }
+    }
+    if (terminalRunIds.size === 0) {
+      return record;
+    }
+
+    const nextActiveLaneOwners: Record<string, string> = {};
+    const reclaimedLaneIds: string[] = [];
+    for (const [laneId, runId] of Object.entries(record.activeLaneOwners)) {
+      if (terminalRunIds.has(runId)) {
+        reclaimedLaneIds.push(laneId);
+      } else {
+        nextActiveLaneOwners[laneId] = runId;
+      }
+    }
+
+    let { failedLaneIds } = record;
+    for (const laneId of reclaimedLaneIds) {
+      failedLaneIds = appendUnique(failedLaneIds, laneId);
+    }
+    const nextRecord = SupervisorRecordSchema.parse({
+      ...record,
+      activeLaneOwners: nextActiveLaneOwners,
+      failedLaneIds,
+    });
+    await this.putRecord(nextRecord);
+
+    return nextRecord;
   }
 
   /**

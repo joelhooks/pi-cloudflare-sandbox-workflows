@@ -129,6 +129,30 @@ const createFakeD1 = (input: { readonly runs: RunRow[] }) => {
       prepare(query: string) {
         const statementFor = (values: readonly D1QueryValue[] = []) => ({
           all() {
+            // Status reader (createCloudflareWorkflowRunStatusReader): a single
+            // `where run_id = ?` lookup selecting blocker columns. Distinguished
+            // from the reaper's stuck-run select (which scans by work_item_id)
+            // purely by the `blocker_code` projection — no other query selects it.
+            if (query.includes("blocker_code")) {
+              const runId = values.at(0);
+              const run = runs.find((candidate) => candidate.run_id === runId);
+
+              return Promise.resolve({
+                results:
+                  run === undefined
+                    ? []
+                    : [
+                        {
+                          blocker_code: null,
+                          blocker_message: null,
+                          blocker_node_type: null,
+                          blocker_step_id: null,
+                          run_id: run.run_id,
+                          status: run.status,
+                        },
+                      ],
+              });
+            }
             if (query.includes("from runs")) {
               return Promise.resolve(selectStuck(values));
             }
@@ -421,7 +445,12 @@ describe("Capsule supervisor reaper alarm", () => {
     expect(record.failedLaneIds).toStrictEqual(["lane-a"]);
   });
 
-  it("alarm leaves a terminal run and its slot untouched", async () => {
+  // Wound #24: a terminal run still holding a lane-owner slot IS the leak. The
+  // reaper itself correctly never re-reaps a terminal run (no duplicate failed
+  // event), but the alarm's safety-net reclaim now frees the slot the captured
+  // run was squatting — the reaper's terminal-exclusion never released it, which
+  // is exactly how the cap jammed. (Pre-fix this asserted the slot stayed held.)
+  it("alarm reclaims a terminal run's leaked slot without re-reaping the run", async () => {
     const d1 = createFakeD1({ runs: [buildRun({ status: "captured" })] });
     const state = createFakeDurableObjectState();
     const supervisor = createSupervisor({ d1: d1.d1, state });
@@ -430,9 +459,10 @@ describe("Capsule supervisor reaper alarm", () => {
     await supervisor.alarm();
 
     expect(d1.runs[0]?.status).toBe("captured");
+    expect(d1.events).toStrictEqual([]);
     const record = await getRecord(supervisor);
-    expect(record.activeLaneIds).toStrictEqual(["lane-a"]);
-    expect(record.failedLaneIds).toStrictEqual([]);
+    expect(record.activeLaneIds).toStrictEqual([]);
+    expect(record.failedLaneIds).toStrictEqual(["lane-a"]);
   });
 
   it("a second alarm after a reap is a no-op", async () => {
@@ -593,5 +623,153 @@ describe("Capsule supervisor lane admission reclaim", () => {
     // The intruder neither stole nor duplicated ownership.
     const record = await getRecord(supervisor);
     expect(record.activeLaneOwners).toStrictEqual({ [laneId]: "run-owner" });
+  });
+});
+
+// Wound #24: the cap death spiral. The supervisor DO is keyed by workItemId, so
+// EVERY dream run shares one `activeLaneOwners` map against a global cap of three.
+// The reaper only releases a slot for a run IT transitions; a run that reaches a
+// terminal status WITHOUT being reaped — it self-blocked, or driveQueuedRuns
+// retired its record once D1 already showed it terminal — leaves its lane-owner
+// slot squatting forever with no live process behind it. Three such leaks jam the
+// cap permanently and every new run dies at planner admission with
+// `concurrency-cap-full` (proven live: 38 blocked runs squatting slots, fresh
+// runs dying ~29s at admission). admitLaneCore now reclaims terminal-owner slots
+// before deferring, and alarm() sweeps them as a periodic safety net. The doubles
+// are hostile (the polite-fakes discipline): the leaked owners are REAL terminal
+// rows in the authoritative store, reclaimed only on explicit terminal status —
+// never on absence of a row, which would yank an in-flight run's reservation.
+describe("Capsule supervisor cap reclaim (Wound #24)", () => {
+  const fillCap = async (
+    supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+    runIds: readonly string[]
+  ): Promise<void> => {
+    for (const runId of runIds) {
+      const decision = await readDecision(
+        await admit(supervisor, `lane:planner:${runId}`, runId)
+      );
+      expect(decision.status).toBe("admitted");
+    }
+  };
+
+  it("reclaims leaked terminal-owner slots so a fresh run is admitted instead of dying at a jammed cap", async () => {
+    // Three distinct runs squat the cap, then all three go terminal in D1 with
+    // their slots never released — the exact leak. blocked AND captured both
+    // count as terminal; a captured leak must release too.
+    const d1 = createFakeD1({
+      runs: [
+        buildRun({ run_id: "run-leak-1", status: "blocked" }),
+        buildRun({ run_id: "run-leak-2", status: "blocked" }),
+        buildRun({ run_id: "run-leak-3", status: "captured" }),
+        buildRun({ run_id: "run-fresh", status: "executingDynamicWorkflow" }),
+      ],
+    });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await fillCap(supervisor, ["run-leak-1", "run-leak-2", "run-leak-3"]);
+
+    // Before the fix this dies: cap of three is full of leaked owners, so the
+    // fresh run defers `concurrency-cap-full` (forged terminal by the planner).
+    const fresh = await readDecision(
+      await admit(supervisor, "lane:planner:run-fresh", "run-fresh")
+    );
+
+    expect(fresh.status).toBe("admitted");
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneOwners).toStrictEqual({
+      "lane:planner:run-fresh": "run-fresh",
+    });
+    // The three dead owners are reclaimed and recorded as force-released.
+    expect(record.failedLaneIds).toStrictEqual([
+      "lane:planner:run-leak-1",
+      "lane:planner:run-leak-2",
+      "lane:planner:run-leak-3",
+    ]);
+  });
+
+  it("does NOT reclaim a cap full of LIVE owners: genuine backpressure still defers", async () => {
+    const d1 = createFakeD1({
+      runs: [
+        buildRun({ run_id: "run-live-1", status: "executingDynamicWorkflow" }),
+        buildRun({ run_id: "run-live-2", status: "executingDynamicWorkflow" }),
+        buildRun({ run_id: "run-live-3", status: "executingDynamicWorkflow" }),
+      ],
+    });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await fillCap(supervisor, ["run-live-1", "run-live-2", "run-live-3"]);
+
+    const newcomer = await readDecision(
+      await admit(supervisor, "lane:planner:run-newcomer", "run-newcomer")
+    );
+
+    // None of the three owners is terminal, so nothing is reclaimed and the cap
+    // is genuinely full — this is real backpressure, deferred (not freed).
+    expect(newcomer).toStrictEqual({
+      reason: "concurrency-cap-full",
+      status: "deferred",
+    });
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneIds).toStrictEqual([
+      "lane:planner:run-live-1",
+      "lane:planner:run-live-2",
+      "lane:planner:run-live-3",
+    ]);
+    expect(record.failedLaneIds).toStrictEqual([]);
+  });
+
+  it("keeps the slot of an owner with NO authoritative row (in-flight): absence is not terminal", async () => {
+    // The owners hold the cap but have no D1 row at all — the status reader
+    // returns null for each. A polite reclaim would free the slot on "run not
+    // found" and yank a still-launching run's reservation; the hostile-correct
+    // reclaim treats null as alive and keeps every slot.
+    const d1 = createFakeD1({ runs: [] });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await fillCap(supervisor, ["run-ghost-1", "run-ghost-2", "run-ghost-3"]);
+
+    const newcomer = await readDecision(
+      await admit(supervisor, "lane:planner:run-newcomer", "run-newcomer")
+    );
+
+    expect(newcomer).toStrictEqual({
+      reason: "concurrency-cap-full",
+      status: "deferred",
+    });
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneIds).toStrictEqual([
+      "lane:planner:run-ghost-1",
+      "lane:planner:run-ghost-2",
+      "lane:planner:run-ghost-3",
+    ]);
+    expect(record.failedLaneIds).toStrictEqual([]);
+  });
+
+  it("alarm safety net sweeps leaked terminal-owner slots with no admission probing", async () => {
+    // No run-start records are queued (driveQueuedRuns is a no-op) and the runs
+    // are already terminal so the reaper sweep finds nothing — only the new
+    // safety-net reclaim drains the leaked slots on a bare alarm tick.
+    const d1 = createFakeD1({
+      runs: [
+        buildRun({ run_id: "run-leak-1", status: "blocked" }),
+        buildRun({ run_id: "run-leak-2", status: "captured" }),
+      ],
+    });
+    const state = createFakeDurableObjectState();
+    const supervisor = createSupervisor({ d1: d1.d1, state });
+
+    await admit(supervisor, "lane:planner:run-leak-1", "run-leak-1");
+    await admit(supervisor, "lane:planner:run-leak-2", "run-leak-2");
+    await supervisor.alarm();
+
+    const record = await getRecord(supervisor);
+    expect(record.activeLaneIds).toStrictEqual([]);
+    expect(record.failedLaneIds).toStrictEqual([
+      "lane:planner:run-leak-1",
+      "lane:planner:run-leak-2",
+    ]);
   });
 });

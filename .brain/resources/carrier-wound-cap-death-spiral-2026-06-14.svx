@@ -1,0 +1,231 @@
+---
+title: "Carrier Wound #24: The Concurrency Cap Counted Corpses As Live Owners"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - concurrency
+  - admission-control
+  - resource-leak
+  - lease-reclamation
+  - durable-objects
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-24-cap-death-spiral-leaked-lane-owner-slots"
+---
+
+# Carrier Wound #24: The Concurrency Cap Counted Corpses As Live Owners
+
+Wound #23 (recovery-machinery that survives the fire) shipped. The next dream
+re-drive did not block with a blind marker — it blocked with something new, and
+worse, because it was **predictable on a clock**: every fresh run died ~29 s in,
+at planner admission, with `concurrency-cap-full`. Not sometimes. Every time.
+A cap that is supposed to make work *wait* had quietly become a cap that makes
+work *die*, and the live admin feed showed why: **38 `blocked` runs were still
+squatting lane-owner slots** they had no living process behind.
+
+This is the resource-leak wound in its cleanest form, and — like every wound
+since [[carrier-wound-btoa-latin1-ceiling-2026-06-14]] — it was only visible
+because the run was watched node-by-node from the outside, not stared at.
+
+## Mechanism — the slot outlives the run that owned it
+
+The supervisor Durable Object (`cloudflare-capsule-supervisor.ts`) is keyed by
+`idFromName(workItemId)`. **Every dream run shares one workItemId**, so they all
+land in **one** DO with **one** `record.activeLaneOwners` map
+(`Record<laneId, runId>`) governed by **one** cap —
+`WORKFLOW_APP_MAX_ACTIVE_LANES: "3"`. Admission is the gate (`admitLaneCore`):
+
+```ts
+if (activeLaneIds.length >= input.maxActiveLanes) {
+  return AgentLaneAdmissionDecisionSchema.parse({
+    ...,
+    reason: "concurrency-cap-full",
+    status: "deferred",
+  });
+}
+```
+
+The cap is only ever correct if `activeLaneOwners` holds **live** owners. It
+doesn't, because **only one actor ever removes an owner**: the reaper, via
+`releaseAdmissionSlotsAfterReap`, and **only for runs the reaper itself just
+transitioned**. Two paths reach a terminal status *without* the reaper ever
+touching them, and both leak the slot:
+
+1. **Self-termination.** A run that blocks or captures on its own
+   (`blocked`/`captured`) is never swept — the reaper only looks at runs
+   `status NOT IN (terminal)`. The owner row in `activeLaneOwners` is never
+   deleted.
+2. **Record retirement by the driver.** `driveQueuedRuns` retires a run's
+   run-start record the moment D1 reports it terminal. That deletes the
+   *driver's* bookkeeping — it never reaches into the supervisor DO's owner map.
+
+Either way the lane-owner slot squats forever with a dead runId behind it. Lane
+ids are run-scoped (`lane:planner:<runId>`), so a leaked slot can **never** be
+reused by the run that leaked it — it is pure dead weight. Three leaks and the
+cap of three is permanently full. The 4th run, and every run after it, dies at
+planner admission. 38 squatters was just how many had piled up before anyone
+watched a run die on the clock.
+
+> Site Reliability Engineering: How Google Runs Production Systems
+> (Beyer, Jones, Petoff, Murphy — O'Reilly, 2016), Ch. 23, "Quorum Leases":
+>
+> > The lease is for a specific (usually brief) period of time. Any operation
+> > that changes the state of that data must be acknowledged by all replicas in
+> > the read quorum. If any of these replicas becomes unavailable, the data
+> > cannot be modified until the lease expires.
+
+The whole reason a lease has a **bounded lifetime tied to liveness** is exactly
+this: an owner that becomes unavailable must not be able to hold its grant
+forever. Our admission slot was a lease with **no expiry and no liveness check**
+— grant on admit, release only if one specific reaper happens to transition the
+owner. Every other way an owner could die left the lease held by a corpse. The
+fix gives the lease the missing liveness bound: *the authoritative run store is
+the lease clock — a terminal owner has, by definition, let its lease lapse.*
+
+This is also the [[polite-fakes-franchise-wound]] discipline applied to our own
+state: the owner map politely *assumed* its entries were alive. The hostile
+truth is that the run store is the only authority on liveness, and the map must
+be reconciled against it before its count is trusted.
+
+## Fix — reconcile owners against the run store before trusting the count
+
+A single mechanism-agnostic reclaim, wired at **both** the gate and the clock.
+It does not care HOW a slot leaked — only whether the owner is still alive.
+
+```ts
+private async reclaimTerminalOwnerSlots(
+  record: SupervisorRecord
+): Promise<SupervisorRecord> {
+  const d1 = this.env.WORKFLOW_APP_D1;
+  if (d1 === undefined) { return record; }                 // no authority ⇒ no-op
+  const ownerRunIds = [...new Set(Object.values(record.activeLaneOwners))];
+  if (ownerRunIds.length === 0) { return record; }
+
+  const statusReader = createCloudflareWorkflowRunStatusReader({ d1 });
+  const terminalRunIds = new Set<string>();
+  for (const runId of ownerRunIds) {
+    const snapshot = await statusReader.read({ runId });
+    if (snapshot !== null && TERMINAL_RUN_STATES.has(snapshot.status)) {
+      terminalRunIds.add(runId);                            // explicitly terminal ⇒ reclaim
+    }
+  }
+  if (terminalRunIds.size === 0) { return record; }
+  // drop terminal owners' lanes; append them to failedLaneIds (force-released ledger)
+  ...
+}
+```
+
+Two non-negotiable rules make this safe:
+
+- **`null` snapshot is ALIVE, not dead.** A run with no authoritative row yet is
+  in-flight — `read({runId})` returns `null`. We KEEP its slot. Freeing a slot on
+  *absence of evidence* would yank a live run's reservation mid-flight. We free
+  ONLY on an explicit terminal status. Absence is never terminal.
+- **No D1 binding ⇒ no-op.** Without an authority to judge liveness, leave the
+  record untouched. Better a stuck cap (visible, recoverable) than a wrongly
+  freed slot (a live run silently losing its lane).
+
+### Wired at the gate (spiral-breaker)
+
+`admitLaneCore` reclaims, then **re-checks**, before deferring. A cap is only
+real backpressure if it is still full *after* corpses are swept:
+
+```ts
+if (activeLaneIds.length >= input.maxActiveLanes) {
+  record = await this.reclaimTerminalOwnerSlots(record);   // sweep dead owners
+  activeLaneIds = activeLaneIdsOf(record);
+}
+if (activeLaneIds.length >= input.maxActiveLanes) {        // STILL full of LIVE owners?
+  return /* deferred concurrency-cap-full */;              // only now is it backpressure
+}
+```
+
+### Wired at the clock (safety net)
+
+`alarm()`, after the reaper's own `releaseAdmissionSlotsAfterReap`, sweeps the
+owner map unconditionally — so a jammed cap drains on the periodic alarm even
+when **no** admission is currently probing (the case that produced the 38-run
+pileup: nothing new was being admitted *because* the cap was jammed, so the
+admission-time reclaim would never have fired on its own).
+
+```ts
+await this.reclaimTerminalOwnerSlots(await this.getRecord());
+```
+
+The two wirings are complements: the gate breaks the spiral the instant a new
+run arrives; the clock drains a cap that nothing is currently knocking on.
+
+## Chaos Receipts (would have caught it)
+
+`tests/integration/cloudflare-run-reaper.test.ts` — **16 passing** (4 new + 1
+corrected). The fake D1's status-reader query is answered from the same `runs`
+fixture the reaper reads, so a run's terminal status is consistent across both
+the reaper sweep and the liveness probe — no politeness gap between them.
+
+- **"reclaims leaked terminal-owner slots so a fresh run is admitted instead of
+  dying at a jammed cap"** — three runs (`blocked`/`blocked`/`captured`) squat
+  the cap; a fresh run hits admission; asserts it is **admitted** (not deferred)
+  and the three leaked lanes land in `failedLaneIds`. This is the production
+  death spiral, reproduced: before the fix the fresh run defers
+  `concurrency-cap-full` forever.
+- **"does NOT reclaim a cap full of LIVE owners: genuine backpressure still
+  defers"** — three `executing` owners; newcomer is deferred
+  `concurrency-cap-full`; **nothing** is freed. The fix must not dissolve real
+  backpressure.
+- **"keeps the slot of an owner with NO authoritative row (in-flight): absence is
+  not terminal"** — `runs: []` so every probe returns `null`; newcomer deferred;
+  all three slots retained. Encodes the absence-is-alive rule as a test, not a
+  comment.
+- **"alarm safety net sweeps leaked terminal-owner slots with no admission
+  probing"** — two terminal owners, a bare `alarm()` with nothing knocking; both
+  slots drain to `failedLaneIds`. This is the 38-run pileup's exit path.
+- **(corrected) "alarm reclaims a terminal run's leaked slot without re-reaping
+  the run"** — was "alarm leaves a terminal run and its slot untouched", which
+  asserted the leak *as correct* (`activeLaneIds === ["lane-a"]`). That assertion
+  WAS the bug. Now: reaper does not re-reap the already-terminal run
+  (`d1.events` empty) **and** the safety net reclaims its leaked slot
+  (`activeLaneIds` empty, `failedLaneIds === ["lane-a"]`). An honest correction
+  of an invariant that encoded the wound, not test-gaming.
+
+The doubles are hostile by construction: a polite test would have pre-seeded
+only live owners and never produced a corpse to count. Each new test
+deliberately constructs the leaked-corpse state the production cap actually got
+into.
+
+## Verification
+
+```bash
+pnpm vitest run tests/integration/cloudflare-run-reaper.test.ts  # 16 pass (4 new, 1 corrected)
+pnpm typecheck   # clean (tsgo)
+pnpm check       # oxfmt + oxlint + type-aware, clean
+```
+
+## Known follow-up — Defect 2 (backpressure forged terminal)
+
+The reclaim makes the cap honest about *liveness*, but a separate wound remains:
+when the cap is genuinely full of live owners, the retryable
+`concurrency-cap-full` / `already-active` deferral is forged into a **terminal**
+`adapter_unavailable` in `proposeDynamicWorkflowBlueprint` (workflow-app.ts).
+**The whole point of a concurrency cap is to make work WAIT, not DIE.** Fixing it
+needs a `paused`-at-planning seam threaded through the critical `run()` path
+(pause + re-arm instead of terminal-fail), which is a deeper change. Until then
+the burn-in runs **serially** (submit one, wait for terminal) so live contention
+never fires this path. Required before any *concurrent* burn-in. Tracked.
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. This fix
+deploys, the leaked owner slots GC on the next alarm / first admission, and ONE
+dream-shape run is then watched node-by-node to `captured` on the fixed,
+deployed code. Only then does D3 reset to zero and the serial 10-run burn-in
+begin. This is the sibling of [[carrier-wound-node-recovery-oom-2026-06-14]]:
+#23 made the announcer survive the fire; #24 makes admission control stop
+counting the dead among the living. Every carrier wound this week surfaced from
+node-by-node observation — *"feels like we should be able to observe the run in
+progress and not guess if it's functioning instead of waiting and staring at it
+like fucking dummies."* Captured on deployed code → fire the operator Discord
+ping with the wzrrd HITL URL, reset D3, start the burn-in.
