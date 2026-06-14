@@ -672,6 +672,10 @@ describe(buildPiAgentLaneCommand, () => {
         encoding: "utf-8",
         env: {
           ...process.env,
+          // A text/markdown verifier lane keeps its tools (source-grounded), so the
+          // pi_tool_args gate adds NO --no-tools here — the hang is orthogonal to it.
+          // LANE_KIND must be set or the pi_tool_args block trips `set -u`.
+          LANE_KIND: "verifier",
           LANE_OUTPUT_MEDIA_TYPE: "text/markdown",
           LANE_PROMPT_PATH: promptPath,
           PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
@@ -749,6 +753,10 @@ describe(buildPiAgentLaneCommand, () => {
         "set -u",
         "script_start_s=$(date +%s)",
         `diag() { printf '%s\\n' "$1" >> "${diagnosticsPath}" 2>/dev/null || true; }`,
+        // Faithful scrub_credentials: the cap branch now rides a sanitized HEAD of the
+        // runaway out on the diag channel, and that head-sample pipes through
+        // scrub_credentials. Define it here so the sliced block runs exactly as prod.
+        "scrub_credentials() { sed -E 's#https://x:[^@]*@#https://x:***@#g'; }",
         piInvokeBlock,
         "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
       ].join("\n");
@@ -757,6 +765,11 @@ describe(buildPiAgentLaneCommand, () => {
         encoding: "utf-8",
         env: {
           ...process.env,
+          // A runaway is what a misbehaving PLANNER does — the live transport. With
+          // LANE_KIND=planner the gate adds --no-tools, but the fake pi spews
+          // regardless of argv, so the cap assertions are unchanged; LANE_KIND must
+          // be set or the pi_tool_args block trips `set -u`.
+          LANE_KIND: "planner",
           LANE_OUTPUT_MEDIA_TYPE: "application/json",
           LANE_PROMPT_PATH: promptPath,
           PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
@@ -800,6 +813,113 @@ describe(buildPiAgentLaneCommand, () => {
       rmSync(dir, { force: true, recursive: true });
     }
   }, 15_000);
+
+  it("muzzles ONLY the planner with --no-tools so the no-tools contract is enforced at the CLI, never begged in the prompt — verifier/source-grounded lanes keep their tools (wound #31)", () => {
+    // Hostile double for wound #31 ([[polite-fakes-franchise-wound]]): slice the REAL
+    // pi-invoke block out of buildPiAgentLaneCommand() and run it verbatim with a `pi`
+    // that RECORDS its own argv, once per lane kind. The live transport for the failure:
+    // the planner prompt said "Do not call tools" while the invocation passed NO tool
+    // constraint and pi ships read/bash/edit/write ON by default — so under --mode json
+    // the planner tool-looped into a 64 MiB+ runaway (4 live runs in a row,
+    // a8bc84dc/f9a37a09/53cc30a4/fa5a3189, terminal planner_lane_incomplete). A polite
+    // mock that asserted on a JS variable would never prove the FLAG reaches the pi
+    // process; this runs the emitted bash and reads pi's real argv off disk.
+    //
+    // Two runs, IDENTICAL except LANE_KIND, so only the tool gate can differ:
+    //   planner  → argv MUST contain --no-tools (the impossible state made impossible)
+    //   verifier → argv MUST NOT contain --no-tools, and pi MUST still run (a verifier
+    //              with no read/bash reviews nothing → a hollow capture, the worse bug).
+    // Pre-fix (no gate at all): planner never gets the flag → plannerMuzzled flips false.
+    // Blanket-apply regression (--no-tools unconditionally): verifier gets muzzled →
+    // verifierKeepsTools flips false. Only the LANE_KIND=planner gate satisfies both.
+    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockEnd = command.indexOf("\nmark normalize-output");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke block in the lane command."
+      );
+    }
+    const piInvokeBlock = command.slice(blockStart, blockEnd);
+
+    const runLane = (laneKind: string) => {
+      const dir = mkdtempSync(join(tmpdir(), `piwf-pi-tools-${laneKind}-`));
+      try {
+        const binDir = join(dir, "bin");
+        mkdirSync(binDir);
+        const argvPath = join(dir, "argv.txt");
+        // Fake pi records each received arg on its own line (so --no-tools is matched
+        // EXACTLY, never as a substring of the prompt) and emits a tiny well-formed
+        // output far under the cap — the runaway/cap branch must NOT fire here.
+        const fakePi = join(binDir, "pi");
+        writeFileSync(
+          fakePi,
+          `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"ok":true}\\n'\n`
+        );
+        chmodSync(fakePi, 0o755);
+
+        const promptPath = join(dir, "prompt.txt");
+        writeFileSync(promptPath, "emit one blueprint");
+        const rawOutputPath = join(dir, "raw.txt");
+        const stderrPath = join(dir, "stderr.txt");
+
+        const harness = [
+          "set -u",
+          "script_start_s=$(date +%s)",
+          "diag() { :; }",
+          "scrub_credentials() { cat; }",
+          piInvokeBlock,
+          "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
+        ].join("\n");
+
+        const stdout = execFileSync("bash", ["-c", harness], {
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            LANE_KIND: laneKind,
+            LANE_OUTPUT_MEDIA_TYPE: "application/json",
+            LANE_PROMPT_PATH: promptPath,
+            PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+            PIWF_COMMAND_TIMEOUT_SECONDS: "5",
+            PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+            PI_MODEL: "fake-model",
+            PI_PROVIDER: "fake-provider",
+            raw_output_path: rawOutputPath,
+            stderr_path: stderrPath,
+          },
+          timeout: 15_000,
+        });
+
+        const argv = existsSync(argvPath)
+          ? readFileSync(argvPath, "utf-8").split("\n")
+          : [];
+        return {
+          piActuallyRan:
+            existsSync(argvPath) && stdout.includes("POST_PI_REACHED"),
+          sawNoTools: argv.includes("--no-tools"),
+        };
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    };
+
+    const planner = runLane("planner");
+    const verifier = runLane("verifier");
+
+    expect({
+      // The planner — pure generation — is muzzled at the CLI, not asked nicely.
+      plannerMuzzled: planner.sawNoTools,
+      plannerRan: planner.piActuallyRan,
+      // The source-grounded verifier keeps read/bash; muzzling it would forge a
+      // hollow capture (a verifier that reviews nothing), which is worse than a runaway.
+      verifierKeepsTools: !verifier.sawNoTools,
+      verifierRan: verifier.piActuallyRan,
+    }).toStrictEqual({
+      plannerMuzzled: true,
+      plannerRan: true,
+      verifierKeepsTools: true,
+      verifierRan: true,
+    });
+  }, 20_000);
 
   it("a failed normalize whose recovery copy also fails does NOT abort the lane blind (wound #25)", () => {
     // Hostile double for wound #25: slice the REAL normalize-output recovery block

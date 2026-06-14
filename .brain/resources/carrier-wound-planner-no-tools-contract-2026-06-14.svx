@@ -1,0 +1,180 @@
+---
+title: "Carrier Wound #31: We Asked The Planner Not To Use Tools. It Had Tools."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - pi-invoke
+  - no-tools
+  - least-privilege
+  - parse-dont-validate
+  - prompt-is-not-a-contract
+  - runaway
+  - string-raw
+  - observability
+  - diagnostics
+  - carrier-finding
+  - chaos-suite
+source: "wound-31-planner-no-tools-contract"
+---
+
+# Carrier Wound #31: We Asked The Planner Not To Use Tools. It Had Tools.
+
+Wound #30 capped pi's raw stdout with `head -c` so a runaway could no longer
+ENOSPC the lite disk. We shipped it, deployed it, and re-drove a dream-shape run.
+The cap WORKED, exactly as the #30 receipt's "What this does NOT claim" section
+called it: run `fa5a3189` came back **disk-healthy** (957 MB free vs the old
+30 MB), the cap fired (`raw_output_capped: reached 67108864`), pi crashed EPIPE
+in its own `output-guard.js` when `head` closed the pipe, `lane_output_bytes`
+was the full 64 MiB and not the 112-byte ENOSPC stub. The ENOSPC cascade was
+dead. And the lane STILL did not reach `captured`:
+
+```
+run-live-...-fa5a3189  →  blocked / planner_lane_incomplete
+Agent lane reached step "build-receipt" (exit 143, pi 1): write EPIPE
+```
+
+The cap converted a disk catastrophe into an honest, bounded, committed-adjacent
+failure — and handed us the next layer to read. The planner pi **rode most of
+its budget reaching the 64 MiB cap** (a slow tool-call loop, ~12 min), then
+normalize burned its full 60s trying to parse 64 MiB of runaway JSON, so the
+overall lane timed out and SIGTERM'd `build-receipt` before it could commit. The
+#30 fix made the failure survivable and diagnosable; #31 removes the cause.
+
+## Mechanism — the prompt was a contract nobody enforced
+
+The planner prompt (`plannerPromptFor`, `cloudflare-agent-lane-adapters.ts`) ends
+with a polite instruction:
+
+> Generate a DynamicWorkflowBlueprint for the requested run. Emit only JSON. […]
+> **Do not call tools, perform side effects, or materialize secrets.**
+
+But the invocation passed **no tool constraint**, and `pi` ships its
+`read`/`bash`/`edit`/`write` tools **ON by default** (`pi --help`, verified —
+not guessed). So under `--mode json`, where every tool call is a stream event,
+the planner — which only has to emit one JSON blueprint and needs nothing from
+the filesystem — was free to wander into a tool-call loop. And it did, four live
+runs in a row: `a8bc84dc`, `f9a37a09`, `53cc30a4`, `fa5a3189`. Deterministic.
+
+The prompt said "do not call tools." The CLI handed it tools anyway. A model
+instruction is a *request*; a CLI flag is an *invariant*. We were asking the
+caller to honor a contract instead of making the dishonored state impossible.
+
+> The principle of least privilege describes the idea that when granting access
+> we should grant the minimum access a party needs to carry out the required
+> functionality, and only for the time period they need it.
+>
+> — Sam Newman, *Building Microservices, 2nd ed.*, Ch. 11, Core Principles
+
+That is this wound exactly. The planner's required functionality is *pure
+generation* — emit one blueprint, touch nothing. Its minimum access is
+**zero tools**. We granted it the full read/bash/edit/write surface, and the
+excess capability was precisely what it abused into a 64 MiB runaway.
+
+## Fix — enforce the contract at the CLI, scoped to the one lane that wants none
+
+`cloudflare-sandbox-agent-lane-command.ts`, the `pi-invoke` block. Add a tool
+gate keyed on `LANE_KIND`, right after the existing `pi_mode_args` gate:
+
+```bash
+pi_tool_args=""
+if [ "$LANE_KIND" = "planner" ]; then
+  pi_tool_args="--no-tools"
+fi
+...
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" \
+  --no-session $pi_mode_args $pi_tool_args -p "$(cat "$LANE_PROMPT_PATH")" \
+  2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
+```
+
+Two load-bearing properties:
+
+1. **The impossible state is made impossible.** `--no-tools` disables pi's tools
+   at the process boundary. The planner *cannot* tool-loop because it has no
+   tools to loop on. The prompt's "do not call tools" is no longer a plea; it is
+   the CLI's reality. (parse, don't validate — make impossible states
+   impossible.)
+2. **Scoped to `LANE_KIND=planner` ONLY — this is the whole skill of the fix.**
+   The worker/analysis/verifier lanes are *source-grounded*: a verifier with no
+   `read`/`bash` cannot open the primary source it is supposed to review, so it
+   would emit a verdict about nothing — **a hollow capture, which is strictly
+   worse than a runaway** (a runaway fails honestly and loudly; a hollow capture
+   *succeeds* falsely). Least privilege is per-party: the planner needs zero
+   tools, the verifier needs read/bash. A blanket `--no-tools` would have traded
+   a loud bug for a silent one. The Explore pass that first proposed this fix
+   recommended a blanket `--tools=''` at the shared invocation line; that would
+   have lobotomized every source-grounded lane. The gate is the correction.
+
+### Plus: head-sample-on-cap, so a *persisting* runaway shows WHAT not just THAT
+
+If `--no-tools` is the right root cause, the cap branch never fires again for the
+planner and the head-sample never runs. But if a runaway somehow persists (pure
+generation looping, an enormous-but-legitimate stream), the disk numbers proved
+*that* it ran away; this rides a sanitized 4 KiB HEAD of the runaway out on the
+`diag()` channel (which survives SIGTERM and reaches the operator blocker) to
+show *what* — a tool-call event loop reads differently from pure-generation
+repetition. That settles the next hypothesis in ONE cycle instead of another
+blind re-drive. (Joel's standing demand: *"we should be able to observe the run
+in progress and not guess … instead of waiting and staring at it like fucking
+dummies."*) Control chars flattened to one line; git creds scrubbed.
+
+### String.raw note (the convention that bit #29 and #30 — it did NOT bite here)
+
+`buildPiAgentLaneCommand()` is a `String.raw` template, so JS `${...}` fires
+anywhere — including bash comments. This edit used bare `$var` only
+(`$LANE_KIND`, `$pi_tool_args`) and no brace-expansion in code or comments, so
+it built clean on the first cut. The lesson from #29/#30 held.
+
+## Chaos test that would have caught it (hostile double, not a polite mock)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — *"muzzles ONLY the
+planner with --no-tools … verifier/source-grounded lanes keep their tools
+(wound #31)"*. It SLICES the REAL pi-invoke block out of the emitted bash
+(`command.indexOf('pi_mode_args=""')` → `command.indexOf("\nmark
+normalize-output")`) and runs it verbatim, twice, against a `pi` that **records
+its own argv to disk** — once with `LANE_KIND=planner`, once with `verifier`,
+IDENTICAL otherwise so only the gate can differ:
+
+- **planner** → recorded argv MUST contain `--no-tools` (the flag actually
+  reaches the process — proven off pi's real argv, not a JS variable).
+- **verifier** → argv MUST NOT contain `--no-tools`, and pi MUST still run (no
+  hollow-capture regression).
+
+A polite mock asserting on a TypeScript variable would prove nothing about what
+the spawned process receives; this reproduces the production transport — the
+real emitted bash, real word-splitting of `$pi_tool_args`, pi's real argv. It
+fails on **both** failure modes: pre-fix (no gate → planner never gets the flag)
+AND a careless blanket-apply (verifier wrongly muzzled). Only the
+`LANE_KIND=planner` gate is green on both.
+
+Two sibling tests slice the SAME region and so now traverse the new gate: their
+harnesses gained a faithful `LANE_KIND` (`set -u` would trip on it otherwise)
+and — for the wound #30 test, whose cap fires — a faithful `scrub_credentials`
+the new head-sample pipes through. `pnpm typecheck` clean · `pnpm check` clean ·
+the lane file = **42 passed** (was 41; the new chaos test is the +1).
+
+## What this does NOT claim (skepticism held)
+
+`--no-tools` is the strongest hypothesis for the runaway, with four
+deterministic live runs behind it and a verified mechanism (tools-on by default
++ `--mode json` amplification). It is NOT yet proven to reach `captured` — that
+is the live re-drive's job, the next move. If the planner still runs away with no
+tools, the head-sample now shows whether it is pure-generation looping (→ a
+prompt/budget change, or a normalize short-circuit on a known-capped runaway) or
+something else — diagnosed from the blocker, not from staring. One variable
+changed (the gate; the head-sample only fires on a runaway the gate should
+eliminate), so the next run's signal is clean.
+
+## The carrier discipline (eleventh carrier wound)
+
+#28 made the lane say WHERE it died. #29 made it say WHY with the disk numbers.
+#30 stopped the lane from letting a misbehaving agent dictate how many bytes hit
+the disk. #31 stops the lane from handing a pure-generation step capabilities it
+was *told not to use but was structurally free to* — the gap between a prompt
+(a request) and a flag (an invariant). A capability a party does not need is a
+capability it can abuse; grant the minimum, at the boundary, per party. The valve
+on the inlet (#30) now sits behind a door that only opens for the lanes that
+have a reason to walk through it.

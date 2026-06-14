@@ -199,6 +199,20 @@ pi_mode_args=""
 if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
   pi_mode_args="--mode json"
 fi
+# Parse, don't validate: enforce the planner prompt's "Do not call tools" contract at
+# the CLI instead of asking the model nicely. pi ships read/bash/edit/write tools ON by
+# default, so the planner — pure generation that only has to emit one JSON blueprint —
+# could (and did, live: 4 runs a8bc84dc/f9a37a09/53cc30a4/fa5a3189) wander into a
+# tool-call loop that, under --mode json where every call is a stream event, ran away to
+# a 64 MiB+ unbounded stream and never converged. --no-tools makes that impossible state
+# impossible. Scoped to LANE_KIND=planner ONLY: the worker/analysis/verifier lanes are
+# source-grounded and MUST keep read/bash to inspect artifacts — disabling tools there
+# would forge hollow captures (a verifier that reviews nothing). LANE_KIND is always set
+# (lanes.ts), same as LANE_OUTPUT_MEDIA_TYPE above, so it is safe under set -u.
+pi_tool_args=""
+if [ "$LANE_KIND" = "planner" ]; then
+  pi_tool_args="--no-tools"
+fi
 set +e
 # Self-bound pi-invoke to the budget remaining before the whole-script timeout, minus
 # a tail margin for the receipt/commit/push steps. Without this bound a hung model
@@ -237,7 +251,7 @@ if [ -n "$PIWF_RAW_OUTPUT_CAP_BYTES" ]; then
   raw_output_cap_bytes="$PIWF_RAW_OUTPUT_CAP_BYTES"
 fi
 set -u
-timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" 2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args $pi_tool_args -p "$(cat "$LANE_PROMPT_PATH")" 2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
 # Bare \$PIPESTATUS expands to the FIRST pipe element in bash — the left-of-pipe
 # (timeout pi) exit. The braced array-index form collides with this String.raw
 # template's JS interpolation (it throws "PIPESTATUS is not defined" at build time —
@@ -250,6 +264,14 @@ raw_output_capture_bytes="$(wc -c < "$raw_output_path" 2>/dev/null | tr -d '[:sp
 if [ "$raw_output_capture_bytes" -ge "$raw_output_cap_bytes" ] 2>/dev/null; then
   printf '\n[pi-invoke output cap] pi raw output reached the %s-byte capture cap and was truncated — the agent produced a runaway/oversized stream. The full stream is intentionally discarded (retaining it would ENOSPC the lite instance disk and poison every downstream step); the committed receipt is status:"failed" with the truncated head.\n' "$raw_output_cap_bytes" >> "$stderr_path"
   diag "pi-invoke raw_output_capped: reached $raw_output_cap_bytes byte cap (runaway/oversized stream; full stream discarded to protect disk)"
+  # Ride a bounded HEAD of the runaway out on the diag channel (which survives a SIGTERM
+  # and reaches the operator blocker). The disk numbers proved THAT it ran away; this
+  # shows WHAT — a tool-call event loop reads differently from pure-generation repetition
+  # — so a persisting runaway is diagnosable from the blocker without another blind
+  # re-drive (the observe-don't-stare discipline). First 4 KiB only; control chars
+  # flattened to spaces so it stays one diag line; git creds scrubbed.
+  runaway_head_sample="$(head -c 4096 "$raw_output_path" 2>/dev/null | tr '\n\r\t' '   ' | tr -cd '[:print:]' | scrub_credentials)"
+  diag "pi-invoke raw_output_head_sample (first 4096 bytes, sanitized): $runaway_head_sample"
 fi
 if [ "$pi_status" -eq 124 ]; then
   printf '\n[pi-invoke self-bound] pi exceeded its %ss budget and was terminated by timeout; the heartbeat names pi-invoke as the wedge step.\n' "$pi_budget_s" >> "$stderr_path"
