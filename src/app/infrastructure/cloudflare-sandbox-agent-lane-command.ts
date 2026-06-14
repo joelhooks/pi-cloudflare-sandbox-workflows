@@ -543,7 +543,8 @@ const receipt = {
   outputNormalization: {
     normalized: outputNormalization.normalized !== false,
     reason: outputNormalization.reason ?? null,
-    agentStopReason: outputNormalization.agentStopReason ?? null
+    agentStopReason: outputNormalization.agentStopReason ?? null,
+    rawOutputSample: outputNormalization.rawOutputSample ?? null
   },
   realAgent: true,
   receiptRef: process.env.LANE_RECEIPT_ARTIFACT_REF,

@@ -1102,6 +1102,142 @@ describe("Cloudflare Pi verifier lane adapter", () => {
       runtimeCalls: 1,
     });
   });
+
+  it("surfaces the raw-output sample from a failed-normalize verifier receipt in the blocker the operator reads (wound #34 dead-letter)", async () => {
+    // Wound #33 muzzled the verifier; this is the OBSERVABILITY half its receipt
+    // predicted. The verifier fails "complete-with-failed-normalize": it COMMITS a
+    // receipt (status:"failed", outputNormalization.normalized=false), so the
+    // abort-path lane-diagnostics file (AgentLaneIncompleteError) NEVER fires — the
+    // bash `diag` sample dead-letters. Pre-fix, the receipt schema had no field to
+    // carry the sample and the adapter's blocker said only "reason:
+    // no_parseable_output". The operator reading /runs/:id/status was blind to WHY
+    // the channel was empty — prose? a tool turn? a verdict written off-stdout? —
+    // and the only recourse was another blind re-drive (the exact thing Joel's
+    // standing demand forbids: "observe the run ... instead of staring like dummies").
+    //
+    // The fix threads a bounded, scrubbed raw head/tail from the normalizer outcome
+    // -> receipt.outputNormalization.rawOutputSample (real AgentLaneReceiptSchema) ->
+    // the verifier adapter's blocker `cause`. This drives the REAL adapter against a
+    // runtime returning a REAL schema-parsed failed receipt; the seam (runLane
+    // returning a committed-failed receipt) is the production seam. The A/B control
+    // below proves the sample suffix is the load-bearing discriminator: a polite
+    // assertion that merely checked a TS field would have stayed green against the
+    // dead-letter schema that DROPPED the field on parse.
+    const fixture = await buildVerifierLaneFixture();
+    const proseSample =
+      "Verdict written to the verification output path. Review complete. " +
+      "...[2048 bytes omitted]... approve: inlined evidence reviewed.";
+
+    const driveWithSample = async (rawOutputSample: string | null) => {
+      const runtime: AgentLaneRuntimePort = {
+        runLane(request) {
+          // A verifier lane that committed status:"failed" because normalize found
+          // no parseable verdict — exactly the fccee972 transport. The receipt is
+          // parsed through the REAL schema, so a regression that drops
+          // rawOutputSample from outputNormalization makes the field vanish here.
+          const promptRef = request.artifactRef({
+            path: request.promptPath,
+            runId: request.runId,
+          });
+          const transcriptRef = request.artifactRef({
+            path: request.transcriptPath,
+            runId: request.runId,
+          });
+          const receiptRef = request.artifactRef({
+            path: request.receiptPath,
+            runId: request.runId,
+          });
+          return Promise.resolve(
+            AgentLaneReceiptSchema.parse({
+              authLease: request.authLease,
+              completedAt: "2026-06-14T20:16:00.000Z",
+              kind: "verifier",
+              laneId: request.laneId,
+              outputNormalization: {
+                agentStopReason: null,
+                normalized: false,
+                rawOutputSample,
+                reason: "no_parseable_output",
+              },
+              outputPins: [],
+              outputRefs: [],
+              prompt: {
+                artifactRef: promptRef,
+                hash: sha256Hex(request.prompt),
+                mediaType: "text/markdown",
+              },
+              realAgent: true,
+              receiptRef,
+              redacted: true,
+              runtime: "pi-agent-cli",
+              sandboxRef: "cloudflare-sandbox:verifier-dead-letter-test",
+              startedAt: "2026-06-14T20:15:00.000Z",
+              status: "failed",
+              traceContext: request.traceContext,
+              transcript: {
+                artifactRef: transcriptRef,
+                hash: sha256Hex("verifier transcript"),
+                mediaType: "text/markdown",
+              },
+            })
+          );
+        },
+        runtime: "pi-agent-cli",
+      };
+      const adapter = createCloudflarePiVerifierLaneAdapter({
+        artifactRemote: "https://artifacts.example.invalid/repo.git",
+        artifactStore: fixture.artifacts,
+        artifactTokenSecret: "artifact-token",
+        authLease: agentAuthLeaseFor(fixture.plan),
+        leasedPiAuthJsonBase64: "auth-json",
+        model: "integration-test-pi-model",
+        provider: "openai-codex",
+        runtime,
+        timeoutMs: 30_000,
+      });
+      try {
+        await adapter.verify({
+          capabilityReceipts: [],
+          contract: fixture.contract,
+          outputEvidence: [],
+          outputRefs: [],
+          plan: fixture.plan,
+        });
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+
+    const withSample = await driveWithSample(proseSample);
+    const withoutSample = await driveWithSample(null);
+
+    expect({
+      // post-fix: the blocker the operator reads now NAMES the raw head/tail
+      withSampleBlocked: withSample !== null,
+      withSampleNamesReason:
+        withSample?.includes("no_parseable_output") ?? false,
+      withSampleSurfacesRawSample:
+        (withSample?.includes("raw output sample:") ?? false) &&
+        (withSample?.includes(
+          "Verdict written to the verification output path"
+        ) ??
+          false),
+      // control: a null sample (normalize captured nothing) must NOT fabricate the
+      // suffix — proves the `raw output sample:` clause is gated on a real sample,
+      // and that the assertion above is non-vacuous, not matching ambient prose.
+      withoutSampleBlocked: withoutSample !== null,
+      withoutSampleOmitsRawSampleClause: !(
+        withoutSample?.includes("raw output sample:") ?? true
+      ),
+    }).toStrictEqual({
+      withSampleBlocked: true,
+      withSampleNamesReason: true,
+      withSampleSurfacesRawSample: true,
+      withoutSampleBlocked: true,
+      withoutSampleOmitsRawSampleClause: true,
+    });
+  });
 });
 
 const analysisReasoningOutput = {

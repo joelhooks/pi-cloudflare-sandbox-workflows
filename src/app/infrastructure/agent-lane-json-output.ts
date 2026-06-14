@@ -537,6 +537,29 @@ const normalizeAgentLaneJsonOutput = (raw) => {
 };
 const raw = fs.readFileSync(process.env.raw_output_path, "utf8");
 const normalizationPath = process.env.LANE_OUTPUT_NORMALIZATION_PATH;
+// Bounded head+tail of the raw stdout, surfaced in the failure outcome so the
+// receipt (and the verifier blocker that reads it) names WHY normalize failed
+// instead of only THAT it failed. Control chars flattened to one line; git
+// creds / bearer tokens scrubbed; total capped — redaction-safe for a token-
+// gated status read. This is the channel the abort-path lane-diagnostics file
+// can NOT reach on the complete-with-failed-normalize path the verifier hits.
+const sampleRawOutput = (text) => {
+  if (typeof text !== "string" || text.length === 0) {
+    return null;
+  }
+  const headLen = 1024;
+  const tailLen = 1024;
+  const head = text.slice(0, headLen);
+  const tail = text.length > headLen + tailLen ? text.slice(-tailLen) : "";
+  const omitted = text.length - headLen - tailLen;
+  const joined =
+    tail === "" ? head : head + " ...[" + omitted + " bytes omitted]... " + tail;
+  return joined
+    .replace(/[\x00-\x1f\x7f]+/g, " ")
+    .replace(/https:\/\/[^@\s]*@/g, "https://<redacted>@")
+    .replace(/(authorization|bearer|x-access-token|token)["':=\s]+[A-Za-z0-9._\-]{8,}/gi, "$1 <redacted>")
+    .slice(0, 2400);
+};
 let outcome;
 try {
   const jsonText = normalizeAgentLaneJsonOutput(raw);
@@ -554,7 +577,8 @@ try {
     normalized: false,
     reason: failureReason,
     agentStopReason: error && error.agentStopReason ? error.agentStopReason : null,
-    detail: error && error.message ? String(error.message).slice(0, 500) : null
+    detail: error && error.message ? String(error.message).slice(0, 500) : null,
+    rawOutputSample: sampleRawOutput(raw)
   };
 }
 if (normalizationPath) {

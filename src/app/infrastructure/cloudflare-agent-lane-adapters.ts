@@ -1006,9 +1006,14 @@ export const createCloudflarePiVerifierLaneAdapter = (
           normalization.agentStopReason !== ""
             ? `, stopReason: ${normalization.agentStopReason}`
             : "";
+        const sampleSuffix =
+          normalization.rawOutputSample !== null &&
+          normalization.rawOutputSample !== ""
+            ? `, raw output sample: ${normalization.rawOutputSample}`
+            : "";
         cause = `agent produced no parseable verdict (reason: ${
           normalization.reason ?? "unknown"
-        }${stopReasonSuffix})`;
+        }${stopReasonSuffix}${sampleSuffix})`;
       } else if (receipt.status === "completed") {
         cause = `receipt kind/lane mismatch (kind: ${receipt.kind}, laneId: ${receipt.laneId})`;
       } else {

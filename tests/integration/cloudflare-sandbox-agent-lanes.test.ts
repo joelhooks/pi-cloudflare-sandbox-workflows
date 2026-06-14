@@ -1208,6 +1208,11 @@ describe(buildPiAgentLaneCommand, () => {
           typeof normalizationRaw["reason"] === "string"
             ? normalizationRaw["reason"]
             : null;
+        const normalizationRawSample =
+          isRecord(normalizationRaw) &&
+          typeof normalizationRaw["rawOutputSample"] === "string"
+            ? normalizationRaw["rawOutputSample"]
+            : null;
         let laneOutputVerdict: string | null = null;
         if (existsSync(outputPath)) {
           try {
@@ -1227,6 +1232,7 @@ describe(buildPiAgentLaneCommand, () => {
         return {
           diagText: existsSync(diagPath) ? readFileSync(diagPath, "utf-8") : "",
           laneOutputVerdict,
+          normalizationRawSample,
           normalizationReason,
           outputNormalized: stdout.includes(
             "POST_NORMALIZE_REACHED normalized=1"
@@ -1259,6 +1265,16 @@ describe(buildPiAgentLaneCommand, () => {
         /Verdict written/u.test(preFix.diagText),
       preFixKeptTools: !preFix.sawNoTools,
       preFixNoParseable: preFix.normalizationReason === "no_parseable_output",
+      // wound #34 dead-letter: the REAL normalizer wrote the raw head/tail into the
+      // OUTCOME FILE — the leg the receipt builder copies into
+      // receipt.outputNormalization.rawOutputSample. Pre-schema-fix this sample had
+      // nowhere to land (the abort-path diag channel never fires on a committed-failed
+      // receipt), so the operator saw only `reason: no_parseable_output`. Proving the
+      // normalizer EMITS it here, plus the adapter SURFACES it (sibling adapter test),
+      // closes the dead-letter the verifier hits.
+      preFixRawSampleInOutcome: /Verdict written/u.test(
+        preFix.normalizationRawSample ?? ""
+      ),
       preFixStreamed: preFix.sawModeFlag,
       preFixVerdictClobbered: preFix.laneOutputVerdict !== "approve",
     }).toStrictEqual({
@@ -1269,6 +1285,7 @@ describe(buildPiAgentLaneCommand, () => {
       preFixDiagnosedRawOutput: true,
       preFixKeptTools: true,
       preFixNoParseable: true,
+      preFixRawSampleInOutcome: true,
       preFixStreamed: true,
       preFixVerdictClobbered: true,
     });

@@ -292,6 +292,14 @@ export const AgentLaneReceiptSchema = z
       .object({
         agentStopReason: z.string().nullable().default(null),
         normalized: z.boolean(),
+        // Bounded, control-char-flattened, credential-scrubbed head+tail of the
+        // raw agent stdout, present ONLY when normalize FAILED. The verifier (and
+        // any JSON lane) fails "complete-with-failed-normalize": it commits this
+        // receipt, so the abort-path lane-diagnostics channel never fires and the
+        // operator otherwise sees only `reason: no_parseable_output`. This field
+        // is the sample that lets the next read settle WHY (prose? empty? a tool
+        // turn? a verdict written off-stdout?) without another blind re-drive.
+        rawOutputSample: z.string().nullable().default(null),
         reason: z.string().nullable().default(null),
       })
       .optional(),

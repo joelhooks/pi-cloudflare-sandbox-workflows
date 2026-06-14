@@ -1,0 +1,156 @@
+---
+title: "Carrier Wound #34: The Verifier Named the Failure but Hid Its State. The Diagnostic Dead-Lettered."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - verifier
+  - normalizer
+  - no-parseable-output
+  - observability
+  - diagnostics
+  - dead-letter
+  - complete-with-failed-normalize
+  - raw-output-sample
+  - in-band-diagnostic
+  - transparency
+  - carrier-finding
+  - chaos-suite
+source: "wound-34-verifier-deadletter-no-raw-sample"
+---
+
+# Carrier Wound #34: The Verifier Named the Failure but Hid Its State. The Diagnostic Dead-Lettered.
+
+Wound #33 muzzled the verifier (text + `--no-tools`, the proven-captured config)
+and forward-promised that **if** the verifier still failed empty, "the new
+non-capped diagnostic now shows the raw head/tail from the blocker." That promise
+was a lie of omission — not because the diagnostic didn't exist, but because it
+lived on a path the verifier's failure mode never travels.
+
+The deployed verifier went terminal again:
+
+```
+run-live-...-786c8feb
+  → blocked / adapter_unavailable:
+    "Configured verifier lane adapter failed: Verifier lane did not return a
+     completed receipt for the requested lane: agent produced no parseable
+     verdict (reason: no_parseable_output)."
+```
+
+The operator reading `/runs/:id/status` saw exactly that — `no_parseable_output`
+and nothing else. Was it prose? An empty channel? A tool turn? A verdict written
+off-stdout? **No way to tell from the blocker.** Re-driving was guessing.
+
+## The wound: the diagnostic and the failure travel different roads
+
+There are two ways a lane can fail to produce a parseable verdict, and they exit
+through different doors:
+
+1. **Abort path** — the lane never commits a receipt; it throws
+   `AgentLaneIncompleteError`, and the catch surfaces
+   `/workspace/.piwf-lane-diagnostics` (the non-capped raw head/tail). This is the
+   path wound #33 was looking at.
+2. **Complete-with-failed-normalize path** — the lane **commits a receipt** with
+   `status:"failed"`, `outputNormalization.normalized=false`,
+   `reason:"no_parseable_output"`. The lane *succeeded as a process*; only the
+   normalization verdict is empty. **No abort. No `AgentLaneIncompleteError`. The
+   `.piwf-lane-diagnostics` surface never fires.**
+
+The verifier fails on road #2. So the one diagnostic that carried the raw bytes
+**dead-lettered** — written to a channel nobody on this path reads. The receipt
+carried the *name* of the failure (`no_parseable_output`) but none of its
+*internal state* (what the agent actually emitted). Present status without
+transparency: the operator knew the verifier was "one thump from a heart attack"
+but not why.
+
+> "This is where transparency is most vital. Applications that reveal more of
+> their internal state provide more accurate, actionable parameters."
+> — Michael Nygard, *Release It!*
+
+`no_parseable_output` is present status. The raw head/tail the agent emitted is
+the *internal state* that makes the parameter actionable. The receipt carried the
+former and threw away the latter.
+
+## The fix: a `rawOutputSample` channel that rides the receipt, not the abort
+
+A four-link channel that threads the agent's actual output from the normalizer
+all the way to the blocker the operator reads — on the road the failure actually
+travels (the committed receipt), not the road it never takes (the abort).
+
+1. **Normalizer emits it** (`agent-lane-json-output.ts`). The self-contained
+   `node` normalizer now carries `sampleRawOutput(raw)` — a redacted, bounded
+   head(1024)+tail(1024) sample (control chars collapsed; `https://…@`,
+   `authorization|bearer|token` scrubbed; hard-capped at 2400 chars). On the
+   failure outcome it writes `rawOutputSample` into the normalization-outcome file
+   alongside `normalized:false, reason, agentStopReason`.
+2. **Receipt builder carries it** (`cloudflare-sandbox-agent-lane-command.ts`).
+   The `outputNormalization` object the receipt commits now includes
+   `rawOutputSample: outputNormalization.rawOutputSample ?? null`.
+3. **Schema admits it** (`schemas.ts`). `AgentLaneReceiptSchema.outputNormalization`
+   gains `rawOutputSample: z.string().nullable().default(null)` between `normalized`
+   and `reason` — `.optional()`/nullable so old receipts parse unchanged.
+4. **Blocker surfaces it** (`cloudflare-agent-lane-adapters.ts`).
+   `createCloudflarePiVerifierLaneAdapter`'s no-parseable-verdict `cause` now
+   appends `, raw output sample: …` when the receipt carries one (and a
+   `stopReason:` suffix when present). The bytes the agent emitted ride straight
+   into the `adapter_unavailable` blocker the operator reads.
+
+The redaction and the 2400-char cap matter: this string lands in a blocker that
+hits `/runs/:id/status`, so it must never carry a credential and never balloon the
+status payload. Bounded, scrubbed, actionable.
+
+## Chaos tests that would have caught it (hostile doubles, not polite mocks)
+
+Split across the two natural homes — one per channel leg:
+
+- **Normalizer → outcome leg** (`cloudflare-sandbox-agent-lanes.test.ts`, extending
+  the wound #33 case). It runs the REAL `node` normalizer against the pre-fix
+  verifier's exact emission (a verdict written off-stdout, only prose on the
+  channel) and asserts `preFixRawSampleInOutcome: /Verdict written/u` against the
+  REAL outcome file. Proves the normalizer actually wrote the agent's prose into
+  the outcome — not a TS variable, the bytes on disk.
+- **Receipt → blocker leg** (`cloudflare-agent-lane-adapters.test.ts`). A
+  `driveWithSample(rawOutputSample)` helper builds a real `AgentLaneReceiptSchema`
+  failed verifier receipt and drives the REAL `createCloudflarePiVerifierLaneAdapter`,
+  catching the thrown blocker. **A/B control, forced non-vacuous:** with a prose
+  sample, the blocker names `no_parseable_output` AND surfaces
+  `raw output sample: …Verdict written to the verification output path…`; with a
+  `null` sample, the blocker OMITS the `raw output sample:` clause entirely. The
+  suffix is load-bearing, not decoration — green only when the sample is actually
+  threaded through schema-parse → adapter → blocker.
+
+A polite mock asserting on a TS field would prove nothing about whether the bytes
+survive the real schema round-trip into the operator-facing string. These
+reproduce the exact transport: real normalizer writing the real outcome file, real
+schema parse, real adapter building the real blocker.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **431 passed / 55 files**
+(one new adapter test over the prior 430).
+
+## What this does NOT claim (skepticism held)
+
+This wound is **observability, not the verifier's root cause.** It does not make
+the verifier reach `captured`; it makes the *next* failure legible. Wound #33's
+fix (muzzle + text mode) is the hypothesis for *why* the verdict was empty; if the
+deployed wound-#33 code already lands the verdict on stdout, this channel stays
+quiet (null sample, no suffix) and the run reaches `captured`. If the verifier
+**still** fails empty on the committed-receipt road, the blocker now carries the
+raw head/tail — and the next diagnosis reads the agent's actual emission instead
+of guessing. Either way, the operator stops re-driving blind. One fresh deploy
+carries BOTH the wound #33 muzzle and this channel, so the next live signal is
+unambiguous.
+
+## The carrier discipline (fourteenth carrier wound)
+
+#33 fixed *where the verdict lands*. #34 fixes *what you can see when it doesn't.*
+The class is not "the verifier failed" — it's "**a diagnostic that only fires on
+the abort path is blind to every failure that commits a receipt instead.**" Two
+roads out of the same failure (no parseable verdict), and the instrumentation only
+watched one. The fix is Nygard's transparency as a carrier invariant: the channel
+that names a failure must also carry enough internal state to act on it, and it
+must ride the road the failure actually travels — the committed receipt — not the
+exception that this failure mode, by construction, never throws. Dead-lettered
+diagnostics are worse than none: they read as "instrumented" while telling you
+nothing.
