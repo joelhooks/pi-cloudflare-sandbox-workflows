@@ -4632,9 +4632,52 @@ export class WorkflowApp implements WorkflowAppContract {
       }
     }
 
-    const statusReceipt = WorkflowDriveLaneStatusReceiptSchema.parse(
-      await agentWorkerLane.pollStep({ dispatch })
-    );
+    // Compute the deadline BEFORE polling: it must dominate EVERY exit from this
+    // poll path, including a `pollStep` that THROWS. pollStep hits a live
+    // Cloudflare container (getProcess RPC); an evicted or recycled container can
+    // make that call reject — or hand back a payload that fails schema parse —
+    // rather than return a status. An unguarded throw here aborted the whole
+    // drive before the deadline guard below, so the reaper re-paused this node
+    // every alarm FOREVER (observed: a 2h+ zombie on the first research.review
+    // node of a live dream run). This is the SAME class as the running-past-
+    // deadline wound, reached via a throwing poll instead of a stale `running`
+    // status — the deadline, not the poll outcome, is the source of truth for
+    // "the lane had its chance."
+    const deadlineMs = Date.parse(dispatch.deadline);
+    const pastDeadline =
+      Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
+
+    let statusReceipt: WorkflowDriveLaneStatusReceipt;
+    try {
+      statusReceipt = WorkflowDriveLaneStatusReceiptSchema.parse(
+        await agentWorkerLane.pollStep({ dispatch })
+      );
+    } catch (error) {
+      if (pastDeadline) {
+        await this.cleanupAsyncWorkerLane({ dispatch, reason: "timed-out" });
+        const result = await input.block(
+          blocker(
+            "capability_denied",
+            `Async worker lane ${dispatch.laneId} poll failed past its deadline: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          ),
+          "Async worker lane poll failed and was not recoverable by its deadline.",
+          { stepId: input.step.stepId }
+        );
+
+        return { result, status: "blocked" };
+      }
+
+      // Transient poll failure before the deadline: pause and retry next drive.
+      // If the container is permanently gone, the deadline guard above fires on a
+      // later drive instead of wedging forever.
+      return {
+        completedStepIds: [],
+        status: "paused",
+        stepIndex: input.nodeIndex,
+      };
+    }
     await input.recordDriveLaneStatus(statusReceipt);
 
     if (
@@ -4654,10 +4697,6 @@ export class WorkflowApp implements WorkflowAppContract {
 
       return { result, status: "blocked" };
     }
-
-    const deadlineMs = Date.parse(dispatch.deadline);
-    const pastDeadline =
-      Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
     // Past the dispatch deadline, ANY status reaching this point is a blown
     // lane and MUST be reaped. The recoverable paths already returned above: a
     // `completed` receipt with resolvable outputs returned "executed", and

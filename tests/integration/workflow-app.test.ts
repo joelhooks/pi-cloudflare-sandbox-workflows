@@ -5936,6 +5936,9 @@ const driveRunOneNodePerCall = async (
 const createAsyncWorkerLaneHarness = (input: {
   readonly artifacts: ReturnType<typeof createMemoryArtifactStore>;
   readonly deadline?: string;
+  // Simulate a live Cloudflare container whose getProcess RPC REJECTS (evicted /
+  // recycled container) instead of returning a status — the throwing-poll wound.
+  readonly pollThrows?: boolean;
   readonly processStatuses?: (
     | "starting"
     | "running"
@@ -5994,6 +5997,13 @@ const createAsyncWorkerLaneHarness = (input: {
     },
     laneKind: "worker",
     pollStep(pollInput) {
+      if (input.pollThrows === true) {
+        polls.push(`throw:${pollInput.dispatch.laneId}`);
+
+        return Promise.reject(
+          new Error("getProcess RPC failed: sandbox container unavailable")
+        );
+      }
       const status =
         processStatuses.shift() ?? processStatuses.at(-1) ?? "running";
       polls.push(`${status}:${pollInput.dispatch.laneId}`);
@@ -6420,6 +6430,101 @@ describe("workflow single-step drive (one node per alarm)", () => {
       cleanupReasons: [`timed-out:${asyncLane.dispatches[0]?.laneId}`],
       dispatchCount: 1,
       pollStatuses: ["running"],
+    });
+  });
+
+  it("blocks when the async worker lane poll throws past its deadline", async () => {
+    // Chaos regression for the throwing-poll wound (eighth carrier wound):
+    // pollStep hits a live Cloudflare container (getProcess RPC). An evicted or
+    // recycled container makes that call REJECT — or returns a payload that
+    // fails schema parse — rather than handing back a status. Before the fix the
+    // unguarded throw aborted the drive before the deadline guard, so the reaper
+    // re-paused the node every alarm FOREVER (observed: a 2h+ zombie on the
+    // first research.review node of a live dream run). Same class as the
+    // running-past-deadline wound, reached via a throwing poll instead of a
+    // stale `running` status — the deadline, not the poll outcome, decides.
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-poll-throws-past-deadline",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            deadline: "2000-01-01T00:00:00.000Z",
+            pollThrows: true,
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const blocked = await driveOneAdmittedSingleStep(rig, request);
+    if (blocked.status !== "blocked") {
+      throw new Error(`Expected blocked, got ${blocked.status}.`);
+    }
+
+    expect({
+      blockerCode: blocked.blocker.code,
+      cleanupReasons: asyncLane.cleanups,
+      dispatchCount: asyncLane.dispatches.length,
+      pollAttempts: asyncLane.polls.map((poll) => poll.split(":")[0]),
+    }).toStrictEqual({
+      blockerCode: "capability_denied",
+      cleanupReasons: [`timed-out:${asyncLane.dispatches[0]?.laneId}`],
+      dispatchCount: 1,
+      pollAttempts: ["throw"],
+    });
+  });
+
+  it("pauses and retries when the async worker lane poll throws before its deadline", async () => {
+    // The deadline-dominates fix must NOT turn a transient poll failure into a
+    // premature block: before the deadline a throwing poll pauses, and the next
+    // drive re-polls the same persisted dispatch. (Past the deadline it blocks —
+    // see the test above.) Two paused drives, one dispatch, two throwing polls.
+    let asyncLane: ReturnType<typeof createAsyncWorkerLaneHarness> | undefined;
+    const rig = buildResumableWorkflow(
+      "workflow-app-async-lane-poll-throws-before-deadline",
+      createIntegrationTestDynamicWorkflowPlanner(),
+      {
+        createAgentWorkerLane(artifacts) {
+          asyncLane = createAsyncWorkerLaneHarness({
+            artifacts,
+            deadline: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            pollThrows: true,
+          });
+
+          return asyncLane.lane;
+        },
+      }
+    );
+    if (asyncLane === undefined) {
+      throw new Error("Async lane harness was not created.");
+    }
+    const request = buildIntegrationTestRunRequest();
+
+    await driveOneAdmittedSingleStep(rig, request);
+    const firstPoll = await driveOneAdmittedSingleStep(rig, request);
+    const secondPoll = await driveOneAdmittedSingleStep(rig, request);
+
+    expect({
+      cleanupReasons: asyncLane.cleanups,
+      dispatchCount: asyncLane.dispatches.length,
+      firstPollStatus: firstPoll.status,
+      pollAttempts: asyncLane.polls.map((poll) => poll.split(":")[0]),
+      secondPollStatus: secondPoll.status,
+    }).toStrictEqual({
+      cleanupReasons: [],
+      dispatchCount: 1,
+      firstPollStatus: "paused",
+      pollAttempts: ["throw", "throw"],
+      secondPollStatus: "paused",
     });
   });
 
