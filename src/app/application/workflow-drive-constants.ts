@@ -1,0 +1,3 @@
+export const DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS = 3;
+
+export const MAX_STALL_GENERATIONS = 3;

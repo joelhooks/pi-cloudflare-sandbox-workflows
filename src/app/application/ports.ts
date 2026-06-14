@@ -97,6 +97,7 @@ export interface ContextCapsuleActorContract {
 
   persistCheckpoint(input: {
     readonly checkpoint: RunStepCheckpoint;
+    readonly driveGeneration?: number;
     readonly workItemId: string;
   }): Promise<void>;
 

@@ -117,6 +117,27 @@ const driveLedgerKey = (input: {
   readonly workItemId: string;
 }): string => `${input.workItemId}:${input.runId}`;
 
+const markWorkMutation = (
+  ledger: WorkflowDriveLedger,
+  driveGeneration: number,
+  updatedAt: string
+): WorkflowDriveLedger =>
+  WorkflowDriveLedgerSchema.parse({
+    ...ledger,
+    lastWorkMutationGeneration: driveGeneration,
+    updatedAt,
+  });
+
+const seedUnknownWorkMutationGeneration = (
+  ledger: WorkflowDriveLedger
+): WorkflowDriveLedger =>
+  ledger.lastWorkMutationGeneration === undefined
+    ? WorkflowDriveLedgerSchema.parse({
+        ...ledger,
+        lastWorkMutationGeneration: ledger.driveGeneration,
+      })
+    : ledger;
+
 const denied = (
   code: CapabilityDenialCode,
   message: string
@@ -308,6 +329,7 @@ export const createMemoryContextCapsuleActor =
     }): WorkflowDriveLedger =>
       WorkflowDriveLedgerSchema.parse({
         driveGeneration: 0,
+        lastWorkMutationGeneration: 0,
         phases: {},
         runId: input.runId,
         schemaVersion: "workflow.drive-ledger.v1",
@@ -327,6 +349,7 @@ export const createMemoryContextCapsuleActor =
     };
     const clearNodeAttemptsThrough = (input: {
       readonly checkpointStepIndex: number;
+      readonly driveGeneration?: number;
       readonly runId: string;
       readonly workItemId: string;
     }): void => {
@@ -352,7 +375,9 @@ export const createMemoryContextCapsuleActor =
             statusReceipt.nodeIndex > input.checkpointStepIndex
         )
       );
+      const checkpointAt = nowIso();
       if (
+        input.driveGeneration === undefined &&
         Object.keys(nodeAttempts).length ===
           Object.keys(current.nodeAttempts).length &&
         Object.keys(laneDispatches).length ===
@@ -364,11 +389,12 @@ export const createMemoryContextCapsuleActor =
       }
 
       putLedger({
-        ...current,
+        ...(input.driveGeneration === undefined
+          ? { ...current, updatedAt: checkpointAt }
+          : markWorkMutation(current, input.driveGeneration, checkpointAt)),
         laneDispatches,
         laneStatuses,
         nodeAttempts,
-        updatedAt: nowIso(),
       });
     };
     const assertGeneration = (input: {
@@ -398,7 +424,7 @@ export const createMemoryContextCapsuleActor =
     return {
       admitDrive(input) {
         const parsed = WorkflowDriveLedgerRequestSchema.parse(input);
-        const current = loadLedger(parsed);
+        const current = seedUnknownWorkMutationGeneration(loadLedger(parsed));
         const ledger = putLedger({
           ...current,
           driveGeneration: current.driveGeneration + 1,
@@ -449,12 +475,22 @@ export const createMemoryContextCapsuleActor =
       },
       persistCheckpoint(input) {
         const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
+        if (input.driveGeneration !== undefined) {
+          assertGeneration({
+            driveGeneration: input.driveGeneration,
+            runId: checkpoint.runId,
+            workItemId: checkpoint.workItemId,
+          });
+        }
         checkpoints.set(
           `${checkpoint.runId}:${checkpoint.stepIndex}`,
           checkpoint
         );
         clearNodeAttemptsThrough({
           checkpointStepIndex: checkpoint.stepIndex,
+          ...(input.driveGeneration === undefined
+            ? {}
+            : { driveGeneration: input.driveGeneration }),
           runId: checkpoint.runId,
           workItemId: checkpoint.workItemId,
         });
@@ -472,12 +508,15 @@ export const createMemoryContextCapsuleActor =
         const current = loadLedger(parsed.dispatch);
         const { dispatch } = parsed;
         const ledger = putLedger({
-          ...current,
+          ...markWorkMutation(
+            current,
+            parsed.driveGeneration,
+            dispatch.dispatchedAt
+          ),
           laneDispatches: {
             ...current.laneDispatches,
             [dispatch.dispatchKey]: dispatch,
           },
-          updatedAt: dispatch.dispatchedAt,
         });
 
         return Promise.resolve(ledger);
@@ -492,12 +531,15 @@ export const createMemoryContextCapsuleActor =
         const current = loadLedger(parsed.statusReceipt);
         const { statusReceipt } = parsed;
         const ledger = putLedger({
-          ...current,
+          ...markWorkMutation(
+            current,
+            parsed.driveGeneration,
+            statusReceipt.checkedAt
+          ),
           laneStatuses: {
             ...current.laneStatuses,
             [statusReceipt.dispatchKey]: statusReceipt,
           },
-          updatedAt: statusReceipt.checkedAt,
         });
 
         return Promise.resolve(ledger);
@@ -521,12 +563,11 @@ export const createMemoryContextCapsuleActor =
           stepId: parsed.stepId,
         });
         putLedger({
-          ...current,
+          ...markWorkMutation(current, parsed.driveGeneration, attemptedAt),
           nodeAttempts: {
             ...current.nodeAttempts,
             [key]: attempt,
           },
-          updatedAt: attemptedAt,
         });
 
         return Promise.resolve(attempt);
@@ -543,12 +584,11 @@ export const createMemoryContextCapsuleActor =
         };
         const current = loadLedger(parsed);
         const ledger = putLedger({
-          ...current,
+          ...markWorkMutation(current, parsed.driveGeneration, completedAt),
           phases: {
             ...current.phases,
             [phase.phaseId]: phase,
           },
-          updatedAt: completedAt,
         });
 
         return Promise.resolve(ledger);

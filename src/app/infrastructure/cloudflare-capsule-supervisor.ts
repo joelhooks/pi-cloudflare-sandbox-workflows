@@ -9,6 +9,7 @@ import type {
   WorkerFrontDoorContract,
 } from "../application/ports.ts";
 import { StaleDriveGenerationError } from "../application/ports.ts";
+import { MAX_STALL_GENERATIONS } from "../application/workflow-drive-constants.ts";
 import {
   AgentLaneAdmissionDecisionSchema,
   AgentLaneAdmissionRequestSchema,
@@ -21,10 +22,13 @@ import {
   RunDurabilityDumpSchema,
   RunDurabilityRequestSchema,
   RunStepCheckpointSchema,
+  SafetyEnvelopeStateSchema,
   StartRunRequestSchema,
   StaleDriveGenerationRejectionSchema,
   WorkflowEventSchema,
   WorkflowDriveAdmissionSchema,
+  WorkflowDriveFailureRecordRequestSchema,
+  WorkflowDriveFailureSchema,
   WorkflowDriveGenerationAssertionRequestSchema,
   WorkflowDriveLaneDispatchRecordRequestSchema,
   WorkflowDriveLaneStatusRecordRequestSchema,
@@ -41,6 +45,7 @@ import type {
   ContextCapsuleRecord,
   RunDurabilityDump,
   RunStepCheckpoint,
+  SafetyEnvelopeState,
   WorkflowDriveNodeAttempt,
   WorkflowDriveLedger,
   StartRunRequest,
@@ -197,6 +202,23 @@ const REAPER_DUE_AT_STORAGE_KEY = "reaper-due-at";
 
 const ReaperDueAtSchema = z.number().int().min(0);
 
+const StallRunProjectionRowSchema = z.object({
+  actor_id: z.string().min(1),
+  capsule_id: z.string().min(1),
+  event_index: z.number().int().min(0).nullable(),
+  run_id: z.string().min(1),
+  status: SafetyEnvelopeStateSchema,
+  work_item_id: z.string().min(1),
+});
+
+const EventIndexRowSchema = z.object({
+  event_index: z.number().int().min(0).nullable(),
+});
+
+const D1RunResultSchema = z.object({
+  success: z.boolean().optional(),
+});
+
 const createCapsuleRecord = (input: {
   readonly runId: string;
   readonly workItemId: string;
@@ -229,6 +251,10 @@ const appendUnique = (
  */
 type DriveOutcome = "failed" | "paused" | "stale" | "terminal";
 
+interface DriveFailureRecorder {
+  recordFailure(error: unknown): Promise<void>;
+}
+
 /**
  * Delay before a paused single-step drive's next node fires (the resume re-arm).
  * Small enough that nodes flow at near work-speed, but STRICTLY POSITIVE because
@@ -247,18 +273,77 @@ type DriveOutcome = "failed" | "paused" | "stale" | "terminal";
  */
 const RESUME_DELAY_MS = 250;
 
+const DRIVE_FAILURE_MESSAGE_MAX_LENGTH = 240;
+
+const SECRET_ASSIGNMENT_PATTERN =
+  /\b(token|secret|password|passwd|bearer|authorization|api[_-]?key)\b\s*[:=]\s*["']?[^,\s"']+/giu;
+const URL_PATTERN = /https?:\/\/\S+/giu;
+const ARTIFACT_REF_PATTERN = /artifact:\/\/\S+/giu;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
+const ABSOLUTE_PATH_PATTERN =
+  /(?:[A-Za-z]:)?\/(?:[^\s"'`,:;(){}[\]]+\/)+[^\s"'`,:;(){}[\]]*/gu;
+const TOKENISH_PATTERN = /\b[A-Za-z0-9_-]{32,}\b/gu;
+
+const redactedDriveFailureMessage = (error: unknown): string => {
+  const raw =
+    error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : `Error: ${String(error)}`;
+  const scrubbed = raw
+    .replace(SECRET_ASSIGNMENT_PATTERN, "$1=[redacted-secret]")
+    .replace(URL_PATTERN, "[redacted-url]")
+    .replace(ARTIFACT_REF_PATTERN, "[redacted-artifact-ref]")
+    .replace(EMAIL_PATTERN, "[redacted-email]")
+    .replace(ABSOLUTE_PATH_PATTERN, "[redacted-path]")
+    .replace(TOKENISH_PATTERN, "[redacted-token]")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+  const message =
+    scrubbed.length === 0 ? "Error: redacted drive failure." : scrubbed;
+
+  return message.length <= DRIVE_FAILURE_MESSAGE_MAX_LENGTH
+    ? message
+    : `${message.slice(0, DRIVE_FAILURE_MESSAGE_MAX_LENGTH - 3)}...`;
+};
+
 const emptyDriveLedger = (input: {
   readonly runId: string;
   readonly workItemId: string;
 }): WorkflowDriveLedger =>
   WorkflowDriveLedgerSchema.parse({
     driveGeneration: 0,
+    lastWorkMutationGeneration: 0,
     phases: {},
     runId: input.runId,
     schemaVersion: "workflow.drive-ledger.v1",
     updatedAt: nowIso(),
     workItemId: input.workItemId,
   });
+
+const withWorkMutationGeneration = (
+  ledger: WorkflowDriveLedger,
+  driveGeneration: number,
+  updatedAt: string
+): WorkflowDriveLedger =>
+  WorkflowDriveLedgerSchema.parse({
+    ...ledger,
+    lastWorkMutationGeneration: driveGeneration,
+    updatedAt,
+  });
+
+const seedUnknownWorkMutationGeneration = (
+  ledger: WorkflowDriveLedger
+): WorkflowDriveLedger =>
+  ledger.lastWorkMutationGeneration === undefined
+    ? WorkflowDriveLedgerSchema.parse({
+        ...ledger,
+        lastWorkMutationGeneration: ledger.driveGeneration,
+      })
+    : ledger;
+
+const stalledGenerationsFor = (ledger: WorkflowDriveLedger): number =>
+  ledger.driveGeneration -
+  (ledger.lastWorkMutationGeneration ?? ledger.driveGeneration);
 
 const staleDriveGeneration = (input: {
   readonly currentGeneration: number;
@@ -292,7 +377,8 @@ const staleDriveGeneration = (input: {
 const driveOneQueuedRun = async (
   frontDoor: WorkerFrontDoorContract,
   request: WorkflowRunRequest,
-  driveGeneration: number
+  driveGeneration: number,
+  failureRecorder: DriveFailureRecorder
 ): Promise<DriveOutcome> => {
   try {
     // Single-step drive: resume from the latest checkpoint and execute EXACTLY
@@ -315,6 +401,13 @@ const driveOneQueuedRun = async (
     }
 
     console.error("queued run driver failed", request.runId, error);
+    try {
+      await failureRecorder.recordFailure(error);
+    } catch {
+      // Best-effort observability: this write is fenced, and if a newer drive
+      // already owns the generation, losing the failure breadcrumb must not mask
+      // the original failure or change the "failed" outcome.
+    }
 
     return "failed";
   }
@@ -380,6 +473,226 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     return parsed;
   }
 
+  private async latestCheckpointForRun(
+    runId: string
+  ): Promise<RunStepCheckpoint | null> {
+    const stored = await this.ctx.storage.list({
+      prefix: checkpointStoragePrefix(runId),
+    });
+    let latest: RunStepCheckpoint | null = null;
+    for (const value of stored.values()) {
+      const checkpoint = RunStepCheckpointSchema.parse(value);
+      if (latest === null || checkpoint.stepIndex > latest.stepIndex) {
+        latest = checkpoint;
+      }
+    }
+
+    return latest;
+  }
+
+  private async nextStepIndexGuess(runId: string): Promise<number> {
+    const latest = await this.latestCheckpointForRun(runId);
+
+    return latest === null ? 0 : latest.stepIndex + 1;
+  }
+
+  private async recordLastDriveFailure(input: {
+    readonly driveGeneration: number;
+    readonly error: unknown;
+    readonly runId: string;
+    readonly stepIndexGuess: number;
+    readonly workItemId: string;
+  }): Promise<void> {
+    const failure = WorkflowDriveFailureRecordRequestSchema.parse({
+      driveGeneration: input.driveGeneration,
+      failure: {
+        message: redactedDriveFailureMessage(input.error),
+        stepIndexGuess: input.stepIndexGuess,
+      },
+      runId: input.runId,
+      workItemId: input.workItemId,
+    });
+    await this.assertActiveGeneration(failure);
+    const current = await this.getDriveLedger(failure);
+    const at = nowIso();
+    await this.putDriveLedger({
+      ...current,
+      lastDriveFailure: WorkflowDriveFailureSchema.parse({
+        ...failure.failure,
+        at,
+        driveGeneration: failure.driveGeneration,
+      }),
+      updatedAt: at,
+    });
+  }
+
+  private async nextEventIndexForRun(runId: string): Promise<number> {
+    const d1 = this.env.WORKFLOW_APP_D1;
+    if (d1 === undefined) {
+      return 1;
+    }
+    const result = await d1
+      .prepare(
+        `select max(event_index) as event_index
+         from workflow_events
+         where run_id = ?`
+      )
+      .bind(runId)
+      .all();
+    const row = EventIndexRowSchema.parse(
+      result.results?.[0] ?? { event_index: null }
+    );
+
+    return (row.event_index ?? 0) + 1;
+  }
+
+  private async readRunProjectionForStall(runId: string): Promise<null | {
+    readonly actorId: string;
+    readonly capsuleId: string;
+    readonly status: SafetyEnvelopeState;
+    readonly workItemId: string;
+  }> {
+    const d1 = this.env.WORKFLOW_APP_D1;
+    if (d1 === undefined) {
+      return null;
+    }
+    const result = await d1
+      .prepare(
+        `select
+           runs.run_id as run_id,
+           runs.work_item_id as work_item_id,
+           runs.capsule_id as capsule_id,
+           runs.actor_id as actor_id,
+           runs.status as status,
+           (select max(event_index) from workflow_events where workflow_events.run_id = runs.run_id) as event_index
+         from runs
+         where runs.run_id = ?
+         limit 1`
+      )
+      .bind(runId)
+      .all();
+    const first = result.results?.[0];
+    if (first === undefined) {
+      return null;
+    }
+    const row = StallRunProjectionRowSchema.parse(first);
+
+    return {
+      actorId: row.actor_id,
+      capsuleId: row.capsule_id,
+      status: row.status,
+      workItemId: row.work_item_id,
+    };
+  }
+
+  private static async assertD1Write(
+    statement: ReturnType<
+      NonNullable<WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]>["prepare"]
+    >,
+    summary: string
+  ): Promise<void> {
+    const result = D1RunResultSchema.parse(await statement.run());
+    if (result.success === false) {
+      throw new Error(summary);
+    }
+  }
+
+  private async blockStalledRun(input: {
+    readonly ledger: WorkflowDriveLedger;
+    readonly request: WorkflowRunRequest;
+    readonly stallGenerations: number;
+  }): Promise<boolean> {
+    const d1 = this.env.WORKFLOW_APP_D1;
+    if (d1 === undefined) {
+      return false;
+    }
+    const row = await this.readRunProjectionForStall(input.request.runId);
+    if (row !== null && TERMINAL_RUN_STATES.has(row.status)) {
+      return true;
+    }
+
+    const now = nowIso();
+    const message = `wedged: ${input.stallGenerations} consecutive drives advanced no ledger work`;
+    const actorId = row?.actorId ?? input.request.actor.id;
+    const capsuleId = row?.capsuleId ?? `capsule:${input.request.workItemId}`;
+    const workItemId = row?.workItemId ?? input.request.workItemId;
+    const nextEventIndex = await this.nextEventIndexForRun(input.request.runId);
+    const lastWorkMutationGeneration =
+      input.ledger.lastWorkMutationGeneration ?? input.ledger.driveGeneration;
+
+    await CloudflareWorkflowCapsuleSupervisor.assertD1Write(
+      d1
+        .prepare(
+          `insert into runs (run_id, work_item_id, capsule_id, actor_id, status, plan_ref, plan_hash, blocker_code, blocker_message, blocker_step_id, blocker_node_type, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           on conflict(run_id) do update set
+             work_item_id = excluded.work_item_id,
+             capsule_id = excluded.capsule_id,
+             actor_id = excluded.actor_id,
+             status = excluded.status,
+             plan_ref = coalesce(excluded.plan_ref, runs.plan_ref),
+             plan_hash = coalesce(excluded.plan_hash, runs.plan_hash),
+             blocker_code = excluded.blocker_code,
+             blocker_message = excluded.blocker_message,
+             blocker_step_id = excluded.blocker_step_id,
+             blocker_node_type = excluded.blocker_node_type,
+             updated_at = excluded.updated_at`
+        )
+        .bind(
+          input.request.runId,
+          workItemId,
+          capsuleId,
+          actorId,
+          "blocked",
+          null,
+          null,
+          "drive_stall_reaped",
+          message,
+          null,
+          null,
+          now
+        ),
+      "Stall-generation reaper run row could not be persisted."
+    );
+    await CloudflareWorkflowCapsuleSupervisor.assertD1Write(
+      d1
+        .prepare(
+          `insert into workflow_events (run_id, event_index, work_item_id, capsule_id, actor_id, state, summary, refs_json, redacted, at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           on conflict(run_id, event_index) do update set
+             work_item_id = excluded.work_item_id,
+             capsule_id = excluded.capsule_id,
+             actor_id = excluded.actor_id,
+             state = excluded.state,
+             summary = excluded.summary,
+             refs_json = excluded.refs_json,
+             redacted = excluded.redacted,
+             at = excluded.at`
+        )
+        .bind(
+          input.request.runId,
+          nextEventIndex,
+          workItemId,
+          capsuleId,
+          actorId,
+          "blocked",
+          "Run blocked by stall-generation reaper.",
+          JSON.stringify({
+            driveGeneration: String(input.ledger.driveGeneration),
+            lastWorkMutationGeneration: String(lastWorkMutationGeneration),
+            maxStallGenerations: String(MAX_STALL_GENERATIONS),
+            reaperReason: "drive-stall-generations",
+            stallGenerations: String(input.stallGenerations),
+          }),
+          1,
+          now
+        ),
+      "Stall-generation reaper event row could not be persisted."
+    );
+
+    return true;
+  }
+
   private async assertActiveGeneration(input: {
     readonly driveGeneration: number;
     readonly runId: string;
@@ -398,17 +711,12 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async admitDrive(request: Request): Promise<Response> {
     const input = WorkflowDriveLedgerRequestSchema.parse(await request.json());
-    const current = await this.getDriveLedger(input);
-    const ledger = await this.putDriveLedger({
-      ...current,
-      driveGeneration: current.driveGeneration + 1,
-      updatedAt: nowIso(),
-    });
+    const admission = await this.admitDriveForRun(input);
 
     return json(
       WorkflowDriveAdmissionSchema.parse({
-        driveGeneration: ledger.driveGeneration,
-        ledger,
+        driveGeneration: admission.driveGeneration,
+        ledger: admission.ledger,
         runId: input.runId,
         workItemId: input.workItemId,
       })
@@ -461,12 +769,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
     return json(
       await this.putDriveLedger({
-        ...current,
+        ...withWorkMutationGeneration(
+          current,
+          input.driveGeneration,
+          completedAt
+        ),
         phases: {
           ...current.phases,
           [phase.phaseId]: phase,
         },
-        updatedAt: completedAt,
       })
     );
   }
@@ -501,12 +812,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       });
 
     await this.putDriveLedger({
-      ...current,
+      ...withWorkMutationGeneration(
+        current,
+        input.driveGeneration,
+        attemptedAt
+      ),
       nodeAttempts: {
         ...current.nodeAttempts,
         [nodeAttemptKey]: attempt,
       },
-      updatedAt: attemptedAt,
     });
 
     return json(attempt);
@@ -535,12 +849,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
     return json(
       await this.putDriveLedger({
-        ...current,
+        ...withWorkMutationGeneration(
+          current,
+          input.driveGeneration,
+          dispatch.dispatchedAt
+        ),
         laneDispatches: {
           ...current.laneDispatches,
           [dispatch.dispatchKey]: dispatch,
         },
-        updatedAt: dispatch.dispatchedAt,
       })
     );
   }
@@ -568,12 +885,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
     return json(
       await this.putDriveLedger({
-        ...current,
+        ...withWorkMutationGeneration(
+          current,
+          input.driveGeneration,
+          statusReceipt.checkedAt
+        ),
         laneStatuses: {
           ...current.laneStatuses,
           [statusReceipt.dispatchKey]: statusReceipt,
         },
-        updatedAt: statusReceipt.checkedAt,
       })
     );
   }
@@ -708,13 +1028,32 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
   private async persistCheckpoint(request: Request): Promise<Response> {
     const input = PersistRunCheckpointRequestSchema.parse(await request.json());
     const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
+    if (input.driveGeneration !== undefined) {
+      try {
+        await this.assertActiveGeneration({
+          driveGeneration: input.driveGeneration,
+          runId: checkpoint.runId,
+          workItemId: checkpoint.workItemId,
+        });
+      } catch (error) {
+        if (error instanceof StaleDriveGenerationError) {
+          return json(error.rejection, { status: 409 });
+        }
+
+        throw error;
+      }
+    }
     await this.ctx.storage.put(
       checkpointStorageKey(checkpoint.runId, checkpoint.stepIndex),
       checkpoint
     );
     await this.clearDriveNodeAttemptsThrough({
       checkpointStepIndex: checkpoint.stepIndex,
+      ...(input.driveGeneration === undefined
+        ? {}
+        : { driveGeneration: input.driveGeneration }),
       runId: checkpoint.runId,
+      workItemId: checkpoint.workItemId,
     });
 
     return json({ ok: true });
@@ -722,7 +1061,9 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async clearDriveNodeAttemptsThrough(input: {
     readonly checkpointStepIndex: number;
+    readonly driveGeneration?: number;
     readonly runId: string;
+    readonly workItemId: string;
   }): Promise<void> {
     const current = WorkflowDriveLedgerSchema.nullable().parse(
       (await this.ctx.storage.get(driveLedgerStorageKey(input.runId))) ?? null
@@ -747,7 +1088,9 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
           statusReceipt.nodeIndex > input.checkpointStepIndex
       )
     );
+    const checkpointAt = nowIso();
     if (
+      input.driveGeneration === undefined &&
       Object.keys(nodeAttempts).length ===
         Object.keys(current.nodeAttempts).length &&
       Object.keys(laneDispatches).length ===
@@ -759,11 +1102,16 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     }
 
     await this.putDriveLedger({
-      ...current,
+      ...(input.driveGeneration === undefined
+        ? { ...current, updatedAt: checkpointAt }
+        : withWorkMutationGeneration(
+            current,
+            input.driveGeneration,
+            checkpointAt
+          )),
       laneDispatches,
       laneStatuses,
       nodeAttempts,
-      updatedAt: nowIso(),
     });
   }
 
@@ -898,11 +1246,13 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       generatedAt: nowIso(),
       hasRunStartRecord,
       laneDispatches,
+      lastDriveFailure:
+        ledger === null ? null : (ledger.lastDriveFailure ?? null),
       nodeAttempts,
       reaperDueAtMs,
       redacted: true,
       runId: input.runId,
-      schemaVersion: "workflow.run-durability.v2",
+      schemaVersion: "workflow.run-durability.v3",
       workItemId: input.workItemId,
     });
 
@@ -1053,10 +1403,15 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         continue;
       }
 
-      const admission = await this.admitDriveForRun({
-        runId: request.runId,
-        workItemId: request.workItemId,
-      });
+      const admission = await this.admitDriveForRun({ request });
+      if (admission.status === "stalled") {
+        await this.ctx.storage.delete(runStartStorageKey(request.runId));
+        await this.ctx.storage.delete(drivingMarkerStorageKey(request.runId));
+        await this.releaseAdmissionSlotsAfterReap(await this.getRecord(), [
+          request.runId,
+        ]);
+        continue;
+      }
       if (frontDoor === undefined) {
         const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
         frontDoor = await driver(this.env);
@@ -1069,7 +1424,18 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       const outcome = await driveOneQueuedRun(
         frontDoor,
         request,
-        admission.driveGeneration
+        admission.driveGeneration,
+        {
+          recordFailure: async (error) => {
+            await this.recordLastDriveFailure({
+              driveGeneration: admission.driveGeneration,
+              error,
+              runId: request.runId,
+              stepIndexGuess: await this.nextStepIndexGuess(request.runId),
+              workItemId: request.workItemId,
+            });
+          },
+        }
       );
       if (outcome === "terminal") {
         // Terminal: retire both the run-start record and the marker. A future
@@ -1106,18 +1472,70 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     }
   }
 
-  private async admitDriveForRun(input: {
-    readonly runId: string;
-    readonly workItemId: string;
-  }): Promise<{ readonly driveGeneration: number }> {
-    const current = await this.getDriveLedger(input);
+  private async admitDriveForRun(
+    input:
+      | {
+          readonly request: WorkflowRunRequest;
+        }
+      | {
+          readonly runId: string;
+          readonly workItemId: string;
+        }
+  ): Promise<
+    | {
+        readonly driveGeneration: number;
+        readonly ledger: WorkflowDriveLedger;
+        readonly status: "admitted";
+      }
+    | {
+        readonly driveGeneration: number;
+        readonly ledger: WorkflowDriveLedger;
+        readonly stallGenerations: number;
+        readonly status: "stalled";
+      }
+  > {
+    const request = "request" in input ? input.request : undefined;
+    const identity =
+      "request" in input
+        ? { runId: input.request.runId, workItemId: input.request.workItemId }
+        : { runId: input.runId, workItemId: input.workItemId };
+    const seeded = seedUnknownWorkMutationGeneration(
+      await this.getDriveLedger(identity)
+    );
+    const stallGenerations = stalledGenerationsFor(seeded);
+    if (
+      request !== undefined &&
+      stallGenerations >= MAX_STALL_GENERATIONS &&
+      (await this.blockStalledRun({
+        ledger: seeded,
+        request,
+        stallGenerations,
+      }))
+    ) {
+      const ledger = await this.putDriveLedger({
+        ...seeded,
+        updatedAt: nowIso(),
+      });
+
+      return {
+        driveGeneration: ledger.driveGeneration,
+        ledger,
+        stallGenerations,
+        status: "stalled",
+      };
+    }
+
     const ledger = await this.putDriveLedger({
-      ...current,
-      driveGeneration: current.driveGeneration + 1,
+      ...seeded,
+      driveGeneration: seeded.driveGeneration + 1,
       updatedAt: nowIso(),
     });
 
-    return { driveGeneration: ledger.driveGeneration };
+    return {
+      driveGeneration: ledger.driveGeneration,
+      ledger,
+      status: "admitted",
+    };
   }
 
   private async clearDrivingMarkerIfOwned(

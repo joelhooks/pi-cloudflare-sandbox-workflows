@@ -1979,10 +1979,11 @@ describe("Cloudflare Worker route", () => {
       drivingMarker: { stale: false, startedAtMs: 1_700_000_400_000 },
       generatedAt: "2026-06-11T01:00:00.000Z",
       hasRunStartRecord: true,
+      lastDriveFailure: null,
       reaperDueAtMs: 1_700_000_900_000,
       redacted: true,
       runId: "run-route-test",
-      schemaVersion: "workflow.run-durability.v2",
+      schemaVersion: "workflow.run-durability.v3",
       workItemId: "work-item:route-test",
     });
 

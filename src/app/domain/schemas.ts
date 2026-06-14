@@ -1252,6 +1252,7 @@ export const CapabilityDenialCodeSchema = z.enum([
   "adapter_unavailable",
   "receipt_persistence_failed",
   "plan_node_config_invalid",
+  "drive_stall_reaped",
 ]);
 
 export const CapabilityBlockerSchema = z.object({
@@ -2087,6 +2088,7 @@ export const RunStepCheckpointSchema = z.object({
 
 export const PersistRunCheckpointRequestSchema = z.object({
   checkpoint: RunStepCheckpointSchema,
+  driveGeneration: z.number().int().min(0).optional(),
   workItemId: z.string().min(1),
 });
 
@@ -2193,6 +2195,21 @@ export const RunDurabilityLaneDispatchSchema = z.object({
   stepId: z.string().min(1),
 });
 
+/**
+ * Redacted projection of the last swallowed queued-drive failure. This is
+ * intentionally tiny: the raw exception may contain private paths, credentials,
+ * prompt/customer data, or platform internals. Writers must scrub/truncate the
+ * message before it reaches this schema; the dump only exposes the scrubbed
+ * value, the drive generation that failed, and an optional best-effort next-step
+ * guess.
+ */
+export const WorkflowDriveFailureSchema = z.object({
+  at: IsoDateTimeSchema,
+  driveGeneration: z.number().int().min(0),
+  message: z.string().min(1).max(280),
+  stepIndexGuess: z.number().int().min(0).optional(),
+});
+
 export const RunDurabilityDumpSchema = z.object({
   activeLaneCount: z.number().int().min(0),
   alarmAtMs: z.number().int().min(0).nullable(),
@@ -2202,11 +2219,12 @@ export const RunDurabilityDumpSchema = z.object({
   generatedAt: IsoDateTimeSchema,
   hasRunStartRecord: z.boolean(),
   laneDispatches: z.array(RunDurabilityLaneDispatchSchema).default([]),
+  lastDriveFailure: WorkflowDriveFailureSchema.nullable(),
   nodeAttempts: z.array(RunDurabilityNodeAttemptSchema).default([]),
   reaperDueAtMs: z.number().int().min(0).nullable(),
   redacted: z.literal(true),
   runId: z.string().min(1),
-  schemaVersion: z.literal("workflow.run-durability.v2"),
+  schemaVersion: z.literal("workflow.run-durability.v3"),
   workItemId: z.string().min(1),
 });
 
@@ -2378,6 +2396,8 @@ export const WorkflowDriveLedgerSchema = z.object({
   laneStatuses: z
     .record(z.string().min(1), WorkflowDriveLaneStatusReceiptSchema)
     .default({}),
+  lastDriveFailure: WorkflowDriveFailureSchema.optional(),
+  lastWorkMutationGeneration: z.number().int().min(0).optional(),
   nodeAttempts: z
     .record(z.string().min(1), WorkflowDriveNodeAttemptSchema)
     .default({}),
@@ -2432,6 +2452,16 @@ export const WorkflowDriveLaneDispatchRecordRequestSchema = z.object({
 export const WorkflowDriveLaneStatusRecordRequestSchema = z.object({
   driveGeneration: z.number().int().min(0),
   statusReceipt: WorkflowDriveLaneStatusReceiptSchema,
+});
+
+export const WorkflowDriveFailureRecordRequestSchema = z.object({
+  driveGeneration: z.number().int().min(0),
+  failure: WorkflowDriveFailureSchema.omit({
+    at: true,
+    driveGeneration: true,
+  }),
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
 });
 
 export const WorkflowDriveGenerationAssertionRequestSchema = z.object({
@@ -2509,6 +2539,7 @@ export type WorkflowDriveLedger = z.infer<typeof WorkflowDriveLedgerSchema>;
 export type WorkflowDriveLedgerPhase = z.infer<
   typeof WorkflowDriveLedgerPhaseSchema
 >;
+export type WorkflowDriveFailure = z.infer<typeof WorkflowDriveFailureSchema>;
 export type WorkflowDriveLedgerPhaseId = z.infer<
   typeof WorkflowDrivePhaseIdSchema
 >;

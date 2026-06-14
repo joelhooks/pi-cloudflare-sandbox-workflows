@@ -133,6 +133,7 @@ import type {
   WzrrdPublishCapabilityAdapter,
   WorkflowAppContract,
 } from "./ports.ts";
+import { DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS } from "./workflow-drive-constants.ts";
 
 interface WorkflowDependencies {
   readonly artifacts: ArtifactStoreContract;
@@ -177,8 +178,6 @@ interface WorkflowDependencies {
     readonly publish: string;
   };
 }
-
-const DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS = 3;
 
 const nodeTypeForAttempt = (
   step: DynamicWorkflowStep
@@ -1710,6 +1709,7 @@ export class WorkflowApp implements WorkflowAppContract {
       });
       await this.dependencies.contextCapsules.persistCheckpoint({
         checkpoint,
+        ...(driveGeneration === undefined ? {} : { driveGeneration }),
         workItemId: request.workItemId,
       });
     };

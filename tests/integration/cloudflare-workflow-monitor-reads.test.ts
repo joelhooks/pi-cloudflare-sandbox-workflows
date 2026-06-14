@@ -222,6 +222,7 @@ describe("Capsule supervisor run durability dump", () => {
       checkpoint: dump.checkpoint,
       drivingStale: dump.drivingMarker?.stale,
       hasRunStartRecord: dump.hasRunStartRecord,
+      lastDriveFailure: dump.lastDriveFailure,
       reaperDueAtMs: dump.reaperDueAtMs,
       redacted: dump.redacted,
       runId: dump.runId,
@@ -243,10 +244,11 @@ describe("Capsule supervisor run durability dump", () => {
       },
       drivingStale: true,
       hasRunStartRecord: true,
+      lastDriveFailure: null,
       reaperDueAtMs: 1_700_000_900_000,
       redacted: true,
       runId: "run-dur",
-      schemaVersion: "workflow.run-durability.v2",
+      schemaVersion: "workflow.run-durability.v3",
       workItemId: "work-item:durability-test",
     });
   });
@@ -270,6 +272,7 @@ describe("Capsule supervisor run durability dump", () => {
       drivingMarker: dump.drivingMarker,
       hasRunStartRecord: dump.hasRunStartRecord,
       laneDispatches: dump.laneDispatches,
+      lastDriveFailure: dump.lastDriveFailure,
       nodeAttempts: dump.nodeAttempts,
       reaperDueAtMs: dump.reaperDueAtMs,
     }).toStrictEqual({
@@ -280,6 +283,7 @@ describe("Capsule supervisor run durability dump", () => {
       drivingMarker: null,
       hasRunStartRecord: false,
       laneDispatches: [],
+      lastDriveFailure: null,
       nodeAttempts: [],
       reaperDueAtMs: null,
     });
@@ -323,6 +327,12 @@ describe("Capsule supervisor run durability dump", () => {
         },
       },
       laneStatuses: {},
+      lastDriveFailure: {
+        at: "2026-06-11T00:16:00.000Z",
+        driveGeneration: 12,
+        message: "Error: redacted",
+        stepIndexGuess: 3,
+      },
       nodeAttempts: {
         "2": {
           attemptCount: 1,
@@ -360,6 +370,12 @@ describe("Capsule supervisor run durability dump", () => {
     // driveGeneration surfaces, and node attempts come back sorted by nodeIndex
     // so the trail reads in execution order.
     expect(dump.driveGeneration).toBe(12);
+    expect(dump.lastDriveFailure).toStrictEqual({
+      at: "2026-06-11T00:16:00.000Z",
+      driveGeneration: 12,
+      message: "Error: redacted",
+      stepIndexGuess: 3,
+    });
     expect(dump.nodeAttempts).toStrictEqual([
       {
         attemptCount: 1,

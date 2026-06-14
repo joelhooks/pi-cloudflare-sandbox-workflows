@@ -1,12 +1,16 @@
 import type * as CloudflareWorkersModule from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts";
+import { MAX_STALL_GENERATIONS } from "../../src/app/application/workflow-drive-constants.ts";
 import {
   LoadRunCheckpointResolutionSchema,
+  RunDurabilityDumpSchema,
   StaleDriveGenerationRejectionSchema,
   WorkflowDriveAdmissionSchema,
   WorkflowDriveLedgerSchema,
+  WorkflowDriveLaneStatusReceiptSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunPausedSchema,
   WorkflowRunRequestSchema,
@@ -214,6 +218,54 @@ const loadDriveLedger = async (
   return WorkflowDriveLedgerSchema.parse(await response.json());
 };
 
+const getDurability = async (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest
+) => {
+  const response = await supervisor.fetch(
+    new Request("https://supervisor.internal/get-durability", {
+      body: JSON.stringify({
+        runId: request.runId,
+        workItemId: request.workItemId,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
+  return RunDurabilityDumpSchema.parse(await response.json());
+};
+
+const recordDriveLaneStatus = (
+  supervisor: CloudflareWorkflowCapsuleSupervisorInstance,
+  request: WorkflowRunRequest,
+  input: { readonly driveGeneration: number; readonly checkedAt: string }
+): Promise<Response> =>
+  supervisor.fetch(
+    new Request("https://supervisor.internal/record-drive-lane-status", {
+      body: JSON.stringify({
+        driveGeneration: input.driveGeneration,
+        statusReceipt: WorkflowDriveLaneStatusReceiptSchema.parse({
+          checkedAt: input.checkedAt,
+          dispatchKey: "node-3:healthy-review",
+          kind: "worker",
+          laneId: "lane:healthy-review",
+          nodeIndex: 3,
+          nodeType: "joelclaw.research.review",
+          processId: "process-healthy-review",
+          runId: request.runId,
+          sandboxId: "sandbox-healthy-review",
+          schemaVersion: "workflow.drive-lane-status.v1",
+          status: "running",
+          stepId: "healthy-review",
+          workItemId: request.workItemId,
+        }),
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    })
+  );
+
 /**
  * Read the latest persisted checkpoint for a run through the supervisor's own
  * `/load-latest-checkpoint` route — the exact resume read `WorkflowApp.run()`
@@ -272,6 +324,184 @@ const drivingMarkerKey = (request: WorkflowRunRequest): string =>
   `driving:${request.runId}`;
 
 const TEST_TIMEOUT_MS = 600_000;
+
+interface MutableRunRow {
+  actor_id: string;
+  blocker_code: null | string;
+  blocker_message: null | string;
+  blocker_node_type: null | string;
+  blocker_step_id: null | string;
+  capsule_id: string;
+  run_id: string;
+  status: string;
+  work_item_id: string;
+}
+
+interface MutableEventRow {
+  actor_id: string;
+  at: string;
+  capsule_id: string;
+  event_index: number;
+  redacted: number;
+  refs_json: string;
+  run_id: string;
+  state: string;
+  summary: string;
+  work_item_id: string;
+}
+
+const StallEventRefsSchema = z.object({
+  driveGeneration: z.string(),
+  lastWorkMutationGeneration: z.string(),
+  maxStallGenerations: z.string(),
+  reaperReason: z.literal("drive-stall-generations"),
+  stallGenerations: z.string(),
+});
+
+const stringBinding = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  throw new TypeError("Expected scalar D1 binding.");
+};
+
+const nullableStringBinding = (value: unknown): null | string =>
+  value === null || value === undefined ? null : stringBinding(value);
+
+const numberBinding = (value: unknown): number => {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return Number(value);
+  }
+
+  throw new TypeError("Expected numeric D1 binding.");
+};
+
+const createMutableRunD1 = (request: WorkflowRunRequest) => {
+  const run: MutableRunRow = {
+    actor_id: request.actor.id,
+    blocker_code: null,
+    blocker_message: null,
+    blocker_node_type: null,
+    blocker_step_id: null,
+    capsule_id: `capsule:${request.workItemId}`,
+    run_id: request.runId,
+    status: "executingDynamicWorkflow",
+    work_item_id: request.workItemId,
+  };
+  const events: MutableEventRow[] = Array.from(
+    { length: 8 },
+    (_unused, index) => ({
+      actor_id: request.actor.id,
+      at: "2026-06-11T00:00:00.000Z",
+      capsule_id: `capsule:${request.workItemId}`,
+      event_index: index + 1,
+      redacted: 1,
+      refs_json: "{}",
+      run_id: request.runId,
+      state: "executingDynamicWorkflow",
+      summary: "Seed event.",
+      work_item_id: request.workItemId,
+    })
+  );
+  const d1 = {
+    prepare(query: string) {
+      let bindings: unknown[] = [];
+      const statement = {
+        all: () => {
+          if (/select run_id, status, blocker_code/iu.test(query)) {
+            return Promise.resolve({
+              results: bindings[0] === run.run_id ? [run] : [],
+            });
+          }
+          if (/select\s+max\(event_index\) as event_index/iu.test(query)) {
+            const [runId] = bindings;
+            const indexes = events
+              .filter((event) => event.run_id === runId)
+              .map((event) => event.event_index);
+
+            return Promise.resolve({
+              results: [
+                {
+                  event_index:
+                    indexes.length === 0 ? null : Math.max(...indexes),
+                },
+              ],
+            });
+          }
+          if (/select\s+runs\.run_id as run_id/iu.test(query)) {
+            return Promise.resolve({
+              results:
+                bindings[0] === run.run_id
+                  ? [
+                      {
+                        ...run,
+                        event_index:
+                          events.length === 0
+                            ? null
+                            : Math.max(
+                                ...events
+                                  .filter(
+                                    (event) => event.run_id === run.run_id
+                                  )
+                                  .map((event) => event.event_index)
+                              ),
+                      },
+                    ]
+                  : [],
+            });
+          }
+
+          return Promise.resolve({ results: [] });
+        },
+        bind: (...values: unknown[]) => {
+          bindings = values;
+
+          return statement;
+        },
+        run: () => {
+          if (/insert into runs/iu.test(query)) {
+            run.run_id = stringBinding(bindings[0]);
+            run.work_item_id = stringBinding(bindings[1]);
+            run.capsule_id = stringBinding(bindings[2]);
+            run.actor_id = stringBinding(bindings[3]);
+            run.status = stringBinding(bindings[4]);
+            run.blocker_code = nullableStringBinding(bindings[7]);
+            run.blocker_message = nullableStringBinding(bindings[8]);
+            run.blocker_step_id = nullableStringBinding(bindings[9]);
+            run.blocker_node_type = nullableStringBinding(bindings[10]);
+          }
+          if (/insert into workflow_events/iu.test(query)) {
+            events.push({
+              actor_id: stringBinding(bindings[4]),
+              at: stringBinding(bindings[9]),
+              capsule_id: stringBinding(bindings[3]),
+              event_index: numberBinding(bindings[1]),
+              redacted: numberBinding(bindings[8]),
+              refs_json: stringBinding(bindings[7]),
+              run_id: stringBinding(bindings[0]),
+              state: stringBinding(bindings[5]),
+              summary: stringBinding(bindings[6]),
+              work_item_id: stringBinding(bindings[2]),
+            });
+          }
+
+          return Promise.resolve({ meta: { changes: 1 }, success: true });
+        },
+      };
+
+      return statement;
+    },
+  };
+
+  return { d1, events, run };
+};
 
 /**
  * Persist a checkpoint through the supervisor's own `/persist-checkpoint` route
@@ -856,6 +1086,165 @@ describe("Capsule supervisor async run driver", () => {
         drivenRunIds: [fresh.runId],
         poisonMarkerCleared: true,
         poisonRetired: true,
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  it("reaps a 28-generation pre-admit throw wedge after MAX_STALL_GENERATIONS failed drives and surfaces lastDriveFailure", async () => {
+    const state = createFakeDurableObjectState();
+    const request = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-stall-pre-admit-throw",
+    };
+    const { d1, events, run } = createMutableRunD1(request);
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 fake models the status/projection writes used by the stall reaper.
+      WORKFLOW_APP_D1: d1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    await persistCheckpoint(supervisor, request, {
+      persistedAt: "2026-06-14T00:42:55.770Z",
+      stepIndex: 2,
+    });
+
+    const driveGenerations: number[] = [];
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() => ({
+      route: "POST /runs",
+      startRun(input, options) {
+        WorkflowRunRequestSchema.parse(input);
+        if (options?.driveGeneration !== undefined) {
+          driveGenerations.push(options.driveGeneration);
+        }
+        throw new Error(
+          "resolveGeneratedWorkflowPlanStep failed for /Users/joel/customer-acme/private-plan.json token=[REDACTED_STRIPE_KEY]"
+        );
+      },
+    }));
+    try {
+      await startRun(supervisor, request);
+      for (let alarmCount = 0; alarmCount < 28; alarmCount += 1) {
+        state.alarmAt = null;
+        // eslint-disable-next-line no-await-in-loop -- alarm redrives are sequential.
+        await supervisor.alarm();
+      }
+
+      const dump = await getDurability(supervisor, request);
+      const failure = dump.lastDriveFailure;
+      const lastEvent = events.at(-1);
+
+      expect({
+        blockerMessage: run.blocker_message,
+        driveGenerations,
+        finalStatus: run.status,
+        lastDriveFailureGeneration: failure?.driveGeneration,
+        lastDriveFailureStepGuess: failure?.stepIndexGuess,
+        rawPathLeaked: failure?.message.includes("/Users/joel") ?? true,
+        rawTokenLeaked: failure?.message.includes("sk_live") ?? true,
+        runStartRetired: !state.store.has(runStartKey(request)),
+        stallEventRefs:
+          lastEvent === undefined
+            ? null
+            : StallEventRefsSchema.parse(JSON.parse(lastEvent.refs_json)),
+      }).toStrictEqual({
+        blockerMessage: `wedged: ${MAX_STALL_GENERATIONS} consecutive drives advanced no ledger work`,
+        driveGenerations: Array.from(
+          { length: MAX_STALL_GENERATIONS },
+          (_unused, index) => index + 1
+        ),
+        finalStatus: "blocked",
+        lastDriveFailureGeneration: MAX_STALL_GENERATIONS,
+        lastDriveFailureStepGuess: 3,
+        rawPathLeaked: false,
+        rawTokenLeaked: false,
+        runStartRetired: true,
+        stallEventRefs: {
+          driveGeneration: String(MAX_STALL_GENERATIONS),
+          lastWorkMutationGeneration: "0",
+          maxStallGenerations: String(MAX_STALL_GENERATIONS),
+          reaperReason: "drive-stall-generations",
+          stallGenerations: String(MAX_STALL_GENERATIONS),
+        },
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  it("does not reap a healthy long-polling research.review run that records lane status each drive", async () => {
+    const state = createFakeDurableObjectState();
+    const request = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-healthy-long-poll",
+    };
+    const { d1, run } = createMutableRunD1(request);
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 fake models non-terminal status reads while the healthy poll keeps working.
+      WORKFLOW_APP_D1: d1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+
+    const driveGenerations: number[] = [];
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() => ({
+      route: "POST /runs",
+      async startRun(input, options) {
+        const parsed = WorkflowRunRequestSchema.parse(input);
+        if (options?.driveGeneration === undefined) {
+          throw new Error("single-step drive generation missing");
+        }
+        driveGenerations.push(options.driveGeneration);
+        await recordDriveLaneStatus(supervisor, parsed, {
+          checkedAt: new Date(
+            Date.UTC(2026, 5, 14, 0, 0, options.driveGeneration)
+          ).toISOString(),
+          driveGeneration: options.driveGeneration,
+        });
+
+        return WorkflowRunPausedSchema.parse({
+          completedStepIds: ["capture-run", "capture-generated-machine"],
+          eventLog: [],
+          runId: parsed.runId,
+          status: "paused",
+          stepIndex: 3,
+        });
+      },
+    }));
+    try {
+      await startRun(supervisor, request);
+      for (
+        let alarmCount = 0;
+        alarmCount < MAX_STALL_GENERATIONS + 4;
+        alarmCount += 1
+      ) {
+        state.alarmAt = null;
+        // eslint-disable-next-line no-await-in-loop -- alarm redrives are sequential.
+        await supervisor.alarm();
+      }
+
+      const ledger = await loadDriveLedger(supervisor, request);
+
+      expect({
+        driveGeneration: ledger.driveGeneration,
+        driveGenerations,
+        finalStatus: run.status,
+        laneStatusCount: Object.keys(ledger.laneStatuses).length,
+        lastWorkMutationGeneration: ledger.lastWorkMutationGeneration,
+        runStartKept: state.store.has(runStartKey(request)),
+      }).toStrictEqual({
+        driveGeneration: MAX_STALL_GENERATIONS + 4,
+        driveGenerations: Array.from(
+          { length: MAX_STALL_GENERATIONS + 4 },
+          (_unused, index) => index + 1
+        ),
+        finalStatus: "executingDynamicWorkflow",
+        laneStatusCount: 1,
+        lastWorkMutationGeneration: MAX_STALL_GENERATIONS + 4,
+        runStartKept: true,
       });
     } finally {
       __capsuleSupervisorTestHooks.resetRunDriverFactory();
