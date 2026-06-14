@@ -921,6 +921,123 @@ describe(buildPiAgentLaneCommand, () => {
     });
   }, 20_000);
 
+  it("runs the planner in pi's text mode (NO --mode json) while keeping --mode json for verifier/agentic JSON lanes, so the planner's stdout cannot balloon into a streamed runaway (wound #32)", () => {
+    // Hostile double for wound #32 ([[polite-fakes-franchise-wound]]): slice the REAL
+    // pi-invoke block and run it verbatim with a `pi` that RECORDS its own argv, once per
+    // lane kind. The live transport for the failure: --mode json streams EVERY lifecycle
+    // event to stdout, so a pure-generation planner's buffer grew with its internal
+    // iteration and ballooned to the 64 MiB cap — FIVE terminal planner_lane_incomplete
+    // runs in a row (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools,
+    // which proved tools were never the cause). Text mode echoes only the final assistant
+    // message, so the buffer stays small no matter how much the model thinks — the exact
+    // config of the one run that ever reached "captured" (06-12, pre --mode json). A
+    // polite mock asserting on a JS variable would never prove the FLAG (or its absence)
+    // reaches the pi process; this reads pi's real argv off disk.
+    //
+    // Two runs, IDENTICAL except LANE_KIND (both application/json), so only the mode gate
+    // can differ:
+    //   planner  → argv MUST NOT contain --mode (text mode), AND MUST keep --no-tools
+    //              (the proven-captured planner config: text channel + zero tools).
+    //   verifier → argv MUST contain --mode (the event stream the normalizer reads to
+    //              recover a verdict produced on a tool turn — wound #20's promise kept).
+    // Pre-fix (mode gated on media type only): planner gets --mode json → plannerTextMode
+    // flips false. Over-correction (a verifier also loses --mode): verifierStreams flips
+    // false. Only the LANE_KIND!=planner gate satisfies both.
+    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockEnd = command.indexOf("\nmark normalize-output");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke block in the lane command."
+      );
+    }
+    const piInvokeBlock = command.slice(blockStart, blockEnd);
+
+    const runLane = (laneKind: string) => {
+      const dir = mkdtempSync(join(tmpdir(), `piwf-pi-mode-${laneKind}-`));
+      try {
+        const binDir = join(dir, "bin");
+        mkdirSync(binDir);
+        const argvPath = join(dir, "argv.txt");
+        // Fake pi records each received arg on its own line (so --mode is matched as a
+        // whole token, never as a substring of the prompt) and emits a tiny well-formed
+        // output far under the cap — the runaway/cap branch must NOT fire here.
+        const fakePi = join(binDir, "pi");
+        writeFileSync(
+          fakePi,
+          `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"ok":true}\\n'\n`
+        );
+        chmodSync(fakePi, 0o755);
+
+        const promptPath = join(dir, "prompt.txt");
+        writeFileSync(promptPath, "emit one blueprint");
+        const rawOutputPath = join(dir, "raw.txt");
+        const stderrPath = join(dir, "stderr.txt");
+
+        const harness = [
+          "set -u",
+          "script_start_s=$(date +%s)",
+          "diag() { :; }",
+          "scrub_credentials() { cat; }",
+          piInvokeBlock,
+          "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
+        ].join("\n");
+
+        const stdout = execFileSync("bash", ["-c", harness], {
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            LANE_KIND: laneKind,
+            LANE_OUTPUT_MEDIA_TYPE: "application/json",
+            LANE_PROMPT_PATH: promptPath,
+            PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+            PIWF_COMMAND_TIMEOUT_SECONDS: "5",
+            PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+            PI_MODEL: "fake-model",
+            PI_PROVIDER: "fake-provider",
+            raw_output_path: rawOutputPath,
+            stderr_path: stderrPath,
+          },
+          timeout: 15_000,
+        });
+
+        const argv = existsSync(argvPath)
+          ? readFileSync(argvPath, "utf-8").split("\n")
+          : [];
+        return {
+          piActuallyRan:
+            existsSync(argvPath) && stdout.includes("POST_PI_REACHED"),
+          sawModeFlag: argv.includes("--mode"),
+          sawNoTools: argv.includes("--no-tools"),
+        };
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    };
+
+    const planner = runLane("planner");
+    const verifier = runLane("verifier");
+
+    expect({
+      // The planner keeps --no-tools, which makes text mode lossless (it cannot end on a
+      // tool turn, the one ending text mode drops)...
+      plannerKeepsNoTools: planner.sawNoTools,
+      plannerRan: planner.piActuallyRan,
+      // ...and runs in pi's text mode: stdout is only the final blueprint, so it cannot
+      // balloon into a streamed runaway (the proven-captured 06-12 config).
+      plannerTextMode: !planner.sawModeFlag,
+      verifierRan: verifier.piActuallyRan,
+      // The source-grounded verifier keeps --mode json: its verdict can land on a tool
+      // turn that text mode would drop, so it must read the event stream (wound #20).
+      verifierStreams: verifier.sawModeFlag,
+    }).toStrictEqual({
+      plannerKeepsNoTools: true,
+      plannerRan: true,
+      plannerTextMode: true,
+      verifierRan: true,
+      verifierStreams: true,
+    });
+  }, 20_000);
+
   it("a failed normalize whose recovery copy also fails does NOT abort the lane blind (wound #25)", () => {
     // Hostile double for wound #25: slice the REAL normalize-output recovery block
     // out of buildPiAgentLaneCommand() and run it verbatim under production's

@@ -191,24 +191,40 @@ mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(di
 cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"
 mark pi-invoke
 # JSON lanes capture pi's machine event stream (--mode json), not its human text
-# channel. Text mode only echoes the final assistant message and goes silent when
-# the run ends on a tool call, error, or abort — so a JSON lane that scraped text
-# mode would lose the verdict the agent actually produced. The normalizer reads
-# the event stream's agent_end message to recover it.
+# channel: text mode only echoes the final assistant message and goes silent when
+# the run ends on a tool call, error, or abort — so a verifier/agentic JSON lane that
+# scraped text mode would lose the verdict the agent produced on a tool turn. The
+# normalizer reads the event stream's agent_end message to recover it.
+#
+# EXCLUDE the planner. --mode json streams EVERY lifecycle event (turn/message/token)
+# to stdout, so the buffer grows with the model's internal iteration; text mode emits
+# ONLY the final message no matter how much the model thinks. The planner is pure
+# generation that ends on one plain assistant message — it has no tools (see the gate
+# below) so it CANNOT end on a tool turn, the one ending text mode drops — so it has no
+# reason to pay the event stream's cost and every reason to avoid it: under --mode json
+# the planner's stream ballooned to the 64 MiB cap and ran away on FIVE consecutive live
+# runs (a8bc84dc/f9a37a09/53cc30a4/fa5a3189, then c08aba9c WITH --no-tools), while the
+# one run that reached "captured" (06-12, text mode) predates --mode json entirely. Mode
+# — not tools — was the lone discriminator; --no-tools alone could not fix it. The
+# normalizer is shape-driven (it falls back to a whole-buffer JSON scan when the output
+# is not an event stream — see agent-lane-json-output.ts), so a text-mode planner
+# blueprint normalizes exactly as it did on 06-12. (wound #32.)
 pi_mode_args=""
-if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ] && [ "$LANE_KIND" != "planner" ]; then
   pi_mode_args="--mode json"
 fi
-# Parse, don't validate: enforce the planner prompt's "Do not call tools" contract at
-# the CLI instead of asking the model nicely. pi ships read/bash/edit/write tools ON by
-# default, so the planner — pure generation that only has to emit one JSON blueprint —
-# could (and did, live: 4 runs a8bc84dc/f9a37a09/53cc30a4/fa5a3189) wander into a
-# tool-call loop that, under --mode json where every call is a stream event, ran away to
-# a 64 MiB+ unbounded stream and never converged. --no-tools makes that impossible state
-# impossible. Scoped to LANE_KIND=planner ONLY: the worker/analysis/verifier lanes are
-# source-grounded and MUST keep read/bash to inspect artifacts — disabling tools there
-# would forge hollow captures (a verifier that reviews nothing). LANE_KIND is always set
-# (lanes.ts), same as LANE_OUTPUT_MEDIA_TYPE above, so it is safe under set -u.
+# Least privilege at the CLI: the planner is pure generation that emits one JSON
+# blueprint and needs nothing from the filesystem, so grant it zero tools. pi ships
+# read/bash/edit/write ON by default; --no-tools removes them at the process boundary.
+# Retained from wound #31, but its role is now correctly understood: it is NOT what stops
+# the runaway — the --mode json gate above is (wound #32 proved --no-tools alone did not;
+# run c08aba9c ran away WITH it). It is defense-in-depth that also makes text mode
+# LOSSLESS for the planner: with no tools the planner CANNOT end on a tool turn (the one
+# ending text mode drops), so its final blueprint always reaches stdout. Scoped to
+# LANE_KIND=planner ONLY: worker/analysis/verifier lanes are source-grounded and MUST
+# keep read/bash to inspect artifacts — disabling tools there would forge hollow captures
+# (a verifier that reviews nothing). LANE_KIND is always set (lanes.ts), same as
+# LANE_OUTPUT_MEDIA_TYPE above, so it is safe under set -u.
 pi_tool_args=""
 if [ "$LANE_KIND" = "planner" ]; then
   pi_tool_args="--no-tools"
@@ -264,14 +280,18 @@ raw_output_capture_bytes="$(wc -c < "$raw_output_path" 2>/dev/null | tr -d '[:sp
 if [ "$raw_output_capture_bytes" -ge "$raw_output_cap_bytes" ] 2>/dev/null; then
   printf '\n[pi-invoke output cap] pi raw output reached the %s-byte capture cap and was truncated — the agent produced a runaway/oversized stream. The full stream is intentionally discarded (retaining it would ENOSPC the lite instance disk and poison every downstream step); the committed receipt is status:"failed" with the truncated head.\n' "$raw_output_cap_bytes" >> "$stderr_path"
   diag "pi-invoke raw_output_capped: reached $raw_output_cap_bytes byte cap (runaway/oversized stream; full stream discarded to protect disk)"
-  # Ride a bounded HEAD of the runaway out on the diag channel (which survives a SIGTERM
+  # Ride a bounded TAIL of the runaway out on the diag channel (which survives a SIGTERM
   # and reaches the operator blocker). The disk numbers proved THAT it ran away; this
-  # shows WHAT — a tool-call event loop reads differently from pure-generation repetition
-  # — so a persisting runaway is diagnosable from the blocker without another blind
-  # re-drive (the observe-don't-stare discipline). First 4 KiB only; control chars
-  # flattened to spaces so it stays one diag line; git creds scrubbed.
-  runaway_head_sample="$(head -c 4096 "$raw_output_path" 2>/dev/null | tr '\n\r\t' '   ' | tr -cd '[:print:]' | scrub_credentials)"
-  diag "pi-invoke raw_output_head_sample (first 4096 bytes, sanitized): $runaway_head_sample"
+  # shows WHAT. Sample the TAIL, not the head: the head of any capped stream is just the
+  # clean preamble (session header, the prompt echo, the first turn) — identical on a
+  # healthy run and a runaway, so it diagnoses nothing. The repeating unit that drove the
+  # stream to the cap lives at the truncation boundary, so the last 4 KiB is where a
+  # tool-call event loop reads differently from pure-generation repetition — settling the
+  # next hypothesis from the blocker without another blind re-drive (observe, don't
+  # stare). Last 4 KiB only; control chars flattened to spaces so it stays one diag line;
+  # git creds scrubbed.
+  runaway_tail_sample="$(tail -c 4096 "$raw_output_path" 2>/dev/null | tr '\n\r\t' '   ' | tr -cd '[:print:]' | scrub_credentials)"
+  diag "pi-invoke raw_output_tail_sample (last 4096 bytes, sanitized): $runaway_tail_sample"
 fi
 if [ "$pi_status" -eq 124 ]; then
   printf '\n[pi-invoke self-bound] pi exceeded its %ss budget and was terminated by timeout; the heartbeat names pi-invoke as the wedge step.\n' "$pi_budget_s" >> "$stderr_path"

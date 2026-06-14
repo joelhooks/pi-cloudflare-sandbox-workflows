@@ -1,0 +1,228 @@
+---
+title: "Carrier Wound #32: --no-tools Didn't Stop It. The Wire Protocol Did."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - pi-invoke
+  - mode-json
+  - text-mode
+  - special-general-mixture
+  - wire-protocol
+  - output-media-type
+  - runaway
+  - string-raw
+  - observability
+  - diagnostics
+  - carrier-finding
+  - chaos-suite
+source: "wound-32-planner-mode-json-special-general-mixture"
+---
+
+# Carrier Wound #32: --no-tools Didn't Stop It. The Wire Protocol Did.
+
+Wound #31 muzzled the planner with `--no-tools`, predicting in its own "What
+this does NOT claim" that the runaway might persist and that the cap branch's
+sample would then diagnose it. We deployed, re-drove a dream-shape run — and the
+prediction came true. Run `c08aba9c` ran away **identically, WITH `--no-tools`
+in its argv**:
+
+```
+run-live-...-c08aba9c  →  blocked / planner_lane_incomplete
+Agent lane reached step "build-receipt": the agent ran but committed no usable
+result … (slow grind to the 64 MiB cap, normalize burned its budget, SIGTERM)
+40 polls of status=planningDynamicWorkflow, then terminal blocked at iteration 41
+```
+
+`--no-tools` removed the tools and the planner *still* drove its stdout to the
+64 MiB cap. That is dispositive: **tools were never the cause.** The five
+runaways and the one capture line up on exactly one variable.
+
+| run | date | mode | tools | outcome |
+|-----|------|------|-------|---------|
+| `dream-live-20260612T1750Z` | 06-12 | **text** | on | **captured** |
+| `a8bc84dc` `f9a37a09` `53cc30a4` `fa5a3189` | 06-14 | json | on | runaway |
+| `c08aba9c` | 06-14 | json | **off** | runaway |
+
+The one run that reached `captured` predates `--mode json` entirely (Wound #20,
+commit `20b8728`, shipped 06-14 01:38) and ran **text mode**. Every runaway ran
+`--mode json`. Toggling tools moved nothing. **Mode is the lone discriminator.**
+
+## Mechanism — the wire protocol, not the tools
+
+`--mode json` makes pi stream **every lifecycle event** — turn started, message
+delta, token, tool call, tool result — as JSONL on stdout. The buffer therefore
+grows with the model's internal iteration: the more the planner thinks, the more
+events, the larger the stream, until it hits the `head -c` 64 MiB cap (Wound
+#30), `head` closes the pipe, pi crashes EPIPE in its own `output-guard.js`, and
+normalize then burns its whole 60s budget trying to parse 64 MiB of truncated
+event stream → the lane times out and SIGTERM's `build-receipt` before it can
+commit. Text mode emits **only the final assistant message** — one blueprint,
+small, no matter how long the model iterates internally. Same model, same
+prompt, same budget; the channel is the entire difference.
+
+So why does `--mode json` exist at all? It is correct — for the lanes it was
+*built* for. Wound #20 added it because pi's text channel "only echoes the final
+assistant message and goes silent when the run ends on a tool call, error, or
+abort." A **verifier/agentic** lane legitimately ends on a tool turn, so text
+mode would drop the verdict it produced; the event stream's `agent_end` message
+is how the normalizer recovers it. `--mode json` is the right tool for a lane
+that ends agentically. The bug was never that it exists — it is *where it was
+gated.*
+
+## The class — a Special-General Mixture (APoSD §9.7)
+
+Wound #20 gated the wire protocol on the lane's **output media type**:
+
+```bash
+# wound #20, the wound:
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
+  pi_mode_args="--mode json"
+fi
+```
+
+But `LANE_OUTPUT_MEDIA_TYPE = "application/json"` is a *general* fact — it means
+"this lane's committed artifact is JSON," true of the planner (one JSON
+blueprint) AND the verifier (a JSON verdict) alike. `--mode json` is a *special*
+decision — it only serves lanes that **end agentically and would lose their
+verdict on the text channel.** Wound #20 lodged the special decision inside the
+general gate. The planner — pure generation, ends on one plain assistant message,
+cannot end on a tool turn — got swept in and made to pay the event stream's
+unbounded cost for a property it can never use. That is exactly Ousterhout's red
+flag:
+
+> The core of undo/redo consists of a general-purpose mechanism … The core was
+> located in the text class along with special-purpose handlers … The
+> special-purpose undo handlers … had nothing to do with anything else in the
+> text class; they resulted in information leakage … The key design decision was
+> the one that separated the general-purpose part … from the special-purpose
+> parts and put the general-purpose part in a class by itself. Once that was
+> done, the rest of the design fell out naturally.
+>
+> — John Ousterhout, *A Philosophy of Software Design*, §9.7,
+>   "Red Flag: Special-General Mixture"
+
+The general-purpose fact (output is JSON) and the special-purpose decision (this
+lane needs the event-stream wire protocol because it ends agentically) are
+**orthogonal concerns Wound #20 complected into one condition.** The output
+media type describes the *artifact we commit*; the wire protocol describes *how
+pi talks to us on stdout*. They change for different reasons. Fusing them leaked
+the verifier's transport requirement onto the planner.
+
+## Fix — separate the wire protocol from the output media type
+
+`cloudflare-sandbox-agent-lane-command.ts`, the `pi-invoke` block. Exclude the
+planner from the event-stream gate:
+
+```bash
+pi_mode_args=""
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ] && [ "$LANE_KIND" != "planner" ]; then
+  pi_mode_args="--mode json"
+fi
+```
+
+Three load-bearing properties:
+
+1. **The planner runs the proven-captured config.** Text mode + the 06-12
+   capture used identical channels. We are not guessing a new config; we are
+   reverting the planner to the one configuration that has ever reached
+   `captured`, and isolating the variable (`--mode json`, Wound #20) that
+   regressed it.
+2. **Wound #20 is preserved for the lanes it was built for.**
+   worker/analysis/verifier JSON lanes keep `--mode json` — they end agentically
+   and the normalizer needs their `agent_end` message. The fix *narrows* the
+   gate to exactly the lanes with the special requirement; it does not revert
+   #20.
+3. **The normalizer already handles text-mode output — verified, not assumed.**
+   `normalizeAgentLaneJsonOutput` (`agent-lane-json-output.ts`) is **shape-driven,
+   gated on `LANE_OUTPUT_MEDIA_TYPE` (line 305), NOT on `--mode json`.** It
+   computes `looksLikeEventStream = events.some(e => typeof e.type === "string")`
+   after parsing; a text-mode blueprint (plain JSON, no `type`-tagged JSONL)
+   yields `false` and falls through to `extractFirstJsonValueText(raw)` — the
+   whole-buffer first-balanced-JSON scan (Wound #23-B). So a text-mode planner
+   normalizes **exactly as it did on 06-12.** Reverting the planner's wire
+   protocol does not move the failure into the normalizer. (This was the one real
+   risk and it was read, not hoped.)
+
+`--no-tools` (Wound #31) is retained — not as the runaway fix (#32 proved it
+isn't; `c08aba9c` ran away with it) but as defense-in-depth that also makes text
+mode **lossless** for the planner: with no tools the planner *cannot* end on a
+tool turn, the one ending text mode would drop, so its final blueprint always
+reaches stdout. The two wounds compose: #31 grants minimum capability, #32 picks
+the minimum wire protocol.
+
+### Plus: head-sample → TAIL-sample on cap
+
+The cap branch's runaway sample switched from the first 4 KiB to the **last**
+4 KiB. The head of any capped stream is the clean preamble — session header,
+prompt echo, the first turn — *identical on a healthy run and a runaway*, so it
+diagnoses nothing. The repeating unit that drove the stream to the cap lives at
+the **truncation boundary**, so the tail is where a tool-call event loop reads
+differently from pure-generation repetition. If a runaway somehow persists after
+the mode fix, the tail settles the next hypothesis from the blocker without
+another blind re-drive. (Joel's standing demand: *"we should be able to observe
+the run in progress and not guess … instead of waiting and staring at it like
+fucking dummies."*) Control chars flattened to one line; git creds scrubbed.
+
+### String.raw note
+
+`buildPiAgentLaneCommand()` is a `String.raw` template; JS `${...}` fires
+anywhere, including bash comments. This edit used bare `$var` only (`$LANE_KIND`,
+`$LANE_OUTPUT_MEDIA_TYPE`, `$pi_mode_args`) — built clean. The #29/#30 lesson
+held again.
+
+## Chaos test that would have caught it (hostile double, not a polite mock)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — the Wound #32 case.
+It SLICES the REAL pi-invoke block out of the emitted bash
+(`command.indexOf('pi_mode_args=""')` → `command.indexOf("\nmark
+normalize-output")`) and runs it verbatim, twice, against a `pi` that **records
+its own argv to disk** — once with `LANE_KIND=planner`, once with `verifier`,
+both with `LANE_OUTPUT_MEDIA_TYPE="application/json"` so the OLD gate would have
+treated them identically and only the new `LANE_KIND` discriminator can differ:
+
+- **planner** → recorded argv MUST NOT contain `--mode` (text mode — proven from
+  pi's real argv, not a JS variable), MUST still contain `--no-tools` (#31 intact),
+  and pi MUST run.
+- **verifier** → argv MUST contain `--mode` (`--mode json` preserved — no #20
+  regression), and pi MUST run.
+
+A polite mock asserting on a TypeScript variable would prove nothing about what
+the spawned process receives. This reproduces the production transport: the real
+emitted bash, real word-splitting of `$pi_mode_args`, pi's real argv. It fails on
+**both** failure modes — pre-fix (output-media-type gate → planner wrongly gets
+`--mode json`) AND a careless over-narrow (verifier wrongly stripped of it). Only
+the `LANE_KIND != planner` gate is green on both. `pnpm typecheck` clean ·
+`pnpm check` clean · the lane file = **43 passed** (was 42; the new chaos test is
+the +1) · full suite **429 passed / 55 files**.
+
+## What this does NOT claim (skepticism held)
+
+Mode is the strongest-possible hypothesis: a clean truth table (one capture, five
+runaways, mode the lone discriminator), a verified mechanism (event stream grows
+with iteration → 64 MiB cap → EPIPE → normalize grind → SIGTERM), and a fix that
+*reverts the planner to the exact config that already reached `captured`* rather
+than inventing a new one. It is NOT yet re-proven to reach `captured` on deployed
+code — that is the live re-drive's job, the next and final step of this wound's
+discipline. If the planner still runs away in text mode (it should not — text
+mode emits one message), the tail-sample now shows whether it is some
+pure-generation pathology or a normalizer issue, diagnosed from the blocker. One
+variable changed (the mode gate; the tail-sample only fires on a runaway the gate
+should eliminate), so the next run's signal is clean.
+
+## The carrier discipline (twelfth carrier wound)
+
+#30 capped the inlet so a runaway could not ENOSPC the disk. #31 closed the door
+so only lanes that need tools get them — and, by ruling tools out as the cause,
+*pointed at the real one*. #32 is what #31's honest failure exposed: the cause was
+never the tools, it was the **wire protocol**, gated on the wrong axis. Wound #20
+mixed a special-purpose transport decision (event stream, for lanes that end
+agentically) into a general-purpose output-media-type gate, and the general case
+— the pure-generation planner — paid for a capability it can never use. The fix is
+Ousterhout's: separate the general from the special, gate each on the axis that
+actually governs it. The output media type says *what we commit*; the lane kind
+says *how pi must talk to us*. Those are two doors, not one — and only the
+agentic lanes have a reason to open the event-stream one.
