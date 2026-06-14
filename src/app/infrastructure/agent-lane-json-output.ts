@@ -17,6 +17,19 @@ const matchingCloser = (char: string): string | null => {
  * the inner step that pulls a verdict out of an agent's final text message.
  */
 export const extractFirstJsonValueText = (raw: string): string => {
+  // Bound total scan work to O(n). The extractor re-scans forward from EVERY
+  // `{`/`[`, so a truncated or prose-heavy blob full of unbalanced openers is
+  // O(n²): a ~1MB pathological pi output grinds for minutes on the lite sandbox,
+  // burns the lane budget, and — under the memory pressure that grind creates —
+  // takes the failure-marker `node` down with it, so the planner gets a blind
+  // "did not emit a result marker" block with NO cause. A real verdict parses on
+  // the first opener and never approaches this budget; only the quadratic
+  // re-scan blows it, converting a multi-minute OOM grind into a fast, honest
+  // "oversized output" failure that the marker can actually report. The budget is
+  // linear in input (4n + 1M) so any single valid value — however large — passes
+  // in one forward scan, while repeated full re-scans trip it almost at once.
+  // (wound #23-B.)
+  let scanBudget = raw.length * 4 + 1_000_000;
   const findJsonEnd = (startIndex: number): number | null => {
     const expectedClosers = [matchingCloser(raw[startIndex] ?? "")];
     if (expectedClosers[0] === null) {
@@ -26,6 +39,14 @@ export const extractFirstJsonValueText = (raw: string): string => {
     let escaped = false;
     let inString = false;
     for (let index = startIndex + 1; index < raw.length; index += 1) {
+      scanBudget -= 1;
+      if (scanBudget <= 0) {
+        const oversized = new RangeError(
+          "Agent lane output exceeded the JSON scan budget; treating as oversized or truncated and unparseable."
+        );
+        (oversized as RangeError & { code?: string }).code = "OVERSIZED_OUTPUT";
+        throw oversized;
+      }
       const char = raw[index] ?? "";
       if (inString) {
         if (escaped) {
@@ -171,7 +192,15 @@ const parsePiEventStream = (raw: string): Record<string, unknown>[] => {
 const tryExtract = (text: string): string | null => {
   try {
     return extractFirstJsonValueText(text);
-  } catch {
+  } catch (error) {
+    // A plain "no JSON here" stays null so the caller can walk to the next
+    // candidate message. An OVERSIZED_OUTPUT (scan-budget) signal is NOT a
+    // fall-through: it means THIS text is pathologically large, so re-throw to
+    // abort the whole normalize with the distinct cause instead of silently
+    // re-grinding the same budget on the next event. (wound #23-B.)
+    if (isRecord(error) && error["code"] === "OVERSIZED_OUTPUT") {
+      throw error;
+    }
     return null;
   }
 };
@@ -303,6 +332,11 @@ const matchingCloser = (char) => {
   return null;
 };
 const extractFirstJsonValueText = (raw) => {
+  // Bound total scan work to O(n) — see the TypeScript source of this function
+  // for the full rationale. Without it a truncated/prose-heavy blob is O(n^2)
+  // and grinds for minutes on the lite sandbox, taking the failure-marker node
+  // down with it. (wound #23-B.)
+  let scanBudget = raw.length * 4 + 1000000;
   const findJsonEnd = (startIndex) => {
     const expectedClosers = [matchingCloser(raw[startIndex] ?? "")];
     if (expectedClosers[0] === null) {
@@ -312,6 +346,12 @@ const extractFirstJsonValueText = (raw) => {
     let escaped = false;
     let inString = false;
     for (let index = startIndex + 1; index < raw.length; index += 1) {
+      scanBudget -= 1;
+      if (scanBudget <= 0) {
+        const oversized = new RangeError("Agent lane output exceeded the JSON scan budget; treating as oversized or truncated and unparseable.");
+        oversized.code = "OVERSIZED_OUTPUT";
+        throw oversized;
+      }
       const char = raw[index] ?? "";
       if (inString) {
         if (escaped) {
@@ -423,7 +463,10 @@ const parsePiEventStream = (raw) => {
 const tryExtract = (text) => {
   try {
     return extractFirstJsonValueText(text);
-  } catch {
+  } catch (error) {
+    if (error && error.code === "OVERSIZED_OUTPUT") {
+      throw error;
+    }
     return null;
   }
 };
@@ -501,9 +544,15 @@ try {
   fs.writeFileSync(process.env.LANE_OUTPUT_PATH, JSON.stringify(parsed, null, 2) + "\n");
   outcome = { normalized: true, reason: null, agentStopReason: null };
 } catch (error) {
+  const failureReason =
+    error && error.code === "AGENT_ERROR"
+      ? "agent_error"
+      : error && error.code === "OVERSIZED_OUTPUT"
+        ? "oversized_output"
+        : "no_parseable_output";
   outcome = {
     normalized: false,
-    reason: error && error.code === "AGENT_ERROR" ? "agent_error" : "no_parseable_output",
+    reason: failureReason,
     agentStopReason: error && error.agentStopReason ? error.agentStopReason : null,
     detail: error && error.message ? String(error.message).slice(0, 500) : null
   };

@@ -1,0 +1,239 @@
+---
+title: "Carrier Wound #23: The Recovery Path Shared The Failure Mode It Recovers"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - recovery
+  - error-handling
+  - oom
+  - normalizer
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-23-planner-silent-block-node-recovery-oom"
+---
+
+# Carrier Wound #23: The Recovery Path Shared The Failure Mode It Recovers
+
+Wound #22 (Layers A/B/C + the C.2 budget probe) shipped and deployed. Its whole
+promise was: **a planner that dies now says why** — pi self-bounds (124 with its
+stderr), or the reaper SIGTERMs and the trap emits the cause. The C.2 probe
+raised `WORKFLOW_APP_TIMEOUT_MS` to `900000` to absorb the runtime install tax.
+
+Then a fresh dream re-drive blocked terminal again — and the blocker was, once
+more, the blind one:
+
+```
+Cloudflare Sandbox lane did not emit a result marker (exit 1).
+```
+
+`nodes=0`, no pi stderr, no failing step. Wound #22 was supposed to make this
+sentence unreachable. It wasn't — because #22 made the *failure trap fire*; it
+never asked whether the **trap's own machinery** could survive the conditions
+that tripped it. This is the recovery-class wound in its purest form, and the
+sixth-plus that the live-observe mandate caught from the outside-invisible /
+node-by-node-legible gap.
+
+## Mechanism — two coupled halves, one shared root: node dies with the lane
+
+### Wound #23-A — `emit_failure_marker` builds its marker with `node`
+
+The EXIT/SIGNAL trap (`cloudflare-sandbox-agent-lane-command.ts`) captures pi's
+stderr tail + git log tail and hands them to a `node` heredoc that JSON-escapes
+the arbitrary text and base64s the marker:
+
+```sh
+PIWF_FAIL_STDERR_TAIL="$stderr_tail" ... node <<'NODE'
+const payload = { status: "error", exitCode: ..., stderrTail: ... };
+process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringify(payload), "utf8").toString("base64") + "\n");
+NODE
+```
+
+node is correct for *escaping* — but node is **also the single most
+memory-hungry actor on a `lite` sandbox**, and the lane's dominant failure mode
+is resource exhaustion (see #23-B). When the lane OOMs, the recovery that is
+supposed to *report* the OOM is `node` — which **cannot fork / cannot allocate /
+gets OOM-killed mid-write**. The trap fires, runs, and emits **nothing**. The
+parser sees no marker and throws the blind sentence. The application that was
+taught to announce its failure lost its voice at exactly the moment it had
+something to announce.
+
+> A Philosophy of Software Design (John Ousterhout), Ch. on exception handling:
+>
+> > Secondary exceptions occurring during recovery are often more subtle and
+> > complex than the primary exceptions.
+
+Ousterhout cites Yuan et al. (OSDI '14): *the majority of catastrophic failures
+in distributed, data-intensive systems were caused by incorrect handling of
+non-fatal errors* — the recovery code, not the original fault, is what takes the
+system down. That is this wound exactly: the primary exception (the OOM grind)
+was survivable as a blocker; the **secondary** exception (node can't emit under
+that same pressure) is what produced the catastrophic *causeless* block.
+
+This is the [[polite-fakes-franchise-wound]] antidote stated structurally:
+**recovery must not share the failure mode of the failure it recovers.** A node
+that needs a V8 heap to report "we ran out of heap" is a polite recovery; the
+hostile-real recovery uses only what survives the fire.
+
+### Wound #23-B — the normalizer is O(n²) and OOMs the lite instance
+
+`extractFirstJsonValueText` (and its embedded node-script twin in
+`agent-lane-json-output.ts`) outer-loops over **every** character; at each `{` or
+`[` it calls `findJsonEnd` (a full forward scan) + `JSON.parse`. A real verdict
+parses on the first opener and stops. But a **truncated or prose-heavy** pi blob
+full of unbalanced openers re-scans forward from every one of them — O(n²).
+Measured on the actual extractor:
+
+| input size | time |
+|-----------:|-----:|
+| 116 KB | 451 ms |
+| 477 KB | 9 003 ms |
+| 1.2 MB | 59 105 ms |
+
+A ~1 MB pathological output grinds for a full minute on the `lite` sandbox,
+burns the lane budget, **and the grind's allocation pressure is what OOMs the
+instance** — which is what then kills the #23-A node recovery. #23-B is the
+*primary* exception; #23-A is why the primary one became invisible. They had to
+be fixed together.
+
+## Fix — recover with what survives the fire; bound the grind to O(n)
+
+### Fix A — shell-only fallback marker + parser that steps past corpses
+
+**(1) node touches a sentinel as its LAST act; absent sentinel ⇒ shell-only
+fallback** (`cloudflare-sandbox-agent-lane-command.ts`):
+
+```sh
+marker_ok_path="/workspace/.piwf-marker-ok"
+rm -f "$marker_ok_path" 2>/dev/null || true
+PIWF_MARKER_OK_PATH="$marker_ok_path" ... node <<'NODE'
+...process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + ...);
+try { require("fs").writeFileSync(process.env.PIWF_MARKER_OK_PATH, "1"); } catch (error) {}
+NODE
+  if [ ! -f "$marker_ok_path" ]; then
+    fallback_pi_status="$pi_status"; [ -z "$fallback_pi_status" ] && fallback_pi_status="null"
+    fallback_json="$(printf '{"status":"error","exitCode":%s,"failingStep":"%s","gitLogTail":"","piStatus":%s,"stderrTail":"[degraded recovery: node-based result marker emit failed (likely resource exhaustion); pi and git tails unavailable]"}' "$exit_code" "$current_step" "$fallback_pi_status")"
+    fallback_b64="$(printf '%s' "$fallback_json" | base64 2>/dev/null | tr -d '\n')"
+    [ -n "$fallback_b64" ] && printf '\n__PIWF_AGENT_LANE_RESULT__:%s\n' "$fallback_b64"
+  fi
+```
+
+The sentinel write is node's final statement; if the marker reached stdout the
+sentinel exists. Absent sentinel = node failed *after or during* the emit, so a
+**shell-only** path emits a minimal-but-valid `status:"error"` marker. It uses
+only the `printf` builtin and the tiny `base64` coreutil — **no V8 heap**, the
+one thing guaranteed available when node is dead. Only known-safe fields are
+interpolated (numeric `exit_code`, numeric-or-`null` `pi_status`, the fixed
+`[a-z-]` step token `current_step`), so no JSON escaping is needed and the
+payload is always valid. The degraded-recovery note rides in `stderrTail` — a
+field the marker schema keeps — so `selectLaneAbortDiagnostic` surfaces it as
+the blocker's **primary cause** instead of the blind sentence.
+
+**(2) `parseLaneResultMarker` scans ALL markers, returns the first that
+validates.** A node OOM-killed mid-`stdout.write` can leave a truncated
+`__PIWF_AGENT_LANE_RESULT__:<partial>` line; the shell fallback then appends a
+*valid* marker after it. The old first-match `.exec` would lock onto the corpse
+and throw, masking the recovered cause:
+
+```ts
+const markers = result.stdout.matchAll(/__PIWF_AGENT_LANE_RESULT__:([A-Za-z0-9+/=]+)/gu);
+let sawMarker = false;
+for (const marker of markers) {
+  const [, encoded] = marker;
+  if (encoded === undefined) continue;
+  sawMarker = true;
+  const parsed = SandboxLaneResultMarkerSchema.safeParse(tryDecodeMarkerJson(encoded));
+  if (parsed.success) return parsed.data;
+}
+throw new Error(`Cloudflare Sandbox lane ${sawMarker ? "emitted only unparseable result markers" : "did not emit a result marker"} ...`);
+```
+
+`tryDecodeMarkerJson` returns `null` on any malformed base64/JSON so the loop
+steps to the next marker instead of throwing on the partial. The error message
+now even distinguishes *no marker at all* from *only-corrupt markers* — two
+different carrier states that used to read identically.
+
+### Fix B — bound the scan to O(n), fail fast as `oversized_output`
+
+A single scan budget, linear in input, applied in **both** copies of
+`extractFirstJsonValueText`:
+
+```js
+let scanBudget = raw.length * 4 + 1_000_000;
+// inside findJsonEnd's inner loop:
+scanBudget -= 1;
+if (scanBudget <= 0) {
+  const oversized = new RangeError("Agent lane output exceeded the JSON scan budget; ...");
+  oversized.code = "OVERSIZED_OUTPUT";
+  throw oversized;
+}
+```
+
+`4n + 1M` is generous enough that **any single valid value — however large —
+passes in one forward scan**; only the quadratic re-scan from many unbalanced
+openers trips it, and it trips almost immediately. `tryExtract` re-throws
+`OVERSIZED_OUTPUT` (it is NOT a "no JSON here ⇒ null" fall-through — it means
+*this* text is pathological, so abort the whole normalize rather than silently
+re-grind the budget on the next event). The outcome mapping adds a distinct
+`reason: "oversized_output"`. A multi-minute OOM grind becomes a sub-second,
+honest failure the marker can actually carry — which is also what keeps node
+*alive* to carry it.
+
+## Chaos Receipts (would have caught it)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — **30 passing**:
+
+- **#23-A hostile double** (`describe(buildPiAgentLaneCommand)`): slices the real
+  `emit_failure_marker` block out of `buildPiAgentLaneCommand()`, **shims `node`
+  to `exit 137`** (the OOM-killer's signal), sets `current_step=normalize-output`,
+  `pi_status=0`, `exit 137`, runs it under `bash`. Asserts the SIGKILL'd node
+  emitted **no** rich marker (`nodeNeverWroteRichMarker`) yet the lane still
+  produced **exactly one** valid `status:"error"` marker (`exactlyOneMarker`)
+  carrying the degraded-recovery note (`carriesDegradedRecoveryNote`), the right
+  failing step (`namesFailingStep:"normalize-output"`), and the preserved exit
+  (137) + pi status (0). It reproduces prod transport — real trap, real shell
+  fallback, real base64 — and fakes only node's death. Before Fix A this emitted
+  zero markers: the exact blind production blocker.
+- **#23-B hostile double** (`describe(normalizeAgentLaneJsonOutput)`): feeds
+  `"{".repeat(600_000)` (the truncated-opener pathology) through the real
+  embedded node-script normalizer. Asserts it `completedWellUnderHang`
+  (`elapsedMs < 5000` — vs the ~59 s the unbounded version would grind),
+  `failedExit:true`, `laneOutput:null`, `normalized:false`,
+  `reason:"oversized_output"`. Before Fix B this ran for ~minutes and would have
+  OOM'd a real lite instance.
+
+The doubles are hostile by construction (the [[polite-fakes-franchise-wound]]
+discipline): a polite mock of node would have *returned a marker* and masked
+#23-A entirely; a polite normalizer test would have used a *valid* small blob and
+never tripped the quadratic. Both deliberately reproduce the production failure
+mode.
+
+## Verification
+
+```bash
+pnpm vitest run tests/integration/cloudflare-sandbox-agent-lanes.test.ts  # 30 pass (2 new)
+pnpm typecheck   # clean (tsgo)
+pnpm check       # oxfmt + oxlint + type-aware, clean
+```
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. Fix A+B
+deploy, then ONE dream-shape run is watched node-by-node. The wound class is now
+closed from both ends: the normalizer can no longer OOM the instance on a
+pathological blob (B), and even if *something else* exhausts memory, the failure
+marker no longer needs a V8 heap to report it (A) — and a truncated partial
+marker can no longer mask the good one (A.2). There is no remaining path by which
+the planner blocks with `did not emit a result marker` and no cause: either the
+marker is valid (rich, from node) or valid (minimal, from the shell), and the
+parser walks past any corpse to find it.
+
+This is the recovery-machinery sibling of [[carrier-wound-lane-self-collision-2026-06-14]]:
+#22 taught the lane to *announce* on the way down; #23 made sure the announcer
+itself survives the fire. Following [[carrier-wound-btoa-latin1-ceiling-2026-06-14]],
+all of them surfaced only because the run was watched node-by-node, not stared at.
+Captured on deployed code → fire the operator Discord ping with the wzrrd HITL
+URL, reset D3, start the 10-run burn-in.

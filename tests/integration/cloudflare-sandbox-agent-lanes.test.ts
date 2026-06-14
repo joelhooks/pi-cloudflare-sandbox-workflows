@@ -442,6 +442,35 @@ describe(normalizeAgentLaneJsonOutput, () => {
       reason: "no_parseable_output",
     });
   });
+
+  it("bounds a brace-heavy truncated blob instead of grinding O(n^2) to a hang", () => {
+    // wound #23-B: extractFirstJsonValueText re-scanned to EOF for every unbalanced
+    // opener, so a large truncated brace run cost O(n^2) — 477KB took 9s, 1.2MB took
+    // 59s, and the real ~1.5-2MB normalize step rode past the lane timeout into a
+    // silent block. A pure run of openers is the worst case: each '{' triggers a full
+    // forward scan that never closes. The scan budget must cut it short and classify
+    // it as oversized_output, not hang. The test timeout IS the bound assertion: the
+    // pre-fix path could not finish a 600KB run inside it.
+    const truncatedBraceRun = "{".repeat(600_000);
+
+    const start = process.hrtime.bigint();
+    const result = runNormalizerNodeScript(truncatedBraceRun);
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+
+    expect({
+      completedWellUnderHang: elapsedMs < 5000,
+      failedExit: result.exitCode !== 0,
+      laneOutput: result.laneOutput,
+      normalized: result.normalization?.["normalized"],
+      reason: result.normalization?.["reason"],
+    }).toStrictEqual({
+      completedWellUnderHang: true,
+      failedExit: true,
+      laneOutput: null,
+      normalized: false,
+      reason: "oversized_output",
+    });
+  }, 15_000);
 });
 
 describe(jsonOutputNormalizerNodeScript, () => {
@@ -479,8 +508,10 @@ describe(buildPiAgentLaneCommand, () => {
       guardsAgainstDoubleEmit: command.includes(
         'if [ "$marker_emitted" = "1" ]'
       ),
-      sameMarkerPrefixForBothPaths:
-        (command.match(/__PIWF_AGENT_LANE_RESULT__/gu) ?? []).length === 2,
+      // Three emit sites share the prefix: success-node, failure-node, and the
+      // shell-only failure fallback that fires when node cannot emit. (wound #23-A)
+      markerEmittedAtAllThreeSites:
+        (command.match(/__PIWF_AGENT_LANE_RESULT__/gu) ?? []).length === 3,
       scrubsCredentialsBeforeTailing: command.includes(
         "s#https://x:[^@]*@#https://x:***@#g"
       ),
@@ -490,7 +521,7 @@ describe(buildPiAgentLaneCommand, () => {
       emitsErrorStatusOnFailure: true,
       emitsOkStatusOnSuccess: true,
       guardsAgainstDoubleEmit: true,
-      sameMarkerPrefixForBothPaths: true,
+      markerEmittedAtAllThreeSites: true,
       scrubsCredentialsBeforeTailing: true,
       tracksFailingStepThroughPush: true,
       trapInstalledBeforeClone: true,
@@ -780,6 +811,79 @@ describe(buildPiAgentLaneCommand, () => {
         preservesPiStatus: true,
         scrubsCredentialsInStderr: true,
         tailNeverCompleted: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 20_000);
+
+  it("falls back to a shell-only marker when node cannot emit under resource exhaustion", () => {
+    // Hostile double for wound #23-A: the rich failure marker is built by node, but
+    // node is the SAME runtime that OOMs during the normalize grind that breaks the
+    // lane — so the recovery shared the failure mode of the failure it recovers and
+    // the planner got a blind "did not emit a result marker." Here `node` is shimmed
+    // to die like an OOM-kill (exit 137, no stdout, no sentinel). The shell-only
+    // fallback (printf + base64, no V8 heap) must still surface a VALID error marker
+    // naming the failing step, so the cause always reaches the planner.
+    const trapSetupStart = command.indexOf("marker_emitted=0");
+    const trapSetupEnd = command.indexOf("\nmark install-pi-agent");
+    if (
+      trapSetupStart === -1 ||
+      trapSetupEnd === -1 ||
+      trapSetupEnd <= trapSetupStart
+    ) {
+      throw new Error(
+        "Could not locate the marker+trap machinery in the lane command."
+      );
+    }
+    const trapSetup = command.slice(trapSetupStart, trapSetupEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-oom-marker-"));
+    try {
+      // node shim simulates an OOM-kill: writes nothing, never touches the sentinel,
+      // exits 137. emit_failure_marker therefore sees no sentinel and must shell out.
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      const nodeShim = join(binDir, "node");
+      writeFileSync(nodeShim, "#!/usr/bin/env bash\nexit 137\n");
+      chmodSync(nodeShim, 0o755);
+
+      const harness = [
+        "set -u",
+        trapSetup,
+        // The OOM struck during the normalize step; pi itself had already exited 0.
+        'current_step="normalize-output"',
+        "pi_status=0",
+        // Exit with the OOM-kill code so the marker carries a real exitCode.
+        "exit 137",
+      ].join("\n");
+
+      const stdout = captureBashStdout(harness, {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+      });
+
+      const payload = decodeAgentLaneMarker(stdout);
+      const stderrTail = markerString(payload, "stderrTail");
+      const markerCount = (stdout.match(/__PIWF_AGENT_LANE_RESULT__/gu) ?? [])
+        .length;
+
+      expect({
+        carriesDegradedRecoveryNote: stderrTail.includes("degraded recovery"),
+        emittedErrorMarker: payload?.["status"] === "error",
+        exactlyOneMarker: markerCount === 1,
+        namesFailingStep: payload?.["failingStep"] === "normalize-output",
+        nodeNeverWroteRichMarker: !stderrTail.includes("self-bound"),
+        preservesExitCode: payload?.["exitCode"],
+        preservesPiStatus: payload?.["piStatus"],
+      }).toStrictEqual({
+        carriesDegradedRecoveryNote: true,
+        emittedErrorMarker: true,
+        exactlyOneMarker: true,
+        namesFailingStep: true,
+        nodeNeverWroteRichMarker: true,
+        preservesExitCode: 137,
+        preservesPiStatus: 0,
       });
     } finally {
       rmSync(dir, { force: true, recursive: true });

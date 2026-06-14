@@ -87,11 +87,23 @@ emit_failure_marker() {
   if [ -f "$git_log_path" ]; then
     git_log_tail="$(tail -c 2000 "$git_log_path" 2>/dev/null | scrub_credentials)"
   fi
+  # The rich marker is built by node so the arbitrary stderr/git tails get safe
+  # JSON-escaping. But node is the SAME thing that dies under the memory pressure
+  # that breaks the lane (the O(n^2) normalize grind OOMs the lite instance) — so
+  # the recovery path shared the failure mode of the failure it recovers, and the
+  # planner got a blind "did not emit a result marker" with no cause. node now
+  # touches a sentinel as its LAST act; if that sentinel is absent the node emit
+  # failed, and a SHELL-ONLY fallback (printf builtin + tiny base64 coreutil, no
+  # V8 heap) emits a minimal but VALID error marker carrying the failing step and
+  # exit codes, so the cause always reaches the planner. (wound #23-A.)
+  marker_ok_path="/workspace/.piwf-marker-ok"
+  rm -f "$marker_ok_path" 2>/dev/null || true
   PIWF_FAIL_EXIT_CODE="$exit_code" \
   PIWF_FAIL_STEP="$current_step" \
   PIWF_FAIL_PI_STATUS="$pi_status" \
   PIWF_FAIL_STDERR_TAIL="$stderr_tail" \
   PIWF_FAIL_GIT_LOG_TAIL="$git_log_tail" \
+  PIWF_MARKER_OK_PATH="$marker_ok_path" \
   node <<'NODE'
 const piStatusRaw = process.env.PIWF_FAIL_PI_STATUS;
 const payload = {
@@ -103,7 +115,25 @@ const payload = {
   stderrTail: process.env.PIWF_FAIL_STDERR_TAIL || ""
 };
 process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringify(payload), "utf8").toString("base64") + "\n");
+try { require("fs").writeFileSync(process.env.PIWF_MARKER_OK_PATH, "1"); } catch (error) {}
 NODE
+  if [ ! -f "$marker_ok_path" ]; then
+    # node failed to emit (OOM / could not fork). Only known-safe fields are
+    # interpolated — exit_code is numeric, current_step is a fixed step token, and
+    # pi_status is a number or the literal null — so no JSON escaping is needed and
+    # the payload is always valid. The degraded-recovery note rides in stderrTail
+    # (a field the marker schema keeps) so selectLaneAbortDiagnostic surfaces it as
+    # the blocker's primary cause instead of "did not emit a result marker".
+    fallback_pi_status="$pi_status"
+    if [ -z "$fallback_pi_status" ]; then
+      fallback_pi_status="null"
+    fi
+    fallback_json="$(printf '{"status":"error","exitCode":%s,"failingStep":"%s","gitLogTail":"","piStatus":%s,"stderrTail":"[degraded recovery: node-based result marker emit failed (likely resource exhaustion); pi and git tails unavailable]"}' "$exit_code" "$current_step" "$fallback_pi_status")"
+    fallback_b64="$(printf '%s' "$fallback_json" | base64 2>/dev/null | tr -d '\n')"
+    if [ -n "$fallback_b64" ]; then
+      printf '\n__PIWF_AGENT_LANE_RESULT__:%s\n' "$fallback_b64"
+    fi
+  fi
 }
 # The whole-script (MIDDLE) shell timeout reaps with SIGTERM, and a bare signal kills
 # bash WITHOUT firing an EXIT-only trap — that is exactly how the tail-starvation case
@@ -319,19 +349,50 @@ exit "$pi_status"`;
 export const tailForDiagnostic = (value: string): string =>
   value.length <= 1200 ? value : value.slice(-1200);
 
+/**
+ * Decode a base64 marker payload to a JSON value, returning `null` on any
+ * malformed input (truncated base64, non-JSON bytes) so the caller can step to
+ * the next marker instead of throwing on a corpse.
+ */
+const tryDecodeMarkerJson = (encoded: string): unknown => {
+  try {
+    return JSON.parse(atob(encoded));
+  } catch {
+    return null;
+  }
+};
+
 export const parseLaneResultMarker = (
   result: SandboxCommandResult
 ): SandboxLaneResultMarker => {
-  const marker = /__PIWF_AGENT_LANE_RESULT__:([A-Za-z0-9+/=]+)/u.exec(
-    result.stdout
+  // Scan ALL marker occurrences and return the first that decodes + validates,
+  // not merely the first that matches the prefix. A node emit that is OOM-killed
+  // mid-stdout-write can leave a truncated `__PIWF_AGENT_LANE_RESULT__:<partial>`
+  // line; the shell-only fallback then appends a VALID marker after it. A
+  // first-match-only parse would lock onto the corpse and throw, masking the
+  // recovered cause — so we step past unparseable markers to the good one.
+  // (wound #23-A: recovery must survive the failure it recovers.)
+  const markers = result.stdout.matchAll(
+    /__PIWF_AGENT_LANE_RESULT__:([A-Za-z0-9+/=]+)/gu
   );
-  if (marker?.[1] === undefined) {
-    throw new Error(
-      `Cloudflare Sandbox lane did not emit a result marker (exit ${result.exitCode}). stdout tail: ${tailForDiagnostic(result.stdout) || "<empty>"} | stderr tail: ${tailForDiagnostic(result.stderr) || "<empty>"}`
+  let sawMarker = false;
+  for (const marker of markers) {
+    const [, encoded] = marker;
+    if (encoded === undefined) {
+      continue;
+    }
+    sawMarker = true;
+    const parsed = SandboxLaneResultMarkerSchema.safeParse(
+      tryDecodeMarkerJson(encoded)
     );
+    if (parsed.success) {
+      return parsed.data;
+    }
   }
 
-  return SandboxLaneResultMarkerSchema.parse(JSON.parse(atob(marker[1])));
+  throw new Error(
+    `Cloudflare Sandbox lane ${sawMarker ? "emitted only unparseable result markers" : "did not emit a result marker"} (exit ${result.exitCode}). stdout tail: ${tailForDiagnostic(result.stdout) || "<empty>"} | stderr tail: ${tailForDiagnostic(result.stderr) || "<empty>"}`
+  );
 };
 
 /**
