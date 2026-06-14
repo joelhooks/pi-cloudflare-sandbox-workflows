@@ -1,0 +1,191 @@
+---
+title: "Carrier Wound #25: The Normalize-Recovery Copy Aborted The Lane Blind"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - error-handling
+  - recovery-path
+  - observability
+  - set-eu
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-25-recovery-cp-blind-abort-at-normalize-output"
+---
+
+# Carrier Wound #25: The Normalize-Recovery Copy Aborted The Lane Blind
+
+Wound #24 (the cap stopped counting corpses) shipped and a fresh dream run
+`run-live-20260614T140159124Z-70714011` was **admitted** — proving the cap-death
+fix works live. Then it blocked, terminal, ~40 minutes later. The admin feed told
+the story node-by-node: **three drive generations** (14:04 → 14:17 → 14:32), each
+re-planning, then terminal `adapter_unavailable` at 14:44. The planner lane died
+the same deterministic way three times and the run was re-driven against it
+anyway. The blocker text named the step — `normalize-output (exit 1, pi 0)` — and
+then showed, as its only evidence, the benign clone log: *"You appear to have
+cloned an empty repository."* pi exited **0**. So what halted at normalize-output
+with a non-zero exit, and why was its only cause a line about an empty clone?
+
+## Mechanism — a recovery path that could itself fail, under `set -eu`, blind
+
+The agent lane runs under `set -eu` (`cloudflare-sandbox-agent-lane-command.ts`).
+After pi exits, the JSON lanes normalize pi's raw output into the blueprint/verdict
+envelope. Wound #20 made a failed normalize an **honest** signal —
+`output_normalized=0`, `outputNormalization.reason` recorded — that must NOT
+clobber `pi_status`, so the receipt commits `status:"failed"` instead of forging
+an adapter outage. The recovery branch copied pi's raw output to `LANE_OUTPUT_PATH`
+so that committed receipt still had a body:
+
+```bash
+else
+  output_normalized=0
+  cp "$raw_output_path" "$LANE_OUTPUT_PATH"   # <-- BARE cp, under set -eu
+fi
+```
+
+That `cp` is **itself fallible** — an oversized raw output against a full
+lite-instance disk (the wound #23-B failure shape), or a missing/short-read
+source. And a bare `cp` that exits non-zero under `set -eu` **aborts the entire
+lane at exit 1**, at step normalize-output, *before the receipt is ever built*.
+Worse, the `cp` error went to the **script's own stderr** — an uncaptured channel.
+`$stderr_path` held only pi's (empty) stderr; `$git_log_path` held the benign
+empty-repo clone line. So `selectLaneAbortDiagnostic` (piRan ⇒ `stderrTail ||
+gitLogTail`) had nothing in stderrTail and fell back to the clone log. The marker
+was **blind**: it named the step and showed an unrelated, reassuring line.
+
+Then the planner adapter compounded it. `createCloudflarePiPlannerLaneAdapter`
+got no receipt at all (the lane aborted), so `runLane` threw the abort diagnostic,
+which `proposeDynamicWorkflowBlueprint` (`workflow-app.ts`) catches and forges into
+**`adapter_unavailable`** — a code that means *transport/infra is down*. It wasn't.
+pi ran fine and produced output the planner couldn't use. `adapter_unavailable`
+read as transient, so the run was re-driven three generations against a failure
+that was 100% deterministic.
+
+This is wound #23-B's promise **left incomplete**: #23-B made oversized output a
+fast honest failure *the normalizer* reports, but the recovery copy could still
+abort the lane before that honest receipt was committed — so the receipt #23-B
+intended never got written, and the operator saw a blind `adapter_unavailable`
+instead of `reason: oversized_output`. Like every wound this week, it was only
+visible because the run was watched node-by-node, not stared at —
+*"feels like we should be able to observe the run in progress and not guess if it's
+functioning instead of waiting and staring at it like fucking dummies."*
+
+> A Philosophy of Software Design (John Ousterhout), Ch. 10, "Defining Errors Out
+> of Existence":
+>
+> > The best way to [reduce where exceptions must be handled] is by redefining
+> > semantics to eliminate error conditions. For exceptions that can't be defined
+> > away, you should look for opportunities to mask them at a low level, so their
+> > impact is limited...
+>
+> (citing Ding Yuan et al., *"Simple Testing Can Prevent Most Critical Failures,"*
+> OSDI 2014 — the failures that take systems down live in the least-tested
+> error-handling path, and a simple test would have caught them.)
+
+The recovery copy is exactly such an error-handling path: rarely exercised,
+catastrophic when it fires, and able to fail in a way that masked its own cause.
+
+## Fix — mask the recovery's failure at a low level; never abort, never go blind
+
+Two surgical changes, no new abstraction.
+
+### A — the recovery copy can no longer abort or hide (carrier core)
+
+A single `persist_unnormalized_output` helper replaces both bare `cp` sites. It
+**never aborts**, **tees any failure into `$stderr_path`** so the marker carries
+the real cause, and **guarantees `LANE_OUTPUT_PATH` exists** (a placeholder if the
+copy fails) so the downstream hash/add/commit steps run and a failed normalize
+**always yields a committed `status:"failed"` receipt**:
+
+```bash
+persist_unnormalized_output() {
+  mkdir -p "$(dirname "$LANE_OUTPUT_PATH")" 2>>"$stderr_path" || true
+  if ! cp "$raw_output_path" "$LANE_OUTPUT_PATH" 2>>"$stderr_path"; then
+    printf '[agent-lane recovery] could not persist raw pi output to LANE_OUTPUT_PATH; see stderr tail for the copy failure\n' \
+      > "$LANE_OUTPUT_PATH" 2>>"$stderr_path" || true
+  fi
+}
+```
+
+The error condition is *defined out of existence* for the lane's control flow: the
+copy's failure is masked at the lowest level, its impact limited to a placeholder
+body and a captured stderr line — it can no longer take down the whole lane.
+
+### B — the planner names the real cause instead of a blind generic throw
+
+The verifier adapter already read `receipt.outputNormalization` and reported
+*"agent produced no parseable verdict (reason: ...)"*. The planner adapter was its
+un-classified twin — a generic *"did not return a completed real-agent receipt."*
+Now (post-A) the planner lane commits a `status:"failed"` receipt with the real
+`outputNormalization.reason`, and the adapter surfaces it:
+
+```ts
+if (normalization?.normalized === false) {
+  cause = `planner produced no parseable blueprint (reason: ${
+    normalization.reason ?? "unknown"
+  }${stopReasonSuffix})`;
+}
+```
+
+So the blocker now reads *"...planner produced no parseable blueprint (reason:
+no_parseable_output)"* — the observability the governing demand asked for. The
+operator stops guessing; the next re-drive decision is made on a named cause.
+
+## Chaos Receipt (would have caught it)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — **31 passing** (1
+new). The new test is a hostile double in the file's established style: it slices
+the **real** normalize-output recovery block out of `buildPiAgentLaneCommand()` and
+runs it verbatim under production's `set -eu`, with the JSON normalizer forced to
+fail (fake `node` exits 1) **and the raw-output source missing** so the recovery
+copy cannot succeed — the exact production conditions. It asserts the block
+**(1) does not abort** (reaches a post-recovery sentinel), **(2) leaves an output
+file** (the placeholder, so downstream steps never abort), and **(3) captures the
+copy error into `$stderr_path`** (the marker is not blind). Against the pre-fix
+bare `cp` all three flip: it aborts before the sentinel, leaves no file, and sends
+the error to the harness's own stderr. A polite test would have copied a file that
+exists; this one constructs the failing-copy state the production lane actually got
+into.
+
+## Verification
+
+```bash
+pnpm vitest run tests/integration/cloudflare-sandbox-agent-lanes.test.ts  # 31 pass (1 new)
+pnpm vitest run                                                            # 412 pass, 55 files
+pnpm typecheck   # clean (tsgo)
+pnpm check       # oxfmt + oxlint + type-aware, clean
+```
+
+## Known follow-ups (not in this fix)
+
+- **Deterministic re-drive (3 generations / 40 min).** With B, the blocker is now
+  honest and fast, but the driver still re-drove planning three times before going
+  terminal. A planner that fails deterministically should fail fast — assess once
+  a clean named-cause block is observed live; may fold into Defect 2's pause/re-arm
+  seam rather than a separate retry cap.
+- **`adapter_unavailable` overload (Defect 2 family).** A planner-no-plan is still
+  routed through `proposeDynamicWorkflowBlueprint`'s catch into
+  `adapter_unavailable`. B fixes the *message*; the *code* still conflates a
+  no-plan with a transport outage. Reclassify alongside the backpressure pause work.
+- **The deepest question this fix now lets us READ:** *why* does pi produce no
+  parseable blueprint (no_parseable_output vs oversized_output vs agent_error)?
+  Before this fix that was a blind wall; after it, the committed receipt's
+  `outputNormalization.reason` names it on the next live run. Diagnose from the
+  named reason — do not guess.
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. This fix
+deploys, then ONE dream-shape run is watched node-by-node — either to `captured`
+(pi produced a real blueprint, the carrier carried it) or to an **honest, named**
+block (`reason: ...`) that tells us the next carrier move without staring. Only a
+`captured` on fixed, deployed code fires the operator Discord ping with the wzrrd
+HITL URL, resets D3, and starts the serial burn-in. Sibling of
+[[carrier-wound-cap-death-spiral-2026-06-14]]: #24 made admission stop counting the
+dead; #25 makes the recovery path stop killing the lane in silence. *Any failure is
+a carrier failure: fix the class in the carrier, with a chaos test that would have
+caught it, reset the count.*

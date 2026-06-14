@@ -342,8 +342,29 @@ export const createCloudflarePiPlannerLaneAdapter = (
       !receipt.realAgent ||
       receipt.runtime === "integration-test"
     ) {
+      // Mirror the verifier adapter: a planner lane that committed a receipt but
+      // could not normalize its blueprint is "pi produced no parseable plan", a
+      // real planner failure — NOT the blind generic throw that upstream forged
+      // into `adapter_unavailable` (transport down) and re-drove for 40 minutes
+      // (wound #25). Surface the real reason so the blocker is honest.
+      const normalization = receipt.outputNormalization;
+      let cause: string;
+      if (normalization?.normalized === false) {
+        const stopReasonSuffix =
+          normalization.agentStopReason !== null &&
+          normalization.agentStopReason !== ""
+            ? `, stopReason: ${normalization.agentStopReason}`
+            : "";
+        cause = `planner produced no parseable blueprint (reason: ${
+          normalization.reason ?? "unknown"
+        }${stopReasonSuffix})`;
+      } else if (receipt.status === "completed") {
+        cause = `receipt completed but was kind:"${receipt.kind}", realAgent:${receipt.realAgent}, runtime:"${receipt.runtime}"`;
+      } else {
+        cause = `receipt status was "${receipt.status}"`;
+      }
       throw new Error(
-        "Planner lane did not return a completed real-agent receipt."
+        `Planner lane did not return a completed real-agent receipt: ${cause}.`
       );
     }
     const artifactCommitSha = requireLaneCommitSha(receipt, "Planner");

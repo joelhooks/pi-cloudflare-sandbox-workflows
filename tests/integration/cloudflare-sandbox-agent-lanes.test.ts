@@ -701,6 +701,97 @@ describe(buildPiAgentLaneCommand, () => {
     }
   }, 15_000);
 
+  it("a failed normalize whose recovery copy also fails does NOT abort the lane blind (wound #25)", () => {
+    // Hostile double for wound #25: slice the REAL normalize-output recovery block
+    // out of buildPiAgentLaneCommand() and run it verbatim under production's
+    // `set -eu`, with the JSON normalizer forced to fail (fake `node` exits 1) AND
+    // the raw-output source MISSING so the recovery copy cannot succeed — exactly
+    // the production conditions (pi exit 0, normalize fails, the verbatim copy of
+    // the raw output into LANE_OUTPUT_PATH fails). The pre-fix recovery was a BARE
+    // `cp "$raw_output_path" "$LANE_OUTPUT_PATH"`: under `set -eu` that exit-1
+    // ABORTED the whole lane at normalize-output, the cp error went to the script's
+    // OWN stderr (an uncaptured channel), the blocker fell back to the benign
+    // empty-repo clone log, and the planner forged a blind `adapter_unavailable`
+    // that was re-driven for 40 minutes. All three signals below flip against that
+    // pre-fix code: it never reaches the sentinel, never leaves an output file, and
+    // never captures the copy error. The fix must (1) not abort, (2) guarantee
+    // LANE_OUTPUT_PATH exists for the downstream hash/add/commit steps, and (3) tee
+    // the copy failure into stderr_path so the marker is not blind.
+    const blockStart = command.indexOf("mark normalize-output");
+    const blockEnd = command.indexOf("\ncompleted_at=");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the normalize-output recovery block in the lane command."
+      );
+    }
+    const normalizeBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-normalize-recovery-"));
+    try {
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      // A `node` that fails so the JSON-lane normalizer takes the recovery branch.
+      const fakeNode = join(binDir, "node");
+      writeFileSync(fakeNode, "#!/usr/bin/env bash\ncat >/dev/null\nexit 1\n");
+      chmodSync(fakeNode, 0o755);
+
+      const stderrPath = join(dir, "stderr.txt");
+      // Dest lives under a not-yet-created subdir to also exercise the recovery's
+      // `mkdir -p "$(dirname ...)"`, matching production's relative run/ output path.
+      const outputPath = join(dir, "run", "planner-blueprint.json");
+      // Source is intentionally MISSING so the recovery copy fails like production.
+      const missingRawPath = join(dir, "raw-MISSING.txt");
+
+      const harness = [
+        "set -eu",
+        "mark() { :; }",
+        normalizeBlock,
+        "printf 'POST_RECOVERY_REACHED normalized=%s\\n' \"$output_normalized\"",
+      ].join("\n");
+
+      const stdout = execFileSync("bash", ["-c", harness], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_OUTPUT_MEDIA_TYPE: "application/json",
+          LANE_OUTPUT_PATH: outputPath,
+          PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+          raw_output_path: missingRawPath,
+          stderr_path: stderrPath,
+        },
+        timeout: 15_000,
+      });
+
+      const stderr = existsSync(stderrPath)
+        ? readFileSync(stderrPath, "utf-8")
+        : "";
+      const output = existsSync(outputPath)
+        ? readFileSync(outputPath, "utf-8")
+        : null;
+
+      expect({
+        // (3) the copy failure is captured into stderr_path — the marker is not blind
+        capturedCopyErrorForTheMarker:
+          stderr.length > 0 && /No such file or directory/u.test(stderr),
+        // (2) LANE_OUTPUT_PATH exists so downstream hash/add/commit never abort
+        leftOutputFile: output !== null,
+        // (1) the recovery did not abort the lane under set -eu
+        reachedPostRecovery: stdout.includes(
+          "POST_RECOVERY_REACHED normalized=0"
+        ),
+        wroteRecoveryPlaceholder:
+          output?.includes("[agent-lane recovery]") ?? false,
+      }).toStrictEqual({
+        capturedCopyErrorForTheMarker: true,
+        leftOutputFile: true,
+        reachedPostRecovery: true,
+        wroteRecoveryPlaceholder: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 15_000);
+
   it("runs the failure marker on a whole-script SIGTERM, not just a clean exit", () => {
     // Wound #22 Layer C: the self-bound pi-invoke fires, but pi can eat its whole
     // budget and leave the post-pi tail (normalize/transcript/receipt/commit/push) too

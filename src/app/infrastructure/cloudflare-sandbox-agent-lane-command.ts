@@ -214,6 +214,25 @@ mark normalize-output
 # the receipt's outputNormalization — it must NOT clobber pi_status, which would
 # forge a non-zero exit and make a committed receipt look like an adapter outage.
 output_normalized=1
+# When normalization fails (or the lane output is not JSON) the raw pi output is
+# copied verbatim to LANE_OUTPUT_PATH so the receipt still commits an honest
+# status:"failed" with the real outputNormalization.reason (wound #23-B's promise).
+# That recovery copy is itself fallible — an oversized raw output against a full
+# lite-instance disk, or a missing source — and under 'set -eu' a BARE 'cp' that
+# fails ABORTS the whole lane at exit 1 with the copy error written to the
+# script's own stderr (an uncaptured channel). The blocker then fell back to the
+# benign empty-repo clone log, the planner forged a blind 'adapter_unavailable',
+# and the run was re-driven for 40 minutes against a deterministic failure
+# (wound #25). Guard it: never abort, tee any failure into stderr_path so the
+# marker is not blind, and guarantee LANE_OUTPUT_PATH exists for the downstream
+# hash/add/commit steps so a failed normalize ALWAYS yields a committed receipt.
+persist_unnormalized_output() {
+  mkdir -p "$(dirname "$LANE_OUTPUT_PATH")" 2>>"$stderr_path" || true
+  if ! cp "$raw_output_path" "$LANE_OUTPUT_PATH" 2>>"$stderr_path"; then
+    printf '[agent-lane recovery] could not persist raw pi output to LANE_OUTPUT_PATH; see stderr tail for the copy failure\n' \
+      > "$LANE_OUTPUT_PATH" 2>>"$stderr_path" || true
+  fi
+}
 if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
   if node <<'NODE'
 ${jsonOutputNormalizerNodeScript}
@@ -222,10 +241,10 @@ NODE
     output_normalized=1
   else
     output_normalized=0
-    cp "$raw_output_path" "$LANE_OUTPUT_PATH"
+    persist_unnormalized_output
   fi
 else
-  cp "$raw_output_path" "$LANE_OUTPUT_PATH"
+  persist_unnormalized_output
 fi
 export output_normalized
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
