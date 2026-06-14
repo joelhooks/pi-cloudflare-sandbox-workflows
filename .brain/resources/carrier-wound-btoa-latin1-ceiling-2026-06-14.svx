@@ -1,0 +1,130 @@
+---
+title: "Carrier Wound #21: btoa() Latin1 Ceiling Forges a Planner Outage"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - encoding
+  - planner
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+source: "wound-21-planner-adapter-unavailable"
+commit: "PENDING"
+---
+
+# Carrier Wound #21: btoa() Latin1 Ceiling Forges a Planner Outage
+
+The very first dream-shape run on freshly-deployed wound-#20 code blocked
+terminal in `planningDynamicWorkflow`, before any node executed:
+
+```json
+"blocker": {
+  "code": "adapter_unavailable",
+  "message": "Dynamic workflow planner failed: btoa() can only operate on characters in the Latin1 (ISO/IEC 8859-1) range."
+}
+```
+
+`driveGeneration 1`, `checkpoint null`, no node attempts, `hasRunStartRecord
+false`. A healthy planner agent never got to run — the carrier killed it while
+**packing the command**, then surfaced the catch-all `adapter_unavailable`. This
+is exactly the failure the "observe the run live, don't stare and guess" mandate
+exists to catch: the wound was invisible from the outside and obvious node-by-node.
+
+## Mechanism
+
+The Worker ships every Sandbox command by base64-encoding the bash script,
+piping it through `base64 -d` on the container, and running the decoded bytes:
+
+```ts
+const wrapCommandForSandbox = (command: string): string => {
+  const encodedCommand = btoa(command); // ← wound
+  return String.raw`...printf '%s' '${encodedCommand}' | base64 -d > "$script_path"...`;
+};
+```
+
+In the Workers runtime, `btoa()` only accepts code points in the Latin1
+(ISO/IEC 8859-1) range — it throws `InvalidCharacterError` on any character
+above `0xFF`. The **Dynamic workflow planner is itself an agent lane**, and its
+command embeds the source material it plans over. Dream transcripts carry emoji
+(🌙), smart quotes (" "), em-dashes (–), accented Latin (café), CJK (日本語) —
+all above `0xFF`. So `btoa` detonated the instant real content flowed through.
+The polite test corpus had been pure ASCII; production was not. A franchise of
+the [[polite-fakes-franchise-wound]]: **the doubles were politer than the
+transcripts.**
+
+The bug is a category error — conflating a string's **code points** with its
+**byte encoding**:
+
+> "you can't spend four bytes encoding a code point that would fit in three.
+> This rule ensures that there is exactly one UTF-8 encoding for a given code
+> point." — Programming Rust, 2nd Ed. (Blandy & Orendorff), Ch. 17
+
+`btoa` wants bytes (0–255). UTF-8 text has code points far above that. You must
+encode the **UTF-8 bytes**, not hand `btoa` the raw code points.
+
+## Fix — Encode the Bytes, as a Class
+
+New module `src/app/infrastructure/sandbox-command-encoding.ts` owns the one
+Worker-side base64 chokepoint:
+
+```ts
+export const encodeCommandToBase64 = (command: string): string => {
+  const bytes = new TextEncoder().encode(command);
+  const chunkSize = 32_768;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCodePoint(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+};
+```
+
+Three properties matter:
+
+1. **Bytes, not code points.** `TextEncoder().encode` yields the UTF-8 byte
+   sequence; each byte (0–255) maps to one Latin1 character, so `btoa` never sees
+   a value it can't handle.
+2. **Decode path is unchanged.** `base64 -d` decodes back to those exact UTF-8
+   bytes → file → bash reads the original UTF-8 script. No container-side change.
+3. **Chunked.** Bytes feed `fromCodePoint` in 32 KiB windows so multi-megabyte
+   transcripts can't overflow the argument stack — verified with ~1 MB of emoji.
+
+`wrapCommandForSandbox` now calls `encodeCommandToBase64`. It is the **only**
+`btoa` in `src/`, so fixing this chokepoint fixes the whole class. (The
+container-side result marker already uses node `Buffer.from(...).toString(
+"base64")`, which is byte-correct.)
+
+## Chaos Receipt (would have caught it)
+
+`tests/integration/sandbox-command-encoding.test.ts` — 5 passing. The hostile
+double is production's **real decode transport**: pipe the encoded payload
+through bash `base64 -d` (`execFileSync`), not a polite JS `atob`. A JS-only
+round-trip would have masked the byte-vs-code-point bug; `base64 -d` does not.
+
+- raw `btoa(nonLatin1)` throws `/character/iu`; `encodeCommandToBase64` does not
+- non-Latin1 (emoji + smart quotes + em-dash + CJK + Cyrillic) round-trips
+  through bash `base64 -d` byte-for-byte
+- plain ASCII round-trips unchanged
+- ~1 MB of 4-byte code points round-trips without stack overflow
+- output is standard padded base64 (`/^[A-Za-z0-9+/]+={0,2}$/`)
+
+## Verification
+
+```bash
+pnpm typecheck   # clean
+pnpm check       # oxfmt + oxlint + type-aware, clean
+pnpm vitest run tests/integration/sandbox-command-encoding.test.ts \
+  tests/integration/cloudflare-sandbox-agent-lanes.test.ts   # 5 + 21 pass
+```
+
+## Burn-In Gate
+
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. This fix
+must be deployed and a fresh dream-shape run must reach `captured` **observed
+live on deployed code** before the burn-in restarts. Any failure is a carrier
+failure: fix the class, add the chaos test that would have caught it, reset the
+count. Wound #21 is the second class found this way after [[carrier-wound-json-lane-lossy-text-2026-06-14]];
+both surfaced only because the run was watched node-by-node, not stared at.

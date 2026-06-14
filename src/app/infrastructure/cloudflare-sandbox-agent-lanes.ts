@@ -26,6 +26,7 @@ import {
   parseLaneResultMarker,
 } from "./cloudflare-sandbox-agent-lane-command.ts";
 import type { SandboxCommandResult } from "./cloudflare-sandbox-agent-lane-command.ts";
+import { encodeCommandToBase64 } from "./sandbox-command-encoding.ts";
 import { buildSandboxId, safeGitRefSegment } from "./sandbox-id.ts";
 
 interface CloudflareSandboxAgentLaneEnv {
@@ -103,7 +104,7 @@ const redact = (value: string, secrets: readonly string[]): string => {
 };
 
 const wrapCommandForSandbox = (command: string): string => {
-  const encodedCommand = btoa(command);
+  const encodedCommand = encodeCommandToBase64(command);
 
   return String.raw`set +e
 script_path="$(mktemp)"
