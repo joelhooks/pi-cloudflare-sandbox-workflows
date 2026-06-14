@@ -292,6 +292,11 @@ export const AgentLaneReceiptSchema = z
       .object({
         agentStopReason: z.string().nullable().default(null),
         normalized: z.boolean(),
+        // pi's process exit code (0 ok; 124 timeout; 126/127 "Argument list too
+        // long" — the prompt overflowed argv before exec). Non-zero ⇒ pi errored
+        // before producing output, so an empty rawOutputSample is a non-arrival,
+        // not a silent model. null on legacy receipts.
+        piExitStatus: z.number().nullable().default(null),
         // Bounded, control-char-flattened, credential-scrubbed head+tail of the
         // raw agent stdout, present ONLY when normalize FAILED. The verifier (and
         // any JSON lane) fails "complete-with-failed-normalize": it commits this
@@ -301,6 +306,12 @@ export const AgentLaneReceiptSchema = z
         // turn? a verdict written off-stdout?) without another blind re-drive.
         rawOutputSample: z.string().nullable().default(null),
         reason: z.string().nullable().default(null),
+        // Bounded, control-char-flattened, credential-scrubbed head+tail of pi's
+        // STDERR, present ONLY when normalize FAILED. When stdout is empty the
+        // failure reason ("Argument list too long", an auth 4xx, a timeout) lives
+        // here — the operator-readable counterpart to the transcript's stderr,
+        // which no artifact endpoint exposes. null on legacy receipts.
+        stderrSample: z.string().nullable().default(null),
       })
       .optional(),
     outputPins: z.array(ArtifactPinSchema).default([]),

@@ -544,8 +544,17 @@ const normalizationPath = process.env.LANE_OUTPUT_NORMALIZATION_PATH;
 // gated status read. This is the channel the abort-path lane-diagnostics file
 // can NOT reach on the complete-with-failed-normalize path the verifier hits.
 const sampleRawOutput = (text) => {
-  if (typeof text !== "string" || text.length === 0) {
+  if (typeof text !== "string") {
     return null;
+  }
+  // An EMPTY channel is the MOST diagnostic case, not the least: it means pi
+  // emitted nothing on stdout (E2BIG before exec, a crash, a SIGKILL). Returning
+  // null here made empty INVISIBLE — the blocker dropped the sample suffix and the
+  // operator read the same bare "no_parseable_output" as a prose miss. Emit an
+  // explicit marker so "the agent produced zero bytes" is legible, paired with the
+  // receipt's piExitStatus + stderrSample (which name WHY it was empty).
+  if (text.length === 0) {
+    return "<empty: 0 bytes — agent emitted nothing on stdout>";
   }
   const headLen = 1024;
   const tailLen = 1024;

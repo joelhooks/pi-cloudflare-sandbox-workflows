@@ -814,6 +814,131 @@ describe(buildPiAgentLaneCommand, () => {
     }
   }, 15_000);
 
+  it("delivers the lane prompt to pi by @file reference so no single argv argument grows with prompt size — an oversized INLINED prompt E2BIGs before pi runs, the @file form survives the same prompt (wound #35)", () => {
+    // Hostile double for wound #35 ([[polite-fakes-franchise-wound]]): slice the REAL
+    // pi-invoke block and run it verbatim against a prompt LARGER than the host's argv
+    // ceiling, twice — once with the shipped @file delivery, once with the pre-fix
+    // inline form rebuilt from the SAME block (the only delta is how the prompt reaches
+    // pi). The live failure: line 301 passed the verifier prompt as
+    // `-p "$(cat "$LANE_PROMPT_PATH")"` — ONE argv argument. The verifier prompt inlines
+    // the contract + full plan + all 19 nodes' evidence (JSON.stringify indent 2) +
+    // capability receipts, so it crossed Linux MAX_ARG_STRLEN (32 pages = 128 KiB per
+    // arg) and execve returned E2BIG ("Argument list too long") BEFORE pi ran → empty
+    // stdout → no_parseable_output → terminal blocked (run-live-...e4aa52ae, 22:02:58,
+    // past planner + all 19 nodes, only the meta-verifier empty). The planner survived
+    // only because its prompt is small. A polite mock asserting the command STRING
+    // contains "@" would prove nothing about the kernel ceiling; this reproduces execve
+    // E2BIG on the real shell and shows the @file form (only the short path on argv)
+    // survives the SAME oversized prompt. The prompt is sized above every host ceiling so
+    // the class reproduces on macOS (~1 MiB total ARG_MAX) and Linux (128 KiB/arg) alike.
+    const blockStart = command.indexOf("pi_generation_lane=0");
+    const blockEnd = command.indexOf("\nmark normalize-output");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke block in the lane command."
+      );
+    }
+    const fileDeliveryBlock = command.slice(blockStart, blockEnd);
+    // Rebuild the pre-fix inline form from the SHIPPED block — isolates delivery, not any
+    // other transport change. If the shipped form ever stops using @file, this no-op
+    // replace throws and the test fails loudly instead of silently testing nothing.
+    const inlineDeliveryBlock = fileDeliveryBlock.replace(
+      '-p "@$LANE_PROMPT_PATH"',
+      '-p "$(cat "$LANE_PROMPT_PATH")"'
+    );
+    if (inlineDeliveryBlock === fileDeliveryBlock) {
+      throw new Error(
+        'Shipped pi-invoke must deliver the prompt via -p "@$LANE_PROMPT_PATH".'
+      );
+    }
+
+    // One argv argument over every host ceiling: > macOS ARG_MAX (~1 MiB total) and >>
+    // Linux MAX_ARG_STRLEN (128 KiB per arg). This is the verifier prompt's shape — a
+    // single oversized blob — not many small ones.
+    const oversizedPrompt = "x".repeat(2 * 1024 * 1024);
+
+    const runDelivery = (piInvokeBlock: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "piwf-pi-delivery-"));
+      try {
+        const binDir = join(dir, "bin");
+        mkdirSync(binDir);
+        // A pi that PROVES it ran by emitting a marker, regardless of how the prompt was
+        // delivered — the test asks whether execve REACHES pi, not whether pi reads files.
+        const fakePi = join(binDir, "pi");
+        writeFileSync(fakePi, "#!/usr/bin/env bash\nprintf 'PI_RAN\\n'\n");
+        chmodSync(fakePi, 0o755);
+
+        const promptPath = join(dir, "prompt.txt");
+        writeFileSync(promptPath, oversizedPrompt);
+        const rawOutputPath = join(dir, "raw.txt");
+        const stderrPath = join(dir, "stderr.txt");
+
+        const harness = [
+          "set -u",
+          "script_start_s=$(date +%s)",
+          "diag() { :; }",
+          "scrub_credentials() { cat; }",
+          piInvokeBlock,
+          "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
+        ].join("\n");
+
+        const stdout = execFileSync("bash", ["-c", harness], {
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            // The failing lane was a text/markdown verifier (source-grounded → keeps its
+            // tools); LANE_KIND must be set or the pi_tool_args block trips `set -u`.
+            LANE_KIND: "verifier",
+            LANE_OUTPUT_MEDIA_TYPE: "text/markdown",
+            LANE_PROMPT_PATH: promptPath,
+            PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+            PIWF_COMMAND_TIMEOUT_SECONDS: "30",
+            PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+            PI_MODEL: "fake-model",
+            PI_PROVIDER: "fake-provider",
+            raw_output_path: rawOutputPath,
+            stderr_path: stderrPath,
+          },
+          timeout: 15_000,
+        });
+
+        const raw = existsSync(rawOutputPath)
+          ? readFileSync(rawOutputPath, "utf-8")
+          : "";
+        const stderr = existsSync(stderrPath)
+          ? readFileSync(stderrPath, "utf-8")
+          : "";
+        return {
+          piRan: raw.includes("PI_RAN"),
+          reachedPostPi: stdout.includes("POST_PI_REACHED"),
+          stderr,
+        };
+      } finally {
+        rmSync(dir, { force: true, recursive: true });
+      }
+    };
+
+    const inline = runDelivery(inlineDeliveryBlock);
+    const fileRef = runDelivery(fileDeliveryBlock);
+
+    expect({
+      // Shipped @file form: only the short path rides argv, so the SAME 2 MiB prompt
+      // reaches pi and it runs — the size is now irrelevant to argv.
+      fileRefPiRan: fileRef.piRan,
+      fileRefReachedPostPi: fileRef.reachedPostPi,
+      // Pre-fix inline form: the 2 MiB prompt is ONE argv arg → execve E2BIGs before pi
+      // runs. The shell's "Argument list too long" lands on the redirected stderr…
+      inlineE2bigInStderr: /Argument list too long/iu.test(inline.stderr),
+      // …and stdout stays empty — byte-for-byte the live no_parseable_output.
+      inlineEmptyStdout: !inline.piRan,
+    }).toStrictEqual({
+      fileRefPiRan: true,
+      fileRefReachedPostPi: true,
+      inlineE2bigInStderr: true,
+      inlineEmptyStdout: true,
+    });
+  }, 20_000);
+
   it("muzzles pure-generation lanes (planner + verifier) with --no-tools at the CLI — agentic lanes (worker) keep read/bash to inspect real artifacts (wound #31, #33)", () => {
     // Hostile double for wound #31/#33 ([[polite-fakes-franchise-wound]]): slice the REAL
     // pi-invoke block out of buildPiAgentLaneCommand() and run it verbatim with a `pi`

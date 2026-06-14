@@ -282,7 +282,23 @@ if [ -n "$PIWF_RAW_OUTPUT_CAP_BYTES" ]; then
   raw_output_cap_bytes="$PIWF_RAW_OUTPUT_CAP_BYTES"
 fi
 set -u
-timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args $pi_tool_args -p "$(cat "$LANE_PROMPT_PATH")" 2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
+# Deliver the prompt by FILE REFERENCE (pi's @file message injection), never as a
+# single argv string. The old '-p "$(cat "$LANE_PROMPT_PATH")"' inlined the entire
+# prompt body into ONE argv argument, and Linux caps a single argv string at
+# MAX_ARG_STRLEN (32 pages = 128 KiB). The verifier prompt inlines the contract +
+# full plan + every node's evidence (JSON.stringify indent 2) and crosses that
+# ceiling, so the shell's execve fails E2BIG ("Argument list too long") BEFORE pi
+# runs: empty stdout, a committed status:"failed" receipt, bare 'no_parseable_output',
+# and no sign the prompt never reached the model (live ...-e4aa52ae died exactly here
+# — past planner + all 19 nodes, then the meta-verifier empty). '@$LANE_PROMPT_PATH'
+# puts only the short path on argv and pi reads the body from disk itself, so the
+# prompt's size is now irrelevant to argv: NO generation lane can E2BIG no matter how
+# large its prompt grows. pi reads the @file at message-assembly time (verified — a
+# missing @file errors "File not found" before any model call), and under --no-tools
+# there is no read tool to dereference an "attachment", so @file content is
+# necessarily injected straight into the message — identical semantics to the old
+# inline cat, minus the ceiling.
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args $pi_tool_args -p "@$LANE_PROMPT_PATH" 2> "$stderr_path" | head -c "$raw_output_cap_bytes" > "$raw_output_path"
 # Bare \$PIPESTATUS expands to the FIRST pipe element in bash — the left-of-pipe
 # (timeout pi) exit. The braced array-index form collides with this String.raw
 # template's JS interpolation (it throws "PIPESTATUS is not defined" at build time —
@@ -519,6 +535,41 @@ if (normalizationPath && fs.existsSync(normalizationPath)) {
 }
 const piExitOk = Number(process.env.pi_status) === 0;
 const laneCompleted = piExitOk && outputNormalization.normalized !== false;
+// When stdout is empty the failure REASON lives in pi's exit code + stderr, not in
+// the (empty) output sample. The transcript already captures stderr, but the
+// operator cannot read it (no artifact endpoint), so an empty-stdout failure read as
+// a bare "no_parseable_output". Thread pi's exit code and a bounded, scrubbed stderr
+// head+tail into the receipt's outputNormalization so the verifier blocker can NAME
+// the cause (e.g. "Argument list too long", an auth 4xx, a timeout) on the
+// committed-receipt road the failure actually travels. Failure-path only: a healthy
+// receipt stays clean and never carries stderr noise (deprecation lines, etc.).
+const normalizationFailed = outputNormalization.normalized === false;
+const piExitStatusNum = Number(process.env.pi_status);
+const stderrSampleFor = (failed) => {
+  if (!failed) {
+    return null;
+  }
+  let stderrText = "";
+  try {
+    stderrText = fs.readFileSync(process.env.stderr_path, "utf8");
+  } catch {}
+  if (stderrText.length === 0) {
+    return null;
+  }
+  const headLen = 800;
+  const tailLen = 800;
+  const head = stderrText.slice(0, headLen);
+  const tail =
+    stderrText.length > headLen + tailLen ? stderrText.slice(-tailLen) : "";
+  const omitted = stderrText.length - headLen - tailLen;
+  const joined =
+    tail === "" ? head : head + " ...[" + omitted + " bytes omitted]... " + tail;
+  return joined
+    .replace(/[\x00-\x1f\x7f]+/g, " ")
+    .replace(/https:\/\/[^@\s]*@/g, "https://<redacted>@")
+    .replace(/(authorization|bearer|x-access-token|token)["':=\s]+[A-Za-z0-9._\-]{8,}/gi, "$1 <redacted>")
+    .slice(0, 1600);
+};
 const receipt = {
   completedAt: process.env.completed_at,
   kind: process.env.LANE_KIND,
@@ -542,9 +593,11 @@ const receipt = {
   },
   outputNormalization: {
     normalized: outputNormalization.normalized !== false,
+    piExitStatus: Number.isFinite(piExitStatusNum) ? piExitStatusNum : null,
     reason: outputNormalization.reason ?? null,
     agentStopReason: outputNormalization.agentStopReason ?? null,
-    rawOutputSample: outputNormalization.rawOutputSample ?? null
+    rawOutputSample: outputNormalization.rawOutputSample ?? null,
+    stderrSample: stderrSampleFor(normalizationFailed)
   },
   realAgent: true,
   receiptRef: process.env.LANE_RECEIPT_ARTIFACT_REF,

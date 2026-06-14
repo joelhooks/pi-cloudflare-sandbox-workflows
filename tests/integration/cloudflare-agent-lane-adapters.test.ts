@@ -1238,6 +1238,152 @@ describe("Cloudflare Pi verifier lane adapter", () => {
       withoutSampleOmitsRawSampleClause: true,
     });
   });
+
+  it("makes a non-arriving verifier legible: the blocker names pi's nonzero exit and stderr tail so an E2BIG (empty stdout) is no longer an unattributable no_parseable_output (wound #35)", async () => {
+    // Wound #35's OBSERVABILITY half. Wound #34 surfaced the raw-output SAMPLE; but when
+    // the prompt overflowed argv (MAX_ARG_STRLEN, 128 KiB/arg) the shell's execve failed
+    // E2BIG BEFORE pi ran — there was no stdout to sample, so the sample was the empty
+    // marker and the blocker still read only "reason: no_parseable_output". The operator
+    // could not tell "the model said nothing parseable" from "the process never started":
+    // the WHY lived in pi's nonzero exit and the shell's "Argument list too long" on
+    // stderr, neither of which the blocker carried. The build-receipt node threads both
+    // (process.env.pi_status + a scrubbed stderr head/tail) into
+    // outputNormalization.piExitStatus / .stderrSample (real AgentLaneReceiptSchema), and
+    // the verifier adapter's blocker `cause` appends them. This drives the REAL adapter
+    // against a runtime returning a REAL schema-parsed committed-failed receipt carrying
+    // the E2BIG signature (empty-stdout marker + exit 126 + "Argument list too long"). The
+    // A/B control proves the suffixes are gated on real values: a clean exit (0) with null
+    // stderr must NOT fabricate them — so the assertion is the load-bearing discriminator,
+    // not ambient text. A regression dropping piExitStatus/stderrSample from the schema
+    // makes the fields vanish on parse here and flips the e2big* keys.
+    const fixture = await buildVerifierLaneFixture();
+    const emptyStdoutMarker =
+      "<empty: 0 bytes — agent emitted nothing on stdout>";
+    const e2bigStderr =
+      "bash: line 42: /opt/homebrew/opt/coreutils/libexec/gnubin/timeout: " +
+      "Argument list too long";
+
+    const driveE2big = async (params: {
+      piExitStatus: number | null;
+      rawOutputSample: string | null;
+      stderrSample: string | null;
+    }) => {
+      const runtime: AgentLaneRuntimePort = {
+        runLane(request) {
+          const promptRef = request.artifactRef({
+            path: request.promptPath,
+            runId: request.runId,
+          });
+          const transcriptRef = request.artifactRef({
+            path: request.transcriptPath,
+            runId: request.runId,
+          });
+          const receiptRef = request.artifactRef({
+            path: request.receiptPath,
+            runId: request.runId,
+          });
+          return Promise.resolve(
+            AgentLaneReceiptSchema.parse({
+              authLease: request.authLease,
+              completedAt: "2026-06-14T22:03:00.000Z",
+              kind: "verifier",
+              laneId: request.laneId,
+              outputNormalization: {
+                agentStopReason: null,
+                normalized: false,
+                piExitStatus: params.piExitStatus,
+                rawOutputSample: params.rawOutputSample,
+                reason: "no_parseable_output",
+                stderrSample: params.stderrSample,
+              },
+              outputPins: [],
+              outputRefs: [],
+              prompt: {
+                artifactRef: promptRef,
+                hash: sha256Hex(request.prompt),
+                mediaType: "text/markdown",
+              },
+              realAgent: true,
+              receiptRef,
+              redacted: true,
+              runtime: "pi-agent-cli",
+              sandboxRef: "cloudflare-sandbox:verifier-e2big-test",
+              startedAt: "2026-06-14T22:02:00.000Z",
+              status: "failed",
+              traceContext: request.traceContext,
+              transcript: {
+                artifactRef: transcriptRef,
+                hash: sha256Hex("verifier transcript"),
+                mediaType: "text/markdown",
+              },
+            })
+          );
+        },
+        runtime: "pi-agent-cli",
+      };
+      const adapter = createCloudflarePiVerifierLaneAdapter({
+        artifactRemote: "https://artifacts.example.invalid/repo.git",
+        artifactStore: fixture.artifacts,
+        artifactTokenSecret: "artifact-token",
+        authLease: agentAuthLeaseFor(fixture.plan),
+        leasedPiAuthJsonBase64: "auth-json",
+        model: "integration-test-pi-model",
+        provider: "openai-codex",
+        runtime,
+        timeoutMs: 30_000,
+      });
+      try {
+        await adapter.verify({
+          capabilityReceipts: [],
+          contract: fixture.contract,
+          outputEvidence: [],
+          outputRefs: [],
+          plan: fixture.plan,
+        });
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+
+    // The E2BIG signature: execve failed before pi ran → empty stdout (the marker),
+    // nonzero exit (126), and the shell's "Argument list too long" on stderr.
+    const e2big = await driveE2big({
+      piExitStatus: 126,
+      rawOutputSample: emptyStdoutMarker,
+      stderrSample: e2bigStderr,
+    });
+    // Control: a clean exit with no stderr (pi ran, just produced nothing parseable) —
+    // the exit/stderr suffixes must NOT appear, proving they are gated on real signal.
+    const cleanExit = await driveE2big({
+      piExitStatus: 0,
+      rawOutputSample: emptyStdoutMarker,
+      stderrSample: null,
+    });
+
+    expect({
+      // control: a 0 exit must not fabricate a "pi exit:" suffix…
+      cleanExitOmitsPiExit: !(cleanExit?.includes("pi exit:") ?? true),
+      // …and a null stderr must not fabricate a "stderr:" suffix.
+      cleanExitOmitsStderr: !(cleanExit?.includes("stderr:") ?? true),
+      e2bigBlocked: e2big !== null,
+      // the blocker names pi's nonzero exit — "the process did not run", not "the model
+      // was unparseable".
+      e2bigNamesPiExit: e2big?.includes("pi exit: 126") ?? false,
+      // the empty-stdout marker reaches the operator (non-arrival, not silent prose).
+      e2bigSurfacesEmptyMarker:
+        e2big?.includes("agent emitted nothing on stdout") ?? false,
+      // the shell's E2BIG cause rides the blocker — the operator sees WHY stdout was empty.
+      e2bigSurfacesStderr: e2big?.includes("Argument list too long") ?? false,
+    }).toStrictEqual({
+      cleanExitOmitsPiExit: true,
+      cleanExitOmitsStderr: true,
+      e2bigBlocked: true,
+      e2bigNamesPiExit: true,
+      e2bigSurfacesEmptyMarker: true,
+      e2bigSurfacesStderr: true,
+    });
+  });
 });
 
 const analysisReasoningOutput = {

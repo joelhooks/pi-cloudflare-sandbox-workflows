@@ -1,0 +1,179 @@
+---
+title: "Carrier Wound #35: The Verifier's Prompt Outgrew a Single argv Argument. execve E2BIG'd Before pi Ran."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - verifier
+  - argv
+  - e2big
+  - max-arg-strlen
+  - prompt-delivery
+  - at-file
+  - fail-fast
+  - resource-unavailable
+  - no-parseable-output
+  - non-arrival
+  - observability
+  - carrier-finding
+  - chaos-suite
+source: "wound-35-verifier-argv-e2big"
+---
+
+# Carrier Wound #35: The Verifier's Prompt Outgrew a Single argv Argument. execve E2BIG'd Before pi Ran.
+
+Wound #34 made the *next* verifier failure legible — it threaded the agent's raw
+output sample into the blocker so a non-arrival would stop reading as guesswork.
+Then the next live drive arrived and the channel did exactly its job: it named a
+failure that wasn't the agent's output at all. The agent never ran.
+
+The deployed verifier went terminal again:
+
+```
+run-live-...-e4aa52ae
+  → blocked / adapter_unavailable:
+    "Configured verifier lane adapter failed: Verifier lane did not return a
+     completed receipt for the requested lane: agent produced no parseable
+     verdict (reason: no_parseable_output)."
+```
+
+Same surface as #33/#34 — `no_parseable_output` — but a different organ. The
+planner (small prompt) reached `captured`. All 19 generated-workflow nodes
+executed. Only the **meta-verifier** — the post-execution lane that reviews the
+generated workflow's own proof (`createCloudflarePiVerifierLaneAdapter`) — came
+back empty. The one lane whose prompt is the biggest: the verifier contract +
+the full dynamic plan + every node's evidence (`JSON.stringify(…, null, 2)`) +
+the capability receipts, all concatenated.
+
+## The wound: a single argv argument has a hard ceiling, and the prompt blew past it
+
+The lane command shipped the prompt to pi inline:
+
+```
+pi … -p "$(cat "$LANE_PROMPT_PATH")"
+```
+
+`$(cat …)` expands the **entire** prompt body into **one** argv argument. Linux
+caps a single argv string at `MAX_ARG_STRLEN` = 32 pages = **128 KiB** — a
+per-argument limit, distinct from the ~1–2 MiB total `ARG_MAX`. The verifier
+prompt, fattened by all that inlined evidence, crossed 128 KiB. So `execve`
+failed `E2BIG` ("Argument list too long") **before pi was ever exec'd**. The
+shell wrote the error to the redirected stderr, stdout stayed empty (zero bytes),
+the normalizer saw nothing to parse, and the lane committed a
+`status:"failed"` / `no_parseable_output` receipt — byte-for-byte the same
+terminal shape as a model that genuinely emitted nothing.
+
+This is a resource-unavailable failure wearing an application-failure's clothes.
+The argv buffer was the unavailable resource; the system tried the operation
+anyway and got *partway* — far enough to commit a failed receipt and flow an
+empty result downstream as if it were real.
+
+> "If the system can determine in advance that it will fail at an operation,
+> it's always better to fail fast. That way, the caller doesn't have to tie up
+> any of its capacity waiting… There is a large class of 'resource unavailable'
+> failures. … This is sort of the software equivalent of the cook's mise en
+> place — gathering all the ingredients it will need to service the request
+> before it begins. If any of the resources are not available, it can fail
+> immediately, rather than getting partway through the work."
+> — Michael Nygard, *Release It!*, §Fail Fast
+
+The old form ignored mise en place: it shoved every ingredient onto a single
+counter (one argv arg) that physically cannot hold them, and only discovered the
+overflow mid-`execve`. The fix is to stop staging the prompt on that counter at
+all.
+
+## The fix: two halves — remove the ceiling, then make the next overflow legible
+
+**Delivery half — `@file` reference (`cloudflare-sandbox-agent-lane-command.ts`).**
+The lane command now ships:
+
+```
+pi … -p "@$LANE_PROMPT_PATH"
+```
+
+Only the short *path* rides argv; pi reads the prompt body from disk via `@file`
+message injection. The prompt can be 2 KiB or 2 MiB — argv no longer grows with
+it, so `MAX_ARG_STRLEN` is structurally out of the loop. This is the carrier-class
+fix: it removes the ceiling for **every** lane, not just the verifier, because
+every lane delivers its prompt through the same builder.
+
+The `--no-tools` worry is answered: under `--no-tools` there is no read tool to
+*dereference* an attachment, so pi injects the `@file` content straight into the
+message — semantically identical to the old inline `cat`, minus the argv ceiling.
+A missing `@file` fails at message-assembly time ("File not found", pre-model),
+so a bad path can't silently send an empty prompt.
+
+**Legibility half — name the non-arrival (`cloudflare-agent-lane-adapters.ts`).**
+Even with the ceiling gone, *some* future overflow or crash will leave an empty
+stdout again. So the blocker now distinguishes "process never produced output"
+from "model emitted unparseable prose." The committed-failed receipt carries
+`piExitStatus` and `stderrSample` (threaded through the normalizer →
+receipt-builder → schema, riding the **committed receipt** road wound #34
+established), and the verifier blocker appends `, pi exit: N` and `, stderr: …`
+when present. An E2BIG non-arrival now reads `pi exit: 126 … stderr: …Argument
+list too long` — Nygard's "report a system failure (resources not available)
+differently than an application failure."
+
+## Chaos tests that would have caught it (hostile doubles, not polite mocks)
+
+Split across the two natural homes — one per half:
+
+- **Delivery half** (`cloudflare-sandbox-agent-lanes.test.ts`). Slices the REAL
+  delivery block out of `buildPiAgentLaneCommand()` and runs it under bash twice
+  against a 2 MiB prompt and a fake `pi` on PATH. The shipped `@file` form: pi
+  **runs** and the command reaches its post-pi step (`fileRefPiRan`,
+  `fileRefReachedPostPi`). The pre-fix inline form — reconstructed by
+  `replace('-p "@$LANE_PROMPT_PATH"', '-p "$(cat "$LANE_PROMPT_PATH")"')`, which
+  **throws if the replace is a no-op** so a silent revert can't pass — `execve`
+  E2BIGs: stderr matches `/Argument list too long/iu` and stdout is empty
+  (`!inline.piRan`). The bug and the fix proven on the **real shell**, not a
+  string-includes mock. The 2 MiB single arg overflows `MAX_ARG_STRLEN` on Linux
+  and the ~1 MiB total `ARG_MAX` on macOS, so the class reproduces on either host.
+- **Legibility half** (`cloudflare-agent-lane-adapters.test.ts`). A
+  `driveE2big({piExitStatus, rawOutputSample, stderrSample})` helper builds a real
+  `AgentLaneReceiptSchema`-parsed committed-failed verifier receipt and drives the
+  REAL `createCloudflarePiVerifierLaneAdapter`, catching the thrown blocker.
+  **A/B control, forced non-vacuous:** the E2BIG case (`piExitStatus: 126`,
+  empty-stdout marker, `stderrSample:` the real "Argument list too long" tail)
+  yields a blocker naming `pi exit: 126`, the empty marker, AND `Argument list
+  too long`; the clean-exit control (`piExitStatus: 0`, `stderrSample: null`)
+  OMITS both the `pi exit:` and `stderr:` clauses. Green only when exit + stderr
+  actually survive schema-parse → adapter → blocker.
+
+A polite mock asserting on a TS field would prove nothing about whether a 128 KiB
+argv argument actually E2BIGs, nor whether the diagnostic survives the real schema
+round-trip into the operator-facing string. These reproduce the exact transport:
+real shell `execve`, real schema parse, real adapter building the real blocker.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **433 passed / 55 files**
+(two new chaos tests over the prior 431).
+
+## What this does NOT claim (skepticism held)
+
+This fixes the verifier's **delivery** and makes the next non-arrival **legible**.
+It does not, by itself, prove the dream run reaches `captured` — only a live
+re-drive on the deployed fix does. The hypothesis is concrete and falsifiable: the
+meta-verifier failed because its oversized prompt couldn't ride a single argv arg;
+with `@file` delivery the same prompt reaches pi, pi emits a verdict, and the lane
+normalizes to `completed`. If instead the verifier **still** fails empty, the
+blocker now carries `pi exit` + `stderr` so the next diagnosis reads the actual
+cause instead of guessing. Either outcome advances the carrier; neither is assumed.
+One fresh deploy carries both halves, so the next live signal is unambiguous.
+
+## The carrier discipline (fifteenth carrier wound)
+
+#33 fixed *where the verdict lands*. #34 fixed *what you can see when it doesn't.*
+#35 fixes *whether the agent could speak at all.* The class is not "the verifier
+failed" — it's "**a delivery channel with an invisible size ceiling fails the
+largest payload first, and fails it as a generic empty-output instead of a named
+resource exhaustion.**" The biggest prompt (the meta-verifier's) is exactly the
+one that overflows, so the failure looks like model silence precisely where the
+payload is heaviest. The fix is Nygard's Fail Fast as a carrier invariant:
+don't stage an unbounded payload on a bounded resource (argv) and discover the
+overflow mid-operation — deliver by reference so the resource is never the
+bottleneck, and when a resource *does* run out, report it as a system failure
+(exit + stderr) distinct from an application failure (unparseable prose). An empty
+stdout that could mean either is the worst of both: it reads as "the model said
+nothing" while the truth is "the shell never let the model speak."

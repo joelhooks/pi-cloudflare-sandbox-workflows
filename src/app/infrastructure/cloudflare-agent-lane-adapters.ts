@@ -920,6 +920,40 @@ const verifierPromptFor = (input: {
   ].join("\n");
 };
 
+// Wound #35 legibility half: a committed-failed verifier receipt
+// (outputNormalization.normalized === false) means the agent process emitted
+// nothing parseable. Name WHY in the blocker — pi's nonzero exit, its stop
+// reason, the raw-output sample, and the stderr tail — so a non-arrival (E2BIG
+// before pi ran) reads differently than unparseable prose. Extracted to module
+// scope so verify() stays under the complexity ceiling.
+const describeNoParseableVerdict = (
+  normalization: NonNullable<
+    ReturnType<typeof AgentLaneReceiptSchema.parse>["outputNormalization"]
+  >
+): string => {
+  const exitSuffix =
+    normalization.piExitStatus !== null && normalization.piExitStatus !== 0
+      ? `, pi exit: ${normalization.piExitStatus}`
+      : "";
+  const stopReasonSuffix =
+    normalization.agentStopReason !== null &&
+    normalization.agentStopReason !== ""
+      ? `, stopReason: ${normalization.agentStopReason}`
+      : "";
+  const sampleSuffix =
+    normalization.rawOutputSample !== null &&
+    normalization.rawOutputSample !== ""
+      ? `, raw output sample: ${normalization.rawOutputSample}`
+      : "";
+  const stderrSuffix =
+    normalization.stderrSample !== null && normalization.stderrSample !== ""
+      ? `, stderr: ${normalization.stderrSample}`
+      : "";
+  return `agent produced no parseable verdict (reason: ${
+    normalization.reason ?? "unknown"
+  }${exitSuffix}${stopReasonSuffix}${sampleSuffix}${stderrSuffix})`;
+};
+
 export const createCloudflarePiVerifierLaneAdapter = (
   config: CloudflarePiLaneAdapterConfig
 ): AgentVerifierLanePort => ({
@@ -1001,19 +1035,7 @@ export const createCloudflarePiVerifierLaneAdapter = (
       const normalization = receipt.outputNormalization;
       let cause: string;
       if (normalization?.normalized === false) {
-        const stopReasonSuffix =
-          normalization.agentStopReason !== null &&
-          normalization.agentStopReason !== ""
-            ? `, stopReason: ${normalization.agentStopReason}`
-            : "";
-        const sampleSuffix =
-          normalization.rawOutputSample !== null &&
-          normalization.rawOutputSample !== ""
-            ? `, raw output sample: ${normalization.rawOutputSample}`
-            : "";
-        cause = `agent produced no parseable verdict (reason: ${
-          normalization.reason ?? "unknown"
-        }${stopReasonSuffix}${sampleSuffix})`;
+        cause = describeNoParseableVerdict(normalization);
       } else if (receipt.status === "completed") {
         cause = `receipt kind/lane mismatch (kind: ${receipt.kind}, laneId: ${receipt.laneId})`;
       } else {
