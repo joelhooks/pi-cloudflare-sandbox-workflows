@@ -82,3 +82,33 @@ Full `pnpm exec vitest run` reached `376` passing tests and failed only on the t
 ## Read
 
 Best read of the live wound after this fix: **not_found / planner ref hallucination** is more likely than `schema_mismatch`. The live search node completed and recorded an output artifact ref, while the immediately following hydrate node said the search artifact could not be loaded. The hardened code would now fall through from stale planner refs to the completed upstream `joelclaw.memory.search` output before blocking. If the upstream output itself fails the schema contract, the new blocker will say `cause: schema_mismatch` with the Zod path.
+
+## Report Union Wound
+
+Second live wound on `2026-06-14`: Dream/memory-fabric run `run-live-20260614T065525621Z-f6e7513a` completed its search and hydration fan-out, then blocked in `render-hitl-report` with `Primary source family agent-transcripts resolved zero receipts`.
+
+Root cause: the HITL report node still treated `joelclaw.memory.search` and `joelclaw.memory.hydrate` as single upstream artifacts. `upstreamRefByNodeType` returns the last completed matching node in plan order, which is correct for linear consumers but wrong for a dynamically generated report over horizon/family fan-out. When `agent-transcripts` receipts lived in an earlier search artifact and a supplementary search ran last, the primary-source gate inspected the supplementary document and falsely called the transcript source dead.
+
+Fix now in `src/cartridges/memory-fabric/workflow-node-adapter.ts`:
+
+- `allCompletedRefsForNodeType` preserves every completed upstream search/hydrate artifact ref in plan order.
+- `reportArtifactRefCandidatesFor` keeps explicit planner refs first, then appends all completed refs for the report path only.
+- `loadAllArtifactCandidates` loads every readable candidate and blocks only when the readable set is empty.
+- `mergeSearchDocuments` concatenates hits and unions `skippedSources`.
+- `mergeHydrationDocuments` concatenates hydration entries and dedupes by `receiptKey`.
+
+Contract preserved: a primary family still blocks when it resolves zero receipts across the full union. The change is from "absent in the last search artifact" to "absent across all completed search artifacts."
+
+Chaos coverage added in `tests/integration/dream-source-criticality-report.test.ts`:
+
+- `renders when agent-transcripts receipts are present only in a non-last search artifact`
+- `blocks when agent-transcripts receipts are absent across the full search union`
+
+Verification in this Codex sandbox:
+
+```bash
+pnpm typecheck
+pnpm vitest run tests/integration/dream-source-criticality-report.test.ts tests/integration/memory-fabric-workflow-node-adapter.test.ts
+```
+
+Both passed.

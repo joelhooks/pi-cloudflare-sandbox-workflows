@@ -923,6 +923,30 @@ const uniqueArtifactRefCandidates = (
   return candidates;
 };
 
+const allCompletedRefsForNodeType = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly nodeType: string;
+  readonly plan: DynamicWorkflowPlanDocument;
+}): readonly ArtifactRef[] => {
+  const completed = input.completedStepArtifactRefs;
+  if (completed === undefined) {
+    return [];
+  }
+
+  return uniqueArtifactRefCandidates(
+    input.plan.steps.flatMap((step) => {
+      if (step.kind !== "workflow.node.invoke") {
+        return [];
+      }
+
+      const ref = completed[step.stepId];
+      return step.nodeType === input.nodeType && ref !== undefined ? [ref] : [];
+    })
+  );
+};
+
 const upstreamArtifactRefCandidatesFor = (input: {
   readonly completedStepArtifactRefs:
     | Readonly<Record<string, ArtifactRef>>
@@ -950,6 +974,29 @@ const upstreamArtifactRefCandidatesFor = (input: {
       : latestDependencyArtifactRef(input.dependencyArtifactRefs),
   ]);
 
+const reportArtifactRefCandidatesFor = (input: {
+  readonly completedStepArtifactRefs:
+    | Readonly<Record<string, ArtifactRef>>
+    | undefined;
+  readonly dependencyArtifactRefs: Readonly<Record<string, ArtifactRef>>;
+  readonly explicitRef: ArtifactRef | undefined;
+  readonly includeAllCompletedRefs?: boolean;
+  readonly includeLatestDependency?: boolean;
+  readonly plan: DynamicWorkflowPlanDocument;
+  readonly stepId: string | undefined;
+  readonly upstreamNodeType: string;
+}): readonly ArtifactRef[] =>
+  uniqueArtifactRefCandidates([
+    ...upstreamArtifactRefCandidatesFor(input),
+    ...(input.includeAllCompletedRefs === true
+      ? allCompletedRefsForNodeType({
+          completedStepArtifactRefs: input.completedStepArtifactRefs,
+          nodeType: input.upstreamNodeType,
+          plan: input.plan,
+        })
+      : []),
+  ]);
+
 const loadFirstArtifactCandidate = async <TDocument>(input: {
   readonly artifactRefs: readonly ArtifactRef[];
   readonly load: (
@@ -964,6 +1011,46 @@ const loadFirstArtifactCandidate = async <TDocument>(input: {
       return loaded;
     }
     lastBlocker = loaded;
+  }
+
+  return lastBlocker ?? blocker("stale_package", input.missingBlockerMessage);
+};
+
+const loadAllArtifactCandidates = async <TDocument>(input: {
+  readonly artifactRefs: readonly ArtifactRef[];
+  readonly load: (
+    artifactRef: ArtifactRef
+  ) => Promise<ArtifactLoadResult<TDocument>>;
+  readonly missingBlockerMessage: string;
+}): Promise<
+  | {
+      readonly documents: readonly TDocument[];
+      readonly refs: readonly ArtifactRef[];
+      readonly status: "loaded";
+    }
+  | BlockedWorkflowNodeExecutionResult
+> => {
+  const documents: TDocument[] = [];
+  const refs: ArtifactRef[] = [];
+  let lastBlocker: BlockedWorkflowNodeExecutionResult | null = null;
+
+  for (const artifactRef of input.artifactRefs) {
+    const loaded = await input.load(artifactRef);
+    if (loaded.status === "loaded") {
+      documents.push(loaded.document);
+      refs.push(loaded.artifactRef);
+      continue;
+    }
+
+    lastBlocker = loaded;
+  }
+
+  if (documents.length > 0) {
+    return {
+      documents,
+      refs,
+      status: "loaded",
+    };
   }
 
   return lastBlocker ?? blocker("stale_package", input.missingBlockerMessage);
@@ -1163,10 +1250,11 @@ const refinementProposalRefCandidatesFor = (input: {
     stepId: input.config.correlationStepId,
     upstreamNodeType: "joelclaw.memory.correlate",
   }),
-  hydrationRefs: upstreamArtifactRefCandidatesFor({
+  hydrationRefs: reportArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     explicitRef: input.config.hydrationRef,
+    includeAllCompletedRefs: true,
     plan: input.plan,
     stepId: input.config.hydrationStepId,
     upstreamNodeType: "joelclaw.memory.hydrate",
@@ -1227,10 +1315,11 @@ const reportRefCandidatesFor = (input: {
     stepId: input.config.refinementProposalStepId,
     upstreamNodeType: "joelclaw.memory.refinement-proposals",
   }),
-  searchRefs: upstreamArtifactRefCandidatesFor({
+  searchRefs: reportArtifactRefCandidatesFor({
     completedStepArtifactRefs: input.completedStepArtifactRefs,
     dependencyArtifactRefs: input.dependencyArtifactRefs,
     explicitRef: input.config.searchRef,
+    includeAllCompletedRefs: true,
     plan: input.plan,
     stepId: input.config.searchStepId,
     upstreamNodeType: "joelclaw.memory.search",
@@ -1324,9 +1413,9 @@ interface LoadedReportInputs {
   readonly correlation: MemoryCorrelationGraphDocument;
   readonly correlationRef: ArtifactRef;
   readonly hydration: MemoryHydrationDocument;
-  readonly hydrationRef: ArtifactRef;
+  readonly hydrationRefs: readonly ArtifactRef[];
   readonly search: MemorySearchDocument;
-  readonly searchRef: ArtifactRef;
+  readonly searchRefs: readonly ArtifactRef[];
 }
 
 const requiredReportRefsPresent = (
@@ -1346,11 +1435,57 @@ const requiredReportRefsPresent = (
   return null;
 };
 
+const receiptKey = (receipt: MemoryReceiptRef): string =>
+  `${receipt.sourceId}:${receipt.receiptId}:${receipt.hash ?? ""}`;
+
+const mergeSearchDocuments = (
+  docs: readonly MemorySearchDocument[]
+): MemorySearchDocument => {
+  const representative = docs.at(0);
+  if (representative === undefined) {
+    throw new Error("Cannot merge zero memory search documents.");
+  }
+
+  return MemorySearchDocumentSchema.parse({
+    ...representative,
+    hits: docs.flatMap((doc) => doc.hits),
+    skippedSources: [...new Set(docs.flatMap((doc) => doc.skippedSources))],
+  });
+};
+
+const mergeHydrationDocuments = (
+  docs: readonly MemoryHydrationDocument[]
+): MemoryHydrationDocument => {
+  const representative = docs.at(0);
+  if (representative === undefined) {
+    throw new Error("Cannot merge zero memory hydration documents.");
+  }
+
+  const seen = new Set<string>();
+  const hydrated: MemoryHydrationDocument["hydrated"] = [];
+  for (const doc of docs) {
+    for (const entry of doc.hydrated) {
+      const key = receiptKey(entry.receipt);
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      hydrated.push(entry);
+    }
+  }
+
+  return MemoryHydrationDocumentSchema.parse({
+    ...representative,
+    hydrated,
+  });
+};
+
 const loadRequiredReportInputs = async (
   artifacts: ArtifactStoreContract,
   refs: ReturnType<typeof reportRefCandidatesFor>
 ): Promise<LoadedReportInputs | BlockedWorkflowNodeExecutionResult> => {
-  const search = await loadFirstArtifactCandidate({
+  const search = await loadAllArtifactCandidates({
     artifactRefs: refs.searchRefs,
     load: (artifactRef) => loadSearch({ artifactRef, artifacts }),
     missingBlockerMessage:
@@ -1360,7 +1495,7 @@ const loadRequiredReportInputs = async (
     return search;
   }
 
-  const hydration = await loadFirstArtifactCandidate({
+  const hydration = await loadAllArtifactCandidates({
     artifactRefs: refs.hydrationRefs,
     load: (artifactRef) => loadHydration({ artifactRef, artifacts }),
     missingBlockerMessage:
@@ -1383,10 +1518,10 @@ const loadRequiredReportInputs = async (
   return {
     correlation: correlation.document,
     correlationRef: correlation.artifactRef,
-    hydration: hydration.document,
-    hydrationRef: hydration.artifactRef,
-    search: search.document,
-    searchRef: search.artifactRef,
+    hydration: mergeHydrationDocuments(hydration.documents),
+    hydrationRefs: hydration.refs,
+    search: mergeSearchDocuments(search.documents),
+    searchRefs: search.refs,
   };
 };
 
@@ -1429,9 +1564,6 @@ const loadOptionalRefinementProposalDocument = async (input: {
     status: "loaded",
   };
 };
-
-const receiptKey = (receipt: MemoryReceiptRef): string =>
-  `${receipt.sourceId}:${receipt.receiptId}:${receipt.hash ?? ""}`;
 
 const hydrationReceiptsFor = (input: {
   readonly maxReceipts: number;
@@ -3362,14 +3494,14 @@ const executeHitlReportNode = async (
     machine: input.machine,
     machineArtifact: input.plan.machine,
   });
-  const sourceRefs = [
-    reportInputs.searchRef,
-    reportInputs.hydrationRef,
+  const sourceRefs = uniqueArtifactRefCandidates([
+    ...reportInputs.searchRefs,
+    ...reportInputs.hydrationRefs,
     reportInputs.correlationRef,
     ...(refinementProposals.refinementProposalRef === null
       ? []
       : [refinementProposals.refinementProposalRef]),
-  ];
+  ]);
   const hitlDecisionContract = hitlDecisionContractFor(sourceRefs);
   const generatedAt = new Date().toISOString();
   const definitionOfDoneAudit = reportDefinitionOfDoneAuditFor({

@@ -186,6 +186,15 @@ const brainReceipt = {
   timestamp: at,
 } as const;
 
+const repoReceipt = {
+  family: "repo-outputs",
+  hash,
+  receiptId: "receipt:repo:dream-1",
+  redactedLocator: "redacted://memory-source/repo/dream-1",
+  sourceId: "source:repo-outputs",
+  timestamp: at,
+} as const;
+
 const transcriptHit = {
   horizon: "all-time",
   receipts: [transcriptReceipt],
@@ -200,6 +209,14 @@ const brainHit = {
   redactedExcerpt: "Brain note about the dream report shape.",
   score: 0.71,
   summary: "Brain note correlates with the dream report.",
+} satisfies MemorySearchHit;
+
+const repoHit = {
+  horizon: "7d",
+  receipts: [repoReceipt],
+  redactedExcerpt: "Repo output about the dream report renderer.",
+  score: 0.66,
+  summary: "Repo output adds a supplementary report-rendering signal.",
 } satisfies MemorySearchHit;
 
 const searchDocumentWith = (input: {
@@ -333,6 +350,199 @@ const executeReportNode = (input: {
     },
   } satisfies Parameters<WorkflowNodeAdapterPort["execute"]>[0]);
 };
+
+const searchAgentTranscriptsStep = {
+  config: {
+    maxHits: 5,
+    query: "dream workflow agent transcripts",
+    sourceFamilies: ["agent-transcripts"],
+  },
+  dependsOn: [],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.search"),
+  outputPath: "dream/search-agent-transcripts.json",
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+  stepId: "search-agent-transcripts",
+  summary: "Search agent transcript receipts across one horizon.",
+} satisfies WorkflowNodeInvocationStep;
+
+const searchBrainStep = {
+  config: {
+    maxHits: 5,
+    query: "dream workflow brain",
+    sourceFamilies: ["brain"],
+  },
+  dependsOn: [],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.search"),
+  outputPath: "dream/search-brain.json",
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+  stepId: "search-brain",
+  summary: "Search Brain receipts.",
+} satisfies WorkflowNodeInvocationStep;
+
+const searchRepoOutputsStep = {
+  config: {
+    maxHits: 5,
+    query: "dream workflow repo outputs",
+    sourceFamilies: ["repo-outputs"],
+  },
+  dependsOn: [],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.search"),
+  outputPath: "dream/search-repo-outputs.json",
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+  stepId: "search-repo-outputs",
+  summary: "Search repo-output receipts last.",
+} satisfies WorkflowNodeInvocationStep;
+
+const hydrateAgentTranscriptsStep = {
+  config: {
+    searchStepId: searchAgentTranscriptsStep.stepId,
+  },
+  dependsOn: [searchAgentTranscriptsStep.stepId],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.hydrate"),
+  outputPath: "dream/hydrate-agent-transcripts.json",
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+  stepId: "hydrate-agent-transcripts",
+  summary: "Hydrate agent transcript receipts.",
+} satisfies WorkflowNodeInvocationStep;
+
+const correlateMemoriesStep = {
+  config: {},
+  dependsOn: [
+    searchAgentTranscriptsStep.stepId,
+    searchBrainStep.stepId,
+    searchRepoOutputsStep.stepId,
+    hydrateAgentTranscriptsStep.stepId,
+  ],
+  inputRefs: [],
+  kind: "workflow.node.invoke",
+  nodeType: WorkflowNodeTypeSchema.parse("joelclaw.memory.correlate"),
+  outputPath: "dream/correlation.json",
+  packageRefs: ["artifact://packages/workflows/memory-fabric/refs/v1"],
+  stepId: "correlate-memories",
+  summary: "Correlate the union of searched and hydrated memories.",
+} satisfies WorkflowNodeInvocationStep;
+
+const multiSearchPlan = {
+  ...plan,
+  proposal: {
+    ...plan.proposal,
+    stochasticNotes: [
+      ...plan.proposal.stochasticNotes,
+      "Production fan-out searches primary agent transcripts before supplementary families.",
+    ],
+  },
+  steps: [
+    searchAgentTranscriptsStep,
+    searchBrainStep,
+    searchRepoOutputsStep,
+    hydrateAgentTranscriptsStep,
+    correlateMemoriesStep,
+    reportStep,
+  ],
+} satisfies DynamicWorkflowPlanDocument;
+
+const seedMultiSearchReportInputs = async (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly searchAgentTranscriptHits: readonly MemorySearchHit[];
+  readonly searchAgentTranscriptSkippedSources: readonly string[];
+  readonly searchBrainHits: readonly MemorySearchHit[];
+  readonly searchBrainSkippedSources: readonly string[];
+  readonly searchRepoHits: readonly MemorySearchHit[];
+  readonly searchRepoSkippedSources: readonly string[];
+}): Promise<{
+  readonly brainSearchRef: ArtifactRef;
+  readonly correlationRef: ArtifactRef;
+  readonly hydrationRef: ArtifactRef;
+  readonly repoSearchRef: ArtifactRef;
+  readonly transcriptSearchRef: ArtifactRef;
+}> => {
+  const transcriptSearchWrite = await input.artifacts.writeJson({
+    path: searchAgentTranscriptsStep.outputPath,
+    redacted: true,
+    runId,
+    value: searchDocumentWith({
+      hits: input.searchAgentTranscriptHits,
+      skippedSources: input.searchAgentTranscriptSkippedSources,
+    }),
+  });
+  const brainSearchWrite = await input.artifacts.writeJson({
+    path: searchBrainStep.outputPath,
+    redacted: true,
+    runId,
+    value: searchDocumentWith({
+      hits: input.searchBrainHits,
+      skippedSources: input.searchBrainSkippedSources,
+    }),
+  });
+  const repoSearchWrite = await input.artifacts.writeJson({
+    path: searchRepoOutputsStep.outputPath,
+    redacted: true,
+    runId,
+    value: searchDocumentWith({
+      hits: input.searchRepoHits,
+      skippedSources: input.searchRepoSkippedSources,
+    }),
+  });
+  const allHits = [
+    ...input.searchAgentTranscriptHits,
+    ...input.searchBrainHits,
+    ...input.searchRepoHits,
+  ];
+  const hydrationWrite = await input.artifacts.writeJson({
+    path: hydrateAgentTranscriptsStep.outputPath,
+    redacted: true,
+    runId,
+    value: hydrationDocumentFor(input.searchAgentTranscriptHits),
+  });
+  const correlationWrite = await input.artifacts.writeJson({
+    path: correlateMemoriesStep.outputPath,
+    redacted: true,
+    runId,
+    value: correlationDocumentFor(allHits),
+  });
+
+  return {
+    brainSearchRef: brainSearchWrite.artifactRef,
+    correlationRef: correlationWrite.artifactRef,
+    hydrationRef: hydrationWrite.artifactRef,
+    repoSearchRef: repoSearchWrite.artifactRef,
+    transcriptSearchRef: transcriptSearchWrite.artifactRef,
+  };
+};
+
+const executeMultiSearchReportNode = (input: {
+  readonly artifacts: ArtifactStoreContract;
+  readonly refs: Awaited<ReturnType<typeof seedMultiSearchReportInputs>>;
+}) =>
+  createMemoryFabricWorkflowNodeAdapter({
+    artifacts: input.artifacts,
+  }).execute({
+    actor: integrationTestActor,
+    completedStepArtifactRefs: {
+      [searchAgentTranscriptsStep.stepId]: input.refs.transcriptSearchRef,
+      [searchBrainStep.stepId]: input.refs.brainSearchRef,
+      [searchRepoOutputsStep.stepId]: input.refs.repoSearchRef,
+      [hydrateAgentTranscriptsStep.stepId]: input.refs.hydrationRef,
+      [correlateMemoriesStep.stepId]: input.refs.correlationRef,
+    },
+    dependencyArtifactRefs: {},
+    machine,
+    plan: multiSearchPlan,
+    step: {
+      ...reportStep,
+      config: {
+        primarySourceFamilies: ["agent-transcripts"],
+      },
+    },
+  } satisfies Parameters<WorkflowNodeAdapterPort["execute"]>[0]);
 
 describe("Dream source criticality enforcement", () => {
   it("declares agent-transcripts PRIMARY and the rest supplementary in the dream profile", () => {
@@ -478,5 +688,108 @@ describe("Dream source criticality enforcement", () => {
 
     expect(mdsvx).toContain("source:cloudflare-runs:unavailable");
     expect(mdsvx.toLowerCase()).toContain("caveat");
+  });
+
+  it("renders when agent-transcripts receipts are present only in a non-last search artifact", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "dream-source-criticality-primary-union-present"
+    );
+    const refs = await seedMultiSearchReportInputs({
+      artifacts,
+      searchAgentTranscriptHits: [transcriptHit],
+      searchAgentTranscriptSkippedSources: [],
+      searchBrainHits: [brainHit],
+      searchBrainSkippedSources: [],
+      searchRepoHits: [repoHit],
+      searchRepoSkippedSources: [],
+    });
+
+    const result = await executeMultiSearchReportNode({
+      artifacts,
+      refs,
+    });
+
+    expect(result.status).toBe("executed");
+    if (result.status !== "executed") {
+      throw new Error("Expected the multi-search report node to execute.");
+    }
+
+    const reportRef = result.outputRefs.at(0);
+    if (reportRef === undefined) {
+      throw new Error("Expected a HITL report output ref.");
+    }
+
+    const report = WorkflowHitlReportDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: reportRef })
+    );
+
+    expect({
+      findingCount: report.findingCount,
+      receiptCount: report.receiptCount,
+      sourceRefs: report.sourceRefs,
+      transcriptFamilyRendered: report.findings.some((finding) =>
+        finding.receipts.some(
+          (receipt) => receipt.family === "agent-transcripts"
+        )
+      ),
+    }).toStrictEqual({
+      findingCount: 3,
+      receiptCount: 3,
+      sourceRefs: [
+        refs.repoSearchRef,
+        refs.transcriptSearchRef,
+        refs.brainSearchRef,
+        refs.hydrationRef,
+        refs.correlationRef,
+      ],
+      transcriptFamilyRendered: true,
+    });
+  });
+
+  it("blocks when agent-transcripts receipts are absent across the full search union", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "dream-source-criticality-primary-union-dead"
+    );
+    const refs = await seedMultiSearchReportInputs({
+      artifacts,
+      searchAgentTranscriptHits: [],
+      searchAgentTranscriptSkippedSources: [
+        "source:joelclaw-sessions:joelclaw-index-unavailable",
+      ],
+      searchBrainHits: [brainHit],
+      searchBrainSkippedSources: ["source:brain:rate-limited"],
+      searchRepoHits: [repoHit],
+      searchRepoSkippedSources: [],
+    });
+
+    const result = await executeMultiSearchReportNode({
+      artifacts,
+      refs,
+    });
+
+    expect(result.status).toBe("blocked");
+    if (result.status !== "blocked") {
+      throw new Error("Expected the multi-search report node to block.");
+    }
+
+    expect({
+      code: result.blocker.code,
+      mentionsBrainCaveat: result.blocker.message.includes(
+        "source:brain:rate-limited"
+      ),
+      mentionsFamily: result.blocker.message.includes("agent-transcripts"),
+      mentionsTranscriptCaveat: result.blocker.message.includes(
+        "source:joelclaw-sessions:joelclaw-index-unavailable"
+      ),
+      mentionsZeroReceipts: result.blocker.message.includes(
+        "resolved zero receipts"
+      ),
+    }).toStrictEqual({
+      code: "stale_package",
+      mentionsBrainCaveat: true,
+      mentionsFamily: true,
+      mentionsTranscriptCaveat: true,
+      mentionsZeroReceipts: true,
+    });
   });
 });
