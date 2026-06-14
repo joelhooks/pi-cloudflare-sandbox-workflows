@@ -1,0 +1,200 @@
+---
+title: "Carrier Wound #28: A Burned Agent Run Wore A Transient Label"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - error-handling
+  - error-classification
+  - observability
+  - heartbeat
+  - set-eu
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+  - retry-classification
+source: "wound-28-burned-agent-run-mislabeled-adapter-unavailable"
+---
+
+# Carrier Wound #28: A Burned Agent Run Wore A Transient Label
+
+Wound #27 (the deterministic planner-output contract miss that wore an
+`adapter_unavailable` label) shipped and deployed. We re-drove a dream-shape run
+on the fixed code — `run-live-20260614T165913566Z-a8bc84dc` — and it reached
+terminal `blocked` with:
+
+```
+blocker.code    = adapter_unavailable
+blocker.message = "Cloudflare Sandbox lane did not emit a result marker (exit 1)"
+```
+
+…the SAME transient label, the SAME blind-re-drive invitation ("re-drove for 40
+minutes"). But this is a DIFFERENT wound than #27 — a sibling, one parse site
+upstream.
+
+The lane's own heartbeat proves it:
+
+```
+… pi-invoke(1781456448) | normalize-output(1781456904) | build-transcript(1781456971)
+```
+
+pi RAN. `pi-invoke` logged at +0s, `normalize-output` at +456s, `build-transcript`
+at +523s. The agent did 456 seconds of real work inside a **reachable** sandbox.
+The lane then aborted under `set -e` (exit 1) somewhere after `build-transcript`
+and BEFORE `emit-marker`, so it committed **no result marker and no receipt**.
+`parseLaneResultMarker` found nothing usable and threw "did not emit a result
+marker." The old catch had exactly one move for a no-marker throw: forge an
+`adapter_unavailable` outage.
+
+That is a lie. A genuine transport outage — sandbox unreachable, image
+un-pullable, clone failing — freezes the heartbeat at an EARLY step and never
+reaches `pi-invoke`. A heartbeat that names `build-transcript` is proof of the
+opposite: the carrier could reach the sandbox fine; the failure is **inside the
+lane, after the agent already burned its run**. Deterministic. Re-driving re-burns
+456 seconds of agent time to fail identically.
+
+> If the operation failed because of any significant problem, it is likely to fail
+> again if retried immediately. Some kinds of transient failures might be overcome
+> with a retry (for example, dropped packets over a wireless WAN). Within the walls
+> of a data center, however, the failure is probably because of something wrong
+> with the other end of a connection. […] Thus, fast retries are very likely to
+> fail again. […] If you cannot complete an operation because of some timeout, it
+> is better for you to return a result. It can be a failure, a success, or a note
+> that you've queued the work for later execution. […] In any case, just come back
+> with an answer.
+>
+> — Michael Nygard, *Release It!*, §5.6 Timeouts (retries & "best effort")
+
+A burned-agent-run lane IS "something wrong with the other end of a connection,"
+not a dropped packet. The honest answer is a failure result that names the lane
+step — not another roll of the same dice.
+
+## Mechanism — the no-marker throw had one classification
+
+Two distinct planner-content failure branches funnel through the SAME catch in
+`cloudflare-sandbox-agent-lanes.ts` (the sync `runLane` path the planner uses):
+
+- **Branch A (Wound #27, SHIPPED):** the lane committed a parseable receipt whose
+  JSON was the wrong shape → `safeParse` rejected downstream →
+  `PlannerBlueprintContractError` → `planner_output_invalid`.
+- **Branch B (Wound #28, THIS one):** the lane committed NOTHING — pi ran,
+  `normalize-output` concluded `normalized:false` (an `set +e`-guarded outcome that
+  does NOT abort), the script continued to `build-transcript`, then aborted under
+  `set -e` before `emit-marker`. No marker, no receipt.
+  `parseLaneResultMarker(result)` throws → caught at the executor's catch → old
+  code flattened it to `adapter_unavailable`.
+
+Branch B never had a typed signal. Every no-marker throw — transport outage OR
+burned-agent-run — collapsed to the same retryable code.
+
+## Fix — classify the no-marker failure by how far the heartbeat got
+
+The heartbeat already exists (the executor reads `/workspace/.piwf-heartbeat` and
+joins the last 20 lines). We made it load-bearing for classification.
+
+**Pure classifier** (`cloudflare-sandbox-agent-lane-command.ts`, three new
+exports, zero new dependencies):
+
+- `LANE_STEP_SEQUENCE` — the ordered 15-step lane sequence as a `const` tuple.
+- `lastHeartbeatStep(heartbeatTail)` — pulls the trailing step token from the
+  `" | "`-joined tail; returns `null` for an empty/garbled tail (fails safe).
+- `laneStepReachedAgentInvocation(step)` — `true` iff `step` is `pi-invoke` or
+  later. An unknown token returns `false`, so a corrupt heartbeat fails **safe**
+  toward the retryable transport classification.
+- `classifyAgentLaneIncompleteFailure({cause, detail, heartbeatTail, runId,
+  workItemId})` — reached `pi-invoke`+ → a typed `AgentLaneIncompleteError`;
+  otherwise `null` (caller keeps its transport error).
+
+**Application layer** (`ports.ts`, zod-free, precedent
+`PlannerBlueprintContractError`): typed `AgentLaneIncompleteError` carrying
+`lastStep`, `reachedAgentInvocation`, `detail`, `runId`, `workItemId`, and `cause`.
+Its message names the last heartbeat step and states "the agent ran but the lane
+committed no usable result (lane-internal failure, NOT a transport outage)."
+
+**Infrastructure wiring** (`cloudflare-sandbox-agent-lanes.ts`, the one catch at
+~line 436): BEFORE the bare-Error transport wrap, call the classifier on the
+heartbeat tail. Non-null → throw the typed error. Null → keep
+`new Error("… [step heartbeat: …]")` so a genuine outage stays retryable. Both the
+no-marker throw and the error-marker abort path flow through this single catch →
+ONE wiring point.
+
+**Application catch** (`workflow-app.ts`, ~line 1459): added a branch BEFORE the
+`z.ZodError` one — `error instanceof AgentLaneIncompleteError` →
+`block("planner_lane_incomplete", error.message)`. `proposePlan` calls
+`config.runtime.runLane(...)` with no surrounding try/catch, so the typed rejection
+propagates unwrapped. The dependency arrow stays correct: infra throws the
+application-layer typed error; application keys on it.
+
+**New denial code** (`schemas.ts`): `planner_lane_incomplete`, between
+`planner_output_invalid` and `drive_stall_reaped`. Because `block()` writes
+`terminalBlocker.code = blockedBy.code`, the operator status endpoint's
+`blocker.code` flips directly from `adapter_unavailable` to
+`planner_lane_incomplete`. The status page stops lying.
+
+## Chaos tests that would have caught it (faithful doubles)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — 5 new, including a
+faithful double that SLICES the REAL `mark()` function out of
+`buildPiAgentLaneCommand()`'s emitted bash, runs it with `hb_path` pointed at a
+tmpdir file, replays `install-pi-agent → … → build-transcript`, reads the file
+back exactly as the executor does, and feeds the joined tail to the classifier:
+
+- live `a8bc84dc` tail (`… pi-invoke | normalize-output | build-transcript`) →
+  `AgentLaneIncompleteError`, `lastStep:"build-transcript"`,
+  `reachedAgentInvocation:true`, preserves `cause`, says lane-internal.
+- error-marker abort at `build-receipt` → `AgentLaneIncompleteError`,
+  `lastStep:"build-receipt"`.
+- frozen at `clone-artifacts` (before `pi-invoke`) → `null` (stays transport).
+- garbled/empty heartbeat → `null` (fails safe).
+- the faithful real-`mark()` double → `AgentLaneIncompleteError` end-to-end.
+
+`tests/integration/workflow-app.test.ts` — the planner double rejects
+`proposePlan()` with a real `AgentLaneIncompleteError` (lastStep
+`build-transcript`); asserts blocker + terminal blocker both
+`planner_lane_incomplete`, message naming the last step and "lane committed no
+usable result." Its sibling ("keeps a generic planner transport failure classified
+as adapter_unavailable", rejecting with a bare `Error("connection reset")`) guards
+the null branch — no over-reclassifying.
+
+`pnpm typecheck` clean · `pnpm check` clean · `pnpm vitest run` = **424 passed**.
+
+## What this does NOT claim (skepticism held)
+
+The root cause of *why* the lane aborted after `build-transcript` is still
+UNCONFIRMED. The most likely candidate is `build-transcript` writing a large
+transcript and tripping ENOSPC (the `lite` sandbox disk), but it could also be a
+git failure, a hash failure, or an OOM between steps. This fix is correct under ALL
+of those hypotheses: it stops the blind retry of a deterministic lane-internal
+failure and surfaces the EXACT step the lane died after. The NEXT honest live run
+will name the true step instead of us guessing — and only THEN do we harden that
+step (e.g. an input-size fast-cap for normalize/transcript), with evidence, not on
+a guess. We did NOT reclassify other `adapter_unavailable` sites — only the class
+with a live receipt.
+
+## Follow-ups (carried, not yet done)
+
+- **Path 2** — a committed `status:failed` planner receipt currently maps to
+  `adapter_unavailable` in `cloudflare-agent-lane-adapters.ts:423`; fix when it
+  surfaces with a live receipt (→ `planner_output_invalid`).
+- **Async dispatch/poll lane no-result path** — the execution-lane path
+  (`dispatchLane`/`pollLane`/`readLaneReceipt`) does NOT call
+  `parseLaneResultMarker`; a separate potential wound, deferred (no live receipt).
+- **Deterministic re-drive fast-fail** — a `planner_lane_incomplete` block should
+  not re-run the planner on the next DO-alarm; fold into the pause/re-arm seam
+  (shared with #27's follow-up).
+- **build-transcript / normalize input-size fast-cap** — do WITH evidence after
+  the next honest run names the dying step, NOT on a guess.
+- Pre-existing zombie run (separate).
+
+## The carrier discipline (eighth wound, same shape)
+
+Error *classification* is a carrier property: the lane can do 456 seconds of real
+agent work and the carrier still lies about the outcome. "Observe the run, don't
+stare at a status page" only works if the status page is HONEST. A transient label
+on a burned agent run is the carrier telling the operator to keep waiting — and to
+keep re-burning 456 seconds of agent time — for something that will never change.
+The heartbeat was telling the truth the whole time; the carrier just wasn't
+reading it.

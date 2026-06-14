@@ -23,6 +23,7 @@ import type {
 import { buildAgentLanePackageMountIndex } from "./agent-lane-package-mounts.ts";
 import {
   buildPiAgentLaneCommand,
+  classifyAgentLaneIncompleteFailure,
   parseLaneResultMarker,
   selectLaneAbortDiagnostic,
 } from "./cloudflare-sandbox-agent-lane-command.ts";
@@ -425,6 +426,23 @@ const runCloudflareSandboxPiAgentLane = async (input: {
     if (heartbeatTail.length > 0) {
       const baseMessage =
         error instanceof Error ? error.message : String(error);
+      // If the heartbeat proves the lane reached `pi-invoke` or later, the agent
+      // demonstrably RAN inside a reachable sandbox: this is a deterministic
+      // lane-internal failure, NOT a transport outage. Throw the typed error so
+      // the application classifies it as `planner_lane_incomplete` and STOPS the
+      // blind re-drive — instead of forging an `adapter_unavailable` outage out
+      // of a lane that already burned the agent's run. Froze before `pi-invoke`
+      // → classifier returns null → keep the bare retryable transport error.
+      const laneIncomplete = classifyAgentLaneIncompleteFailure({
+        cause: error,
+        detail: baseMessage,
+        heartbeatTail,
+        runId: input.input.runId,
+        workItemId: input.input.workItemId,
+      });
+      if (laneIncomplete !== null) {
+        throw laneIncomplete;
+      }
       throw new Error(`${baseMessage} [step heartbeat: ${heartbeatTail}]`, {
         cause: error,
       });

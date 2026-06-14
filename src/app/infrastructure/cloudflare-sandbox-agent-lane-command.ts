@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AgentLaneIncompleteError } from "../application/ports.ts";
 import { jsonOutputNormalizerNodeScript } from "./agent-lane-json-output.ts";
 import { agentLanePackageMountWriterNodeScript } from "./agent-lane-package-mounts.ts";
 import { agentLaneTokenCostAccountingNodeScript } from "./agent-lane-token-cost-accounting.ts";
@@ -480,4 +481,109 @@ export const selectLaneAbortDiagnostic = (marker: {
     piRan && marker.stderrTail !== "" && marker.gitLogTail !== "";
   const suffix = appendGitLog ? ` [git log: ${marker.gitLogTail}]` : "";
   return `${primary === "" ? "no diagnostic output" : primary}${suffix}`;
+};
+
+/**
+ * The ordered lane steps stamped into the `/workspace/.piwf-heartbeat` file by
+ * `mark <step>` (plus the `init` start state and the unmarked `emit-marker` tail).
+ * The heartbeat's last entry is the furthest step the lane reached before it
+ * aborted — the single OBSERVABLE fact that distinguishes a pre-agent transport
+ * outage from a lane-internal failure after the agent ran.
+ */
+export const LANE_STEP_SEQUENCE = [
+  "init",
+  "install-pi-agent",
+  "prepare-auth",
+  "clone-artifacts",
+  "checkout-branch",
+  "mount-packages",
+  "pi-invoke",
+  "normalize-output",
+  "build-transcript",
+  "hash-artifacts",
+  "build-receipt",
+  "git-add",
+  "git-commit",
+  "git-push",
+  "emit-marker",
+] as const;
+
+/**
+ * Did the lane reach the agent invocation (`pi-invoke`) or any later step?
+ *
+ * `true` is proof the agent demonstrably RAN inside a reachable sandbox: a
+ * genuine transport outage (sandbox unreachable, image un-pullable, clone
+ * failing) freezes the heartbeat at an EARLIER step and never gets here. An
+ * unknown step token (not in the sequence) is treated as NOT reached, so a
+ * corrupt heartbeat fails safe toward the retryable transport classification.
+ *
+ * @param step - The last step name read from the heartbeat (or an error marker).
+ */
+export const laneStepReachedAgentInvocation = (
+  step: string | null
+): boolean => {
+  if (step === null) {
+    return false;
+  }
+  const sequence: readonly string[] = LANE_STEP_SEQUENCE;
+  const stepIndex = sequence.indexOf(step);
+  const agentInvocationIndex = sequence.indexOf("pi-invoke");
+  return stepIndex !== -1 && stepIndex >= agentInvocationIndex;
+};
+
+/**
+ * Pull the last step NAME from a formatted heartbeat tail.
+ *
+ * The executor reads `/workspace/.piwf-heartbeat` (lines of `<epoch> <step>`)
+ * and joins the last 20 with `" | "`. Each entry is `<epoch> <step>`; we want
+ * the trailing token of the last entry. Returns `null` for an empty/garbled tail
+ * so the caller fails safe toward the transport classification.
+ *
+ * @param heartbeatTail - The `" | "`-joined heartbeat tail the executor built.
+ */
+export const lastHeartbeatStep = (heartbeatTail: string): string | null => {
+  const entries = heartbeatTail
+    .split("|")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const lastEntry = entries.at(-1);
+  if (lastEntry === undefined) {
+    return null;
+  }
+  const stepToken = lastEntry.split(/\s+/u).at(-1);
+  return stepToken === undefined || stepToken.length === 0 ? null : stepToken;
+};
+
+/**
+ * Classify a lane that aborted WITHOUT committing a usable result, by how far its
+ * heartbeat got. Reached `pi-invoke`+ → an {@link AgentLaneIncompleteError} (the
+ * agent ran; this is lane-internal, deterministic, must NOT blind-re-drive).
+ * Froze before `pi-invoke` (or no heartbeat) → `null`, leaving the caller to
+ * throw its existing transport error so a genuine outage stays retryable
+ * (`adapter_unavailable`).
+ *
+ * Correct under EVERY root-cause hypothesis for wound #28 (ENOSPC at transcript,
+ * an un-emitted EXIT-trap marker, oversized pi output): all of them reach
+ * `pi-invoke` first, so all of them classify as lane-internal — the fix stops the
+ * blind re-drive and lets the next honest run name the true root cause.
+ */
+export const classifyAgentLaneIncompleteFailure = (input: {
+  readonly cause: unknown;
+  readonly detail: string;
+  readonly heartbeatTail: string;
+  readonly runId: string;
+  readonly workItemId: string;
+}): AgentLaneIncompleteError | null => {
+  const lastStep = lastHeartbeatStep(input.heartbeatTail);
+  if (!laneStepReachedAgentInvocation(lastStep)) {
+    return null;
+  }
+  return new AgentLaneIncompleteError({
+    cause: input.cause,
+    detail: input.detail,
+    lastStep,
+    reachedAgentInvocation: true,
+    runId: input.runId,
+    workItemId: input.workItemId,
+  });
 };

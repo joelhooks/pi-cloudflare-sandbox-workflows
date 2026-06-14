@@ -134,7 +134,10 @@ import type {
   WzrrdPublishCapabilityAdapter,
   WorkflowAppContract,
 } from "./ports.ts";
-import { PlannerBlueprintContractError } from "./ports.ts";
+import {
+  AgentLaneIncompleteError,
+  PlannerBlueprintContractError,
+} from "./ports.ts";
 import { DEFAULT_ZOMBIE_NODE_MAX_ATTEMPTS } from "./workflow-drive-constants.ts";
 
 interface WorkflowDependencies {
@@ -1442,6 +1445,22 @@ export class WorkflowApp implements WorkflowAppContract {
           blocker: blocker("planner_output_invalid", error.message),
           status: "blocked",
           summary: "Planner output failed the blueprint contract.",
+        };
+      }
+      // The lane's step heartbeat proved the agent RAN (`pi-invoke`+) but the
+      // lane aborted before committing any usable result — no parseable marker,
+      // or an error marker. The agent's run is already burned; re-driving just
+      // re-burns it. This is wound #28: that no-result lane failure flattened to
+      // `adapter_unavailable` and blind-re-drove. Name it `planner_lane_incomplete`
+      // so the status endpoint reads "the agent ran, the lane failed internally"
+      // instead of forging a transport outage. (A lane that froze BEFORE
+      // `pi-invoke` never produces this error — it stays the retryable
+      // `adapter_unavailable` below.)
+      if (error instanceof AgentLaneIncompleteError) {
+        return {
+          blocker: blocker("planner_lane_incomplete", error.message),
+          status: "blocked",
+          summary: "Planner agent ran but the lane committed no usable result.",
         };
       }
       // Defense-in-depth: any raw Zod parse failure escaping the planner path is

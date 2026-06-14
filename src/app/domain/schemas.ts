@@ -1260,6 +1260,7 @@ export const CapabilityDenialCodeSchema = z.enum([
   "receipt_persistence_failed",
   "plan_node_config_invalid",
   "planner_output_invalid",
+  "planner_lane_incomplete",
   "drive_stall_reaped",
 ]);
 

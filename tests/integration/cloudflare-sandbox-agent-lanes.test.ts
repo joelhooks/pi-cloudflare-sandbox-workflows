@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { AgentLaneIncompleteError } from "../../src/app/application/ports.ts";
 import {
   AgentLanePackageMountIndexSchema,
   PackageMetadataSchema,
@@ -33,6 +34,9 @@ import {
 } from "../../src/app/infrastructure/agent-lane-package-mounts.ts";
 import {
   buildPiAgentLaneCommand,
+  classifyAgentLaneIncompleteFailure,
+  lastHeartbeatStep,
+  laneStepReachedAgentInvocation,
   selectLaneAbortDiagnostic,
 } from "../../src/app/infrastructure/cloudflare-sandbox-agent-lane-command.ts";
 import { integrationTestPackageMetadata } from "./workflow-app-fixtures.ts";
@@ -1293,5 +1297,198 @@ describe("selectLaneAbortDiagnostic — the blocker names WHICH actor halted", (
         stderrTail: "",
       })
     ).toBe("error: failed to push some refs");
+  });
+});
+
+describe("classifyAgentLaneIncompleteFailure — heartbeat names a burned agent run vs a transport outage (wound #28)", () => {
+  // The EXACT step heartbeat the live re-drive run-live-20260614T165913566Z-a8bc84dc
+  // left behind: pi-invoke ran 456s (1781456448 → 1781456904), normalize-output 67s,
+  // then the lane FROZE at build-transcript and aborted under `set -e` with exit 1 and
+  // no usable result marker. The executor reads /workspace/.piwf-heartbeat and joins
+  // the last 20 lines with " | " — this is that joined tail, byte-for-byte.
+  const liveA8bc84dcHeartbeatTail = [
+    "1781456366 install-pi-agent",
+    "1781456441 prepare-auth",
+    "1781456441 clone-artifacts",
+    "1781456446 checkout-branch",
+    "1781456446 mount-packages",
+    "1781456448 pi-invoke",
+    "1781456904 normalize-output",
+    "1781456971 build-transcript",
+  ].join(" | ");
+
+  it("classifies the live a8bc84dc no-marker abort as a burned agent run, NOT a transport outage", () => {
+    // This is the regression lock on the production failure. Pre-fix, the executor
+    // wrapped this into a bare Error and the planner flattened it to the transient
+    // `adapter_unavailable`, which blind-re-drove the same burned run for ~40 minutes.
+    // The fix keys off the ONE observable fact — the heartbeat reached build-transcript,
+    // six steps PAST pi-invoke — so the agent demonstrably ran and the failure is
+    // deterministic/lane-internal.
+    const classified = classifyAgentLaneIncompleteFailure({
+      cause: new Error(
+        "Cloudflare Sandbox lane did not emit a result marker (exit 1)."
+      ),
+      detail: "Cloudflare Sandbox lane did not emit a result marker (exit 1).",
+      heartbeatTail: liveA8bc84dcHeartbeatTail,
+      runId: "run-live-20260614T165913566Z-a8bc84dc",
+      workItemId: "work-a8bc84dc",
+    });
+
+    expect(classified).toBeInstanceOf(AgentLaneIncompleteError);
+    expect({
+      lastStep: classified?.lastStep,
+      preservesCause: classified?.cause instanceof Error,
+      reachedAgentInvocation: classified?.reachedAgentInvocation,
+      runId: classified?.runId,
+      // The classifier's message must read "the agent ran, the lane failed" — not a
+      // transport outage — so the operator status endpoint stops guessing.
+      saysLaneInternal: classified?.message.includes(
+        "lane committed no usable result"
+      ),
+    }).toStrictEqual({
+      lastStep: "build-transcript",
+      preservesCause: true,
+      reachedAgentInvocation: true,
+      runId: "run-live-20260614T165913566Z-a8bc84dc",
+      saysLaneInternal: true,
+    });
+  });
+
+  it("classifies an ERROR-marker abort that reached pi-invoke the same way (both funnels share the catch)", () => {
+    // The no-marker throw and the error-marker throw both land in the SAME executor
+    // catch, so the classifier must treat them identically: what matters is the
+    // heartbeat, not which marker (or no marker) came back. Here the lane aborted at
+    // build-receipt with an error marker — still a burned agent run.
+    const classified = classifyAgentLaneIncompleteFailure({
+      cause: new Error('lane aborted at step "build-receipt" (exit 1, pi 0)'),
+      detail: 'lane aborted at step "build-receipt" (exit 1, pi 0)',
+      heartbeatTail: [
+        "1781456448 pi-invoke",
+        "1781456904 normalize-output",
+        "1781456971 build-transcript",
+        "1781456999 hash-artifacts",
+        "1781457001 build-receipt",
+      ].join(" | "),
+      runId: "run-err-marker",
+      workItemId: "work-err-marker",
+    });
+
+    expect(classified).toBeInstanceOf(AgentLaneIncompleteError);
+    expect(classified?.lastStep).toBe("build-receipt");
+  });
+
+  it("returns null for a lane that FROZE before pi-invoke — a genuine transport outage stays retryable", () => {
+    // Symmetric guard. A sandbox that never became reachable / a clone that failed
+    // freezes the heartbeat at an EARLY step and never gets to pi-invoke. That IS the
+    // retryable `adapter_unavailable`: null tells the executor to keep its bare
+    // transport error so re-driving a transient outage is still correct.
+    const frozenAtClone = classifyAgentLaneIncompleteFailure({
+      cause: new Error("Cloudflare Sandbox lane did not emit a result marker."),
+      detail: "Cloudflare Sandbox lane did not emit a result marker.",
+      heartbeatTail: [
+        "1781456366 install-pi-agent",
+        "1781456441 prepare-auth",
+        "1781456441 clone-artifacts",
+      ].join(" | "),
+      runId: "run-pre-pi",
+      workItemId: "work-pre-pi",
+    });
+
+    expect(frozenAtClone).toBeNull();
+  });
+
+  it("treats a missing/garbled heartbeat as NOT-reached so a corrupt tail fails safe to retryable", () => {
+    expect({
+      // Empty / whitespace-only tails carry no usable step.
+      emptyTail: lastHeartbeatStep(""),
+      // A bare epoch with no step token is read verbatim as the token...
+      epochOnlyToken: lastHeartbeatStep("1781456448"),
+      separatorOnlyTail: lastHeartbeatStep("   |   |  "),
+    }).toStrictEqual({
+      emptyTail: null,
+      epochOnlyToken: "1781456448",
+      separatorOnlyTail: null,
+    });
+
+    expect({
+      // ...but an unknown step token is never "reached pi-invoke" (fails safe).
+      garbledEpochToken: laneStepReachedAgentInvocation("1781456448"),
+      nullStep: laneStepReachedAgentInvocation(null),
+      prePiInvokeStep: laneStepReachedAgentInvocation("install-pi-agent"),
+      thePiInvokeStep: laneStepReachedAgentInvocation("pi-invoke"),
+      wellPastPiInvoke: laneStepReachedAgentInvocation("git-push"),
+    }).toStrictEqual({
+      garbledEpochToken: false,
+      nullStep: false,
+      prePiInvokeStep: false,
+      thePiInvokeStep: true,
+      wellPastPiInvoke: true,
+    });
+  });
+
+  it("reads the step the REAL mark() writer stamps — a faithful double of the heartbeat file", () => {
+    // Hostile double: slice the REAL mark() function out of buildPiAgentLaneCommand()
+    // and run it verbatim to write an actual heartbeat file, then read+join it EXACTLY
+    // as the executor does and feed THAT to the classifier. This guarantees the
+    // classifier parses the real on-disk format (`<epoch> <step>`) — if anyone changes
+    // how mark() stamps steps, this test breaks instead of the live classification.
+    const command = buildPiAgentLaneCommand();
+    const markStart = command.indexOf("mark() {");
+    const markEnd = command.indexOf("\nstarted_at=");
+    if (markStart === -1 || markEnd === -1 || markEnd <= markStart) {
+      throw new Error(
+        "Could not locate the mark() writer in the lane command."
+      );
+    }
+    const markBlock = command.slice(markStart, markEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-heartbeat-"));
+    try {
+      const heartbeatPath = join(dir, "heartbeat");
+      // Reproduce the a8bc84dc trajectory through the REAL mark() — install through
+      // build-transcript, the post-pi step where the live lane froze.
+      const harness = [
+        "set -u",
+        `hb_path=${JSON.stringify(heartbeatPath)}`,
+        ': > "$hb_path"',
+        markBlock,
+        "mark install-pi-agent",
+        "mark prepare-auth",
+        "mark clone-artifacts",
+        "mark checkout-branch",
+        "mark mount-packages",
+        "mark pi-invoke",
+        "mark normalize-output",
+        "mark build-transcript",
+      ].join("\n");
+
+      execFileSync("bash", ["-c", harness], { encoding: "utf-8" });
+
+      // The EXACT executor read+join logic (cloudflare-sandbox-agent-lanes.ts catch).
+      const heartbeatTail = readFileSync(heartbeatPath, "utf-8")
+        .trim()
+        .split("\n")
+        .slice(-20)
+        .join(" | ");
+
+      const classified = classifyAgentLaneIncompleteFailure({
+        cause: new Error("did not emit a result marker"),
+        detail: "did not emit a result marker",
+        heartbeatTail,
+        runId: "run-faithful-double",
+        workItemId: "work-faithful-double",
+      });
+
+      expect(classified).toBeInstanceOf(AgentLaneIncompleteError);
+      expect({
+        lastStep: classified?.lastStep,
+        reachedAgentInvocation: classified?.reachedAgentInvocation,
+      }).toStrictEqual({
+        lastStep: "build-transcript",
+        reachedAgentInvocation: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
   });
 });

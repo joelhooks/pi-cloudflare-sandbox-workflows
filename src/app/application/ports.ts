@@ -244,6 +244,55 @@ export class PlannerBlueprintContractError extends Error {
   }
 }
 
+/**
+ * Thrown when an agent lane demonstrably INVOKED the agent (its step heartbeat
+ * reached `pi-invoke` or later) but the lane process then aborted before
+ * committing a usable result — no parseable result marker, or an error marker —
+ * so the workflow obtained no plan/receipt at all.
+ *
+ * This is a LANE-INTERNAL failure, NOT a transient transport/adapter outage. A
+ * genuine `adapter_unavailable` (the sandbox unreachable, the image un-pullable,
+ * the clone failing) never reaches `pi-invoke`: the heartbeat would freeze at
+ * `install-pi-agent`/`prepare-auth`/`clone-artifacts`. So the heartbeat's
+ * last-reached step is OBSERVABLE proof of which class this is, and the
+ * application catch keys on this type to surface the deterministic
+ * `planner_lane_incomplete` blocker instead of the transient `adapter_unavailable`
+ * that blind-re-drove carrier wound #28 (`a8bc84dc`: pi ran 456s, normalize 67s,
+ * lane aborted at `build-transcript` with no marker — mislabeled a transport
+ * outage and re-driven for ~40 minutes). It carries only the heartbeat's
+ * last-reached STEP name (structural, never a value) so the block stays
+ * redaction-safe while naming exactly how far the lane got for the next read.
+ */
+// eslint-disable-next-line max-classes-per-file -- typed lane errors are colocated with the ports they cross (sibling of PlannerBlueprintContractError).
+export class AgentLaneIncompleteError extends Error {
+  readonly lastStep: string | null;
+  readonly reachedAgentInvocation: boolean;
+  readonly runId: string;
+  readonly workItemId: string;
+
+  constructor(input: {
+    readonly cause?: unknown;
+    readonly detail: string;
+    readonly lastStep: string | null;
+    readonly reachedAgentInvocation: boolean;
+    readonly runId: string;
+    readonly workItemId: string;
+  }) {
+    super(
+      `Agent lane reached step "${
+        input.lastStep ?? "unknown"
+      }" — the agent ran but the lane committed no usable result (lane-internal ` +
+        `failure, NOT a transport outage): ${input.detail}`,
+      input.cause === undefined ? undefined : { cause: input.cause }
+    );
+    this.name = "AgentLaneIncompleteError";
+    this.lastStep = input.lastStep;
+    this.reachedAgentInvocation = input.reachedAgentInvocation;
+    this.runId = input.runId;
+    this.workItemId = input.workItemId;
+  }
+}
+
 export interface PackageRegistryActorContract {
   discoverMetadata(input: {
     readonly actor: Actor;

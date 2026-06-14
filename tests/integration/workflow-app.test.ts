@@ -9,6 +9,7 @@ import type {
   WorkflowPostExecutionArtifactRecorderPort,
 } from "../../src/app/application/ports.ts";
 import {
+  AgentLaneIncompleteError,
   PlannerBlueprintContractError,
   StaleDriveGenerationError,
 } from "../../src/app/application/ports.ts";
@@ -2817,6 +2818,94 @@ describe("workflow app integration contract", () => {
       namesPresentKeys: true,
       status: "blocked",
       terminalBlockerCode: "planner_output_invalid",
+    });
+  });
+
+  // Wound #28's twin of the above: pi RAN (its step heartbeat reached pi-invoke or
+  // later) but the lane aborted before committing any usable result — no parseable
+  // marker, or an error marker. The agent's run is already burned; re-driving just
+  // re-burns it. The carrier flattened this no-result lane failure into the transient
+  // `adapter_unavailable` and blind-re-drove the live run a8bc84dc for ~40 minutes. A
+  // typed AgentLaneIncompleteError must surface as the deterministic
+  // `planner_lane_incomplete` so the operator status endpoint reads "the agent ran,
+  // the lane failed internally" instead of forging a transport outage.
+  it("blocks a burned-agent-run lane (heartbeat reached pi-invoke, no usable result) as planner_lane_incomplete (not adapter_unavailable)", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "workflow-app-planner-lane-incomplete"
+    );
+    const statusProjection = createMemoryWorkflowStatusProjectionStore();
+    const workflow = new WorkflowApp({
+      artifacts,
+      capabilityLeases: createPolicyCapabilityLeaseBroker(artifacts, {
+        discordSecretRef: "secretref:discord-bot",
+        policyId: "discord-message-policy",
+      }),
+      contextCapsules: createMemoryContextCapsuleActor(),
+      discordMessages: createDryRunDiscordMessageAdapter(),
+      discordSecretRefs: {
+        dryRun: "secretref:discord-dry-run",
+        send: "secretref:discord-bot",
+      },
+      dynamicWorkflowPlanner: {
+        // Hostile double: the executor classified the live a8bc84dc abort — heartbeat
+        // froze at build-transcript, six steps past pi-invoke — and threw exactly this
+        // typed error up through the planner adapter.
+        proposePlan() {
+          return Promise.reject(
+            new AgentLaneIncompleteError({
+              cause: new Error(
+                "Cloudflare Sandbox lane did not emit a result marker (exit 1)."
+              ),
+              detail:
+                "Cloudflare Sandbox lane did not emit a result marker (exit 1).",
+              lastStep: "build-transcript",
+              reachedAgentInvocation: true,
+              runId: "run-planner-lane-incomplete",
+              workItemId: "work-planner-lane-incomplete",
+            })
+          );
+        },
+      },
+      executionMode: "integration-test",
+      observabilityRecorder: createCloudflareArtifactsObservabilityRecorder({
+        artifacts,
+      }),
+      packageRegistry: createMemoryPackageRegistryActor(
+        integrationTestPackageMetadata
+      ),
+      reviewGate: createMemoryReviewGateActor(artifacts),
+      reviewSurfacePublisher: createCloudflareArtifactsReviewSurfacePublisher({
+        artifacts,
+      }),
+      statusProjection,
+      wzrrdPublisher: createDryRunWzrrdPublishAdapter(),
+      wzrrdSecretRefs: {
+        dryRun: "secretref:wzrrd-dry-run",
+        publish: "secretref:wzrrd-api",
+      },
+      wzrrdSiteRef: "wzrrd:test",
+    });
+
+    const result = await workflow.run(buildIntegrationTestRunRequest());
+    const latestProjection = statusProjection.latest.get(result.runId);
+    const blocker = result.status === "blocked" ? result.blocker : undefined;
+
+    // The block must name the burned-agent-run cause (the step the lane reached) and
+    // classify as the DETERMINISTIC planner_lane_incomplete — NOT the transient
+    // adapter_unavailable that blind-re-drove — and the status endpoint agrees.
+    expect({
+      blockerCode: blocker?.code,
+      namesLastStep: blocker?.message.includes("build-transcript") ?? false,
+      saysLaneInternal:
+        blocker?.message.includes("lane committed no usable result") ?? false,
+      status: result.status,
+      terminalBlockerCode: latestProjection?.terminalBlocker?.code,
+    }).toStrictEqual({
+      blockerCode: "planner_lane_incomplete",
+      namesLastStep: true,
+      saysLaneInternal: true,
+      status: "blocked",
+      terminalBlockerCode: "planner_lane_incomplete",
     });
   });
 
