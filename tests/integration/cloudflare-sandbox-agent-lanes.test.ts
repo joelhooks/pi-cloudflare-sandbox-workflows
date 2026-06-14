@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,8 +19,10 @@ import {
 } from "../../src/app/domain/schemas.ts";
 import type { PinnedPackage } from "../../src/app/domain/schemas.ts";
 import {
+  AgentLaneAgentError,
   extractFirstJsonValueText,
   jsonOutputNormalizerNodeScript,
+  normalizeAgentLaneJsonOutput,
 } from "../../src/app/infrastructure/agent-lane-json-output.ts";
 import {
   agentLanePackageMountWriterNodeScript,
@@ -99,6 +107,294 @@ describe(extractFirstJsonValueText, () => {
   });
 });
 
+/**
+ * Build a faithful pi `--mode json` JSONL event stream. The shape mirrors a real
+ * captured stream: a `session` HEADER line (itself a complete JSON object — the
+ * hostile bit, because a naive whole-buffer scan would return it instead of the
+ * verdict), lifecycle events, then an `agent_end` carrying `messages[]`. The
+ * verdict lives ONLY inside the final assistant message's `{type:"text"}` block,
+ * alongside a `{type:"thinking"}` block that must be ignored. When `stopReason`
+ * is "error"/"aborted" the assistant carries no text block and an `errorMessage`,
+ * exactly like pi's failure ending.
+ */
+const buildPiJsonEventStream = (
+  options: {
+    readonly assistantText?: string;
+    readonly errorMessage?: string;
+    readonly includeThinking?: boolean;
+    readonly stopReason?: string;
+  } = {}
+): string => {
+  const {
+    assistantText = '{"ok":true}',
+    errorMessage,
+    includeThinking = true,
+    stopReason = "stop",
+  } = options;
+  const failed = stopReason === "error" || stopReason === "aborted";
+
+  const assistantContent: Record<string, unknown>[] = [];
+  if (includeThinking) {
+    assistantContent.push({
+      thinking: "weighing the primary source against the claim",
+      type: "thinking",
+    });
+  }
+  if (!failed) {
+    assistantContent.push({ text: assistantText, type: "text" });
+  }
+
+  const assistantMessage: Record<string, unknown> = {
+    content: assistantContent,
+    role: "assistant",
+    stopReason,
+  };
+  if (errorMessage !== undefined) {
+    assistantMessage["errorMessage"] = errorMessage;
+  }
+
+  const lines: Record<string, unknown>[] = [
+    {
+      cwd: "/workspace/piwf-agent-lane",
+      id: "sess_chaos",
+      timestamp: "2026-06-14T00:00:00.000Z",
+      type: "session",
+      version: 3,
+    },
+    { type: "agent_start" },
+    { type: "turn_start" },
+    {
+      message: { content: [], role: "assistant", stopReason: null },
+      type: "message_start",
+    },
+    {
+      messages: [
+        {
+          content: [{ text: "verify the claim", type: "text" }],
+          role: "user",
+        },
+        assistantMessage,
+      ],
+      type: "agent_end",
+      willRetry: false,
+    },
+  ];
+
+  return `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+};
+
+/** Narrow an unknown JSON value to a plain object (non-null, non-array). */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Assert a caught value is an {@link AgentLaneAgentError}, narrowing without a cast. */
+const asAgentError = (value: unknown): AgentLaneAgentError => {
+  if (value instanceof AgentLaneAgentError) {
+    return value;
+  }
+  throw new Error(`expected AgentLaneAgentError, received: ${String(value)}`);
+};
+
+/** Run the sandbox node normalizer script against a raw fixture, out-of-process. */
+const runNormalizerNodeScript = (
+  raw: string
+): {
+  readonly exitCode: number;
+  readonly laneOutput: string | null;
+  readonly normalization: Record<string, unknown> | null;
+} => {
+  const dir = mkdtempSync(join(tmpdir(), "piwf-normalize-"));
+  const rawPath = join(dir, "raw.txt");
+  const outPath = join(dir, "out.json");
+  const normPath = join(dir, "normalization.json");
+
+  try {
+    writeFileSync(rawPath, raw);
+    let exitCode = 0;
+    try {
+      execFileSync(process.execPath, ["-e", jsonOutputNormalizerNodeScript], {
+        env: {
+          ...process.env,
+          LANE_OUTPUT_NORMALIZATION_PATH: normPath,
+          LANE_OUTPUT_PATH: outPath,
+          raw_output_path: rawPath,
+        },
+      });
+    } catch (error) {
+      const status =
+        typeof error === "object" && error !== null && "status" in error
+          ? error.status
+          : undefined;
+      exitCode = typeof status === "number" ? status : 1;
+    }
+
+    const normalizationRaw: unknown = existsSync(normPath)
+      ? JSON.parse(readFileSync(normPath, "utf-8"))
+      : null;
+
+    return {
+      exitCode,
+      laneOutput: existsSync(outPath) ? readFileSync(outPath, "utf-8") : null,
+      normalization: isRecord(normalizationRaw) ? normalizationRaw : null,
+    };
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+};
+
+describe(normalizeAgentLaneJsonOutput, () => {
+  it("recovers the verdict from the agent_end assistant text of a real json event stream", () => {
+    const verdict = normalizeAgentLaneJsonOutput(
+      buildPiJsonEventStream({
+        assistantText: '{"ok":true,"verdict":"accepted"}',
+      })
+    );
+
+    expect(JSON.parse(verdict)).toStrictEqual({
+      ok: true,
+      verdict: "accepted",
+    });
+  });
+
+  it("recovers a fenced verdict buried in the assistant's prose", () => {
+    const verdict = normalizeAgentLaneJsonOutput(
+      buildPiJsonEventStream({
+        assistantText: [
+          "Here is my verification result:",
+          "```json",
+          '{ "status": "accepted", "confidence": 0.9 }',
+          "```",
+          "Done.",
+        ].join("\n"),
+      })
+    );
+
+    expect(JSON.parse(verdict)).toStrictEqual({
+      confidence: 0.9,
+      status: "accepted",
+    });
+  });
+
+  it("throws AgentLaneAgentError (not a silent empty) when the run ends in error", () => {
+    let thrown: unknown;
+    try {
+      normalizeAgentLaneJsonOutput(
+        buildPiJsonEventStream({
+          errorMessage: "model provider returned 500",
+          stopReason: "error",
+        })
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    const agentError = asAgentError(thrown);
+    expect(agentError.agentStopReason).toBe("error");
+    expect(agentError.message).toBe("model provider returned 500");
+  });
+
+  it("throws AgentLaneAgentError when the run is aborted mid-flight", () => {
+    expect(() =>
+      normalizeAgentLaneJsonOutput(
+        buildPiJsonEventStream({ stopReason: "aborted" })
+      )
+    ).toThrow(AgentLaneAgentError);
+  });
+
+  it("never returns the session header when an event stream carries no verdict", () => {
+    // The wound class: a json lane whose agent produced only thinking (no text
+    // verdict) must NOT have its `{type:"session"}` header scraped as the result.
+    const stream = buildPiJsonEventStream({ includeThinking: true });
+    const verdictless = stream
+      .split("\n")
+      .filter((line) => !line.includes('"type":"text"'))
+      .join("\n");
+
+    expect(() => normalizeAgentLaneJsonOutput(verdictless)).toThrow(
+      "Agent lane output did not contain a complete JSON value."
+    );
+  });
+
+  it("falls back to a bare legacy verdict that is not an event stream", () => {
+    expect(
+      JSON.parse(
+        normalizeAgentLaneJsonOutput('{"status":"accepted","score":3}')
+      )
+    ).toStrictEqual({ score: 3, status: "accepted" });
+  });
+
+  it("falls back to extracting a verdict from legacy chatty single-line text", () => {
+    expect(
+      JSON.parse(
+        normalizeAgentLaneJsonOutput('result: {"ok":true} <- the verdict')
+      )
+    ).toStrictEqual({ ok: true });
+  });
+
+  it("normalizes a real stream end-to-end through the sandbox node script", () => {
+    const result = runNormalizerNodeScript(
+      buildPiJsonEventStream({
+        assistantText: '{"ok":true,"verdict":"accepted"}',
+      })
+    );
+
+    expect({
+      exitCode: result.exitCode,
+      laneVerdict:
+        result.laneOutput === null
+          ? null
+          : (JSON.parse(result.laneOutput) as unknown),
+      normalization: result.normalization,
+    }).toStrictEqual({
+      exitCode: 0,
+      laneVerdict: { ok: true, verdict: "accepted" },
+      normalization: { agentStopReason: null, normalized: true, reason: null },
+    });
+  });
+
+  it("classifies an agent-error stream as a non-zero, honest normalization failure", () => {
+    const result = runNormalizerNodeScript(
+      buildPiJsonEventStream({
+        errorMessage: "model provider returned 500",
+        stopReason: "error",
+      })
+    );
+
+    expect({
+      agentStopReason: result.normalization?.["agentStopReason"],
+      failedExit: result.exitCode !== 0,
+      normalized: result.normalization?.["normalized"],
+      reason: result.normalization?.["reason"],
+    }).toStrictEqual({
+      agentStopReason: "error",
+      failedExit: true,
+      normalized: false,
+      reason: "agent_error",
+    });
+  });
+
+  it("records a no-parseable-output failure without inventing an agent stop reason", () => {
+    const result = runNormalizerNodeScript(
+      buildPiJsonEventStream({ includeThinking: true })
+        .split("\n")
+        .filter((line) => !line.includes('"type":"text"'))
+        .join("\n")
+    );
+
+    expect({
+      agentStopReason: result.normalization?.["agentStopReason"],
+      failedExit: result.exitCode !== 0,
+      normalized: result.normalization?.["normalized"],
+      reason: result.normalization?.["reason"],
+    }).toStrictEqual({
+      agentStopReason: null,
+      failedExit: true,
+      normalized: false,
+      reason: "no_parseable_output",
+    });
+  });
+});
+
 describe(jsonOutputNormalizerNodeScript, () => {
   it("embeds the same extraction helper used by the TypeScript tests", () => {
     expect({
@@ -163,6 +459,32 @@ describe(buildPiAgentLaneCommand, () => {
       copiesPromptFromSourcePath: true,
       promptEnvRemoved: true,
       writesPromptPath: true,
+    });
+  });
+
+  it("captures pi's json event stream for json lanes without forging a non-zero exit", () => {
+    expect({
+      appliesJsonModeForJsonLanes: command.includes(
+        'pi_mode_args="--mode json"'
+      ),
+      doesNotClobberPiStatus: !command.includes("pi_status=65"),
+      exitsWithRealPiStatus: command.includes('exit "$pi_status"'),
+      gatesJsonModeOnMediaType: command.includes(
+        '[ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]'
+      ),
+      passesModeArgsToPi: command.includes("$pi_mode_args"),
+      recordsNormalizationOutcomePath: command.includes(
+        'export LANE_OUTPUT_NORMALIZATION_PATH="$normalization_outcome_path"'
+      ),
+      tracksNormalizationSeparately: command.includes("output_normalized=0"),
+    }).toStrictEqual({
+      appliesJsonModeForJsonLanes: true,
+      doesNotClobberPiStatus: true,
+      exitsWithRealPiStatus: true,
+      gatesJsonModeOnMediaType: true,
+      passesModeArgsToPi: true,
+      recordsNormalizationOutcomePath: true,
+      tracksNormalizationSeparately: true,
     });
   });
 

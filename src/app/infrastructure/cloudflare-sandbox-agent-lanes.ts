@@ -327,11 +327,13 @@ const runCloudflareSandboxPiAgentLane = async (input: {
         `Cloudflare Sandbox Pi lane aborted at step "${marker.failingStep ?? "unknown"}" (exit ${marker.exitCode}, pi ${marker.piStatus ?? "n/a"}): ${marker.gitLogTail || marker.stderrTail || "no diagnostic output"}`
       );
     }
-    if (!result.success) {
-      throw new Error(
-        `Cloudflare Sandbox Pi lane failed after commit ${marker.artifactCommitSha}: ${result.stderr || result.stdout}`
-      );
-    }
+    // An "ok" marker means the receipt was committed and pushed. The command
+    // intentionally exits with pi's status, so a non-zero pi run (or a failed
+    // JSON normalize) surfaces here as result.success === false WHILE a real
+    // receipt exists. We do NOT throw on that — the receipt's own honest
+    // `status` field ("completed" | "failed") is the source of truth, and every
+    // consumer already gates on it. Throwing here was the wound: it discarded a
+    // committed receipt and forged an adapter outage out of an agent verdict.
 
     const receiptFile = await prepared.sandbox.readFile(
       `/workspace/piwf-agent-lane/${marker.receiptPath}`

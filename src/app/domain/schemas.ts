@@ -288,6 +288,13 @@ export const AgentLaneReceiptSchema = z
     completedAt: IsoDateTimeSchema.optional(),
     kind: AgentLaneKindSchema,
     laneId: z.string().min(1),
+    outputNormalization: z
+      .object({
+        agentStopReason: z.string().nullable().default(null),
+        normalized: z.boolean(),
+        reason: z.string().nullable().default(null),
+      })
+      .optional(),
     outputPins: z.array(ArtifactPinSchema).default([]),
     outputRefs: z.array(ArtifactRefSchema).default([]),
     packageMounts: AgentLanePackageMountEvidenceSchema.optional(),

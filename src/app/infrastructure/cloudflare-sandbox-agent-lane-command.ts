@@ -53,7 +53,9 @@ auth_path="$agent_dir/auth.json"
 raw_output_path="/workspace/piwf-agent-lane-output-raw.txt"
 stderr_path="/workspace/piwf-agent-lane-stderr.txt"
 git_log_path="/workspace/piwf-agent-lane-git.log"
+normalization_outcome_path="/workspace/piwf-agent-lane-output-normalization.json"
 export raw_output_path stderr_path
+export LANE_OUTPUT_NORMALIZATION_PATH="$normalization_outcome_path"
 scrub_credentials() {
   sed -E 's#https://x:[^@]*@#https://x:***@#g'
 }
@@ -120,22 +122,39 @@ NODE
 mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(dirname "$LANE_TRANSCRIPT_PATH")" "$(dirname "$LANE_RECEIPT_PATH")"
 cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"
 current_step="pi-invoke"
+# JSON lanes capture pi's machine event stream (--mode json), not its human text
+# channel. Text mode only echoes the final assistant message and goes silent when
+# the run ends on a tool call, error, or abort — so a JSON lane that scraped text
+# mode would lose the verdict the agent actually produced. The normalizer reads
+# the event stream's agent_end message to recover it.
+pi_mode_args=""
+if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
+  pi_mode_args="--mode json"
+fi
 set +e
-pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
+pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
 pi_status=$?
 set -e
 current_step="normalize-output"
+# Normalization success is tracked separately from pi's exit status. A failed
+# normalize is a real "agent produced no parseable verdict" signal recorded in
+# the receipt's outputNormalization — it must NOT clobber pi_status, which would
+# forge a non-zero exit and make a committed receipt look like an adapter outage.
+output_normalized=1
 if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
-  if ! node <<'NODE'
+  if node <<'NODE'
 ${jsonOutputNormalizerNodeScript}
 NODE
   then
+    output_normalized=1
+  else
+    output_normalized=0
     cp "$raw_output_path" "$LANE_OUTPUT_PATH"
-    pi_status=65
   fi
 else
   cp "$raw_output_path" "$LANE_OUTPUT_PATH"
 fi
+export output_normalized
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 current_step="build-transcript"
 {
@@ -177,6 +196,15 @@ const accounting = parseAgentLaneTokenCostAccountingFromText([
   fs.readFileSync(process.env.raw_output_path, "utf8"),
   fs.readFileSync(process.env.stderr_path, "utf8")
 ].join("\n"));
+let outputNormalization = { normalized: true, reason: null, agentStopReason: null };
+const normalizationPath = process.env.LANE_OUTPUT_NORMALIZATION_PATH;
+if (normalizationPath && fs.existsSync(normalizationPath)) {
+  try {
+    outputNormalization = JSON.parse(fs.readFileSync(normalizationPath, "utf8"));
+  } catch {}
+}
+const piExitOk = Number(process.env.pi_status) === 0;
+const laneCompleted = piExitOk && outputNormalization.normalized !== false;
 const receipt = {
   completedAt: process.env.completed_at,
   kind: process.env.LANE_KIND,
@@ -198,6 +226,11 @@ const receipt = {
     hash: process.env.prompt_hash,
     mediaType: "text/markdown"
   },
+  outputNormalization: {
+    normalized: outputNormalization.normalized !== false,
+    reason: outputNormalization.reason ?? null,
+    agentStopReason: outputNormalization.agentStopReason ?? null
+  },
   realAgent: true,
   receiptRef: process.env.LANE_RECEIPT_ARTIFACT_REF,
   authLease: JSON.parse(process.env.LANE_AUTH_LEASE_JSON),
@@ -205,7 +238,7 @@ const receipt = {
   runtime: process.env.LANE_RUNTIME,
   sandboxRef: process.env.LANE_SANDBOX_REF,
   startedAt: process.env.started_at,
-  status: Number(process.env.pi_status) === 0 ? "completed" : "failed",
+  status: laneCompleted ? "completed" : "failed",
   ...(accounting === null ? {} : { tokenCostAccounting: accounting }),
   traceContext: JSON.parse(process.env.WORKFLOW_TRACE_CONTEXT_JSON),
   transcript: {

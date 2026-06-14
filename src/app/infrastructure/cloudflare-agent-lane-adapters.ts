@@ -888,8 +888,24 @@ export const createCloudflarePiVerifierLaneAdapter = (
       receipt.laneId !== laneId ||
       receipt.status !== "completed"
     ) {
+      const normalization = receipt.outputNormalization;
+      let cause: string;
+      if (normalization?.normalized === false) {
+        const stopReasonSuffix =
+          normalization.agentStopReason !== null &&
+          normalization.agentStopReason !== ""
+            ? `, stopReason: ${normalization.agentStopReason}`
+            : "";
+        cause = `agent produced no parseable verdict (reason: ${
+          normalization.reason ?? "unknown"
+        }${stopReasonSuffix})`;
+      } else if (receipt.status === "completed") {
+        cause = `receipt kind/lane mismatch (kind: ${receipt.kind}, laneId: ${receipt.laneId})`;
+      } else {
+        cause = `receipt status was "${receipt.status}"`;
+      }
       throw new Error(
-        "Verifier lane did not return a completed receipt for the requested lane."
+        `Verifier lane did not return a completed receipt for the requested lane: ${cause}.`
       );
     }
     const resultPin = receipt.outputPins.at(0);
