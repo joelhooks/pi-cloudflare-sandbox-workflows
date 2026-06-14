@@ -265,6 +265,7 @@ export class PlannerBlueprintContractError extends Error {
  */
 // eslint-disable-next-line max-classes-per-file -- typed lane errors are colocated with the ports they cross (sibling of PlannerBlueprintContractError).
 export class AgentLaneIncompleteError extends Error {
+  readonly diagnostics: string | null;
   readonly lastStep: string | null;
   readonly reachedAgentInvocation: boolean;
   readonly runId: string;
@@ -272,20 +273,37 @@ export class AgentLaneIncompleteError extends Error {
 
   constructor(input: {
     readonly cause?: unknown;
+    // Optional structural/numeric self-diagnosis the lane wrote to
+    // `/workspace/.piwf-lane-diagnostics` BEFORE the step that aborted it (disk
+    // free, raw/normalized/stderr byte sizes, the failing write's exit code).
+    // The lane commits NO receipt when it aborts, so without this the operator
+    // only sees WHICH step died, never WHY. Surfaced in the blocker message so
+    // the next read names the cause (ENOSPC vs OOM vs other) instead of guessing
+    // — redaction-safe: byte counts and KB-free, never values or private paths.
+    readonly diagnostics?: string;
     readonly detail: string;
     readonly lastStep: string | null;
     readonly reachedAgentInvocation: boolean;
     readonly runId: string;
     readonly workItemId: string;
   }) {
+    const diagnostics =
+      input.diagnostics !== undefined && input.diagnostics.trim().length > 0
+        ? input.diagnostics.trim()
+        : null;
     super(
       `Agent lane reached step "${
         input.lastStep ?? "unknown"
       }" — the agent ran but the lane committed no usable result (lane-internal ` +
-        `failure, NOT a transport outage): ${input.detail}`,
+        `failure, NOT a transport outage): ${input.detail}${
+          diagnostics === null
+            ? ""
+            : ` [lane diagnostics: ${diagnostics.split("\n").join("; ")}]`
+        }`,
       input.cause === undefined ? undefined : { cause: input.cause }
     );
     this.name = "AgentLaneIncompleteError";
+    this.diagnostics = diagnostics;
     this.lastStep = input.lastStep;
     this.reachedAgentInvocation = input.reachedAgentInvocation;
     this.runId = input.runId;

@@ -1,0 +1,211 @@
+---
+title: "Carrier Wound #29: The Debug Transcript Filled The Bucket It Wrote To"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - agent-lanes
+  - planner
+  - build-transcript
+  - ensoc
+  - disk
+  - steady-state
+  - set-eu
+  - observability
+  - diagnostics
+  - carrier-finding
+  - chaos-suite
+  - observe-dont-stare
+  - resource-recycling
+source: "wound-29-build-transcript-ensoc-blind-abort"
+---
+
+# Carrier Wound #29: The Debug Transcript Filled The Bucket It Wrote To
+
+Wound #28 made a burned-agent-run lane stop wearing the transient
+`adapter_unavailable` label. It now classifies a no-marker lane failure by
+heartbeat depth and surfaces the EXACT step the lane died after. We shipped it,
+deployed it, and re-drove dream-shape runs on the fixed code. Two of them named
+the dying step out loud:
+
+```
+run-live-20260614T165913566Z-a8bc84dc  →  blocked / planner_lane_incomplete
+run-live-20260614T175503461Z-f9a37a09  →  blocked / planner_lane_incomplete
+"Agent lane reached step \"build-transcript\" — the agent ran but the lane
+ committed no usable result (lane-internal failure, NOT a transport outage)"
+```
+
+Wound #28 worked exactly as designed: it refused to guess and handed us the
+step. The #28 receipt's own "Follow-ups" deferred the build-transcript fast-cap
+to **"do WITH evidence after the next honest run names the dying step, NOT on a
+guess."** Two live runs naming `build-transcript` IS that evidence. This is the
+carrier finishing the sentence #28 started.
+
+## Mechanism — the transcript writer re-concatenated its own oversized inputs
+
+The `build-transcript` step assembles a human-readable debug transcript. The
+original writer was a bare redirect:
+
+```bash
+{
+  printf '# Pi agent lane transcript\n\n'
+  ...
+  cat "$raw_output_path"      # the FULL raw agent output, unbounded
+  cat "$LANE_OUTPUT_PATH"     # a failed-normalize copy of that same raw output
+  cat "$stderr_path"
+} > "$LANE_TRANSCRIPT_PATH"
+```
+
+On a happy run the raw output is small and this is invisible. On a real dream
+run the agent produces a large transcript, and `normalize-output` had ALREADY
+concluded `normalized:false` — which leaves `LANE_OUTPUT_PATH` holding a verbatim
+copy of the raw output. So the transcript redirect writes the oversized payload
+**twice** (raw + its normalize-failure clone), producing a transcript roughly 2×
+the raw size while raw + lane_output already occupy ~2× on disk — a transient
+peak near 4× the agent's output.
+
+The sandbox is `instance_type: "lite"` — a small disk. The peak hit ENOSPC. The
+redirect failed mid-write under `set -e`, and the lane aborted **before
+`emit-marker`** — no result marker, no receipt, and (here's the carrier sin) **no
+word about disk**. The operator got "reached build-transcript" and had to GUESS
+whether it was disk, git, a hash, or an OOM. Wound #28 told us *where*; it could
+not tell us *why*, because the lane carried no diagnostic channel that survives an
+abort.
+
+> The Steady State pattern says, for every mechanism that accumulates a resource,
+> some other mechanism must recycle that resource. […] Any mechanism that
+> accumulates resources (whether it is log files in the filesystem, rows in the
+> database, or caches in memory) is like the bucket from those high-school
+> calculus problems. The bucket fills up at a certain rate […]. It must be
+> drained.
+>
+> — Michael Nygard, *Release It!*, §5.4 Steady State
+
+The transcript is exactly that bucket: a debug artifact that accumulates the full
+agent output (twice) with no draining mechanism. The fix bounds the accumulation
+AND adds a diagnostic channel that names the disk state even when the write dies.
+
+## Fix — bound the bucket, guard the write, narrate the disk
+
+`cloudflare-sandbox-agent-lane-command.ts`, the `build-transcript` block. The
+transcript is DEBUG — never load-bearing; the committed output pin is the source
+of truth. So it is now safe to bound and to fail soft.
+
+**Diagnostic channel that survives an abort** (init near line 60, added with #28's
+wiring): `diagnostics_path="/workspace/.piwf-lane-diagnostics"`, truncated at lane
+start, with a `diag()` helper that appends `>> ... 2>/dev/null || true` (never
+fatal). The infra catch in `cloudflare-sandbox-agent-lanes.ts` reads this file
+before destroying the sandbox and threads it into
+`classifyAgentLaneIncompleteFailure({ diagnostics })`; `AgentLaneIncompleteError`
+appends `[lane diagnostics: …]` to its message. Because the operator blocker IS
+`error.message`, the disk/size state rides out on the status page — no staring.
+
+**Disk + size telemetry, emitted BEFORE the write** so it exists even if the write
+aborts:
+
+```bash
+diag "build-transcript disk: $(df -Pk /workspace | awk 'NR==2{print $4" KB free of "$2" KB"}')"
+diag "build-transcript raw_output_bytes: $raw_output_bytes"
+diag "build-transcript lane_output_bytes: $lane_output_bytes"
+diag "build-transcript stderr_bytes: $stderr_bytes"
+diag "build-transcript section_cap_bytes: $transcript_section_cap_bytes"
+```
+
+**Bounded section writer** — drains the bucket. `emit_capped_section()` writes at
+most `transcript_section_cap_bytes` (default 262144) via `head -c`, then appends a
+truncation notice naming the real size and pointing at the committed output pin:
+
+```
+[transcript truncated: 262144 of <N> bytes shown — the full output is the
+ committed output pin, not this debug transcript]
+```
+
+Raw Output, Normalized Output, Stderr, and the mounted-packages dump all flow
+through the cap. The transcript can no longer exceed ~4 caps regardless of agent
+output size.
+
+**Guarded, non-fatal write** — the whole assembly runs under `set +e` … `set -e`
+with the byte count captured, and a fallback so the transcript path ALWAYS exists:
+
+```bash
+set +e
+{ ...sections... } > "$LANE_TRANSCRIPT_PATH" 2>/dev/null
+transcript_write_status=$?
+set -e
+diag "build-transcript write_exit: $transcript_write_status"
+if [ ! -f "$LANE_TRANSCRIPT_PATH" ]; then
+  printf '[transcript unavailable: build-transcript write failed (exit %s); see lane diagnostics]\n' \
+    "$transcript_write_status" > "$LANE_TRANSCRIPT_PATH" 2>/dev/null || true
+fi
+```
+
+A transcript write can no longer abort the lane. If it fails it leaves a stub and
+a `write_exit: <nonzero>` diagnostic; the lane proceeds to `hash-artifacts` and
+beyond, so the agent's real work commits instead of being thrown away over a debug
+artifact.
+
+### String.raw note (carried, so the next editor doesn't re-trip it)
+
+`buildPiAgentLaneCommand()` is a `String.raw` template, so JS `${...}`
+interpolation still fires inside the bash. The original author used ONLY bare
+`$var` (never `${VAR:-default}` param expansion) because `${}` collides with JS
+interpolation. The cap override therefore defaults under a brief `set +u` /
+`set -u` instead of `${PIWF_TRANSCRIPT_SECTION_CAP_BYTES:-262144}`, and every byte
+count is a bare-var assignment with an explicit `[ -n "$x" ] || x=unknown` guard.
+Two PARSE_ERRORs were paid to learn this; the convention is now load-bearing.
+
+## Chaos tests that would have caught it (hostile doubles, not polite mocks)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — 2 new tests that
+SLICE the REAL `build-transcript` block out of `buildPiAgentLaneCommand()`'s
+emitted bash (`command.indexOf("mark build-transcript")` →
+`command.indexOf("\nmark hash-artifacts")`, throwing if either anchor moves) and
+run it under a faithful harness (real `diag()`, real env wiring) against tmpdir
+fixtures:
+
+- **Scenario A — oversized output cannot ENOSPC the lane.** Raw + lane outputs are
+  4096 bytes each with a 1024-byte cap. Asserts the transcript is bounded
+  (`< 4096`), carries the `[transcript truncated:` notice, the diagnostics name
+  `lane_output_bytes: 4096` / `raw_output_bytes` / `write_exit: 0`, and the script
+  reaches a `POST_TRANSCRIPT_REACHED` sentinel. **Pre-fix:** the bare `cat` redirect
+  embeds the full 4096 bytes with no notice and no sizes → every assertion flips
+  false.
+- **Scenario B — a write that cannot open its target does NOT abort blind.** The
+  transcript path is placed under a regular file (`ENOTDIR`, a faithful proxy for
+  ENOSPC's open failure). Asserts the diagnostics record `disk:` state and
+  `write_exit: <nonzero>`, and the script STILL reaches `POST_TRANSCRIPT_REACHED`.
+  **Pre-fix:** the bare redirect under `set -e` aborts → no sentinel, no
+  diagnostics.
+
+These are hostile doubles in the franchise sense ([[polite-fakes-franchise-wound]]):
+they reproduce the production transport (real emitted bash, real filesystem
+failure modes — oversized files, un-openable targets) rather than a politer mock
+that would never ENOSPC.
+
+`pnpm typecheck` clean · `pnpm check` clean · `pnpm vitest run` =
+**55 files / 426 passed** (incl. the 2 new chaos tests).
+
+## What this does NOT claim (skepticism held)
+
+ENOSPC is the leading hypothesis for a8bc84dc/f9a37a09, strongly supported by the
+double-write mechanism on a `lite` disk — but the live runs predate the diagnostic
+channel, so we have NOT yet seen `disk: … KB free` from a real abort. This fix is
+correct under every candidate cause: bounding + guarding the transcript removes it
+as a failure source regardless, and the `diag()` channel will name the TRUE state
+on the next run. If the next honest run shows disk is fine and the lane now advances
+to `build-receipt` and dies THERE, that is the next wound — `build-receipt` still
+does a full `readFileSync(raw_output)`, and we harden it then, with evidence, not on
+a guess. We did NOT touch any other step's I/O on speculation.
+
+## The carrier discipline (ninth wound, same shape)
+
+Observability is a carrier property. Wound #28 made the lane say WHERE it died;
+Wound #29 makes it say WHY, with the disk numbers in hand, even when the failing
+operation is the very write that would have recorded them. The governing demand —
+*"feels like we should be able to observe the run in progress and not guess if it's
+functioning instead of waiting and staring at it like fucking dummies"* — is
+satisfied one wound at a time by refusing to let any step fail mutely. A debug
+artifact must never be able to kill the run whose work it was merely describing,
+and a resource that accumulates must drain. The bucket now has a hole in the
+bottom, and a gauge on the side.

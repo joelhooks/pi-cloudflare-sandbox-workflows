@@ -415,6 +415,20 @@ const runCloudflareSandboxPiAgentLane = async (input: {
     } catch {
       // heartbeat unavailable — fall through with the original error
     }
+    // The aborting step writes a structural/numeric cause (disk free, byte sizes,
+    // the failing write's exit) to a SEPARATE diagnostics file BEFORE it dies —
+    // read it alongside the heartbeat (also before destroy) so the blocker names
+    // WHY the lane aborted, not just WHICH step. The lane commits no receipt on
+    // abort, so this best-effort file is the only surviving record of the cause.
+    let laneDiagnostics = "";
+    try {
+      const diagnostics = await prepared.sandbox.readFile(
+        "/workspace/.piwf-lane-diagnostics"
+      );
+      laneDiagnostics = diagnostics.content.trim();
+    } catch {
+      // diagnostics unavailable — fall through; the heartbeat still classifies
+    }
     await destroySandbox(prepared.sandbox, prepared.sandboxId).catch(
       (destroyError: unknown) => {
         console.error(
@@ -436,6 +450,7 @@ const runCloudflareSandboxPiAgentLane = async (input: {
       const laneIncomplete = classifyAgentLaneIncompleteFailure({
         cause: error,
         detail: baseMessage,
+        diagnostics: laneDiagnostics,
         heartbeatTail,
         runId: input.input.runId,
         workItemId: input.input.workItemId,

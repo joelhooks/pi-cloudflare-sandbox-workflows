@@ -57,6 +57,17 @@ mark() {
   current_step="$1"
   printf '%s %s\n' "$(date +%s)" "$1" >> "$hb_path" 2>/dev/null || true
 }
+diagnostics_path="/workspace/.piwf-lane-diagnostics"
+: > "$diagnostics_path" 2>/dev/null || true
+# diag() records a structural/numeric fact (disk free, byte sizes, a write's exit
+# code) into a SEPARATE channel from the heartbeat. The heartbeat carries the step
+# SEQUENCE (the classifier parses its trailing token as the failing step — polluting
+# it would break classification); the diagnostics file carries the CAUSE the
+# executor folds into the blocker. A lane that aborts commits no receipt, so this
+# best-effort file is the only surviving record of WHY a heavy step died.
+diag() {
+  printf '%s\n' "$1" >> "$diagnostics_path" 2>/dev/null || true
+}
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Epoch captured at script start so pi-invoke can self-bound to the budget remaining
 # before the whole-script timeout (see the pi-invoke step). Robust to the variable
@@ -290,6 +301,57 @@ fi
 export output_normalized
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mark build-transcript
+# The transcript is a DEBUG artifact and must NEVER be load-bearing. Wounds #23/#25/
+# #26 hardened normalize + persist against an oversized pi output on the lite
+# instance's small disk, but build-transcript was the one heavy write left
+# UNGUARDED: it re-concatenates raw_output (1x) AND LANE_OUTPUT_PATH (~1x when a
+# failed normalize copied raw verbatim) into the transcript (~2x), so an oversized
+# output peaks at ~4x on disk and the bare '> "$LANE_TRANSCRIPT_PATH"' redirect
+# tripped ENOSPC under set -e — no marker, no receipt, the agent's 456s run burned
+# (wound #29: the heartbeat named build-transcript across two live runs
+# a8bc84dc + f9a37a09). Three coordinated guards: (1) announce disk + input byte
+# sizes to the diagnostics channel BEFORE the write, so an abort here names its
+# cause instead of going blind; (2) bound every section with head -c so the
+# transcript can never balloon past an input (the full output is the committed
+# output pin, not this debug file); (3) never let the write abort the lane, and
+# guarantee the file EXISTS for the downstream hash so a failed write still commits
+# an honest receipt.
+# Bash brace param-expansion defaults collide with this String.raw template's JS
+# interpolation, so default the (test-only) cap override under a brief set +u and
+# keep every byte count a bare-var assignment with an explicit empty guard.
+transcript_section_cap_bytes=262144
+set +u
+if [ -n "$PIWF_TRANSCRIPT_SECTION_CAP_BYTES" ]; then
+  transcript_section_cap_bytes="$PIWF_TRANSCRIPT_SECTION_CAP_BYTES"
+fi
+set -u
+raw_output_bytes="$(wc -c < "$raw_output_path" 2>/dev/null | tr -d '[:space:]')"
+[ -n "$raw_output_bytes" ] || raw_output_bytes=unknown
+lane_output_bytes="$(wc -c < "$LANE_OUTPUT_PATH" 2>/dev/null | tr -d '[:space:]')"
+[ -n "$lane_output_bytes" ] || lane_output_bytes=unknown
+stderr_bytes="$(wc -c < "$stderr_path" 2>/dev/null | tr -d '[:space:]')"
+[ -n "$stderr_bytes" ] || stderr_bytes=unknown
+diag "build-transcript disk: $(df -Pk /workspace 2>/dev/null | awk 'NR==2{print $4" KB free of "$2" KB"}' || printf 'unknown')"
+diag "build-transcript raw_output_bytes: $raw_output_bytes"
+diag "build-transcript lane_output_bytes: $lane_output_bytes"
+diag "build-transcript stderr_bytes: $stderr_bytes"
+diag "build-transcript section_cap_bytes: $transcript_section_cap_bytes"
+# Bounded section writer: head -c the source into a capped preview with a
+# truncation notice, never the whole (possibly multi-MB) file.
+emit_capped_section() {
+  printf '## %s\n\n' "$2"
+  if [ -f "$1" ]; then
+    head -c "$transcript_section_cap_bytes" "$1" 2>/dev/null || true
+    section_bytes="$(wc -c < "$1" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$section_bytes" ] || section_bytes=0
+    if [ "$section_bytes" -gt "$transcript_section_cap_bytes" ] 2>/dev/null; then
+      printf '\n\n[transcript truncated: %s of %s bytes shown — the full output is the committed output pin, not this debug transcript]\n' \
+        "$transcript_section_cap_bytes" "$section_bytes"
+    fi
+  fi
+  printf '\n\n'
+}
+set +e
 {
   printf '# Pi agent lane transcript\n\n'
   printf 'Run: %s\n' "$RUN_ID"
@@ -299,15 +361,22 @@ mark build-transcript
   printf 'Span: %s\n' "$WORKFLOW_SPAN_ID"
   printf 'Exit status: %s\n\n' "$pi_status"
   printf '## Mounted Packages\n\n'
-  cat packages/pinned-packages.json || true
+  head -c "$transcript_section_cap_bytes" packages/pinned-packages.json 2>/dev/null || true
   printf '\n\n'
-  printf '## Raw Output\n\n'
-  cat "$raw_output_path" || true
-  printf '\n\n## Normalized Output\n\n'
-  cat "$LANE_OUTPUT_PATH" || true
-  printf '\n\n## Stderr\n\n'
-  cat "$stderr_path" || true
-} > "$LANE_TRANSCRIPT_PATH"
+  emit_capped_section "$raw_output_path" "Raw Output"
+  emit_capped_section "$LANE_OUTPUT_PATH" "Normalized Output"
+  emit_capped_section "$stderr_path" "Stderr"
+} > "$LANE_TRANSCRIPT_PATH" 2>/dev/null
+transcript_write_status=$?
+set -e
+diag "build-transcript write_exit: $transcript_write_status"
+# Debug-only: a failed/partial write must not abort the lane, but the hash step
+# needs the file to EXIST. Guarantee a placeholder so a failed write still yields a
+# committed receipt (honest status) instead of a blind no-marker abort.
+if [ ! -f "$LANE_TRANSCRIPT_PATH" ]; then
+  printf '[transcript unavailable: build-transcript write failed (exit %s); see lane diagnostics for disk/size state]\n' \
+    "$transcript_write_status" > "$LANE_TRANSCRIPT_PATH" 2>/dev/null || true
+fi
 mark hash-artifacts
 prompt_hash="$(sha256sum "$LANE_PROMPT_PATH" | awk '{print $1}')"
 transcript_hash="$(sha256sum "$LANE_TRANSCRIPT_PATH" | awk '{print $1}')"
@@ -570,6 +639,12 @@ export const lastHeartbeatStep = (heartbeatTail: string): string | null => {
 export const classifyAgentLaneIncompleteFailure = (input: {
   readonly cause: unknown;
   readonly detail: string;
+  // Best-effort `/workspace/.piwf-lane-diagnostics` content the executor read
+  // alongside the heartbeat. Carries the CAUSE (disk free, byte sizes, the failing
+  // write's exit) the aborting step announced before it died, since the lane
+  // commits no receipt. Folded into the error message so the next read names ENOSPC
+  // vs OOM vs other instead of us guessing (wound #29).
+  readonly diagnostics?: string;
   readonly heartbeatTail: string;
   readonly runId: string;
   readonly workItemId: string;
@@ -581,6 +656,9 @@ export const classifyAgentLaneIncompleteFailure = (input: {
   return new AgentLaneIncompleteError({
     cause: input.cause,
     detail: input.detail,
+    ...(input.diagnostics === undefined
+      ? {}
+      : { diagnostics: input.diagnostics }),
     lastStep,
     reachedAgentInvocation: true,
     runId: input.runId,

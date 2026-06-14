@@ -1159,6 +1159,180 @@ describe(buildPiAgentLaneCommand, () => {
       rmSync(dir, { force: true, recursive: true });
     }
   }, 20_000);
+
+  it("bounds and diagnoses the transcript so an oversized output cannot ENOSPC the lane (wound #29)", () => {
+    // Hostile double for wound #29: slice the REAL build-transcript block out of
+    // buildPiAgentLaneCommand() and run it verbatim under production's `set -eu`
+    // with an OVERSIZED raw output AND an oversized LANE_OUTPUT_PATH (the failed-
+    // normalize persist copy) — exactly the live conditions where the bare
+    // `> "$LANE_TRANSCRIPT_PATH"` redirect concatenated raw(1x) + lane(~1x) into the
+    // transcript(~2x), peaked at ~4x on the lite disk, and tripped ENOSPC under
+    // set -e with no marker and no receipt (two live runs named build-transcript:
+    // a8bc84dc + f9a37a09). The pre-fix block left the transcript UNBOUNDED and
+    // wrote NO diagnostics — both signals below flip against it: it would embed the
+    // full 4096-byte raw output with no truncation notice, and record no sizes.
+    const blockStart = command.indexOf("mark build-transcript");
+    const blockEnd = command.indexOf("\nmark hash-artifacts");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the build-transcript block in the lane command."
+      );
+    }
+    const transcriptBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-transcript-bound-"));
+    try {
+      const rawOutputPath = join(dir, "raw.txt");
+      const laneOutputPath = join(dir, "lane-output.txt");
+      const stderrPath = join(dir, "stderr.txt");
+      const transcriptPath = join(dir, "transcript.md");
+      const diagnosticsPath = join(dir, "diagnostics.txt");
+      writeFileSync(rawOutputPath, "R".repeat(4096));
+      writeFileSync(laneOutputPath, "N".repeat(4096));
+      writeFileSync(stderrPath, "stderr-tail");
+
+      const harness = [
+        "set -eu",
+        "mark() { :; }",
+        'diag() { printf \'%s\\n\' "$1" >> "$diagnostics_path" 2>/dev/null || true; }',
+        transcriptBlock,
+        "printf 'POST_TRANSCRIPT_REACHED\\n'",
+      ].join("\n");
+
+      const stdout = execFileSync("bash", ["-c", harness], {
+        cwd: dir,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_ID: "lane-test",
+          LANE_OUTPUT_PATH: laneOutputPath,
+          LANE_TRANSCRIPT_PATH: transcriptPath,
+          PIWF_TRANSCRIPT_SECTION_CAP_BYTES: "1024",
+          RUN_ID: "run-test",
+          WORKFLOW_SPAN_ID: "span-test",
+          WORKFLOW_TRACE_ID: "trace-test",
+          WORK_ITEM_ID: "work-test",
+          diagnostics_path: diagnosticsPath,
+          pi_status: "0",
+          raw_output_path: rawOutputPath,
+          stderr_path: stderrPath,
+        },
+        timeout: 15_000,
+      });
+
+      const transcript = readFileSync(transcriptPath, "utf-8");
+      const diagnostics = existsSync(diagnosticsPath)
+        ? readFileSync(diagnosticsPath, "utf-8")
+        : "";
+
+      expect({
+        // the transcript can never balloon past its inputs: each section is capped,
+        // so the file is far smaller than the un-capped raw(4096)+lane(4096) concat
+        boundedBelowInputs: transcript.length < 4096,
+        diagnosticsNamesLaneBytes: diagnostics.includes(
+          "lane_output_bytes: 4096"
+        ),
+        diagnosticsNamesRawBytes: diagnostics.includes(
+          "raw_output_bytes: 4096"
+        ),
+        diagnosticsNamesWriteExit: diagnostics.includes("write_exit: 0"),
+        reachedPostTranscript: stdout.includes("POST_TRANSCRIPT_REACHED"),
+        wroteTruncationNotice: transcript.includes("[transcript truncated:"),
+      }).toStrictEqual({
+        boundedBelowInputs: true,
+        diagnosticsNamesLaneBytes: true,
+        diagnosticsNamesRawBytes: true,
+        diagnosticsNamesWriteExit: true,
+        reachedPostTranscript: true,
+        wroteTruncationNotice: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 15_000);
+
+  it("a transcript write that cannot open its target does NOT abort the lane blind (wound #29)", () => {
+    // Hostile double: same REAL build-transcript block, but the transcript path's
+    // parent is a regular FILE, so the redirect cannot be opened (ENOTDIR) — a
+    // cross-platform proxy for the live ENOSPC on the lite disk. The pre-fix bare
+    // redirect under set -e ABORTED the lane here (no marker, no receipt, blind
+    // re-drive); the fix wraps the write in set +e, records the failing exit to the
+    // diagnostics channel, and continues so the lane still commits an honest result.
+    const blockStart = command.indexOf("mark build-transcript");
+    const blockEnd = command.indexOf("\nmark hash-artifacts");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the build-transcript block in the lane command."
+      );
+    }
+    const transcriptBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-transcript-enospc-"));
+    try {
+      const rawOutputPath = join(dir, "raw.txt");
+      const laneOutputPath = join(dir, "lane-output.txt");
+      const stderrPath = join(dir, "stderr.txt");
+      const diagnosticsPath = join(dir, "diagnostics.txt");
+      // The transcript's PARENT is a regular file, not a directory: opening the
+      // redirect fails with ENOTDIR — a portable stand-in for the live ENOSPC.
+      const blockerFile = join(dir, "not-a-dir");
+      writeFileSync(blockerFile, "x");
+      const transcriptPath = join(blockerFile, "transcript.md");
+      writeFileSync(rawOutputPath, "raw");
+      writeFileSync(laneOutputPath, "normalized");
+      writeFileSync(stderrPath, "stderr-tail");
+
+      const harness = [
+        "set -eu",
+        "mark() { :; }",
+        'diag() { printf \'%s\\n\' "$1" >> "$diagnostics_path" 2>/dev/null || true; }',
+        transcriptBlock,
+        "printf 'POST_TRANSCRIPT_REACHED\\n'",
+      ].join("\n");
+
+      const stdout = execFileSync("bash", ["-c", harness], {
+        cwd: dir,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_ID: "lane-test",
+          LANE_OUTPUT_PATH: laneOutputPath,
+          LANE_TRANSCRIPT_PATH: transcriptPath,
+          PIWF_TRANSCRIPT_SECTION_CAP_BYTES: "1024",
+          RUN_ID: "run-test",
+          WORKFLOW_SPAN_ID: "span-test",
+          WORKFLOW_TRACE_ID: "trace-test",
+          WORK_ITEM_ID: "work-test",
+          diagnostics_path: diagnosticsPath,
+          pi_status: "0",
+          raw_output_path: rawOutputPath,
+          stderr_path: stderrPath,
+        },
+        // the redirect-open failure is the POINT of this case; bash reports it on
+        // the script's own stderr before the inner 2>/dev/null applies, so silence
+        // the child's stderr to keep the suite output clean (we assert on stdout +
+        // the diagnostics file, which carry the real signal).
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 15_000,
+      });
+
+      const diagnostics = existsSync(diagnosticsPath)
+        ? readFileSync(diagnosticsPath, "utf-8")
+        : "";
+
+      expect({
+        diagnosticsNamesDiskState: diagnostics.includes("disk:"),
+        diagnosticsRecordsFailedWrite: /write_exit: [1-9]/u.test(diagnostics),
+        reachedPostTranscript: stdout.includes("POST_TRANSCRIPT_REACHED"),
+      }).toStrictEqual({
+        diagnosticsNamesDiskState: true,
+        diagnosticsRecordsFailedWrite: true,
+        reachedPostTranscript: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 15_000);
 });
 
 describe(buildAgentLanePackageMountIndex, () => {
