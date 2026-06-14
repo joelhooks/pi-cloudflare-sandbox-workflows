@@ -47,7 +47,20 @@ export const buildPiAgentLaneCommand = (): string => String.raw`set -eu
 marker_emitted=0
 current_step="init"
 pi_status=""
+hb_path="/workspace/.piwf-heartbeat"
+: > "$hb_path" 2>/dev/null || true
+# mark() records the step boundary into a heartbeat file BEFORE the step runs, so
+# a step that wedges past the sandbox timeout is recoverable as the last line — the
+# EXIT trap does not fire on timeout's SIGTERM, the heartbeat does not depend on it.
+mark() {
+  current_step="$1"
+  printf '%s %s\n' "$(date +%s)" "$1" >> "$hb_path" 2>/dev/null || true
+}
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Epoch captured at script start so pi-invoke can self-bound to the budget remaining
+# before the whole-script timeout (see the pi-invoke step). Robust to the variable
+# cold-install lead time that would otherwise steal pi's budget.
+script_start_s="$(date +%s)"
 agent_dir="/workspace/.pi/agent"
 auth_path="$agent_dir/auth.json"
 raw_output_path="/workspace/piwf-agent-lane-output-raw.txt"
@@ -93,35 +106,35 @@ process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringif
 NODE
 }
 trap emit_failure_marker EXIT
-current_step="install-pi-agent"
+mark install-pi-agent
 export PATH="/workspace/.npm-global/bin:$PATH"
 if ! command -v pi >/dev/null 2>&1; then
   npm install -g --prefix /workspace/.npm-global --ignore-scripts @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} > "$stderr_path" 2>&1
 fi
 mkdir -p "$agent_dir/sessions"
-current_step="prepare-auth"
+mark prepare-auth
 rm -rf /workspace/piwf-agent-lane
 mkdir -p "$agent_dir"
 printf '%s' "$PI_AUTH_JSON_B64" | base64 -d > "$auth_path"
 chmod 600 "$auth_path"
-current_step="clone-artifacts"
+mark clone-artifacts
 git clone "$ARTIFACTS_GIT_REMOTE" /workspace/piwf-agent-lane > "$git_log_path" 2>&1
 cd /workspace/piwf-agent-lane
 git config user.name "pi-workflow-agent-lane"
 git config user.email "pi-workflow-agent-lane@example.invalid"
-current_step="checkout-branch"
+mark checkout-branch
 if git show-ref --verify --quiet "refs/remotes/origin/$LANE_BRANCH"; then
   git checkout -B "$LANE_BRANCH" "origin/$LANE_BRANCH" >> "$git_log_path" 2>&1
 else
   git checkout -B "$LANE_BRANCH" >> "$git_log_path" 2>&1
 fi
-current_step="mount-packages"
+mark mount-packages
 node <<'NODE'
 ${agentLanePackageMountWriterNodeScript}
 NODE
 mkdir -p "$(dirname "$LANE_PROMPT_PATH")" "$(dirname "$LANE_OUTPUT_PATH")" "$(dirname "$LANE_TRANSCRIPT_PATH")" "$(dirname "$LANE_RECEIPT_PATH")"
 cp "$LANE_PROMPT_SOURCE_PATH" "$LANE_PROMPT_PATH"
-current_step="pi-invoke"
+mark pi-invoke
 # JSON lanes capture pi's machine event stream (--mode json), not its human text
 # channel. Text mode only echoes the final assistant message and goes silent when
 # the run ends on a tool call, error, or abort — so a JSON lane that scraped text
@@ -132,10 +145,27 @@ if [ "$LANE_OUTPUT_MEDIA_TYPE" = "application/json" ]; then
   pi_mode_args="--mode json"
 fi
 set +e
-pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
+# Self-bound pi-invoke to the budget remaining before the whole-script timeout, minus
+# a tail margin for the receipt/commit/push steps. Without this bound a hung model
+# call (egress black-hole, auth-retry storm, runaway generation) rides until the outer
+# timeout SIGTERMs the whole script — and SIGTERM skips the EXIT trap, so pi's stderr
+# is never captured and the blocker names a step with no cause. A slow error is worse
+# than a fast one: self-bounding converts a silent ride into a committed receipt that
+# carries pi's stderr tail. The budget is computed from elapsed time (not a fixed
+# value) so the variable cold-install lead time cannot starve or overrun it. (wound #22
+# Layer B: planner sync-hang is a structural pi-invoke wedge.)
+pi_elapsed_s=$(( $(date +%s) - script_start_s ))
+pi_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - pi_elapsed_s - PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS ))
+if [ "$pi_budget_s" -lt 1 ]; then
+  pi_budget_s=1
+fi
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" --no-session $pi_mode_args -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
 pi_status=$?
+if [ "$pi_status" -eq 124 ]; then
+  printf '\n[pi-invoke self-bound] pi exceeded its %ss budget and was terminated by timeout; the heartbeat names pi-invoke as the wedge step.\n' "$pi_budget_s" >> "$stderr_path"
+fi
 set -e
-current_step="normalize-output"
+mark normalize-output
 # Normalization success is tracked separately from pi's exit status. A failed
 # normalize is a real "agent produced no parseable verdict" signal recorded in
 # the receipt's outputNormalization — it must NOT clobber pi_status, which would
@@ -156,7 +186,7 @@ else
 fi
 export output_normalized
 completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-current_step="build-transcript"
+mark build-transcript
 {
   printf '# Pi agent lane transcript\n\n'
   printf 'Run: %s\n' "$RUN_ID"
@@ -175,7 +205,7 @@ current_step="build-transcript"
   printf '\n\n## Stderr\n\n'
   cat "$stderr_path" || true
 } > "$LANE_TRANSCRIPT_PATH"
-current_step="hash-artifacts"
+mark hash-artifacts
 prompt_hash="$(sha256sum "$LANE_PROMPT_PATH" | awk '{print $1}')"
 transcript_hash="$(sha256sum "$LANE_TRANSCRIPT_PATH" | awk '{print $1}')"
 output_hash="$(sha256sum "$LANE_OUTPUT_PATH" | awk '{print $1}')"
@@ -187,7 +217,7 @@ process.stdout.write(String(index.mounts.length));
 NODE
 )"
 export completed_at output_hash package_mount_count package_mount_index_hash pi_status prompt_hash started_at transcript_hash
-current_step="build-receipt"
+mark build-receipt
 node <<'NODE'
 const fs = require("fs");
 ${agentLaneTokenCostAccountingNodeScript}
@@ -249,19 +279,19 @@ const receipt = {
 };
 fs.writeFileSync(process.env.LANE_RECEIPT_PATH, JSON.stringify(receipt, null, 2) + "\n");
 NODE
-current_step="git-add"
+mark git-add
 git add "$LANE_PROMPT_PATH" "$LANE_OUTPUT_PATH" "$LANE_TRANSCRIPT_PATH" "$LANE_RECEIPT_PATH" packages >> "$git_log_path" 2>&1
-current_step="git-commit"
+mark git-commit
 if git diff --cached --quiet; then
   commit="$(git rev-parse HEAD)"
 else
   git commit -m "agent lane: $LANE_ID $RUN_ID" >> "$git_log_path" 2>&1
   commit="$(git rev-parse HEAD)"
 fi
-current_step="git-push"
+mark git-push
 git push origin HEAD:"refs/heads/$LANE_BRANCH" >> "$git_log_path" 2>&1
 export commit
-current_step="emit-marker"
+mark emit-marker
 marker_emitted=1
 node <<'NODE'
 const payload = {

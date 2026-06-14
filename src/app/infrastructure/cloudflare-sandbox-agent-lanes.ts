@@ -274,6 +274,11 @@ const prepareCloudflareSandboxPiAgentLane = (input: {
       PIWF_COMMAND_TIMEOUT_SECONDS: String(
         Math.ceil(input.input.timeoutMs / 1000)
       ),
+      // Seconds reserved at the end of the lane budget for the post-pi steps
+      // (normalize, transcript, hash, receipt, git add/commit/push, emit-marker).
+      // pi-invoke self-bounds to `PIWF_COMMAND_TIMEOUT_SECONDS - elapsed - this`, so
+      // it always times out and commits a receipt before the whole-script SIGTERM.
+      PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "30",
       PI_AUTH_JSON_B64: input.input.leasedPiAuthJsonBase64,
       // PI_* runtime env the old Dockerfile baked in via ENV. The deploy now uses
       // the stock public sandbox image, so the agent lane supplies these directly.
@@ -362,6 +367,22 @@ const runCloudflareSandboxPiAgentLane = async (input: {
       },
     });
   } catch (error) {
+    // The sandbox is still operable after an exec timeout (destroySandbox below
+    // proves it). Read the step heartbeat BEFORE tearing it down so a wedged
+    // step surfaces in the blocker — the last logged step is where it hung.
+    let heartbeatTail = "";
+    try {
+      const heartbeat = await prepared.sandbox.readFile(
+        "/workspace/.piwf-heartbeat"
+      );
+      heartbeatTail = heartbeat.content
+        .trim()
+        .split("\n")
+        .slice(-20)
+        .join(" | ");
+    } catch {
+      // heartbeat unavailable — fall through with the original error
+    }
     await destroySandbox(prepared.sandbox, prepared.sandboxId).catch(
       (destroyError: unknown) => {
         console.error(
@@ -370,6 +391,13 @@ const runCloudflareSandboxPiAgentLane = async (input: {
         );
       }
     );
+    if (heartbeatTail.length > 0) {
+      const baseMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(`${baseMessage} [step heartbeat: ${heartbeatTail}]`, {
+        cause: error,
+      });
+    }
     throw error;
   }
 };

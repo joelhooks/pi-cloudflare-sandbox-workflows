@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -435,7 +437,7 @@ describe(buildPiAgentLaneCommand, () => {
       scrubsCredentialsBeforeTailing: command.includes(
         "s#https://x:[^@]*@#https://x:***@#g"
       ),
-      tracksFailingStepThroughPush: command.includes('current_step="git-push"'),
+      tracksFailingStepThroughPush: command.includes("mark git-push"),
       trapInstalledBeforeClone: trapIndex !== -1 && trapIndex < cloneIndex,
     }).toStrictEqual({
       emitsErrorStatusOnFailure: true,
@@ -507,6 +509,119 @@ describe(buildPiAgentLaneCommand, () => {
       toleratesNoopCommit: true,
     });
   });
+
+  it("self-bounds pi-invoke to the remaining whole-script budget so a hung model call cannot ride past the EXIT trap", () => {
+    // Wound #22 Layer B was structural: pi-invoke was a bare `pi --provider ...` with
+    // no inner bound, so a hung model call rode until the whole-script `timeout`
+    // SIGTERM'd it — and SIGTERM skips the EXIT trap, so pi's stderr was never captured
+    // and the blocker named a step with no cause. The fix wraps pi in a `timeout`
+    // derived from the budget remaining before the whole-script ceiling (so the
+    // variable cold-install lead time cannot starve it, and it always fires first).
+    // This assertion fails against the pre-fix bare invocation.
+    expect({
+      attributesTimeoutToPiInvoke:
+        command.includes("[pi-invoke self-bound]") &&
+        command.includes("the heartbeat names pi-invoke as the wedge step"),
+      boundsPiInvokeWithTimeout: command.includes(
+        'timeout "$pi_budget_s" pi --provider'
+      ),
+      capturesScriptStartEpoch: command.includes(
+        'script_start_s="$(date +%s)"'
+      ),
+      clampsBudgetToAtLeastOneSecond: command.includes(
+        'if [ "$pi_budget_s" -lt 1 ]; then'
+      ),
+      derivesBudgetFromElapsed: command.includes(
+        "pi_elapsed_s=$(( $(date +%s) - script_start_s ))"
+      ),
+      subtractsTailMarginFromCeiling: command.includes(
+        "pi_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - pi_elapsed_s - PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS ))"
+      ),
+    }).toStrictEqual({
+      attributesTimeoutToPiInvoke: true,
+      boundsPiInvokeWithTimeout: true,
+      capturesScriptStartEpoch: true,
+      clampsBudgetToAtLeastOneSecond: true,
+      derivesBudgetFromElapsed: true,
+      subtractsTailMarginFromCeiling: true,
+    });
+  });
+
+  it("converts a hung pi-invoke into a bounded, attributable failure that reaches the post-pi steps", () => {
+    // Hostile double (polite fakes recur because doubles are politer than prod):
+    // slice the REAL pi-invoke block out of buildPiAgentLaneCommand() and run it
+    // verbatim against a `pi` that hangs. Production transport — the budget
+    // arithmetic, the `timeout` wrapper, the exit-124 attribution — is exercised
+    // byte-for-byte; only the pi binary is faked. A pre-fix unbounded `pi` would run
+    // the fake's full sleep and exit 0 with no attribution line, failing all three
+    // signals. That is exactly the regression this guards.
+    const blockStart = command.indexOf('pi_mode_args=""');
+    const blockEnd = command.indexOf("\nmark normalize-output");
+    if (blockStart === -1 || blockEnd === -1 || blockEnd <= blockStart) {
+      throw new Error(
+        "Could not locate the pi-invoke block in the lane command."
+      );
+    }
+    const piInvokeBlock = command.slice(blockStart, blockEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-pi-hang-"));
+    try {
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      // A pi that never returns on its own. 20s dwarfs the 2s budget, so any non-124
+      // exit means the self-bound `timeout` was missing or wrong.
+      const fakePi = join(binDir, "pi");
+      writeFileSync(fakePi, "#!/usr/bin/env bash\nsleep 20\n");
+      chmodSync(fakePi, 0o755);
+
+      const promptPath = join(dir, "prompt.txt");
+      writeFileSync(promptPath, "verify the primary source");
+      const rawOutputPath = join(dir, "raw.txt");
+      const stderrPath = join(dir, "stderr.txt");
+
+      const harness = [
+        "set -u",
+        "script_start_s=$(date +%s)",
+        piInvokeBlock,
+        "printf 'POST_PI_REACHED pi_status=%s\\n' \"$pi_status\"",
+      ].join("\n");
+
+      const stdout = execFileSync("bash", ["-c", harness], {
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          LANE_OUTPUT_MEDIA_TYPE: "text/markdown",
+          LANE_PROMPT_PATH: promptPath,
+          PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+          PIWF_COMMAND_TIMEOUT_SECONDS: "3",
+          PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "1",
+          PI_MODEL: "fake-model",
+          PI_PROVIDER: "fake-provider",
+          raw_output_path: rawOutputPath,
+          stderr_path: stderrPath,
+        },
+        timeout: 15_000,
+      });
+
+      const stderr = existsSync(stderrPath)
+        ? readFileSync(stderrPath, "utf-8")
+        : "";
+
+      expect({
+        attributesWedgeToPiInvoke:
+          stderr.includes("[pi-invoke self-bound]") &&
+          stderr.includes("pi-invoke as the wedge step"),
+        reachedPostPiSteps: stdout.includes("POST_PI_REACHED"),
+        timedOutWithExit124: stdout.includes("POST_PI_REACHED pi_status=124"),
+      }).toStrictEqual({
+        attributesWedgeToPiInvoke: true,
+        reachedPostPiSteps: true,
+        timedOutWithExit124: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 15_000);
 });
 
 describe(buildAgentLanePackageMountIndex, () => {

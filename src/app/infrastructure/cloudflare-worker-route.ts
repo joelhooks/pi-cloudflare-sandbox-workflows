@@ -307,6 +307,15 @@ const bearerToken = (request: Request): null | string => {
   return authorization.slice(prefix.length);
 };
 
+/**
+ * Margin subtracted from the reaper's drive-stall deadline to derive the agent
+ * lane's sandbox.exec ceiling. A lane MUST be able to throw, catch, and commit
+ * its blocker before the reaper can mistake the drive for stale — otherwise a
+ * wedged lane respawns forever (wound #22 Layer B). The margin must cover the
+ * sandbox-prep lead time plus the catch's heartbeat read + destroy + D1 persist.
+ */
+const LANE_EXEC_REAPER_MARGIN_MS = 120_000;
+
 export interface CreateFrontDoorFromEnvOptions {
   readonly contextCapsulesOverride?: CloudflareWorkflowFrontDoorConfig["contextCapsules"];
 }
@@ -317,6 +326,17 @@ export const createFrontDoorFromEnv = (
 ): WorkerFrontDoorContract => {
   const bindings = WorkerEnvBindingSchema.parse(env);
   const discordBotSecretRef = bindings.DISCORD_BOT_SECRET_REF;
+  // Decouple the lane sandbox.exec ceiling from the reaper deadline. Both come
+  // from WORKFLOW_APP_TIMEOUT_MS, but the reaper clock starts at drive-start
+  // while the lane exec clock starts after sandbox prep — so at equal timeouts
+  // the reaper always wins, marks the drive stale, and the generation fence
+  // discards the lane's caught failure as a stale write, wedging the run in an
+  // infinite stale-respawn loop. Firing the lane a margin EARLIER guarantees a
+  // wedged lane surfaces a blocker instead of riding to the reaper forever.
+  const laneExecTimeoutMs = Math.max(
+    60_000,
+    bindings.WORKFLOW_APP_TIMEOUT_MS - LANE_EXEC_REAPER_MARGIN_MS
+  );
 
   return createCloudflareWorkflowFrontDoor({
     ...(bindings.WORKFLOW_TELEMETRY === undefined
@@ -420,7 +440,7 @@ export const createFrontDoorFromEnv = (
     piAuthSecretRef: bindings.PI_AUTH_SECRET_REF,
     repoNamePrefix: bindings.WORKFLOW_APP_REPO_PREFIX,
     sandbox: bindings.Sandbox,
-    timeoutMs: bindings.WORKFLOW_APP_TIMEOUT_MS,
+    timeoutMs: laneExecTimeoutMs,
     wzrrdPublishAdapter: {
       secretResolver: createCloudflareWzrrdApiTokenResolver({
         secret: bindings.WZRRD_API_TOKEN ?? "",

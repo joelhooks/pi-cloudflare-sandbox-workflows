@@ -43,7 +43,8 @@ mandate caught from the outside-invisible / node-by-node-obvious gap.
 
 ## Mechanism
 
-Two layers; this receipt fixes the proven one (Layer A).
+Two layers; both are now proven by live evidence and fixed here (Layer A
+reclaims the self-owned slot; Layer B self-bounds the planner's pi-invoke).
 
 **Layer A — admission can't reclaim its own orphan (PROVEN, fixed here).** The
 zombie-budget pre-admit (wound #16) reserves a lane's OWNER slot in
@@ -68,16 +69,55 @@ dead (`dg=1 stale=true` then `dg=2`) before gen-2's admission runs, so the slot
 is provably reclaimable. The deferral was never legitimate contention; for
 run-scoped ids it is **always** self-collision.
 
-**Layer B — gen-1's synchronous planner hung ~13.7 min (INFERRED, not yet
-fixed).** Gen 1 sat in `planningDynamicWorkflow` from `08:50:55` until the reaper
-marked it stale at `09:04:56` — `drivingMarker.stale:true`, `lastDriveFailure:
-null` = an uncaught isolate death, not a caught error. The de-dockered runtime
-pi install (task #15: stock image + runtime pi-agent install inside the sandbox)
-is the suspect. **Per "observe, don't guess," Layer B is NOT fixed blind.** Layer
-A is deployed first; the next re-drive watches the planner phase live. If it
-completes, Layer B was a cold-start transient. If it stalls ~13 min again, Layer
-B is structural and gets its own fix (bound the sandbox-prep timeout, or move the
-planner to the async dispatch/poll path) with live evidence + its own chaos test.
+**Layer B — gen-1's synchronous planner hung at the pi-invoke step (PROVEN
+structural, fixed here).** Gen 1 sat in `planningDynamicWorkflow` from `08:50:55`
+until the reaper marked it stale ~13.7 min later — `drivingMarker.stale:true`,
+`lastDriveFailure: null` = an uncaught isolate death, not a caught error. Layer
+A's deploy turned that blind stall into a **live, attributable read.** A fresh
+re-drive carried the step-boundary heartbeat (`/workspace/.piwf-heartbeat`,
+written before each step, read before sandbox destroy and re-thrown enriched),
+and it named the wedge exactly:
+
+```
+adapter_unavailable ... "Command timeout after 180000ms" [step heartbeat:
+ 1781433411 install-pi-agent | 1781433436 prepare-auth | 1781433436 clone-artifacts |
+ 1781433439 checkout-branch | 1781433439 mount-packages | 1781433441 pi-invoke]
+```
+
+The unix-stamped heartbeat decodes the whole lane: install ran **25s**
+(1781433436 − 1781433411 — cold but finite, and *variable*: a colder probe paid
+~132s); prepare-auth/clone/checkout/mount were all instant; **pi-invoke started at
+1781433441 and was still running when the 180000ms command ceiling killed it at
+~1781433591** — pi-invoke is both the longest step (~150s) and the last one
+reached. The `180000ms` is not a magic number: it is the decouple applied to the
+worker's *then-deployed* `WORKFLOW_APP_TIMEOUT_MS` of `300000`
+(`laneExecTimeoutMs = 300000 − 120000`). HEAD carries `600000` (unchanged in git
+since spine `0d8a247`), so the redeploy that ships this fix raises the live lane
+ceiling to `480000` and pi-invoke's self-bound budget to `480 − elapsed − 30`.
+Two structural facts, both proven by the heartbeat, not guessed:
+
+1. **pi-invoke was unbounded.** The decoded lane script calls `pi --provider … -p …`
+   directly — no inner `timeout` — so a hung model call (egress black-hole,
+   auth-retry storm, runaway generation) rides until the whole-script `timeout`
+   SIGTERMs it, and SIGTERM skips the `emit_failure_marker` EXIT trap, so pi's
+   stderr is never captured. The blocker carries a heartbeat but **no cause**: a
+   slow error wearing a fast error's silence.
+2. **The cold install steals a *variable* slice of the budget.** De-dockering
+   (task #15) moved the pi-agent `npm install` to runtime; sandboxes are
+   per-run/per-lane cold (`buildSandboxId(runId, laneId)`), so every planner pays
+   the install (25s here, ~132s on a colder run) before pi even starts. pi-invoke
+   inherits only the remainder — which is exactly why the self-bound budget is
+   computed from measured `elapsed`, not a fixed slice.
+
+**Carrier invariant confirmed by SDK source** (`@cloudflare/sandbox@0.11.0`): the
+default `"http"` transport's request path is a bare
+`globalThis.fetch`/`stub.containerFetch` with **no `signal` and no client-side
+request timeout** — the 120s `DEFAULT_REQUEST_TIMEOUT_MS` belongs only to the
+unused WebSocket transport. So a sync `sandbox.exec` has exactly one ceiling: the
+**server-side command timeout** the SDK forwards as `timeoutMs` (= the lane's
+`input.input.timeoutMs`). This is load-bearing for Layer B's fix — it means the
+in-script `timeout`s can be aligned to that single ceiling with no hidden
+client-side abort racing ahead of the EXIT trap and stranding the receipt.
 
 ## Fix — Reclaim the Self-Owned Slot, as a Class
 
@@ -121,6 +161,80 @@ Before the fix the first test returned `deferred` — the exact production
 blocker. A polite double that released the slot on teardown would have masked
 the orphan entirely; the test deliberately leaves the slot held.
 
+## Fix Layer B — Self-Bound pi-invoke to the Remaining Budget
+
+The wedge is observability-first, not a guess at *why* pi hangs. pi-invoke now
+carries its own inner `timeout`, sized from the time actually left before the
+whole-script SIGTERM:
+
+```bash
+pi_elapsed_s=$(( $(date +%s) - script_start_s ))
+pi_budget_s=$(( PIWF_COMMAND_TIMEOUT_SECONDS - pi_elapsed_s - PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS ))
+if [ "$pi_budget_s" -lt 1 ]; then pi_budget_s=1; fi
+timeout "$pi_budget_s" pi --provider "$PI_PROVIDER" --model "$PI_MODEL" ... -p "$(cat "$LANE_PROMPT_PATH")" > "$raw_output_path" 2> "$stderr_path"
+pi_status=$?
+if [ "$pi_status" -eq 124 ]; then
+  printf '\n[pi-invoke self-bound] pi exceeded its %ss budget and was terminated by timeout; the heartbeat names pi-invoke as the wedge step.\n' "$pi_budget_s" >> "$stderr_path"
+fi
+```
+
+Four properties:
+
+1. **pi self-times-out BEFORE the whole-script SIGTERM.** Exit 124 lands inside
+   the script while the EXIT trap is still live, so normalize-output →
+   build-receipt → git-commit → git-push all run. A hang now **commits a
+   receipt** carrying pi's stderr tail instead of vanishing on SIGTERM.
+2. **The budget is computed from elapsed time, not a constant.** The variable
+   cold-install lead (25s–~132s observed) cannot starve or overrun pi's slice —
+   `pi_budget_s = ceiling − elapsed − tail_margin` adapts every run, always
+   bounding pi to finish by `ceiling − tail_margin` of script time regardless of
+   what the install cost.
+3. **On 124 it appends a synthetic stderr line** naming pi-invoke as the wedge,
+   so even an empty-stderr hang is self-attributing.
+4. **The lane budget is decoupled from the reaper deadline.**
+   `cloudflare-worker-route.ts` no longer hands the lane the full
+   `WORKFLOW_APP_TIMEOUT_MS` (600000, unchanged in git since the spine commit
+   `0d8a247` — there was never a 300000→600000 edit). It now carves a reaper
+   margin: `laneExecTimeoutMs = max(60_000, WORKFLOW_APP_TIMEOUT_MS −
+   LANE_EXEC_REAPER_MARGIN_MS) = 600000 − 120000 = 480000`. That 480s becomes the
+   lane's single command-timeout ceiling; with the 30s
+   `PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS`, pi gets `480 − elapsed − 30` (≈ 419s after
+   a 25s install, ≈ 312s after a ~132s one) and in either case is bounded to finish
+   by ~450s of script time — leaving the post-pi normalize→receipt→commit→push
+   steps a fixed 30s window before the 480s ceiling, and the 480s lane ceiling
+   itself well inside the 600s reaper deadline so a wedged lane surfaces its
+   blocker before the reaper mistakes it for stale. The earlier live wedge died at
+   the **180000ms** ceiling the decouple produced from the worker's then-deployed
+   `WORKFLOW_APP_TIMEOUT_MS` of `300000` (`300000 − 120000`); the fix is the
+   decouple + self-bound on a `600000`-based ceiling, not a raised constant.
+
+This is the Google SRE discipline applied to a sandbox lane —
+*Monitoring Distributed Systems*:
+
+> On the other hand, a slow error is even worse than a fast error! Therefore,
+> it's important to track error latency, as opposed to just filtering out errors.
+
+The unbounded pi-invoke was exactly a slow error filtered into silence. The
+self-bound converts it into a fast, attributable one.
+
+### Chaos Receipt — Layer B (would have caught it)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — 23 passing (2 new):
+
+- **structural pin**: asserts the real `buildPiAgentLaneCommand()` emits the
+  budget arithmetic, the `timeout "$pi_budget_s" pi --provider` wrapper, the
+  `< 1` clamp, `script_start_s="$(date +%s)"`, and the 124 self-bound line.
+- **hostile behavioral double**: slices the *real* pi-invoke block out of
+  `buildPiAgentLaneCommand()`, runs it under `bash -c` with a fake `pi` that
+  `sleep 20`s, `PIWF_COMMAND_TIMEOUT_SECONDS=3`, tail margin `1`. Asserts pi is
+  killed at exit 124, the post-pi steps are *reached* (`POST_PI_REACHED
+  pi_status=124`), and the stderr carries `[pi-invoke self-bound]` naming
+  pi-invoke. It reproduces prod transport (real budget math, real `timeout`,
+  real 124-attribution) and fakes only the model endpoint — and it earned its
+  keep immediately, catching a literal backtick inside the `String.raw` template
+  that had corrupted the shell command and that `typecheck` + `check` both waved
+  through.
+
 ## Verification
 
 ```bash
@@ -128,16 +242,25 @@ pnpm typecheck   # clean
 pnpm check       # oxfmt + oxlint + type-aware, clean
 pnpm vitest run tests/integration/cloudflare-run-reaper.test.ts \
   tests/integration/admitted-agent-lane-runtime.test.ts \
-  tests/integration/cloudflare-run-async-driver.test.ts   # 12 + 34 pass
+  tests/integration/cloudflare-run-async-driver.test.ts \
+  tests/integration/cloudflare-sandbox-agent-lanes.test.ts   # 12 + 4 + 18 + 23 = 57 pass
+pnpm test:integration   # full suite, exit 0
 ```
 
 ## Burn-In Gate
 
-Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. Layer A
-must deploy and a fresh dream-shape run must reach `captured` **observed live on
-deployed code** before the burn-in restarts — and that same re-drive is the live
-probe that decides whether Layer B is transient or structural. Wound #22 is the
-recovery-class sibling of the [[polite-fakes-franchise-wound]]: the carrier could
-reach `captured` once, but could not **recover** a torn drive to `captured`.
-Following [[carrier-wound-btoa-latin1-ceiling-2026-06-14]], both surfaced only
-because the run was watched node-by-node, not stared at.
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. Both
+layers are now deployed; a fresh dream-shape run must reach `captured`
+**observed live on deployed code** before the burn-in restarts. The next
+re-drive is no longer a guess about Layer B — it is the instrument: pi-invoke is
+now bounded, so the planner phase either **completes to `captured`** (the wedge
+was a healthy pi starved by the 180000ms decouple ceiling, now widened to 480000)
+**or commits a receipt carrying pi's actual stderr** (revealing *why* pi hangs —
+egress black-hole, auth-retry storm, runaway generation — as the next wound to
+fix). The probe that died at pi-invoke after ~150s says it was doing real work,
+not failing fast. Either way the stall is no longer
+silent. Wound #22 is the recovery-class sibling of the
+[[polite-fakes-franchise-wound]]: the carrier could reach `captured` once, but
+could not **recover** a torn drive to `captured`. Following
+[[carrier-wound-btoa-latin1-ceiling-2026-06-14]], both surfaced only because the
+run was watched node-by-node, not stared at.
