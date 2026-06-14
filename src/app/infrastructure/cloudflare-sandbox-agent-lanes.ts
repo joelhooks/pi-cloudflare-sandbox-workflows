@@ -103,6 +103,14 @@ const redact = (value: string, secrets: readonly string[]): string => {
   return redacted;
 };
 
+// Gap (seconds) between the MIDDLE whole-script shell `timeout` and the OUTER
+// server-side `sandbox.exec` timeout. The shell timeout must fire strictly FIRST so
+// its SIGTERM runs the script's failure-marker trap and the outer wrapper flushes the
+// marker to stdout BEFORE the server-side timeout throws "Command timeout" and
+// discards stdout. When the two were equal they raced and the server-side throw won,
+// erasing pi's stderr from the blocker. (wound #22 Layer C.)
+const WHOLE_SCRIPT_REAPER_GUARD_SECONDS = 30;
+
 const wrapCommandForSandbox = (command: string): string => {
   const encodedCommand = encodeCommandToBase64(command);
 
@@ -271,13 +279,23 @@ const prepareCloudflareSandboxPiAgentLane = (input: {
       LANE_SANDBOX_REF: `cloudflare-sandbox:${sandboxId}`,
       LANE_TRANSCRIPT_ARTIFACT_REF: transcriptRef,
       LANE_TRANSCRIPT_PATH: input.input.transcriptPath,
+      // The MIDDLE whole-script shell timeout. Decoupled BELOW the OUTER server-side
+      // sandbox.exec timeout (input.input.timeoutMs) by the reaper guard so the shell
+      // timeout's SIGTERM fires first, runs the failure-marker trap, and the marker
+      // reaches stdout before the server-side timeout throws and discards it.
       PIWF_COMMAND_TIMEOUT_SECONDS: String(
-        Math.ceil(input.input.timeoutMs / 1000)
+        Math.max(
+          1,
+          Math.floor(input.input.timeoutMs / 1000) -
+            WHOLE_SCRIPT_REAPER_GUARD_SECONDS
+        )
       ),
       // Seconds reserved at the end of the lane budget for the post-pi steps
       // (normalize, transcript, hash, receipt, git add/commit/push, emit-marker).
       // pi-invoke self-bounds to `PIWF_COMMAND_TIMEOUT_SECONDS - elapsed - this`, so
-      // it always times out and commits a receipt before the whole-script SIGTERM.
+      // it times out before the tail steps. If the tail itself overruns, the MIDDLE
+      // shell timeout SIGTERMs the script and the INT/TERM trap still emits a failure
+      // marker carrying pi's stderr — the cause surfaces in the blocker either way.
       PIWF_PI_INVOKE_TAIL_MARGIN_SECONDS: "30",
       PI_AUTH_JSON_B64: input.input.leasedPiAuthJsonBase64,
       // PI_* runtime env the old Dockerfile baked in via ENV. The deploy now uses

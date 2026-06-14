@@ -105,6 +105,19 @@ const payload = {
 process.stdout.write("\n__PIWF_AGENT_LANE_RESULT__:" + Buffer.from(JSON.stringify(payload), "utf8").toString("base64") + "\n");
 NODE
 }
+# The whole-script (MIDDLE) shell timeout reaps with SIGTERM, and a bare signal kills
+# bash WITHOUT firing an EXIT-only trap — that is exactly how the tail-starvation case
+# lost pi's stderr: pi self-bounds, the post-pi steps overrun the margin, the shell
+# timeout SIGTERMs the script, and the blocker named a step with no cause. Trapping
+# INT/TERM runs the same failure marker (which carries pi's stderr tail) and then exits
+# so the outer wrapper completes and the marker reaches stdout before the server-side
+# (OUTER) sandbox.exec timeout throws. The EXIT trap is the idempotent backstop; the
+# marker_emitted guard makes the double-fire a no-op. (wound #22 Layer C.)
+on_signal() {
+  emit_failure_marker
+  exit 143
+}
+trap on_signal INT TERM
 trap emit_failure_marker EXIT
 mark install-pi-agent
 export PATH="/workspace/.npm-global/bin:$PATH"

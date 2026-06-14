@@ -244,6 +244,50 @@ const runNormalizerNodeScript = (
   }
 };
 
+/**
+ * Run bash out-of-process and return its stdout regardless of exit status. A handler
+ * that exits non-zero (e.g. 143 on a trapped SIGTERM) makes execFileSync throw with
+ * the stdout riding on the error; this normalizes both paths to a plain string.
+ */
+const captureBashStdout = (harness: string, env: NodeJS.ProcessEnv): string => {
+  try {
+    return execFileSync("bash", ["-c", harness], {
+      encoding: "utf-8",
+      env,
+      timeout: 15_000,
+    });
+  } catch (error) {
+    const captured =
+      typeof error === "object" && error !== null && "stdout" in error
+        ? error.stdout
+        : undefined;
+    return typeof captured === "string" ? captured : "";
+  }
+};
+
+/** Decode the base64 `__PIWF_AGENT_LANE_RESULT__` marker from lane stdout. */
+const decodeAgentLaneMarker = (
+  stdout: string
+): Record<string, unknown> | null => {
+  const match = /__PIWF_AGENT_LANE_RESULT__:([A-Za-z0-9+/=]+)/u.exec(stdout);
+  if (match?.[1] === undefined) {
+    return null;
+  }
+  const decoded: unknown = JSON.parse(
+    Buffer.from(match[1], "base64").toString("utf-8")
+  );
+  return isRecord(decoded) ? decoded : null;
+};
+
+/** Read a marker field as a string, defaulting to "" when absent or non-string. */
+const markerString = (
+  payload: Record<string, unknown> | null,
+  key: string
+): string => {
+  const value = payload?.[key];
+  return typeof value === "string" ? value : "";
+};
+
 describe(normalizeAgentLaneJsonOutput, () => {
   it("recovers the verdict from the agent_end assistant text of a real json event stream", () => {
     const verdict = normalizeAgentLaneJsonOutput(
@@ -622,6 +666,122 @@ describe(buildPiAgentLaneCommand, () => {
       rmSync(dir, { force: true, recursive: true });
     }
   }, 15_000);
+
+  it("runs the failure marker on a whole-script SIGTERM, not just a clean exit", () => {
+    // Wound #22 Layer C: the self-bound pi-invoke fires, but pi can eat its whole
+    // budget and leave the post-pi tail (normalize/transcript/receipt/commit/push) too
+    // little time. When the tail overruns, the MIDDLE whole-script shell `timeout`
+    // reaps with SIGTERM — and a bare signal kills bash WITHOUT running an EXIT-only
+    // trap, so pi's stderr was never captured and the blocker named a step with no
+    // cause (observed live: a causeless "Command timeout after 480000ms"). The fix
+    // traps INT/TERM to run the SAME failure marker, which carries pi's stderr tail.
+    expect({
+      backstopsWithExitTrap: command.includes("trap emit_failure_marker EXIT"),
+      signalHandlerExitsAfterMarker: command.includes("exit 143"),
+      signalHandlerRunsMarker: /on_signal\(\)\s*\{\s*emit_failure_marker/u.test(
+        command
+      ),
+      trapsSignalsNotJustExit: command.includes("trap on_signal INT TERM"),
+    }).toStrictEqual({
+      backstopsWithExitTrap: true,
+      signalHandlerExitsAfterMarker: true,
+      signalHandlerRunsMarker: true,
+      trapsSignalsNotJustExit: true,
+    });
+  });
+
+  it("emits a failure marker carrying pi's stderr when the whole script is SIGTERM'd mid-tail", () => {
+    // Hostile double for Layer C: slice the REAL marker+trap machinery out of
+    // buildPiAgentLaneCommand() and run it verbatim, then deliver the whole-script
+    // reaper signal with `kill -TERM $$` while a tail step is in flight. Production
+    // transport — the on_signal handler, emit_failure_marker, the credential scrub,
+    // the base64 marker contract — is exercised byte-for-byte; only the SIGTERM source
+    // is faked. The pre-fix EXIT-only trap would NOT run on this signal, so no marker
+    // reaches stdout and pi's stderr is lost. That is exactly the regression this guards.
+    const trapSetupStart = command.indexOf("marker_emitted=0");
+    const trapSetupEnd = command.indexOf("\nmark install-pi-agent");
+    if (
+      trapSetupStart === -1 ||
+      trapSetupEnd === -1 ||
+      trapSetupEnd <= trapSetupStart
+    ) {
+      throw new Error(
+        "Could not locate the marker+trap machinery in the lane command."
+      );
+    }
+    const trapSetup = command.slice(trapSetupStart, trapSetupEnd);
+
+    const dir = mkdtempSync(join(tmpdir(), "piwf-sigterm-"));
+    try {
+      // emit_failure_marker shells out to bare `node`; guarantee it resolves to this
+      // runtime regardless of the test host's PATH.
+      const binDir = join(dir, "bin");
+      mkdirSync(binDir);
+      const nodeShim = join(binDir, "node");
+      writeFileSync(
+        nodeShim,
+        `#!/usr/bin/env bash\nexec ${process.execPath} "$@"\n`
+      );
+      chmodSync(nodeShim, 0o755);
+
+      const stderrPath = join(dir, "stderr.txt");
+      // What pi left behind before the tail starved: a credential-bearing transport
+      // line (must be scrubbed) plus the self-bound attribution.
+      writeFileSync(
+        stderrPath,
+        [
+          "pi: clone https://x:supersecrettoken@artifacts.example/run.git failed: timeout",
+          "[pi-invoke self-bound] pi exceeded its 2s budget; the heartbeat names pi-invoke as the wedge step.",
+          "",
+        ].join("\n")
+      );
+
+      const harness = [
+        "set -u",
+        trapSetup,
+        // Override the hardcoded /workspace paths to test-controlled ones; the trap
+        // reads $stderr_path at fire time, so the override takes effect.
+        `stderr_path="${stderrPath}"`,
+        // Simulate the moment the tail starved: pi already self-bounded (124) and the
+        // script is mid-push when the whole-script reaper fires.
+        'current_step="git-push"',
+        "pi_status=124",
+        "kill -TERM $$",
+        // Neither line may run: the TERM trap must emit the marker and exit first.
+        "sleep 5",
+        "printf 'TAIL_COMPLETED\\n'",
+      ].join("\n");
+
+      // bash exits 143 (128 + SIGTERM) via the handler; the marker rides on stdout.
+      const stdout = captureBashStdout(harness, {
+        ...process.env,
+        PATH: `${binDir}:${process.env["PATH"] ?? ""}`,
+      });
+
+      const payload = decodeAgentLaneMarker(stdout);
+      const stderrTail = markerString(payload, "stderrTail");
+
+      expect({
+        carriesPiStderr: stderrTail.includes("[pi-invoke self-bound]"),
+        emittedErrorMarker: payload?.["status"] === "error",
+        namesFailingStep: payload?.["failingStep"] === "git-push",
+        preservesPiStatus: payload?.["piStatus"] === 124,
+        scrubsCredentialsInStderr:
+          stderrTail.includes("https://x:***@") &&
+          !stderrTail.includes("supersecrettoken"),
+        tailNeverCompleted: !stdout.includes("TAIL_COMPLETED"),
+      }).toStrictEqual({
+        carriesPiStderr: true,
+        emittedErrorMarker: true,
+        namesFailingStep: true,
+        preservesPiStatus: true,
+        scrubsCredentialsInStderr: true,
+        tailNeverCompleted: true,
+      });
+    } finally {
+      rmSync(dir, { force: true, recursive: true });
+    }
+  }, 20_000);
 });
 
 describe(buildAgentLanePackageMountIndex, () => {

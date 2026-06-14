@@ -43,8 +43,10 @@ mandate caught from the outside-invisible / node-by-node-obvious gap.
 
 ## Mechanism
 
-Two layers; both are now proven by live evidence and fixed here (Layer A
-reclaims the self-owned slot; Layer B self-bounds the planner's pi-invoke).
+Three layers (Layer A reclaims the self-owned slot; Layer B self-bounds the
+planner's pi-invoke; Layer C makes the whole-script reaper *announce its cause*).
+Layers A and B are proven by live evidence; Layer C is the wound the **post-B
+re-drive** surfaced — and it is the reason that re-drive still died causeless.
 
 **Layer A — admission can't reclaim its own orphan (PROVEN, fixed here).** The
 zombie-budget pre-admit (wound #16) reserves a lane's OWNER slot in
@@ -118,6 +120,51 @@ unused WebSocket transport. So a sync `sandbox.exec` has exactly one ceiling: th
 `input.input.timeoutMs`). This is load-bearing for Layer B's fix — it means the
 in-script `timeout`s can be aligned to that single ceiling with no hidden
 client-side abort racing ahead of the EXIT trap and stranding the receipt.
+
+**Layer C — a SIGTERM'd script can't run an EXIT-only trap, so the reaper kills
+the cause (PROVEN by the post-B re-drive).** Layer B's deploy was the instrument,
+and the very next live dream re-drive ran it: it sat in `planningDynamicWorkflow`
+and then terminated `blocked / adapter_unavailable` with `nodes=0` — **again
+causeless,** the blocker carrying no pi stderr at all:
+
+```
+[11:25:25Z] status=planningDynamicWorkflow lanes=1 dg=1 nodes=0 disp=0 blk=None
+[11:29:48Z] status=blocked            lanes=0 dg=1 nodes=0 disp=0 blk=adapter_unavailable
+```
+
+Reading the three nested timeouts that actually wrap the lane explains why
+Layer B's receipt-on-exit-124 never reached the caller:
+
+- **OUTER** — `sandbox.exec(wrapped, { timeout: input.input.timeoutMs })` = the
+  480000ms server-side command ceiling. On expiry the SDK **throws** "Command
+  timeout after 480000ms" and **discards stdout entirely.**
+- **MIDDLE** — `timeout "$PIWF_COMMAND_TIMEOUT_SECONDS" bash script` inside
+  `wrapCommandForSandbox`, which **SIGTERMs** the script.
+- **INNER** — Layer B's `timeout "$pi_budget_s" pi …`, self-bounded to
+  `MIDDLE − elapsed − tail_margin`.
+
+Two compounding facts make Layer B's stderr vanish anyway:
+
+1. **MIDDLE == OUTER, so they raced.** `PIWF_COMMAND_TIMEOUT_SECONDS` was
+   `ceil(timeoutMs/1000)` = **480s**, the exact wall the OUTER 480000ms throw
+   sits on. When they fire together the server-side throw wins, and it **drops
+   stdout** — so even a perfectly-emitted result marker is erased before
+   `runCommand` can parse it.
+2. **A bare SIGTERM never runs an EXIT-only `trap`.** Layer B bounds *pi*, but
+   the post-pi **tail** — normalize → transcript → hash → build-receipt →
+   `git add/commit/push` → emit-OK-marker — is itself unbounded inside the
+   script. When pi self-bounds late (exit 124) the tail can overrun its ~30s
+   margin (a slow `git push` to the artifact remote is the obvious culprit), and
+   then the **MIDDLE** `timeout` SIGTERMs bash. `trap emit_failure_marker EXIT`
+   does **not** fire on a signal-kill — bash dies without emitting anything. The
+   blocker names a heartbeat step with **no cause**: the same slow-error silence
+   Layer B fixed for *pi*, reopened one layer out in the *tail*.
+
+So the run that was supposed to prove Layer B instead proved that Layer B's
+guarantee — "a hang commits a receipt carrying pi's stderr" — only holds if the
+tail finishes before the MIDDLE reaper, and the reaper, when it does fire, still
+runs the marker. Layer C closes both: it makes the SIGTERM itself emit the
+marker, and it pulls MIDDLE strictly below OUTER so the marker survives.
 
 ## Fix — Reclaim the Self-Owned Slot, as a Class
 
@@ -235,6 +282,86 @@ self-bound converts it into a fast, attributable one.
   that had corrupted the shell command and that `typecheck` + `check` both waved
   through.
 
+## Fix Layer C — Make the Reaper Announce Its Cause
+
+Two coupled edits, one in the script and one in the env that wraps it.
+
+**(1) Trap the signal, not just the exit** (`cloudflare-sandbox-agent-lane-command.ts`):
+
+```sh
+on_signal() {
+  emit_failure_marker
+  exit 143
+}
+trap on_signal INT TERM
+trap emit_failure_marker EXIT   # idempotent backstop; marker_emitted guard no-ops the double-fire
+```
+
+The MIDDLE `timeout` reaps with SIGTERM. `on_signal` runs the *same*
+`emit_failure_marker` (which captures `tail -c 2000` of pi's stderr, scrubbed of
+credentials, plus `failingStep=$current_step`, `piStatus`, `gitLogTail`) and then
+`exit 143` (128+15). The `exit` re-triggers the EXIT trap, which the
+`marker_emitted=1` guard turns into a no-op — exactly one marker, whether the
+script ends by clean exit, by error, or by signal. Before this, a tail that
+overran the margin took a SIGTERM straight to `/dev/null`.
+
+**(2) Pull MIDDLE strictly below OUTER** (`cloudflare-sandbox-agent-lanes.ts`):
+
+```ts
+const WHOLE_SCRIPT_REAPER_GUARD_SECONDS = 30;
+// MIDDLE shell timeout, decoupled BELOW the OUTER server-side ceiling so its
+// SIGTERM fires first, runs the marker trap, and the marker reaches stdout
+// before the OUTER throw discards it.
+PIWF_COMMAND_TIMEOUT_SECONDS: String(
+  Math.max(1, Math.floor(input.input.timeoutMs / 1000) - WHOLE_SCRIPT_REAPER_GUARD_SECONDS)
+),
+```
+
+With the live ceiling at `480000ms`, MIDDLE drops from 480s to **450s**. The
+reaper SIGTERM now fires a guaranteed 30s before the OUTER throw, so
+`on_signal`'s marker flushes through `bash`'s stdout and `sandbox.exec` *returns*
+that stdout — `runCommand` parses the marker, and the existing error-marker path
+(`cloudflare-sandbox-agent-lanes.ts` ~331) surfaces `marker.stderrTail` into the
+blocker. pi's inner budget rides along: `450 − elapsed − 30`, so pi finishes by
+~420s of script time and the tail gets a 30s window before the 450s reaper —
+and even if the tail blows that window, edit (1) makes the reaper itself emit the
+cause. The slow error is converted to a fast, attributable one at *both* layers.
+
+This is *Release It!* (Nygard), Fail Fast / Transparency:
+
+> When a host gets rebooted in the middle of the night and an application fails
+> … nobody is going to know unless the application itself announces the problem.
+> … Of course, for the application to announce that it failed …, it first has to
+> know that it failed. … A running application can be interrogated for its
+> internal state, but a halted one cannot.
+
+A signal-killed lane is a halted application: it can't be interrogated after the
+fact, so it has to announce the cause *on the way down*. The EXIT-only trap
+assumed the lane always got to exit on its own terms. The reaper's whole job is
+to deny it that, so the announcement has to live on the signal path too.
+
+### Chaos Receipt — Layer C (would have caught it)
+
+`tests/integration/cloudflare-sandbox-agent-lanes.test.ts` — 25 passing (2 new):
+
+- **structural pin**: asserts the real `buildPiAgentLaneCommand()` emits
+  `on_signal() { emit_failure_marker`, `trap on_signal INT TERM`, `exit 143`,
+  *and* keeps `trap emit_failure_marker EXIT` — the signal path and the backstop
+  must both exist.
+- **hostile behavioral double**: slices the real script from `marker_emitted=0`
+  to `mark install-pi-agent`, overrides `stderr_path` with a fixture line
+  (`pi: clone https://x:supersecrettoken@…/run.git failed: timeout` plus the
+  `[pi-invoke self-bound]` marker), sets `current_step=git-push`, `pi_status=124`,
+  then `kill -TERM $$` mid-tail with a trailing `sleep 5; printf TAIL_COMPLETED`
+  that must **never** run. Asserts the SIGTERM emitted a `status:"error"` marker
+  carrying pi's stderr tail, `failingStep:"git-push"`, `piStatus:124`, with the
+  credential scrubbed (`https://x:***@`, never `supersecrettoken`) and
+  `TAIL_COMPLETED` absent. macOS lacks GNU `timeout`'s process-group SIGTERM, so
+  the test signals the unit-level fact directly (`kill -TERM $$`): *does a TERM
+  run the marker?* — which is the exact bash semantic the prod MIDDLE `timeout`
+  relies on. Before edit (1) this returned no marker; the EXIT-only trap is
+  silent on a signal.
+
 ## Verification
 
 ```bash
@@ -243,23 +370,24 @@ pnpm check       # oxfmt + oxlint + type-aware, clean
 pnpm vitest run tests/integration/cloudflare-run-reaper.test.ts \
   tests/integration/admitted-agent-lane-runtime.test.ts \
   tests/integration/cloudflare-run-async-driver.test.ts \
-  tests/integration/cloudflare-sandbox-agent-lanes.test.ts   # 12 + 4 + 18 + 23 = 57 pass
+  tests/integration/cloudflare-sandbox-agent-lanes.test.ts   # 12 + 4 + 18 + 25 = 59 pass
 pnpm test:integration   # full suite, exit 0
 ```
 
 ## Burn-In Gate
 
-Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. Both
+Per the Phase 2 D3 acceptance bar, the 10-run count stays at **zero**. All three
 layers are now deployed; a fresh dream-shape run must reach `captured`
-**observed live on deployed code** before the burn-in restarts. The next
-re-drive is no longer a guess about Layer B — it is the instrument: pi-invoke is
-now bounded, so the planner phase either **completes to `captured`** (the wedge
-was a healthy pi starved by the 180000ms decouple ceiling, now widened to 480000)
-**or commits a receipt carrying pi's actual stderr** (revealing *why* pi hangs —
-egress black-hole, auth-retry storm, runaway generation — as the next wound to
-fix). The probe that died at pi-invoke after ~150s says it was doing real work,
-not failing fast. Either way the stall is no longer
-silent. Wound #22 is the recovery-class sibling of the
+**observed live on deployed code** before the burn-in restarts. The post-B
+re-drive already taught the lesson Layer C encodes: a bounded pi is necessary but
+not sufficient — the *tail* and the *reaper* both had to learn to speak. With C,
+the next re-drive is the real instrument: the planner phase either **completes to
+`captured`**, or it **surfaces a marker** — whether pi self-bounded (124 with its
+stderr tail) or the tail itself wedged (the reaper's SIGTERM now names the failing
+step and carries pi's stderr regardless). There is no remaining path by which the
+blocker is causeless; `adapter_unavailable` with `nodes=0` and an empty stderr is
+no longer reachable. Whatever the next run blocks on — if it blocks — will *say
+why*, which is the whole point. Wound #22 is the recovery-class sibling of the
 [[polite-fakes-franchise-wound]]: the carrier could reach `captured` once, but
 could not **recover** a torn drive to `captured`. Following
 [[carrier-wound-btoa-latin1-ceiling-2026-06-14]], both surfaced only because the
