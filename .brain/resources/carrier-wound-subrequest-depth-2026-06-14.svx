@@ -1,0 +1,81 @@
+---
+title: "Carrier Wound: Supervisor Self-Fetch Subrequest Depth"
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - durable-execution
+  - carrier-finding
+  - subrequest-depth
+  - chaos-suite
+source: "run-live-20260613T230612379Z-9a8b0e4b"
+---
+
+# Carrier Wound: Supervisor Self-Fetch Subrequest Depth
+
+Live Dream run `run-live-20260613T230612379Z-9a8b0e4b` died driving node index 3 with Cloudflare runtime error `Subrequest depth limit exceeded`. The run had checkpointed deterministic capture meta-nodes 0, 1, and 2. Node 3 was the first generated node to enter the lane/admission path.
+
+## Mechanism
+
+Confirmed mechanism: **H2, sequential same-Durable-Object self-fetch depth**, not genuine `startRun` re-entry.
+
+Call stack:
+
+1. `CloudflareWorkflowCapsuleSupervisor.alarm()` drives queued runs from inside the supervisor Durable Object.
+2. `driveQueuedRuns()` admits the generation in-process, then builds the front door through `defaultRunDriverFactory`.
+3. Before this fix, `defaultRunDriverFactory` called `createFrontDoorFromEnv(env)` without an override, so `createCloudflareWorkflowFrontDoor()` resolved `contextCapsules` from the Durable Object namespace.
+4. `createCapsuleSupervisorClient(namespace)` in `src/app/infrastructure/cloudflare-workflow-front-door.ts` implements all capsule and lane-admission ports by `namespace.get(namespace.idFromName(workItemId)).fetch(...)`.
+5. `WorkflowApp.run()` in single-step mode calls those ports repeatedly: load ledger, assert active generation, resolve capsule, load checkpoint, record node attempt, admit lane, record lane dispatch/status, release lane, persist checkpoint.
+6. For node index 3, `executeAsyncResearchReviewStep()` first records the node attempt, then dispatches the admitted worker lane and records the lane dispatch. The Sandbox lane runtime dispatches to the Sandbox; it does not call back into `startRun`.
+
+The public Worker route still needs the namespace client. The alarm path already has the supervisor instance, so using `stub.fetch()` from that same invocation just burns Worker-to-Worker recursion depth.
+
+## Fix
+
+The supervisor route handlers now delegate to parsed-input core methods, and `createInProcessCapsuleSupervisorClient(self)` maps the same 13 port methods directly to those cores:
+
+- `admitDrive`
+- `admitLane`
+- `appendEvent`
+- `assertActiveDriveGeneration`
+- `loadDriveLedger`
+- `loadLatestCheckpoint`
+- `persistCheckpoint`
+- `recordDriveLaneDispatch`
+- `recordDriveLaneStatus`
+- `recordDriveNodeAttempt`
+- `recordDrivePhaseCompletion`
+- `releaseLane`
+- `resolve`
+
+`defaultRunDriverFactory` passes that in-process client into `createFrontDoorFromEnv(env, { contextCapsulesOverride })`. Public Worker requests still omit the override, so they keep the namespace-backed client.
+
+Generation fencing is preserved: the core methods throw `StaleDriveGenerationError`; the HTTP route wrappers still convert that to the same 409 stale-generation response.
+
+## Secondary Carrier Wounds
+
+Stall reaper: a legacy/pre-existing ledger with `lastWorkMutationGeneration` unset and zero recorded work mutations now seeds the low-water mark to `0`, not to the current high `driveGeneration`. Ledgers that do contain recorded work stay conservative and seed to the current generation.
+
+Poison starvation: already covered by the existing terminal-record drain in `driveQueuedRuns()`. D1-terminal run-start records are retired before the loop spends a drive on them, so a blocked poison record cannot starve fresh siblings behind it.
+
+## Chaos Receipts
+
+Added `tests/integration/cloudflare-run-async-driver.test.ts` regressions:
+
+- `drives node 3 through in-process supervisor ports without self-fetching the supervisor namespace`: mocks the Worker-route dynamic import, injects a fake supervisor namespace whose `.get().fetch()` throws, drives node index 3 through node attempt, lane admit, lane dispatch, lane release, and checkpoint, and asserts zero same-DO fetch calls.
+- `reaps a pre-existing zero-work ledger with no low-water mark within MAX_STALL_GENERATIONS alarms`: seeds `driveGeneration: 28`, no `lastWorkMutationGeneration`, no attempts/lanes/phases/statuses, and proves the stall reaper blocks the run before another zero-work drive.
+
+## Verification
+
+Local verification in this Codex sandbox:
+
+```bash
+pnpm exec vitest run tests/integration/cloudflare-run-async-driver.test.ts
+pnpm check
+pnpm typecheck
+```
+
+All three passed.
+
+`pnpm exec vitest run` reached 371 passing tests and failed only on the two local Dream relay HTTP tests because this sandbox rejects `listen` on `127.0.0.1` with `EPERM`.

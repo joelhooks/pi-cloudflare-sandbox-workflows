@@ -46,6 +46,7 @@ import type {
   RunDurabilityDump,
   RunStepCheckpoint,
   SafetyEnvelopeState,
+  WorkflowDriveAdmission,
   WorkflowDriveNodeAttempt,
   WorkflowDriveLedger,
   StartRunRequest,
@@ -65,6 +66,144 @@ export interface WorkflowCapsuleSupervisorEnv {
   readonly ZOMBIE_NODE_MAX_ATTEMPTS?: number | string;
 }
 
+type CapsuleSupervisorPorts = ContextCapsuleActorContract &
+  AgentLaneAdmissionControllerContract;
+
+const ResolveCapsuleRequestSchema = z.object({
+  runId: z.string().min(1),
+  workItemId: z.string().min(1),
+});
+
+const AppendCapsuleEventRequestSchema = z.object({
+  event: WorkflowEventSchema,
+  workItemId: z.string().min(1),
+});
+
+interface InProcessCapsuleSupervisorCore {
+  admitDriveCore(
+    input: z.infer<typeof WorkflowDriveLedgerRequestSchema>
+  ): Promise<WorkflowDriveAdmission>;
+  admitLaneCore(
+    input: z.infer<typeof AgentLaneAdmissionRequestSchema>
+  ): Promise<AgentLaneAdmissionDecision>;
+  appendEventCore(
+    input: z.infer<typeof AppendCapsuleEventRequestSchema>
+  ): Promise<void>;
+  assertActiveDriveGenerationCore(
+    input: z.infer<typeof WorkflowDriveGenerationAssertionRequestSchema>
+  ): Promise<void>;
+  loadDriveLedgerCore(
+    input: z.infer<typeof WorkflowDriveLedgerRequestSchema>
+  ): Promise<WorkflowDriveLedger>;
+  loadLatestCheckpointCore(
+    input: z.infer<typeof LoadRunCheckpointRequestSchema>
+  ): Promise<RunStepCheckpoint | null>;
+  persistCheckpointCore(
+    input: z.infer<typeof PersistRunCheckpointRequestSchema>
+  ): Promise<void>;
+  recordDriveLaneDispatchCore(
+    input: z.infer<typeof WorkflowDriveLaneDispatchRecordRequestSchema>
+  ): Promise<WorkflowDriveLedger>;
+  recordDriveLaneStatusCore(
+    input: z.infer<typeof WorkflowDriveLaneStatusRecordRequestSchema>
+  ): Promise<WorkflowDriveLedger>;
+  recordDriveNodeAttemptCore(
+    input: z.infer<typeof WorkflowDriveNodeAttemptRecordRequestSchema>
+  ): Promise<WorkflowDriveNodeAttempt>;
+  recordDrivePhaseCompletionCore(
+    input: z.infer<typeof WorkflowDriveLedgerPhaseCompletionRequestSchema>
+  ): Promise<WorkflowDriveLedger>;
+  releaseLaneCore(
+    input: z.infer<typeof AgentLaneReleaseRequestSchema>
+  ): Promise<AgentLaneReleaseReceipt>;
+  resolveCapsuleCore(
+    input: z.infer<typeof ResolveCapsuleRequestSchema>
+  ): Promise<ContextCapsuleRecord>;
+}
+
+export const createInProcessCapsuleSupervisorClient = (
+  self: CloudflareWorkflowCapsuleSupervisor
+): CapsuleSupervisorPorts => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Friend adapter in this module reaches private core methods without making them public Durable Object RPC methods.
+  const core = self as unknown as InProcessCapsuleSupervisorCore;
+
+  return {
+    async admitDrive(input) {
+      return WorkflowDriveAdmissionSchema.parse(
+        await core.admitDriveCore(WorkflowDriveLedgerRequestSchema.parse(input))
+      );
+    },
+    async admitLane(input): Promise<AgentLaneAdmissionDecision> {
+      return AgentLaneAdmissionDecisionSchema.parse(
+        await core.admitLaneCore(AgentLaneAdmissionRequestSchema.parse(input))
+      );
+    },
+    async appendEvent(input): Promise<void> {
+      await core.appendEventCore(AppendCapsuleEventRequestSchema.parse(input));
+    },
+    async assertActiveDriveGeneration(input): Promise<void> {
+      await core.assertActiveDriveGenerationCore(
+        WorkflowDriveGenerationAssertionRequestSchema.parse(input)
+      );
+    },
+    async loadDriveLedger(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await core.loadDriveLedgerCore(
+          WorkflowDriveLedgerRequestSchema.parse(input)
+        )
+      );
+    },
+    async loadLatestCheckpoint(input): Promise<RunStepCheckpoint | null> {
+      return await core.loadLatestCheckpointCore(
+        LoadRunCheckpointRequestSchema.parse(input)
+      );
+    },
+    async persistCheckpoint(input): Promise<void> {
+      await core.persistCheckpointCore(
+        PersistRunCheckpointRequestSchema.parse(input)
+      );
+    },
+    async recordDriveLaneDispatch(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await core.recordDriveLaneDispatchCore(
+          WorkflowDriveLaneDispatchRecordRequestSchema.parse(input)
+        )
+      );
+    },
+    async recordDriveLaneStatus(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await core.recordDriveLaneStatusCore(
+          WorkflowDriveLaneStatusRecordRequestSchema.parse(input)
+        )
+      );
+    },
+    async recordDriveNodeAttempt(input) {
+      return WorkflowDriveNodeAttemptSchema.parse(
+        await core.recordDriveNodeAttemptCore(
+          WorkflowDriveNodeAttemptRecordRequestSchema.parse(input)
+        )
+      );
+    },
+    async recordDrivePhaseCompletion(input) {
+      return WorkflowDriveLedgerSchema.parse(
+        await core.recordDrivePhaseCompletionCore(
+          WorkflowDriveLedgerPhaseCompletionRequestSchema.parse(input)
+        )
+      );
+    },
+    async releaseLane(input): Promise<AgentLaneReleaseReceipt> {
+      return AgentLaneReleaseReceiptSchema.parse(
+        await core.releaseLaneCore(AgentLaneReleaseRequestSchema.parse(input))
+      );
+    },
+    async resolve(input) {
+      return ContextCapsuleRecordSchema.parse(
+        await core.resolveCapsuleCore(ResolveCapsuleRequestSchema.parse(input))
+      );
+    },
+  };
+};
+
 /**
  * Builds the front door that drives a run from inside the supervisor DO's
  * `alarm()` invocation (M2.5 step 4). The DO receives the full Worker `Env` at
@@ -73,18 +212,22 @@ export interface WorkflowCapsuleSupervisorEnv {
  * async-contract behavior can be exercised without a live Sandbox/Artifacts.
  */
 export type CapsuleSupervisorRunDriverFactory = (
-  env: WorkflowCapsuleSupervisorEnv
+  env: WorkflowCapsuleSupervisorEnv,
+  supervisor: CloudflareWorkflowCapsuleSupervisor
 ) => Promise<WorkerFrontDoorContract> | WorkerFrontDoorContract;
 
 let runDriverFactoryOverride: CapsuleSupervisorRunDriverFactory | undefined;
 
 const defaultRunDriverFactory: CapsuleSupervisorRunDriverFactory = async (
-  env
+  env,
+  supervisor
 ) => {
   const { createFrontDoorFromEnv } =
     await import("./cloudflare-worker-route.ts");
 
-  return createFrontDoorFromEnv(env);
+  return createFrontDoorFromEnv(env, {
+    contextCapsulesOverride: createInProcessCapsuleSupervisorClient(supervisor),
+  });
 };
 
 export const __capsuleSupervisorTestHooks = {
@@ -97,16 +240,6 @@ export const __capsuleSupervisorTestHooks = {
 };
 
 const TimeoutMsSchema = z.coerce.number().int().min(1);
-
-const ResolveCapsuleRequestSchema = z.object({
-  runId: z.string().min(1),
-  workItemId: z.string().min(1),
-});
-
-const AppendCapsuleEventRequestSchema = z.object({
-  event: WorkflowEventSchema,
-  workItemId: z.string().min(1),
-});
 
 const SupervisorRecordSchema = z.object({
   // Active lanes carry their owning `runId` so the reaper can release only the
@@ -331,13 +464,21 @@ const withWorkMutationGeneration = (
     updatedAt,
   });
 
+const ledgerHasRecordedWorkMutation = (ledger: WorkflowDriveLedger): boolean =>
+  Object.keys(ledger.laneDispatches).length > 0 ||
+  Object.keys(ledger.laneStatuses).length > 0 ||
+  Object.keys(ledger.nodeAttempts).length > 0 ||
+  Object.keys(ledger.phases).length > 0;
+
 const seedUnknownWorkMutationGeneration = (
   ledger: WorkflowDriveLedger
 ): WorkflowDriveLedger =>
   ledger.lastWorkMutationGeneration === undefined
     ? WorkflowDriveLedgerSchema.parse({
         ...ledger,
-        lastWorkMutationGeneration: ledger.driveGeneration,
+        lastWorkMutationGeneration: ledgerHasRecordedWorkMutation(ledger)
+          ? ledger.driveGeneration
+          : 0,
       })
     : ledger;
 
@@ -711,16 +852,22 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async admitDrive(request: Request): Promise<Response> {
     const input = WorkflowDriveLedgerRequestSchema.parse(await request.json());
+
+    return json(await this.admitDriveCore(input));
+  }
+
+  private async admitDriveCore(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveAdmission> {
     const admission = await this.admitDriveForRun(input);
 
-    return json(
-      WorkflowDriveAdmissionSchema.parse({
-        driveGeneration: admission.driveGeneration,
-        ledger: admission.ledger,
-        runId: input.runId,
-        workItemId: input.workItemId,
-      })
-    );
+    return WorkflowDriveAdmissionSchema.parse({
+      driveGeneration: admission.driveGeneration,
+      ledger: admission.ledger,
+      runId: input.runId,
+      workItemId: input.workItemId,
+    });
   }
 
   private async assertDriveGeneration(request: Request): Promise<Response> {
@@ -728,7 +875,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await request.json()
     );
     try {
-      await this.assertActiveGeneration(input);
+      await this.assertActiveDriveGenerationCore(input);
     } catch (error) {
       if (error instanceof StaleDriveGenerationError) {
         return json(error.rejection, { status: 409 });
@@ -740,10 +887,25 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     return json({ ok: true });
   }
 
+  private async assertActiveDriveGenerationCore(input: {
+    readonly driveGeneration: number;
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<void> {
+    await this.assertActiveGeneration(input);
+  }
+
   private async loadDriveLedger(request: Request): Promise<Response> {
     const input = WorkflowDriveLedgerRequestSchema.parse(await request.json());
 
-    return json(await this.getDriveLedger(input));
+    return json(await this.loadDriveLedgerCore(input));
+  }
+
+  private async loadDriveLedgerCore(input: {
+    readonly runId: string;
+    readonly workItemId: string;
+  }): Promise<WorkflowDriveLedger> {
+    return await this.getDriveLedger(input);
   }
 
   private async recordDrivePhase(request: Request): Promise<Response> {
@@ -751,7 +913,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await request.json()
     );
     try {
-      await this.assertActiveGeneration(input);
+      return json(await this.recordDrivePhaseCompletionCore(input));
     } catch (error) {
       if (error instanceof StaleDriveGenerationError) {
         return json(error.rejection, { status: 409 });
@@ -759,6 +921,12 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
       throw error;
     }
+  }
+
+  private async recordDrivePhaseCompletionCore(
+    input: z.infer<typeof WorkflowDriveLedgerPhaseCompletionRequestSchema>
+  ): Promise<WorkflowDriveLedger> {
+    await this.assertActiveGeneration(input);
     const current = await this.getDriveLedger(input);
     const completedAt = nowIso();
     const phase = {
@@ -767,19 +935,17 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       driveGeneration: input.driveGeneration,
     };
 
-    return json(
-      await this.putDriveLedger({
-        ...withWorkMutationGeneration(
-          current,
-          input.driveGeneration,
-          completedAt
-        ),
-        phases: {
-          ...current.phases,
-          [phase.phaseId]: phase,
-        },
-      })
-    );
+    return await this.putDriveLedger({
+      ...withWorkMutationGeneration(
+        current,
+        input.driveGeneration,
+        completedAt
+      ),
+      phases: {
+        ...current.phases,
+        [phase.phaseId]: phase,
+      },
+    });
   }
 
   private async recordDriveNodeAttempt(request: Request): Promise<Response> {
@@ -787,7 +953,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await request.json()
     );
     try {
-      await this.assertActiveGeneration(input);
+      return json(await this.recordDriveNodeAttemptCore(input));
     } catch (error) {
       if (error instanceof StaleDriveGenerationError) {
         return json(error.rejection, { status: 409 });
@@ -795,6 +961,12 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
       throw error;
     }
+  }
+
+  private async recordDriveNodeAttemptCore(
+    input: z.infer<typeof WorkflowDriveNodeAttemptRecordRequestSchema>
+  ): Promise<WorkflowDriveNodeAttempt> {
+    await this.assertActiveGeneration(input);
 
     const current = await this.getDriveLedger(input);
     const nodeAttemptKey = String(input.nodeIndex);
@@ -823,7 +995,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       },
     });
 
-    return json(attempt);
+    return attempt;
   }
 
   private async recordDriveLaneDispatch(request: Request): Promise<Response> {
@@ -831,11 +1003,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await request.json()
     );
     try {
-      await this.assertActiveGeneration({
-        driveGeneration: input.driveGeneration,
-        runId: input.dispatch.runId,
-        workItemId: input.dispatch.workItemId,
-      });
+      return json(await this.recordDriveLaneDispatchCore(input));
     } catch (error) {
       if (error instanceof StaleDriveGenerationError) {
         return json(error.rejection, { status: 409 });
@@ -843,23 +1011,31 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
       throw error;
     }
+  }
+
+  private async recordDriveLaneDispatchCore(
+    input: z.infer<typeof WorkflowDriveLaneDispatchRecordRequestSchema>
+  ): Promise<WorkflowDriveLedger> {
+    await this.assertActiveGeneration({
+      driveGeneration: input.driveGeneration,
+      runId: input.dispatch.runId,
+      workItemId: input.dispatch.workItemId,
+    });
 
     const current = await this.getDriveLedger(input.dispatch);
     const { dispatch } = input;
 
-    return json(
-      await this.putDriveLedger({
-        ...withWorkMutationGeneration(
-          current,
-          input.driveGeneration,
-          dispatch.dispatchedAt
-        ),
-        laneDispatches: {
-          ...current.laneDispatches,
-          [dispatch.dispatchKey]: dispatch,
-        },
-      })
-    );
+    return await this.putDriveLedger({
+      ...withWorkMutationGeneration(
+        current,
+        input.driveGeneration,
+        dispatch.dispatchedAt
+      ),
+      laneDispatches: {
+        ...current.laneDispatches,
+        [dispatch.dispatchKey]: dispatch,
+      },
+    });
   }
 
   private async recordDriveLaneStatus(request: Request): Promise<Response> {
@@ -867,11 +1043,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       await request.json()
     );
     try {
-      await this.assertActiveGeneration({
-        driveGeneration: input.driveGeneration,
-        runId: input.statusReceipt.runId,
-        workItemId: input.statusReceipt.workItemId,
-      });
+      return json(await this.recordDriveLaneStatusCore(input));
     } catch (error) {
       if (error instanceof StaleDriveGenerationError) {
         return json(error.rejection, { status: 409 });
@@ -879,77 +1051,86 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
       throw error;
     }
+  }
+
+  private async recordDriveLaneStatusCore(
+    input: z.infer<typeof WorkflowDriveLaneStatusRecordRequestSchema>
+  ): Promise<WorkflowDriveLedger> {
+    await this.assertActiveGeneration({
+      driveGeneration: input.driveGeneration,
+      runId: input.statusReceipt.runId,
+      workItemId: input.statusReceipt.workItemId,
+    });
 
     const current = await this.getDriveLedger(input.statusReceipt);
     const { statusReceipt } = input;
 
-    return json(
-      await this.putDriveLedger({
-        ...withWorkMutationGeneration(
-          current,
-          input.driveGeneration,
-          statusReceipt.checkedAt
-        ),
-        laneStatuses: {
-          ...current.laneStatuses,
-          [statusReceipt.dispatchKey]: statusReceipt,
-        },
-      })
-    );
+    return await this.putDriveLedger({
+      ...withWorkMutationGeneration(
+        current,
+        input.driveGeneration,
+        statusReceipt.checkedAt
+      ),
+      laneStatuses: {
+        ...current.laneStatuses,
+        [statusReceipt.dispatchKey]: statusReceipt,
+      },
+    });
   }
 
   private async admitLane(request: Request): Promise<Response> {
     const input = AgentLaneAdmissionRequestSchema.parse(await request.json());
+
+    return json(await this.admitLaneCore(input));
+  }
+
+  private async admitLaneCore(
+    input: z.infer<typeof AgentLaneAdmissionRequestSchema>
+  ): Promise<AgentLaneAdmissionDecision> {
     const record = await this.getRecord();
     const activeLaneIds = activeLaneIdsOf(record);
 
     if (record.completedLaneIds.includes(input.laneId)) {
       const releaseCommitSha =
         record.laneReleases[input.laneId]?.artifactCommitSha;
-      return json(
-        AgentLaneAdmissionDecisionSchema.parse({
-          ...(releaseCommitSha === undefined
-            ? {}
-            : { artifactCommitSha: releaseCommitSha }),
-          kind: input.kind,
-          laneId: input.laneId,
-          runId: input.runId,
-          status: "already-completed",
-          workItemId: input.workItemId,
-        })
-      );
+      return AgentLaneAdmissionDecisionSchema.parse({
+        ...(releaseCommitSha === undefined
+          ? {}
+          : { artifactCommitSha: releaseCommitSha }),
+        kind: input.kind,
+        laneId: input.laneId,
+        runId: input.runId,
+        status: "already-completed",
+        workItemId: input.workItemId,
+      });
     }
 
     if (activeLaneIds.includes(input.laneId)) {
-      return json(
-        AgentLaneAdmissionDecisionSchema.parse({
-          activeLaneIds,
-          kind: input.kind,
-          laneId: input.laneId,
-          maxActiveLanes: input.maxActiveLanes,
-          reason: "already-active",
-          retryAfterSeconds: 1,
-          runId: input.runId,
-          status: "deferred",
-          workItemId: input.workItemId,
-        })
-      );
+      return AgentLaneAdmissionDecisionSchema.parse({
+        activeLaneIds,
+        kind: input.kind,
+        laneId: input.laneId,
+        maxActiveLanes: input.maxActiveLanes,
+        reason: "already-active",
+        retryAfterSeconds: 1,
+        runId: input.runId,
+        status: "deferred",
+        workItemId: input.workItemId,
+      });
     }
 
     if (activeLaneIds.length >= input.maxActiveLanes) {
-      return json(
-        AgentLaneAdmissionDecisionSchema.parse({
-          activeLaneIds,
-          kind: input.kind,
-          laneId: input.laneId,
-          maxActiveLanes: input.maxActiveLanes,
-          reason: "concurrency-cap-full",
-          retryAfterSeconds: 2,
-          runId: input.runId,
-          status: "deferred",
-          workItemId: input.workItemId,
-        })
-      );
+      return AgentLaneAdmissionDecisionSchema.parse({
+        activeLaneIds,
+        kind: input.kind,
+        laneId: input.laneId,
+        maxActiveLanes: input.maxActiveLanes,
+        reason: "concurrency-cap-full",
+        retryAfterSeconds: 2,
+        runId: input.runId,
+        status: "deferred",
+        workItemId: input.workItemId,
+      });
     }
 
     const nextActiveLaneOwners = {
@@ -968,23 +1149,30 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     await this.putRecord(nextRecord);
     await this.ensureReaperAlarm();
 
-    return json(
-      AgentLaneAdmissionDecisionSchema.parse({
-        activeLaneIds: Object.keys(nextActiveLaneOwners),
-        admissionId: `admission:${input.runId}:${input.laneId}:${crypto.randomUUID()}`,
-        admittedAt: nowIso(),
-        kind: input.kind,
-        laneId: input.laneId,
-        maxActiveLanes: input.maxActiveLanes,
-        runId: input.runId,
-        status: "admitted",
-        workItemId: input.workItemId,
-      })
-    );
+    return AgentLaneAdmissionDecisionSchema.parse({
+      activeLaneIds: Object.keys(nextActiveLaneOwners),
+      admissionId: `admission:${input.runId}:${input.laneId}:${crypto.randomUUID()}`,
+      admittedAt: nowIso(),
+      kind: input.kind,
+      laneId: input.laneId,
+      maxActiveLanes: input.maxActiveLanes,
+      runId: input.runId,
+      status: "admitted",
+      workItemId: input.workItemId,
+    });
   }
 
   private async appendEvent(request: Request): Promise<Response> {
     const input = AppendCapsuleEventRequestSchema.parse(await request.json());
+
+    await this.appendEventCore(input);
+
+    return json({ ok: true });
+  }
+
+  private async appendEventCore(
+    input: z.infer<typeof AppendCapsuleEventRequestSchema>
+  ): Promise<void> {
     const record = await this.getRecord();
     await this.putRecord(
       SupervisorRecordSchema.parse({
@@ -993,8 +1181,6 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
         workItemId: input.workItemId,
       })
     );
-
-    return json({ ok: true });
   }
 
   /**
@@ -1027,21 +1213,29 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
    */
   private async persistCheckpoint(request: Request): Promise<Response> {
     const input = PersistRunCheckpointRequestSchema.parse(await request.json());
+    try {
+      await this.persistCheckpointCore(input);
+    } catch (error) {
+      if (error instanceof StaleDriveGenerationError) {
+        return json(error.rejection, { status: 409 });
+      }
+
+      throw error;
+    }
+
+    return json({ ok: true });
+  }
+
+  private async persistCheckpointCore(
+    input: z.infer<typeof PersistRunCheckpointRequestSchema>
+  ): Promise<void> {
     const checkpoint = RunStepCheckpointSchema.parse(input.checkpoint);
     if (input.driveGeneration !== undefined) {
-      try {
-        await this.assertActiveGeneration({
-          driveGeneration: input.driveGeneration,
-          runId: checkpoint.runId,
-          workItemId: checkpoint.workItemId,
-        });
-      } catch (error) {
-        if (error instanceof StaleDriveGenerationError) {
-          return json(error.rejection, { status: 409 });
-        }
-
-        throw error;
-      }
+      await this.assertActiveGeneration({
+        driveGeneration: input.driveGeneration,
+        runId: checkpoint.runId,
+        workItemId: checkpoint.workItemId,
+      });
     }
     await this.ctx.storage.put(
       checkpointStorageKey(checkpoint.runId, checkpoint.stepIndex),
@@ -1055,8 +1249,6 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       runId: checkpoint.runId,
       workItemId: checkpoint.workItemId,
     });
-
-    return json({ ok: true });
   }
 
   private async clearDriveNodeAttemptsThrough(input: {
@@ -1124,20 +1316,17 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
    */
   private async loadLatestCheckpoint(request: Request): Promise<Response> {
     const input = LoadRunCheckpointRequestSchema.parse(await request.json());
-    const stored = await this.ctx.storage.list({
-      prefix: checkpointStoragePrefix(input.runId),
-    });
-    let latest: ReturnType<typeof RunStepCheckpointSchema.parse> | null = null;
-    for (const value of stored.values()) {
-      const checkpoint = RunStepCheckpointSchema.parse(value);
-      if (latest === null || checkpoint.stepIndex > latest.stepIndex) {
-        latest = checkpoint;
-      }
-    }
+    const latest = await this.loadLatestCheckpointCore(input);
 
     return json(
       LoadRunCheckpointResolutionSchema.parse({ checkpoint: latest })
     );
+  }
+
+  private async loadLatestCheckpointCore(
+    input: z.infer<typeof LoadRunCheckpointRequestSchema>
+  ): Promise<RunStepCheckpoint | null> {
+    return await this.latestCheckpointForRun(input.runId);
   }
 
   private async getRecordResponse(): Promise<Response> {
@@ -1414,7 +1603,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       }
       if (frontDoor === undefined) {
         const driver = runDriverFactoryOverride ?? defaultRunDriverFactory;
-        frontDoor = await driver(this.env);
+        frontDoor = await driver(this.env, this);
       }
 
       await this.ctx.storage.put(drivingMarkerStorageKey(request.runId), {
@@ -1801,6 +1990,13 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
 
   private async releaseLane(request: Request): Promise<Response> {
     const input = AgentLaneReleaseRequestSchema.parse(await request.json());
+
+    return json(await this.releaseLaneCore(input));
+  }
+
+  private async releaseLaneCore(
+    input: z.infer<typeof AgentLaneReleaseRequestSchema>
+  ): Promise<AgentLaneReleaseReceipt> {
     const record = await this.getRecord();
     const { [input.laneId]: _released, ...nextActiveLaneOwners } =
       record.activeLaneOwners;
@@ -1841,16 +2037,21 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
     });
     await this.putRecord(nextRecord);
 
-    return json(
-      AgentLaneReleaseReceiptSchema.parse({
-        ...receipt,
-        activeLaneIds,
-      })
-    );
+    return AgentLaneReleaseReceiptSchema.parse({
+      ...receipt,
+      activeLaneIds,
+    });
   }
 
   private async resolveCapsule(request: Request): Promise<Response> {
     const input = ResolveCapsuleRequestSchema.parse(await request.json());
+
+    return json(await this.resolveCapsuleCore(input));
+  }
+
+  private async resolveCapsuleCore(
+    input: z.infer<typeof ResolveCapsuleRequestSchema>
+  ): Promise<ContextCapsuleRecord> {
     const record = await this.getRecord();
     const capsule = ContextCapsuleRecordSchema.parse(
       record.capsule === undefined
@@ -1868,7 +2069,7 @@ export class CloudflareWorkflowCapsuleSupervisor extends DurableObject<WorkflowC
       })
     );
 
-    return json(capsule);
+    return capsule;
   }
 
   private async getRecord(): Promise<SupervisorRecord> {
@@ -1912,7 +2113,7 @@ const postJson = async (
 
 export const createCloudflareCapsuleSupervisorClient = (
   namespace: DurableObjectNamespace<CloudflareWorkflowCapsuleSupervisor>
-): ContextCapsuleActorContract & AgentLaneAdmissionControllerContract => {
+): CapsuleSupervisorPorts => {
   const stubFor = (workItemId: string): DurableObjectStub =>
     namespace.get(namespace.idFromName(workItemId));
 

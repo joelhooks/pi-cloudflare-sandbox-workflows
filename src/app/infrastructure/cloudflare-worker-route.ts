@@ -58,6 +58,7 @@ import {
 } from "./cloudflare-workflow-event-stream.ts";
 import type { WorkflowRunStatusSnapshot } from "./cloudflare-workflow-event-stream.ts";
 import { createCloudflareWorkflowFrontDoor } from "./cloudflare-workflow-front-door.ts";
+import type { CloudflareWorkflowFrontDoorConfig } from "./cloudflare-workflow-front-door.ts";
 import {
   createCloudflareWorkflowRunsListReader,
   createCloudflareWorkflowRunWorkItemReader,
@@ -306,8 +307,13 @@ const bearerToken = (request: Request): null | string => {
   return authorization.slice(prefix.length);
 };
 
+export interface CreateFrontDoorFromEnvOptions {
+  readonly contextCapsulesOverride?: CloudflareWorkflowFrontDoorConfig["contextCapsules"];
+}
+
 export const createFrontDoorFromEnv = (
-  env: unknown
+  env: unknown,
+  options: CreateFrontDoorFromEnvOptions = {}
 ): WorkerFrontDoorContract => {
   const bindings = WorkerEnvBindingSchema.parse(env);
   const discordBotSecretRef = bindings.DISCORD_BOT_SECRET_REF;
@@ -346,7 +352,17 @@ export const createFrontDoorFromEnv = (
       policyId: bindings.WORKFLOW_APP_DISCORD_POLICY_ID,
       wzrrdSecretRef: bindings.WZRRD_PUBLISH_SECRET_REF,
     },
-    capsuleSupervisor: bindings.WORKFLOW_CAPSULE_SUPERVISOR,
+    // The in-DO drive path injects an in-process `contextCapsules` client so it
+    // never self-fetches its own Durable Object (the subrequest-depth carrier
+    // wound). When that override is present we deliberately DROP the namespace
+    // binding from the config: the depth limit must not be load-bearing for
+    // correctness. If a future edit ever drops the override, the front door has
+    // no namespace to fall back to, so `resolveCapsuleSupervisor` throws a clear
+    // construction error here-and-now instead of recursing to a depth-32 melt on
+    // node 3 in production. The public worker route keeps the namespace client.
+    ...(options.contextCapsulesOverride === undefined
+      ? { capsuleSupervisor: bindings.WORKFLOW_CAPSULE_SUPERVISOR }
+      : { contextCapsules: options.contextCapsulesOverride }),
     ...workflowCartridgeDependenciesFromWorkerBindings(bindings),
     d1: bindings.WORKFLOW_APP_D1,
     discordMessages: createCloudflareDiscordMessageAdapter({

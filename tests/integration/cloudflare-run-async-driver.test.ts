@@ -2,7 +2,11 @@ import type * as CloudflareWorkersModule from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import type { WorkerFrontDoorContract } from "../../src/app/application/ports.ts";
+import type {
+  AgentLaneAdmissionControllerContract,
+  ContextCapsuleActorContract,
+  WorkerFrontDoorContract,
+} from "../../src/app/application/ports.ts";
 import { MAX_STALL_GENERATIONS } from "../../src/app/application/workflow-drive-constants.ts";
 import {
   LoadRunCheckpointResolutionSchema,
@@ -10,6 +14,7 @@ import {
   StaleDriveGenerationRejectionSchema,
   WorkflowDriveAdmissionSchema,
   WorkflowDriveLedgerSchema,
+  WorkflowDriveLaneDispatchSchema,
   WorkflowDriveLaneStatusReceiptSchema,
   WorkflowRunBlockedSchema,
   WorkflowRunPausedSchema,
@@ -20,6 +25,7 @@ import type {
   WorkflowRunRequest,
 } from "../../src/app/domain/schemas.ts";
 import type { WorkflowCapsuleSupervisorEnv } from "../../src/app/infrastructure/cloudflare-capsule-supervisor.ts";
+import type * as CloudflareWorkerRouteModule from "../../src/app/infrastructure/cloudflare-worker-route.ts";
 import { buildIntegrationTestRunRequest } from "./workflow-app-fixtures.ts";
 
 class StubDurableObject {
@@ -36,10 +42,27 @@ class StubDurableObject {
 // `DurableObject` base so the supervisor DO's async run driver can be exercised
 // without the workerd runtime.
 const cloudflareWorkersStub = { DurableObject: StubDurableObject };
+const workerRouteMock = vi.hoisted(() => ({
+  createFrontDoorFromEnv: vi.fn<
+    (
+      env: WorkflowCapsuleSupervisorEnv,
+      options?: {
+        readonly contextCapsulesOverride?: ContextCapsuleActorContract &
+          AgentLaneAdmissionControllerContract;
+      }
+    ) => WorkerFrontDoorContract
+  >(),
+}));
+
 vi.mock(
   import("cloudflare:workers"),
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The partial stub provides only the DurableObject base the supervisor extends.
   () => cloudflareWorkersStub as unknown as typeof CloudflareWorkersModule
+);
+vi.mock(
+  import("../../src/app/infrastructure/cloudflare-worker-route.ts"),
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The mock supplies only createFrontDoorFromEnv for this suite's dynamic import.
+  () => workerRouteMock as unknown as typeof CloudflareWorkerRouteModule
 );
 
 const { __capsuleSupervisorTestHooks, CloudflareWorkflowCapsuleSupervisor } =
@@ -114,6 +137,36 @@ const createSupervisor = (
   const env = envOverride as unknown as WorkflowCapsuleSupervisorEnv;
 
   return new CloudflareWorkflowCapsuleSupervisor(durableState, env);
+};
+
+const createThrowingSupervisorNamespace = (): {
+  readonly fetchCalls: string[];
+  readonly namespace: WorkflowCapsuleSupervisorEnv["WORKFLOW_CAPSULE_SUPERVISOR"];
+} => {
+  const fetchCalls: string[] = [];
+  const namespace = {
+    get() {
+      return {
+        fetch(request: Request) {
+          fetchCalls.push(request.url);
+
+          throw new Error("same-DO supervisor fetch is forbidden in this test");
+        },
+      };
+    },
+    idFromName(name: string) {
+      return { name };
+    },
+  };
+
+  const typedNamespace =
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The test only needs idFromName/get/fetch; a real Worker runtime supplies the full DurableObjectNamespace.
+    namespace as unknown as WorkflowCapsuleSupervisorEnv["WORKFLOW_CAPSULE_SUPERVISOR"];
+
+  return {
+    fetchCalls,
+    namespace: typedNamespace,
+  };
 };
 
 const createBlockedFrontDoor = (
@@ -732,6 +785,185 @@ describe("Capsule supervisor async run driver", () => {
     }
   });
 
+  it("drives node 3 through in-process supervisor ports without self-fetching the supervisor namespace", async () => {
+    const state = createFakeDurableObjectState();
+    const { fetchCalls, namespace } = createThrowingSupervisorNamespace();
+    const supervisor = createSupervisor(state, {
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+      WORKFLOW_CAPSULE_SUPERVISOR: namespace,
+    });
+    const request = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-zero-self-fetch-node-3",
+    };
+    const observedNodeAttempts: number[] = [];
+    const observedLaneDispatches: number[] = [];
+    type ContextCapsulesOverride = ContextCapsuleActorContract &
+      AgentLaneAdmissionControllerContract;
+    workerRouteMock.createFrontDoorFromEnv.mockImplementation(
+      (
+        env: WorkflowCapsuleSupervisorEnv,
+        options: {
+          readonly contextCapsulesOverride?: ContextCapsulesOverride;
+        } = {}
+      ): WorkerFrontDoorContract => ({
+        route: "POST /runs",
+        async startRun(input, driveOptions) {
+          const parsed = WorkflowRunRequestSchema.parse(input);
+          const contextCapsules = options.contextCapsulesOverride;
+          if (contextCapsules === undefined) {
+            const stub = env.WORKFLOW_CAPSULE_SUPERVISOR.get(
+              env.WORKFLOW_CAPSULE_SUPERVISOR.idFromName(parsed.workItemId)
+            );
+            await stub.fetch(
+              new Request("https://supervisor.internal/admit-drive", {
+                body: JSON.stringify({
+                  runId: parsed.runId,
+                  workItemId: parsed.workItemId,
+                }),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+              })
+            );
+            throw new Error("expected same-DO fetch fallback to throw");
+          }
+          if (driveOptions?.driveGeneration === undefined) {
+            throw new Error("single-step drive generation missing");
+          }
+
+          await contextCapsules.loadDriveLedger({
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          });
+          await contextCapsules.assertActiveDriveGeneration({
+            driveGeneration: driveOptions.driveGeneration,
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          });
+          await contextCapsules.resolve({
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          });
+          await contextCapsules.loadLatestCheckpoint({
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          });
+          const attempt = await contextCapsules.recordDriveNodeAttempt({
+            driveGeneration: driveOptions.driveGeneration,
+            nodeIndex: 3,
+            runId: parsed.runId,
+            stepId: "generated-node-3",
+            workItemId: parsed.workItemId,
+          });
+          observedNodeAttempts.push(attempt.nodeIndex);
+          const admitted = await contextCapsules.admitLane({
+            kind: "worker",
+            laneId: `lane:worker:${parsed.runId}:generated-node-3`,
+            maxActiveLanes: 2,
+            requestedAt: "2026-06-14T00:00:03.000Z",
+            runId: parsed.runId,
+            workItemId: parsed.workItemId,
+          });
+          if (admitted.status !== "admitted") {
+            throw new Error(`unexpected admission status ${admitted.status}`);
+          }
+          const dispatch = WorkflowDriveLaneDispatchSchema.parse({
+            deadline: "2026-06-14T00:10:03.000Z",
+            dispatchKey: "3:generated-node-3",
+            dispatchedAt: "2026-06-14T00:00:03.000Z",
+            expectedOutputArtifactRefs: [
+              `artifact://workflow-app/runs/${parsed.runId}/lanes/generated-node-3/output.json`,
+            ],
+            expectedReceiptArtifactRef: `artifact://workflow-app/runs/${parsed.runId}/receipts/generated-node-3.json`,
+            kind: "worker",
+            laneAuthLeaseId: "lease:node-3",
+            laneId: `lane:worker:${parsed.runId}:generated-node-3`,
+            nodeIndex: 3,
+            processId: "process-node-3",
+            promptArtifactRef: `artifact://workflow-app/runs/${parsed.runId}/lanes/generated-node-3/prompt.md`,
+            runId: parsed.runId,
+            sandboxId: "sandbox-node-3",
+            schemaVersion: "workflow.drive-lane-dispatch.v1",
+            status: "lane-dispatched",
+            stepId: "generated-node-3",
+            workItemId: parsed.workItemId,
+          });
+          await contextCapsules.recordDriveLaneDispatch({
+            dispatch,
+            driveGeneration: driveOptions.driveGeneration,
+          });
+          observedLaneDispatches.push(dispatch.nodeIndex);
+          await contextCapsules.releaseLane({
+            artifactCommitSha: "1234567890abcdef1234567890abcdef12345678",
+            kind: "worker",
+            laneId: dispatch.laneId,
+            releasedAt: "2026-06-14T00:00:04.000Z",
+            runId: parsed.runId,
+            status: "completed",
+            workItemId: parsed.workItemId,
+          });
+          await contextCapsules.persistCheckpoint({
+            checkpoint: {
+              capabilityReceipts: [],
+              completedStepIds: [
+                "capture-run",
+                "capture-generated-machine",
+                "capture-generated-plan",
+                "generated-node-3",
+              ],
+              envelopeSnapshot: { status: "active" },
+              executionArtifactRefs: [],
+              generatedMachineSnapshot: { status: "active" },
+              generatedStateSequence: [],
+              outputArtifactRefs: [],
+              persistedAt: "2026-06-14T00:00:05.000Z",
+              runId: parsed.runId,
+              schemaVersion: "workflow.run-step-checkpoint.v1",
+              stepIndex: 3,
+              workItemId: parsed.workItemId,
+              workerLaneReceipts: [],
+            },
+            driveGeneration: driveOptions.driveGeneration,
+            workItemId: parsed.workItemId,
+          });
+
+          return WorkflowRunPausedSchema.parse({
+            completedStepIds: ["generated-node-3"],
+            eventLog: [],
+            runId: parsed.runId,
+            status: "paused",
+            stepIndex: 3,
+          });
+        },
+      })
+    );
+    try {
+      await startRun(supervisor, request);
+      await supervisor.alarm();
+      const latestCheckpoint = await loadLatestCheckpoint(supervisor, request);
+
+      expect({
+        fetchCalls,
+        laneDispatches: observedLaneDispatches,
+        latestCheckpointStepIndex: latestCheckpoint?.stepIndex ?? null,
+        nodeAttempts: observedNodeAttempts,
+        runStartKeptAfterPause: state.store.has(runStartKey(request)),
+        workerRouteCallCount:
+          workerRouteMock.createFrontDoorFromEnv.mock.calls.length,
+      }).toStrictEqual({
+        fetchCalls: [],
+        laneDispatches: [3],
+        latestCheckpointStepIndex: 3,
+        nodeAttempts: [3],
+        runStartKeptAfterPause: true,
+        workerRouteCallCount: 1,
+      });
+    } finally {
+      workerRouteMock.createFrontDoorFromEnv.mockReset();
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
   it("does not re-drive a run once its alarm has fired", async () => {
     const state = createFakeDurableObjectState();
     const supervisor = createSupervisor(state);
@@ -1167,6 +1399,92 @@ describe("Capsule supervisor async run driver", () => {
           maxStallGenerations: String(MAX_STALL_GENERATIONS),
           reaperReason: "drive-stall-generations",
           stallGenerations: String(MAX_STALL_GENERATIONS),
+        },
+      });
+    } finally {
+      __capsuleSupervisorTestHooks.resetRunDriverFactory();
+    }
+  });
+
+  it("reaps a pre-existing zero-work ledger with no low-water mark within MAX_STALL_GENERATIONS alarms", async () => {
+    const state = createFakeDurableObjectState();
+    const request = {
+      ...buildIntegrationTestRunRequest(),
+      runId: "run-stall-legacy-zero-work-ledger",
+    };
+    const { d1, events, run } = createMutableRunD1(request);
+    const supervisor = createSupervisor(state, {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- minimal D1 fake models the status/projection writes used by the stall reaper.
+      WORKFLOW_APP_D1: d1 as unknown as NonNullable<
+        WorkflowCapsuleSupervisorEnv["WORKFLOW_APP_D1"]
+      >,
+      WORKFLOW_APP_TIMEOUT_MS: TEST_TIMEOUT_MS,
+    });
+    state.store.set(
+      `drive-ledger:${request.runId}`,
+      WorkflowDriveLedgerSchema.parse({
+        driveGeneration: 28,
+        laneDispatches: {},
+        laneStatuses: {},
+        nodeAttempts: {},
+        phases: {},
+        runId: request.runId,
+        schemaVersion: "workflow.drive-ledger.v1",
+        updatedAt: "2026-06-14T00:00:00.000Z",
+        workItemId: request.workItemId,
+      })
+    );
+
+    const driveGenerations: number[] = [];
+    __capsuleSupervisorTestHooks.setRunDriverFactory(() => ({
+      route: "POST /runs",
+      startRun(input, options) {
+        WorkflowRunRequestSchema.parse(input);
+        if (options?.driveGeneration !== undefined) {
+          driveGenerations.push(options.driveGeneration);
+        }
+        throw new Error("legacy zero-work ledger should reap before driving");
+      },
+    }));
+    try {
+      await startRun(supervisor, request);
+      for (
+        let alarmCount = 0;
+        alarmCount < MAX_STALL_GENERATIONS;
+        alarmCount += 1
+      ) {
+        state.alarmAt = null;
+        // eslint-disable-next-line no-await-in-loop -- alarm redrives are sequential.
+        await supervisor.alarm();
+      }
+
+      const ledger = await loadDriveLedger(supervisor, request);
+      const lastEvent = events.at(-1);
+
+      expect({
+        blockerMessage: run.blocker_message,
+        driveGenerations,
+        finalStatus: run.status,
+        ledgerDriveGeneration: ledger.driveGeneration,
+        ledgerLastWorkMutationGeneration: ledger.lastWorkMutationGeneration,
+        runStartRetired: !state.store.has(runStartKey(request)),
+        stallEventRefs:
+          lastEvent === undefined
+            ? null
+            : StallEventRefsSchema.parse(JSON.parse(lastEvent.refs_json)),
+      }).toStrictEqual({
+        blockerMessage: "wedged: 28 consecutive drives advanced no ledger work",
+        driveGenerations: [],
+        finalStatus: "blocked",
+        ledgerDriveGeneration: 28,
+        ledgerLastWorkMutationGeneration: 0,
+        runStartRetired: true,
+        stallEventRefs: {
+          driveGeneration: "28",
+          lastWorkMutationGeneration: "0",
+          maxStallGenerations: String(MAX_STALL_GENERATIONS),
+          reaperReason: "drive-stall-generations",
+          stallGenerations: "28",
         },
       });
     } finally {
