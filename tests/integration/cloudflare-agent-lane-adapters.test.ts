@@ -1006,10 +1006,14 @@ describe("Cloudflare Pi verifier lane adapter", () => {
     });
 
     // The hitl-report MDSvX is the verifier's redaction/noindex/proof-below-dreams
-    // target. Its safety-critical markers live in the TAIL — well past the old
-    // 2500 head cap — so a head-truncated snapshot would hide exactly what must be
-    // confirmed. These sentinels are placed past 2500 chars to prove the report is
-    // presented in full while ordinary evidence is still head-truncated.
+    // target. Its safety-critical markers live in the TAIL, and a production
+    // report renders in the ~60–90k char range (the findings section is one
+    // analysis-lane response near its output-token budget). This fixture is sized
+    // ~85k ON PURPOSE — above the FALSIFIED 60k guess, below the runaway backstop —
+    // so it reproduces the live block (run-live-20260615T003009433Z-0ba8dd24) that
+    // the old polite ~3.3k fixture could never trigger. On the old 60k ceiling the
+    // tail markers below get sliced and the report blocks; on the derived 262_144
+    // ceiling the full report survives. Other evidence is still head-truncated.
     const mdsvxTailSentinel = "MDSVX-TAIL-SENTINEL-9f3a";
     const inBudgetReportMdsvx = [
       "---",
@@ -1017,7 +1021,7 @@ describe("Cloudflare Pi verifier lane adapter", () => {
       "template: joel/tufte-mdsvx@0.1.0",
       "---",
       "## The actual findings",
-      "f".repeat(3200),
+      "f".repeat(85_000),
       "## Dynamic generation proof",
       "## What did not happen",
       "Raw transcripts were not returned.",
@@ -1029,10 +1033,12 @@ describe("Cloudflare Pi verifier lane adapter", () => {
       "p".repeat(3200),
       plainTailSentinel,
     ].join("\n");
+    // Pathological generator runaway: above the 262_144 backstop, so the block-
+    // marker must fire and the tail must be excluded.
     const overflowSentinel = "MDSVX-OVERFLOW-SENTINEL-4b8e";
     const overflowReportMdsvx = [
       "## The actual findings",
-      "z".repeat(60_500),
+      "z".repeat(300_000),
       overflowSentinel,
     ].join("\n");
 
@@ -1082,8 +1088,9 @@ describe("Cloudflare Pi verifier lane adapter", () => {
     const prompt = harness.capturedRequests.at(0)?.prompt ?? "";
 
     expect({
-      // In-budget MDSvX: full document reaches the prompt, including the tail
-      // redaction attestation and proof section past the old 2500 head cap.
+      // In-budget MDSvX (~85k): full document reaches the prompt, including the
+      // tail redaction attestation and proof section past the FALSIFIED 60k
+      // ceiling that blocked the live run.
       mdsvxProofSectionSurvives: prompt.includes("## Dynamic generation proof"),
       mdsvxRedactionAttestationSurvives: prompt.includes(
         "Raw transcripts were not returned."

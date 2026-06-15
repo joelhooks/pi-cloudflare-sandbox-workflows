@@ -855,12 +855,23 @@ const verifierPromptFor = (input: {
   // must confirm NOTHING un-redacted lives anywhere in it, that noindex is set
   // via the declared template, and that proof sits below dreams. None of that is
   // confirmable from a head-truncated view — raw content could hide in the tail
-  // and be falsely blessed, then published. The report is bounded by
-  // construction (capped findings/proposals, bounded D2 figure), so present it
-  // in full up to a high safety ceiling. If a pathological report blows the
-  // ceiling, emit a LEGIBLE block-marker (not a silent "[truncated]") so the
-  // verifier blocks rather than accepting an unseen, possibly-unredacted tail.
-  const reportEvidenceTextLimit = 60_000;
+  // and be falsely blessed, then published. So the report is presented in FULL up
+  // to a runaway-backstop ceiling.
+  //
+  // The bound is DERIVED, not guessed. The report's variable bulk is the findings
+  // section, emitted by a SINGLE analysis-lane agent response, so it is bounded by
+  // that lane's output-token budget plus a fixed template and a bounded D2 figure.
+  // A verbose lane response renders the report in the ~60–90k char range — the
+  // original 60_000 ceiling was a vibes-estimate of "bounded by construction" and
+  // live run run-live-20260615T003009433Z-0ba8dd24 overflowed it and blocked, so
+  // the GUESS was the bug, falsified in production. The verifier is a pi/Claude
+  // agent with a 200k+ token context and the prompt is delivered via @file (no
+  // argv/E2BIG limit, wound #35), so a full report even at this ceiling is a small
+  // fraction of context. The ceiling therefore sits far above any legitimate
+  // report; only a pathological generator runaway can trip it, and on overflow we
+  // emit a LEGIBLE block-marker (not a silent "[truncated]") so the verifier
+  // blocks rather than accepting an unseen, possibly-unredacted tail.
+  const reportEvidenceTextLimit = 262_144;
   const truncateEvidenceText = (text: string, mediaType: string): string => {
     if (mediaType === "text/mdsvx") {
       return text.length > reportEvidenceTextLimit

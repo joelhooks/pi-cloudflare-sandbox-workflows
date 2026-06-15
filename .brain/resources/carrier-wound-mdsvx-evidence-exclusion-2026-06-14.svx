@@ -204,6 +204,84 @@ finds a genuine redaction or noindex defect, that is a new, true signal about th
 report generator — not this carrier wound, and not to be silenced by re-blinding
 the verifier. One fresh deploy carries the change; the next live drive says which.
 
+## fix-v2: the live drive falsified my "bounded by construction" guess (2026-06-15)
+
+The fix above shipped and deployed. The next live drive,
+`run-live-20260615T003009433Z-0ba8dd24`, went terminal `blocked:
+capability_denied` — and this time the verifier was **not** blind. Part 1
+worked: the report reached it as a `text/mdsvx` Output Evidence Snapshot. Part 2
+is where I was wrong. The real rendered report **overflowed the 60_000 ceiling**
+and tripped my own overflow block-marker. The verifier blocked because it was
+handed `[REPORT TRUNCATED — … this report must block rather than be accepted]`
+instead of the report's tail.
+
+So the block was real, but it was not a redaction defect in the report
+generator. It was **my ceiling guess being wrong.** The receipt above claimed the
+report is "bounded by construction … so it fits comfortably under the ceiling in
+practice." That sentence was a vibes-estimate dressed as a derivation, and the
+live drive falsified it. This is the same Ousterhout file-format leak as the
+original wound, one level deeper: the prompt builder (`verifierPromptFor`)
+encoded a **size** assumption (60k) about the report that the report generator
+(`reportMdsvxFor`) violates. I fixed *which* file is evidence and *whether* its
+tail survives, then re-introduced the same class as a wrong number.
+
+> "As with any performance issue, you need to measure within your environment to
+> find out how much of a factor this is."
+> — Martin Fowler, *Patterns of Enterprise Application Architecture*
+
+I set a bound by assumption instead of measuring the real artifact in the real
+environment. The deployed live drive **was** the measurement, and it found the
+60k ceiling was very much a factor — it blocked.
+
+### The derived (not guessed) ceiling: 262_144
+
+The report's variable bulk is the findings section, emitted by a **single
+analysis-lane agent response**. That is bounded by the lane's output-token
+budget plus a fixed template and a bounded D2 figure. Schema caps confirm the
+count bound: `maxProposals: z.number().int().min(1).max(20).default(8)` slices
+findings to ≤20. The free-text fields (`reasoning`/`summary`/`recommendation`)
+carry `.min(1)` and **no** `.max()`, so the report is bounded by *count* and the
+lane's *output budget*, not by a per-field char cap. A verbose lane response
+renders the report in the ~60–90k char range — which is exactly why a 60k ceiling
+was doomed: a legitimate verbose report clears it.
+
+The new ceiling is `262_144` (256 KiB, ~65k tokens). The verifier is a pi/Claude
+agent with a 200k+ token context, and the prompt is delivered via `@file` (wound
+#35 — no argv/E2BIG limit), so even a full report at this ceiling is a small
+fraction of the verifier's context. The ceiling now sits far above any legitimate
+report; only a pathological generator runaway can trip it, and on overflow we
+still emit the legible block-marker so the verifier blocks rather than blessing an
+unseen tail. The safety property is unchanged; only the runaway-backstop value
+moved from a guess to a derived bound.
+
+### The polite-fixture test gap that let the guess ship green
+
+The Layer-2 chaos test had an "in-budget" mdsvx fixture of only ~3.3k chars — it
+never exercised the 60k boundary, so it passed green while the real 60k+ report
+blocked live. That is a sizing-variant `[[polite-fakes-franchise-wound]]`: the
+double was politer than production because it was *smaller* than production. The
+fix resizes the fixture to **production magnitude**: `inBudgetReportMdsvx` is now
+`"f".repeat(85_000)` with its proof/redaction/tail sentinels placed *past the
+falsified 60k ceiling* (so a 60k cap would slice them off), and
+`overflowReportMdsvx` is `"z".repeat(300_000)` above the new 262_144 ceiling.
+
+**Falsified both ways.** With the resized fixture and the ceiling reverted to
+`60_000`, the test goes **red** (`mdsvxProofSectionSurvives: false`,
+`mdsvxRedactionAttestationSurvives: false`, `mdsvxTailSurvives: false`) —
+reproducing the live block in-suite. With the ceiling at `262_144`, it goes
+**green**. The test now fails for the same reason the live run did, which is the
+whole point of a hostile double.
+
+### What fix-v2 still does NOT claim
+
+Same skepticism as the original. This proves the report now reaches the verifier
+in full at production magnitude and that an *actual* runaway still blocks loudly.
+It does **not** prove the run reaches `captured` — only a live re-drive on the
+deployed fix-v2 does. And the original caveat stands, now load-bearing: if the
+verifier reads the full report and finds a genuine redaction/noindex/proof-order
+defect, that is a **new, true signal about the report generator** — a distinct
+wound, not to be silenced by re-blinding or re-lowering the ceiling.
+
 ## The carrier discipline (seventeenth carrier wound)
 
 #35 fixed *whether the verifier could speak at all.* #36 fixed *a check that
