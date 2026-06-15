@@ -1,0 +1,167 @@
+---
+title: "Carrier Wound #41: An Unprovisioned Cartridge Installer Returned {} And Vanished Its Adapter, So Its Planned Nodes Routed To A Foreign Adapter That Mis-Answered With An Error Naming The Wrong Subsystem."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - workflow-cartridges
+  - workflow-node-adapter
+  - composite-adapter
+  - fail-closed
+  - fail-fast
+  - no-hollow-capability
+  - vanishing-adapter
+  - ownership-routing
+  - grant-dont-loosen
+  - additive-fix
+  - carrier-finding
+  - chaos-suite
+  - polite-fakes
+  - noindex
+source: "wound-41-vanishing-adapter"
+---
+
+# Carrier Wound #41: The Unprovisioned Installer Vanished Its Adapter, And A Foreign Adapter Answered For Nodes It Did Not Own.
+
+The D3 burn-in restarted after the wound #38 dream capture, and wound #40 cleared
+admission for the support-sweep shape. One gate later — the executor — the
+**support-sweep** run `run-live-20260615T021858572Z-ec8eb69c` went terminal at
+stepId `inventory-aihero-sources`:
+
+```
+run blocked: adapter_unavailable
+  "Memory fabric workflow node adapter does not support nodeType
+   aihero.support-sweep.source-inventory."
+```
+
+Read that error literally: the **memory-fabric** adapter is answering for an
+**aihero** node. The wrong subsystem is holding the bag. The planner mounted
+aihero, planned an aihero node, and at execution time the memory-fabric adapter
+got handed a node it has no business touching — and dutifully reported that it
+"does not support" it. That message is true and useless. It points the operator
+at memory-fabric to fix an aihero provisioning gap.
+
+## The wound: `return {}` is a silent vanish, not a no-op
+
+Each Cloudflare cartridge installer's `resolve()` returns its dependencies. When
+the relay binding is absent, both the memory-fabric and aihero installers took
+the same shortcut:
+
+```ts
+if (relayBaseUrl === undefined) {
+  return {}; // <- the wound: contribute NOTHING
+}
+```
+
+`combineCloudflareWorkflowCartridgeDependencies` flatMaps the installers' results
+and **filters out** any dependency with no `createWorkflowNodeAdapter`. So an
+empty `{}` does not "stand down politely" — it **erases the cartridge from the
+adapter set entirely**. On the live Worker, memory-fabric WAS provisioned and
+aihero was NOT, so the surviving adapter set was `[memory-fabric]` only. With a
+single adapter, the combiner returns it directly (no composite), and every node —
+including aihero's — routes to memory-fabric, which mis-answers.
+
+This is the **no-hollow-capability rule in adapter form**. A verifier with no
+tools reviews nothing — strictly worse than a runaway. An executor with no
+adapter blocks nothing it owns — strictly worse than one that fails closed. An
+absent adapter is not neutral: it lets a *foreign* adapter answer for nodes it
+does not own and aims the operator at the wrong fix. The class is not "aihero
+wasn't provisioned." It is "**an unprovisioned cartridge deleted itself from the
+routing table instead of staying present to honestly refuse its own work.**"
+
+## The fix: stay present, fail closed, claim your own palette
+
+A shared `createUnprovisionedCartridgeWorkflowNodeAdapter` helper. An unprovisioned
+installer no longer vanishes — it contributes an honest fail-closed adapter that:
+
+- For nodeTypes the cartridge **owns** (its config-schema palette): returns a
+  **terminal** `secret_denied` blocker naming the cartridge and the missing
+  binding — `"workflow/aihero-support-sweep mounted and planned nodeType
+  aihero.support-sweep.source-inventory, but its live executor is unprovisioned:
+  AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL is not set on the deployed Worker."`
+- For nodeTypes it does **not** own: returns `adapter_unavailable`, so the
+  composite falls through to the true owner — exactly as a fully-wired adapter's
+  own non-matching fall-through behaves.
+
+The owned-node blocker MUST be terminal (`secret_denied`, not
+`adapter_unavailable`): `createCompositeWorkflowNodeAdapter` *skips*
+`adapter_unavailable` to try the next adapter. An `adapter_unavailable` here would
+fall straight through to the foreign adapter and reproduce the misleading error.
+`adapter_unavailable` is the **only** code the composite skips; every other
+blocker is returned immediately. So ownership routing is enforced by the blocker
+code: own it → terminal block at the right owner; disown it → skip to the owner.
+Both installers now share this helper — the fix is a **class** fix, not an aihero
+instance fix. Memory-fabric unprovisioned blocks `joelclaw.memory.*`; aihero
+unprovisioned blocks `aihero.support-sweep.*`; neither vanishes; neither answers
+for the other's nodes.
+
+## GRANT, don't loosen — and the second gate is Joel's
+
+This carrier fix makes the failure **honest and precisely routed**. It does NOT
+provision the relay. `AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL` is a new network
+boundary to customer-private support data — that is an owner decision, not a
+carrier patch. Post-fix, the support-sweep run reaches a TRUE blocker that names
+the real gap at the right subsystem, instead of a false one pointing at
+memory-fabric. The burn-in "both shapes reach captured" cannot complete for the
+support-sweep shape until that provisioning gate is decided. The carrier did its
+job: it stopped lying about where the wall is.
+
+## The hostile double: drive the real installer assembly, not synthetic adapters
+
+The chaos suite
+(`tests/integration/cloudflare-workflow-cartridge-installer.test.ts`) drives the
+**real** `workflowCartridgeDependenciesFromWorkerBindings` →
+`aiHeroSupportSweepCloudflareCartridgeInstaller` /
+`memoryFabricCloudflareCartridgeInstaller`, with bindings parsed through the
+production `InstalledWorkflowCartridgeEnvBindingSchema` — the exact resolve()/
+combine() path the deployed Worker runs. No polite mock stands in for the
+installer.
+
+- **The live wound** (memory provisioned, aihero not): the aihero package is
+  PINNED with its source-inventory workflow-node export, reproducing the live
+  condition exactly — the planner mounted aihero and planned its node. This makes
+  memory-fabric's artifact-backed wrapper PASS export verification and delegate to
+  the inner adapter (which emits the skippable `adapter_unavailable`), rather than
+  short-circuiting on a `stale_package` blocker that would never reach the aihero
+  adapter. Asserts the aihero node reaches a `secret_denied` naming
+  `AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL` and `workflow/aihero-support-sweep`, NOT
+  "Memory fabric."
+- **The class** (both unprovisioned): an aihero node blocks at the aihero binding;
+  a `joelclaw.memory.search` node blocks at `MEMORY_RELAY_BASE_URL`; each disowns
+  the other's palette. Ownership routing survives the composite regardless of
+  registration order.
+
+Falsification proof: reverting the aihero installer to `return {}` turns both
+tests RED with `AssertionError: expected 'adapter_unavailable' to be
+'secret_denied'` — the chaos suite reproduces the exact live failure code before
+the fix. The worker-route shape test
+(`cloudflare-worker-route.test.ts`) was the vanish enshrined as a contract
+("does not install a workflow-node adapter when the Memory relay is
+unconfigured"); it now asserts the anti-vanish contract — the Worker installs an
+honest fail-closed adapter even unprovisioned, and still withholds the
+provisioning-gated recorders.
+
+## pdf-brain receipt
+
+> "If you don't succeed in saving the data, your database worker has failed, and
+> there's no point in hiding this fact. It's better to fail fast, which will cause
+> an error that will be logged and (hopefully) noticed and fixed."
+> — Saša Jurić, *Elixir in Action, Third Edition*
+
+`return {}` was the database worker swallowing the write failure and returning
+`nil` — hiding the fact that it could not do its job. The fix is `File.write!/2`:
+fail fast, loudly, at the right owner, so the error is noticed and the real gap
+(provisioning) gets fixed instead of being papered over by a foreign adapter's
+misleading "does not support." Linked: [[polite-fakes-franchise-wound]],
+[[recovery-cant-share-failure-mode]].
+
+## Live outcome
+
+Pending: `pnpm app:deploy` (executor code → full Worker redeploy), then re-submit
+the support-sweep run and poll `/runs/:runId/status` to terminal. Expected: a
+precise `secret_denied` provisioning blocker naming
+`AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL`, routed to aihero — NOT memory-fabric's raw
+"does not support" error. This section is appended with the honest live result
+once the re-drive is observed — the receipt records what happened on deployed
+code, not what the fix predicted.

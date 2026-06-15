@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { createUnprovisionedCartridgeWorkflowNodeAdapter } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
 import { createMemoryGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/generated-workflow-proof.ts";
@@ -10,7 +11,10 @@ import {
 import { buildWorkflowHitlReportAuditProofCheck } from "./hitl-report-audit-proof-check.ts";
 import { memoryFabricPackageMetadata } from "./package-seed.ts";
 import { dreamTranscriptReviewSourceProfile } from "./source-profile.ts";
-import { createMemoryFabricWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
+import {
+  createMemoryFabricWorkflowNodeAdapter,
+  MEMORY_FABRIC_NODE_CONFIG_SCHEMAS,
+} from "./workflow-node-adapter.ts";
 
 export const MemoryFabricCloudflareEnvBindingSchema = z.object({
   MEMORY_RELAY_BASE_URL: z.url().optional(),
@@ -34,7 +38,19 @@ export const memoryFabricCloudflareCartridgeInstaller: CloudflareWorkflowCartrid
     resolve({ bindings }) {
       const relayBaseUrl = bindings.MEMORY_RELAY_BASE_URL;
       if (relayBaseUrl === undefined) {
-        return {};
+        // Wound #41: an unprovisioned installer must not vanish. Contribute an
+        // honest fail-closed adapter that claims memory-fabric's palette and
+        // blocks its own planned nodes with a terminal `secret_denied` naming the
+        // missing binding — so no foreign adapter can answer for joelclaw.memory.*
+        // nodes with a misleading error pointing at the wrong subsystem.
+        return {
+          createWorkflowNodeAdapter: () =>
+            createUnprovisionedCartridgeWorkflowNodeAdapter({
+              cartridgeId: "workflow/memory-fabric",
+              missingBindingName: "MEMORY_RELAY_BASE_URL",
+              ownedNodeTypes: Object.keys(MEMORY_FABRIC_NODE_CONFIG_SCHEMAS),
+            }),
+        };
       }
 
       return {

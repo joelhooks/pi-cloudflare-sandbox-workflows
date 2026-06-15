@@ -40,16 +40,22 @@ type BlockedWorkflowNodeExecutionResult = Extract<
   { readonly status: "blocked" }
 >;
 
-const workflowNodeBlocked = (
+const blockedNodeResult = (
+  code: CapabilityBlocker["code"],
   message: string
 ): BlockedWorkflowNodeExecutionResult => ({
   blocker: {
-    code: "adapter_unavailable",
+    code,
     message,
     redacted: true,
   },
   status: "blocked",
 });
+
+const workflowNodeBlocked = (
+  message: string
+): BlockedWorkflowNodeExecutionResult =>
+  blockedNodeResult("adapter_unavailable", message);
 
 const adapterUnavailable = (blocker: CapabilityBlocker): boolean =>
   blocker.code === "adapter_unavailable";
@@ -115,5 +121,58 @@ export const combineCloudflareWorkflowCartridgeDependencies = (
             return createCompositeWorkflowNodeAdapter(adapters);
           },
         }),
+  };
+};
+
+/**
+ * Honest fail-closed workflow-node adapter for a cartridge that mounted and
+ * planned its nodes, but whose live executor could not be wired because a required
+ * relay binding is absent on the deployed Worker.
+ *
+ * Wound #41: the installer's unprovisioned branch used to `return {}` and contribute
+ * NO adapter at all. `combineCloudflareWorkflowCartridgeDependencies` filters the
+ * empty dependency out, so the cartridge's planned nodeTypes routed to whatever
+ * adapter was left registered — a FOREIGN one — which mis-answered with a misleading
+ * "does not support nodeType X" error naming the WRONG subsystem. An absent adapter
+ * is strictly worse than a present-but-honestly-blocking one: it lets another
+ * cartridge answer for nodes it does not own and points the operator at the wrong
+ * fix. (This is the no-hollow-capability rule in adapter form — a verifier with no
+ * tools reviews nothing; an executor with no adapter blocks nothing it owns.)
+ *
+ * This adapter CLAIMS the cartridge's own `ownedNodeTypes`. For those it returns a
+ * TERMINAL `secret_denied` blocker naming the cartridge and the missing binding,
+ * routed to the right owner and pointing at the real provisioning gap. It MUST be
+ * terminal (not `adapter_unavailable`): `createCompositeWorkflowNodeAdapter` skips
+ * `adapter_unavailable` to try the next adapter, so an `adapter_unavailable` here
+ * would fall straight back through to the foreign adapter and reproduce the
+ * misleading error. For nodeTypes it does NOT own it returns `adapter_unavailable`,
+ * so the composite still falls through to whichever adapter does own them — exactly
+ * as a fully-wired adapter's own non-matching fall-through would.
+ */
+export const createUnprovisionedCartridgeWorkflowNodeAdapter = (input: {
+  readonly cartridgeId: string;
+  readonly missingBindingName: string;
+  readonly ownedNodeTypes: readonly string[];
+}): WorkflowNodeAdapterPort => {
+  const ownedNodeTypes = new Set(input.ownedNodeTypes);
+
+  return {
+    execute(executeInput) {
+      const { nodeType } = executeInput.step;
+      if (!ownedNodeTypes.has(nodeType)) {
+        return Promise.resolve(
+          workflowNodeBlocked(
+            `${input.cartridgeId} is installed but unprovisioned and does not own nodeType ${nodeType}.`
+          )
+        );
+      }
+
+      return Promise.resolve(
+        blockedNodeResult(
+          "secret_denied",
+          `${input.cartridgeId} mounted and planned nodeType ${nodeType}, but its live executor is unprovisioned: ${input.missingBindingName} is not set on the deployed Worker. Provision the relay binding to execute this cartridge live.`
+        )
+      );
+    },
   };
 };

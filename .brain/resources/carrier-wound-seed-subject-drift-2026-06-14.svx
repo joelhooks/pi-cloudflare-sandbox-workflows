@@ -171,9 +171,22 @@ instead of patching past it. Linked: [[polite-fakes-franchise-wound]].
 
 ## Live outcome
 
-Pending: re-seed deployed D1 via `pnpm app:deploy:seed` (provisions
-`actor:workflow` + `actor:workflow-live-operator` for every package), verify the
-`workflow/aihero-support-sweep` rows by direct D1 query, then re-submit the
-support-sweep run and poll `/runs/:runId/status` to terminal. This section is
-appended with the honest live result once the re-drive is observed — the receipt
-records what happened on deployed code, not what the fix predicted.
+**Proven on deployed code.** After `pnpm app:deploy:seed` granted
+`actor:workflow-live-operator` mount on every package, the re-submitted
+support-sweep run cleared the admission gate that had blocked it with
+`entitlement_missing` — the wound #40 block did not recur. The fix held: the
+executing identity and the seeded identity now agree because both import one
+constant instead of hardcoding the subject twice.
+
+Admission was never the only gate, though. The same run
+(`run-live-20260615T021858572Z-ec8eb69c`) advanced past admission and went
+terminal **one gate later**, at the executor, with
+`adapter_unavailable: "Memory fabric workflow node adapter does not support
+nodeType aihero.support-sweep.source-inventory."` — the aihero installer had
+`return {}`-ed its adapter out of existence when its relay was unprovisioned, so
+the node routed to a foreign adapter. That is a distinct class (a vanishing
+adapter, not a drifted identity) and is carried as **wound #41**
+([[carrier-wound-vanishing-adapter-2026-06-14]]). Wound #40 is closed: the actor
+the live run executes as can now mount the packages the seed granted. The
+support-sweep shape reaching `captured` waits on wound #41's fix landing and the
+relay-provisioning gate it surfaces.

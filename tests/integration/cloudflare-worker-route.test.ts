@@ -255,7 +255,18 @@ const isFakeRouteUpgradeResponse = (
 };
 
 describe("Cloudflare Worker route", () => {
-  it("does not install a workflow-node adapter when the Memory relay is unconfigured", () => {
+  // Wound #41: an unprovisioned cartridge installer must NOT vanish its adapter.
+  // The deployed Worker resolves cartridge dependencies through this exact path,
+  // and the live failure (run-live-20260615T021858572Z-ec8eb69c) was an aihero
+  // node routing to memory-fabric's adapter because the aihero installer had
+  // `return {}`-ed itself out of existence. So even with the relays unconfigured
+  // the Worker must INSTALL a workflow-node adapter — an honest fail-closed one —
+  // while still withholding the post-execution recorders that only a provisioned
+  // relay can back. (The execute-level proof that the fail-closed adapter blocks
+  // its OWN palette with a terminal `secret_denied` naming the missing binding,
+  // and that ownership routing survives the composite, lives in
+  // tests/integration/cloudflare-workflow-cartridge-installer.test.ts.)
+  it("installs an honest fail-closed workflow-node adapter when the relays are unconfigured — it does not vanish", () => {
     const bindings =
       __cloudflareWorkerRouteTestHooks.WorkerEnvBindingSchema.parse(
         createWorkerEnv()
@@ -265,7 +276,8 @@ describe("Cloudflare Worker route", () => {
         bindings
       );
 
-    expect("createWorkflowNodeAdapter" in dependency).toBeFalsy();
+    expect("createWorkflowNodeAdapter" in dependency).toBeTruthy();
+    expect(dependency.createWorkflowNodeAdapter).toBeTypeOf("function");
     expect("createPostExecutionArtifactRecorders" in dependency).toBeFalsy();
   });
 

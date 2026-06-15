@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import type { CapabilityBlocker } from "../../app/domain/schemas.ts";
+import { createUnprovisionedCartridgeWorkflowNodeAdapter } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import type { CloudflareWorkflowCartridgeInstaller } from "../../app/infrastructure/cloudflare-workflow-cartridge-installer.ts";
 import { createArtifactBackedWorkflowCartridgeAdapter } from "../../app/workflow-nodes/artifact-backed-cartridge-adapter.ts";
 import { createMemoryGeneratedWorkflowProofRecorder } from "../../app/workflow-nodes/generated-workflow-proof.ts";
@@ -26,7 +27,10 @@ import type {
   AiHeroSupportSweepSignalSearchDocument,
 } from "./schemas.ts";
 import { aiHeroSupportSweepSourceProfile } from "./source-profile.ts";
-import { createAiHeroSupportSweepWorkflowNodeAdapter } from "./workflow-node-adapter.ts";
+import {
+  AIHERO_SUPPORT_SWEEP_NODE_CONFIG_SCHEMAS,
+  createAiHeroSupportSweepWorkflowNodeAdapter,
+} from "./workflow-node-adapter.ts";
 import type {
   AiHeroSupportSweepDataPort,
   AiHeroSupportSweepResult,
@@ -195,7 +199,20 @@ export const aiHeroSupportSweepCloudflareCartridgeInstaller: CloudflareWorkflowC
     resolve({ bindings }) {
       const relayBaseUrl = bindings.AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL;
       if (relayBaseUrl === undefined) {
-        return {};
+        // Wound #41: do NOT vanish. Contribute an honest fail-closed adapter that
+        // CLAIMS this cartridge's palette and blocks its own planned nodes with a
+        // terminal `secret_denied` naming the missing binding — so the executor
+        // routes aihero nodes to aihero, not to a foreign adapter that mis-answers.
+        return {
+          createWorkflowNodeAdapter: () =>
+            createUnprovisionedCartridgeWorkflowNodeAdapter({
+              cartridgeId: "workflow/aihero-support-sweep",
+              missingBindingName: "AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL",
+              ownedNodeTypes: Object.keys(
+                AIHERO_SUPPORT_SWEEP_NODE_CONFIG_SCHEMAS
+              ),
+            }),
+        };
       }
 
       return {
