@@ -3642,6 +3642,7 @@ describe("workflow app integration contract", () => {
     });
     let verifierOutputEvidence: readonly {
       readonly artifactRef: ArtifactRef;
+      readonly mediaType: string;
       readonly text: string;
     }[] = [];
     const workflow = new WorkflowApp({
@@ -3651,6 +3652,7 @@ describe("workflow app integration contract", () => {
         async verify(input) {
           verifierOutputEvidence = input.outputEvidence.map((evidence) => ({
             artifactRef: evidence.artifactRef,
+            mediaType: evidence.mediaType,
             text: evidence.text,
           }));
           const resultDocument = VerificationResultDocumentSchema.parse({
@@ -4267,6 +4269,43 @@ describe("workflow app integration contract", () => {
     );
     const executionReceiptText = executionReceiptEvidence?.text ?? "";
 
+    // Wound #37 regression guard: the public Wzrrd report MDSvX is the verifier's
+    // redaction/noindex/proof-below-dreams target, so its FULL content — not just
+    // the JSON sidecar — must reach Output Evidence Snapshots. d8dc890 skipped
+    // ".mdsvx" refs in loadArtifactRefVerifierEvidence, starving the verifier of
+    // the one artifact it is contractually required to inspect; the fake verifier
+    // blessed it anyway (politer than a real pi verifier), so the exclusion stayed
+    // invisible until a live drive blocked capability_denied.
+    const reportMdsvxEvidence = verifierOutputEvidence.find((evidence) =>
+      evidence.artifactRef.endsWith("/report/hitl-report.mdsvx")
+    );
+    const reportMdsvxEvidenceText = reportMdsvxEvidence?.text ?? "";
+    // Collapsed into one object assertion to keep every check while honoring the
+    // per-test expect budget. Exact, untruncated content at the loader layer: the
+    // redaction attestation ("## What did not happen") and the proof section
+    // ("## Dynamic generation proof") live in the tail, past the old 2500 head
+    // cap, and proof sits below the findings. Equality to the source report
+    // proves nothing was dropped.
+    expect({
+      mdsvxMediaType: reportMdsvxEvidence?.mediaType,
+      mdsvxProofBelowFindings:
+        reportMdsvxEvidenceText.indexOf("## The actual findings") <
+        reportMdsvxEvidenceText.indexOf("## Dynamic generation proof"),
+      mdsvxProofSectionPresent: reportMdsvxEvidenceText.includes(
+        "## Dynamic generation proof"
+      ),
+      mdsvxRedactionSectionPresent: reportMdsvxEvidenceText.includes(
+        "## What did not happen"
+      ),
+      mdsvxTextMatchesSource: reportMdsvxEvidence?.text === reportMdsvx,
+    }).toStrictEqual({
+      mdsvxMediaType: "text/mdsvx",
+      mdsvxProofBelowFindings: true,
+      mdsvxProofSectionPresent: true,
+      mdsvxRedactionSectionPresent: true,
+      mdsvxTextMatchesSource: true,
+    });
+
     expect({
       captureArtifactKind: captureArtifact.captureKind,
       captureArtifactRef: captureArtifact.capturedRef.artifactRef,
@@ -4461,6 +4500,7 @@ describe("workflow app integration contract", () => {
       verifierEvidenceRefsIncludeDreamOutputs: [
         dreamRefs.searchRef,
         dreamRefs.reportRef,
+        dreamRefs.reportMdsvxRef,
         dreamRefs.hitlDecisionSeedRef,
         dreamRefs.hitlFollowUpRef,
       ].every((artifactRef) =>

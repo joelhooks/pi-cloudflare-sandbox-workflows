@@ -1,0 +1,221 @@
+---
+title: "Carrier Wound #37: The Verifier Was Blinded to the One Artifact It Exists to Redact-Check. Two Modules Disagreed on Which File Is the Evidence."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - generated-workflow-proof
+  - verifier-evidence
+  - mdsvx-report
+  - redaction
+  - noindex
+  - information-leakage
+  - file-format-leak
+  - safety-critical-module
+  - head-truncation
+  - tail-proof
+  - additive-fix
+  - carrier-finding
+  - chaos-suite
+source: "wound-37-mdsvx-evidence-exclusion"
+---
+
+# Carrier Wound #37: The Verifier Was Blinded to the One Artifact It Exists to Redact-Check. Two Modules Disagreed on Which File Is the Evidence.
+
+Wound #36 pulled the phantom horizon check out of the platform, and the next
+live drive sailed *through* the generated-workflow proof — past every check that
+had blocked the prior dozen runs — and landed on the verifier with a clean plan
+and a clean execution proof. And there the verifier did exactly what it is built
+to do: it refused to bless what it could not see.
+
+The deployed dream run went terminal:
+
+```
+run-live-20260614T235214125Z-25dd3778 → blocked: capability_denied
+  "Output Evidence Snapshots do not include the report/hitl-report.mdsvx
+   artifact content, so the verifier cannot confirm the public Wzrrd report is
+   redacted, noindex via the declared template, cites receipt metadata, and
+   follows docs/dream-report-canon.md proof-below-dreams expectations."
+```
+
+This block is **correct**. The verifier's job at this gate is to certify that
+the public-facing Wzrrd report — the one artifact that *leaves the system and
+gets indexed by the open web* — carries its noindex template, redacts every
+private name and credential, and keeps proof below dreams per
+`docs/dream-report-canon.md`. The report is `report/hitl-report.mdsvx`. The
+verifier was handed Output Evidence Snapshots that **did not contain it.** A
+verifier asked to certify redaction on a document it cannot read must block.
+This is the inverse of a hollow-capture wound: the verifier was right, and the
+carrier had starved it. (Removing the check to make the run go green would have
+published an unredacted, web-indexable report — the exact catastrophe the check
+exists to prevent. Forbidden.)
+
+## The wound: two modules disagreed on which artifact is the evidence
+
+The "which artifact content reaches the verifier, and how much of it" decision
+lived in **two** modules that had silently drifted apart:
+
+- **The loader.** `loadArtifactRefVerifierEvidence`
+  (`src/app/application/workflow-app.ts`) decided *which* artifact refs become
+  Output Evidence Snapshots. It carried a skip clause —
+  `artifactRef.endsWith(".mdsvx")` — that dropped the report on the floor before
+  it ever became evidence. So the safety-critical document never entered the
+  snapshot set.
+- **The prompt builder.** `verifierPromptFor`
+  (`src/app/infrastructure/cloudflare-agent-lane-adapters.ts`) decided *how much*
+  of each evidence text the verifier sees. It head-truncated **every** snapshot
+  at a flat 2500 chars. The report's redaction and proof markers — the noindex
+  template tag, the "## What did not happen" redaction section, the proof block —
+  live in the report's **tail.** So even if the loader had passed the mdsvx
+  through, the prompt builder would have sliced off exactly the part the verifier
+  needed and re-blocked on a hidden tail. Two independent blinds, stacked.
+
+The class is **information leakage — the file-format variant**, Ousterhout's most
+pernicious kind, the back-door leak that lives in no interface:
+
+> "Suppose two classes both have knowledge of a particular file format (perhaps
+> one class reads files in that format and the other class writes them). Even if
+> neither class exposes that information in its interface, they both depend on the
+> file format: if the format changes, both classes will need to be modified.
+> Back-door leakage like this is more pernicious than leakage through an
+> interface, because it isn't obvious. Information leakage is one of the most
+> important red flags in software design… ask yourself 'How can I reorganize
+> these classes so that this particular piece of knowledge only affects a single
+> class?'"
+> — John Ousterhout, *A Philosophy of Software Design*, §Information Leakage
+
+The "particular file format" here is *the hitl-report* — what it is, where its
+safety-critical content sits, and therefore how it must be presented as evidence.
+The loader and the prompt builder both held an opinion about that document, and
+neither opinion appeared in either interface. The loader's opinion was "the mdsvx
+isn't evidence" (wrong). The prompt builder's opinion was "all evidence is
+front-loaded, head-truncation is lossless enough" (wrong for the one document
+where the safety signal lives in the tail). When two modules silently encode the
+same file's handling and disagree, the system is broken in exactly the way the
+disagreement allows — here, a verifier blind to the document it must certify.
+
+## How the leak got planted: a matched pair with a wrong half
+
+The `.mdsvx` skip was not ancient. It was introduced two commits back in
+`d8dc890` as a **matched pair** with `primaryOutputPathForStep`, which redirects
+the hitl-report node's "primary" output to its `.json` sidecar. The pairing
+carried an assumption: *"the json sidecar is sufficient evidence; the mdsvx is
+just a rendering, skip it."*
+
+Half of that pair is right and stays. `primaryOutputPathForStep` (json sidecar =
+primary) is **correct** for presence-and-hash matching — the json is the
+structured, stable artifact for "did this node produce its output." It is
+**untouched.**
+
+The other half is wrong. noindex-via-template, redaction completeness,
+proof-below-dreams, receipt-citation — these are properties of the **rendered
+mdsvx**, not the json. The json sidecar cannot answer "is the *public report*
+redacted," because the public report is the mdsvx. Skipping the mdsvx didn't drop
+a redundant rendering; it dropped the only artifact that carries the safety
+contract the verifier enforces. The assumption "json is sufficient evidence"
+conflated *presence evidence* (json: sufficient) with *redaction evidence* (mdsvx:
+mandatory).
+
+## The fix: additive, two-part, and it does NOT weaken the verifier
+
+The fix restores the verifier's sight without removing a single check, and
+without touching `primaryOutputPathForStep`.
+
+**Part 1 — un-skip the mdsvx in the loader.** The `.endsWith(".mdsvx")` clause is
+removed from `loadArtifactRefVerifierEvidence`'s skip condition. The report now
+becomes an Output Evidence Snapshot. The `readJson` attempt fails on mdsvx and
+falls through to `readText`, which tags it `mediaType: "text/mdsvx"` and stamps
+`hash: sha256Hex(text)`. The json sidecar still flows through as before — this is
+purely additive, both artifacts now reach the verifier.
+
+**Part 2 — media-type-aware full presentation in the prompt builder.** A flat
+2500-char head-truncation cannot serve a redaction target: the verifier must
+confirm *nothing un-redacted lives anywhere* in the report, and a head-only view
+could falsely bless a document whose raw private content hides in the truncated
+tail — which then gets published. So `verifierPromptFor` now branches on media
+type:
+
+- `text/mdsvx` → presented in full up to a 60k ceiling. The report is **bounded
+  by construction** (capped findings/proposals, a bounded D2 figure), so it fits
+  comfortably under the ceiling in practice.
+- On the pathological overflow case, it emits a **legible block-marker** —
+  `[REPORT TRUNCATED — exceeds verifier inline budget; redaction and noindex
+  completeness cannot be confirmed for the omitted tail, so this report must
+  block rather than be accepted]` — never a silent `[truncated]`. A report that
+  blows the ceiling *blocks*; it is never falsely blessed on an unseen tail.
+- Everything else → the prior 2500-char head-truncation, unchanged. The cost
+  discipline that keeps non-safety evidence cheap is preserved.
+
+### Why full presentation is safe downstream
+
+The deterministic verifier was checked, not assumed. `evidenceHashMatches`
+(`src/app/infrastructure/deterministic-verifier.ts`) special-cases only
+`application/json`; `text/mdsvx` falls to the `sha256Hex(input.text) ===
+input.expectedHash` branch. The added mdsvx evidence carries
+`hash: sha256Hex(text)` and the deterministic verifier receives the **untruncated**
+evidence, so the hash check passes cleanly. No hash mismatch is introduced by
+presenting more text to the agent verifier; the two verifiers see consistent
+content.
+
+## The chaos tests that would have caught it (hostile transport, not polite mocks)
+
+Two layers, each driving **real** production transport, each falsified (red on
+its own bug, green on the fix):
+
+- **Layer 1 — the loader, end-to-end.** In `tests/integration/workflow-app.test.ts`,
+  the real end-to-end dream run (`executes generated Dream preflight steps through
+  the configured memory fabric adapter`) now runs through the **real**
+  `loadVerifierOutputEvidence`. It asserts the `report/hitl-report.mdsvx` snapshot
+  exists, carries `mediaType "text/mdsvx"`, equals the full rendered report, and
+  contains tail-resident markers (`## What did not happen`, `## Dynamic generation
+  proof`) in the correct below-dreams order. **Falsified:** re-adding the
+  `.mdsvx` skip turns it red — `expected undefined to be 'text/mdsvx'`. The fake
+  verifier in this test blesses unconditionally (politer than pi), which is
+  *exactly why* the old exclusion shipped green and undetected — a textbook
+  `[[polite-fakes-franchise-wound]]`: the double never demanded the evidence pi
+  demanded, so the missing artifact was invisible until a real verifier on a real
+  drive refused it.
+- **Layer 2 — the prompt builder, real assembly.** In
+  `tests/integration/cloudflare-agent-lane-adapters.test.ts`, a new case drives
+  the **real** `createCloudflarePiVerifierLaneAdapter(...).verify(...)` with three
+  hostile evidence shapes: an in-budget mdsvx (~5k) with redaction/proof
+  sentinels deliberately placed *past* 2500; a long plain-text snapshot (~3.2k)
+  with a tail sentinel; and an overflow mdsvx (>60k). It captures the assembled
+  prompt and asserts the mdsvx tail/redaction/proof markers **survive**, the plain
+  text **is** head-truncated (`[truncated]`), and the overflow mdsvx emits the
+  block-marker with its tail **excluded**. **Falsified:** reverting to flat-2500
+  turns it red — `mdsvxTailSurvives: false`, `overflowBlockMarker: false`.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **440 passed / 55 files**.
+
+## What this does NOT claim (skepticism held)
+
+This restores the verifier's sight on the report and proves, in-suite, that the
+report content reaches the verifier in full with its tail intact, that other
+evidence stays cheaply truncated, and that an overflow report blocks loudly
+rather than being blessed on an unseen tail. It does **not**, by itself, prove the
+dream run reaches `captured` — only a live re-drive on the deployed fix does. The
+hypothesis is concrete and falsifiable: the run blocked because the verifier could
+not read the report it must redact-check; with the report now an untruncated
+Output Evidence Snapshot, the verifier can confirm noindex/redaction/proof-order
+and the run proceeds to `captured`. If instead the verifier *reads* the report and
+finds a genuine redaction or noindex defect, that is a new, true signal about the
+report generator — not this carrier wound, and not to be silenced by re-blinding
+the verifier. One fresh deploy carries the change; the next live drive says which.
+
+## The carrier discipline (seventeenth carrier wound)
+
+#35 fixed *whether the verifier could speak at all.* #36 fixed *a check that
+refused every answer once it could.* #37 fixes *what the verifier is allowed to
+see before it answers* — and the class is not "the mdsvx was skipped." It is
+"**two modules silently encoded how the safety-critical report is handled, and
+they disagreed, so the verifier was starved of the one artifact it exists to
+certify.**" The fix is Ousterhout's information-hiding as a carrier invariant
+again, one layer down from #36: when a single document's safety properties drive
+both *which artifact is evidence* and *how much of it the verifier sees*, that
+knowledge cannot be split across a loader that drops it and a truncator that
+guts it. The safety-critical module gets the artifact, in full, or it blocks
+loudly — never a silent head-slice that could bless an unredacted tail into the
+public web. A verifier you have blinded is worse than no verifier: it doesn't
+refuse, it *approves* — and approval is the one outcome that ships the harm.

@@ -990,6 +990,124 @@ describe("Cloudflare Pi verifier lane adapter", () => {
     });
   });
 
+  it("presents the full MDSvX report to the verifier (tail proof/redaction survives truncation) while head-truncating other evidence", async () => {
+    const fixture = await buildVerifierLaneFixture();
+    const harness = createVerifierRuntimeHarness(fixture);
+    const adapter = createCloudflarePiVerifierLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture.plan),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    // The hitl-report MDSvX is the verifier's redaction/noindex/proof-below-dreams
+    // target. Its safety-critical markers live in the TAIL — well past the old
+    // 2500 head cap — so a head-truncated snapshot would hide exactly what must be
+    // confirmed. These sentinels are placed past 2500 chars to prove the report is
+    // presented in full while ordinary evidence is still head-truncated.
+    const mdsvxTailSentinel = "MDSVX-TAIL-SENTINEL-9f3a";
+    const inBudgetReportMdsvx = [
+      "---",
+      "noindex: true",
+      "template: joel/tufte-mdsvx@0.1.0",
+      "---",
+      "## The actual findings",
+      "f".repeat(3200),
+      "## Dynamic generation proof",
+      "## What did not happen",
+      "Raw transcripts were not returned.",
+      mdsvxTailSentinel,
+    ].join("\n");
+    const plainTailSentinel = "PLAIN-TAIL-SENTINEL-7c21";
+    const longPlainText = [
+      "plain head",
+      "p".repeat(3200),
+      plainTailSentinel,
+    ].join("\n");
+    const overflowSentinel = "MDSVX-OVERFLOW-SENTINEL-4b8e";
+    const overflowReportMdsvx = [
+      "## The actual findings",
+      "z".repeat(60_500),
+      overflowSentinel,
+    ].join("\n");
+
+    await adapter.verify({
+      capabilityReceipts: [],
+      contract: fixture.contract,
+      outputEvidence: [
+        {
+          artifactCommitSha: "reportcommit00000000000000000000000000000000000",
+          artifactRef: fixture.artifacts.artifactRef({
+            path: "report/hitl-report.mdsvx",
+            runId: fixture.plan.runId,
+          }),
+          hash: sha256Hex(inBudgetReportMdsvx),
+          mediaType: "text/mdsvx",
+          text: inBudgetReportMdsvx,
+        },
+        {
+          artifactCommitSha: "plaincommit000000000000000000000000000000000000",
+          artifactRef: fixture.artifacts.artifactRef({
+            path: "lanes/worker/transcript.txt",
+            runId: fixture.plan.runId,
+          }),
+          hash: sha256Hex(longPlainText),
+          mediaType: "text/plain",
+          text: longPlainText,
+        },
+        {
+          artifactCommitSha: "overflowcommit0000000000000000000000000000000000",
+          artifactRef: fixture.artifacts.artifactRef({
+            path: "report/oversized-report.mdsvx",
+            runId: fixture.plan.runId,
+          }),
+          hash: sha256Hex(overflowReportMdsvx),
+          mediaType: "text/mdsvx",
+          text: overflowReportMdsvx,
+        },
+      ],
+      outputRefs: [
+        fixture.artifacts.artifactRef({
+          path: "report/hitl-report.mdsvx",
+          runId: fixture.plan.runId,
+        }),
+      ],
+      plan: fixture.plan,
+    });
+    const prompt = harness.capturedRequests.at(0)?.prompt ?? "";
+
+    expect({
+      // In-budget MDSvX: full document reaches the prompt, including the tail
+      // redaction attestation and proof section past the old 2500 head cap.
+      mdsvxProofSectionSurvives: prompt.includes("## Dynamic generation proof"),
+      mdsvxRedactionAttestationSurvives: prompt.includes(
+        "Raw transcripts were not returned."
+      ),
+      mdsvxTailSurvives: prompt.includes(mdsvxTailSentinel),
+      // Pathological oversized report: a LEGIBLE block-marker fires (not a silent
+      // "[truncated]") and the unseen tail is excluded, so the verifier blocks
+      // rather than blessing content it never saw.
+      overflowBlockMarker: prompt.includes("[REPORT TRUNCATED"),
+      overflowTailExcluded: prompt.includes(overflowSentinel),
+      // Ordinary evidence is still head-truncated at 2500 with the silent marker.
+      plainHeadTruncated: prompt.includes("[truncated]"),
+      plainTailDropped: prompt.includes(plainTailSentinel),
+    }).toStrictEqual({
+      mdsvxProofSectionSurvives: true,
+      mdsvxRedactionAttestationSurvives: true,
+      mdsvxTailSurvives: true,
+      overflowBlockMarker: true,
+      overflowTailExcluded: false,
+      plainHeadTruncated: true,
+      plainTailDropped: false,
+    });
+  });
+
   it("recovers a completed verifier lane from its committed receipt", async () => {
     const fixture = await buildVerifierLaneFixture();
     const laneId = `lane:verifier:${fixture.plan.runId}`;

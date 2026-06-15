@@ -851,16 +851,33 @@ const verifierPromptFor = (input: {
   readonly plan: DynamicWorkflowPlanDocument;
 }): string => {
   const evidenceTextLimit = 2500;
+  // The hitl-report MDSvX is the safety-critical redaction target: the verifier
+  // must confirm NOTHING un-redacted lives anywhere in it, that noindex is set
+  // via the declared template, and that proof sits below dreams. None of that is
+  // confirmable from a head-truncated view — raw content could hide in the tail
+  // and be falsely blessed, then published. The report is bounded by
+  // construction (capped findings/proposals, bounded D2 figure), so present it
+  // in full up to a high safety ceiling. If a pathological report blows the
+  // ceiling, emit a LEGIBLE block-marker (not a silent "[truncated]") so the
+  // verifier blocks rather than accepting an unseen, possibly-unredacted tail.
+  const reportEvidenceTextLimit = 60_000;
+  const truncateEvidenceText = (text: string, mediaType: string): string => {
+    if (mediaType === "text/mdsvx") {
+      return text.length > reportEvidenceTextLimit
+        ? `${text.slice(0, reportEvidenceTextLimit)}\n[REPORT TRUNCATED — exceeds verifier inline budget; redaction and noindex completeness cannot be confirmed for the omitted tail, so this report must block rather than be accepted]`
+        : text;
+    }
+    return text.length > evidenceTextLimit
+      ? `${text.slice(0, evidenceTextLimit)}\n[truncated]`
+      : text;
+  };
   const outputEvidence = input.outputEvidence.map((evidence) => ({
     artifactCommitSha: evidence.artifactCommitSha,
     artifactRef: evidence.artifactRef,
     extractedObservabilityPack: extractObservabilityEvidence(evidence.text),
     hash: evidence.hash,
     mediaType: evidence.mediaType,
-    text:
-      evidence.text.length > evidenceTextLimit
-        ? `${evidence.text.slice(0, evidenceTextLimit)}\n[truncated]`
-        : evidence.text,
+    text: truncateEvidenceText(evidence.text, evidence.mediaType),
   }));
 
   return [

@@ -5275,11 +5275,17 @@ export class WorkflowApp implements WorkflowAppContract {
       if (
         input.existingArtifactRefs.has(artifactRef) ||
         artifactRef.includes("/memory/relay-lease-receipts/") ||
-        artifactRef.includes("/run/workflow-node-cartridges/") ||
-        artifactRef.endsWith(".mdsvx")
+        artifactRef.includes("/run/workflow-node-cartridges/")
       ) {
         continue;
       }
+      // MDSvX report artifacts (e.g. report/hitl-report.mdsvx) MUST NOT be
+      // skipped: the verification contract requires confirming the public
+      // Wzrrd report is redacted, noindex via the declared template, cites
+      // receipt metadata, and follows the proof-below-dreams canon — none of
+      // which is confirmable unless the report content reaches Output Evidence
+      // Snapshots. The readJson attempt below fails for MDSvX and falls through
+      // to readText, which tags it mediaType "text/mdsvx".
 
       try {
         const json = await this.dependencies.artifacts.readJson({
