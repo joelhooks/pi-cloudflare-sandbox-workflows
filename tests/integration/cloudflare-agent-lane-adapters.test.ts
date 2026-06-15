@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { AgentLaneAlreadyCompletedError } from "../../src/app/application/admitted-agent-lane-runtime.ts";
-import { PlannerBlueprintContractError } from "../../src/app/application/ports.ts";
+import {
+  PlannerBlueprintContractError,
+  redactionSafePlannerErrorEnvelopeSample,
+} from "../../src/app/application/ports.ts";
 import type {
   AgentLaneRuntimePort,
   AgentLaneRuntimeRequest,
@@ -765,6 +768,112 @@ describe("Cloudflare Pi planner lane adapter", () => {
       runId: fixture.plannerInput.runId,
       stage: "planner-output",
       workItemId: fixture.plannerInput.workItemId,
+    });
+  });
+
+  // Wound #38 (carrier): pi self-reported failure by emitting a well-formed
+  // {error: "..."} envelope (exit 0, valid JSON, normalized true). The contract
+  // correctly BLOCKS it — but the redaction-safe diagnostic named only the key
+  // `[error]`, redacting the WHY, so a live block was diagnosable only by mining
+  // a content-addressed artifact. This drives the REAL adapter against a REAL
+  // {error} envelope (a hostile double for pi's own self-report transport, not a
+  // hand-crafted ZodError) and asserts the bounded reason now rides the blocker.
+  it("surfaces a bounded planner error-envelope sample when pi self-reports {error}", async () => {
+    const fixture = await buildPlannerLaneFixture();
+    const piSelfReportedReason =
+      "no pinned package exports a skill providing the requested " +
+      "transcript-review capability; cannot satisfy verificationContract";
+    const errorEnvelopeOutput: Record<string, unknown> = {
+      error: piSelfReportedReason,
+    };
+    const harness = createPlannerRuntimeHarness({
+      ...fixture,
+      plannerOutput: errorEnvelopeOutput,
+    });
+    const adapter = createCloudflarePiPlannerLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(fixture.plannerInput),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    const rejection = await adapter.proposePlan(fixture.plannerInput).then(
+      () => {
+        throw new Error("expected proposePlan to reject");
+      },
+      (error: unknown) => error
+    );
+
+    expect(rejection).toBeInstanceOf(PlannerBlueprintContractError);
+    if (!(rejection instanceof PlannerBlueprintContractError)) {
+      throw new Error("expected a PlannerBlueprintContractError");
+    }
+    const contractError = rejection;
+    expect({
+      // The block STILL fires — visibility never silences the contract.
+      deterministic: contractError.message.includes("deterministic"),
+      envelopeSample: contractError.errorEnvelopeSample,
+      messageCarriesReason: contractError.message.includes(
+        `planner error envelope: ${piSelfReportedReason}`
+      ),
+      presentKeys: contractError.presentKeys,
+      stage: contractError.stage,
+    }).toStrictEqual({
+      deterministic: true,
+      envelopeSample: piSelfReportedReason,
+      messageCarriesReason: true,
+      presentKeys: ["error"],
+      stage: "planner-output",
+    });
+  });
+
+  // Wound #38 boundary coverage: the redaction-safe sampler crosses ONLY a
+  // recognized `error` field, bounded, single-line — never a generic value.
+  it("redactionSafePlannerErrorEnvelopeSample samples only a recognized error envelope, bounded", () => {
+    const longReason = "x".repeat(900);
+    expect({
+      // recognized error envelope → bounded single-line sample
+      collapsesWhitespace: redactionSafePlannerErrorEnvelopeSample({
+        error: "line one\n  line two\t\tindented",
+      }),
+      // non-error value never crosses (a `result` envelope, a `session` header)
+      nonErrorIsNull: redactionSafePlannerErrorEnvelopeSample({
+        result: { summary: "not an error" },
+      }),
+      // non-string error is stringified, still bounded
+      objectErrorStringified: redactionSafePlannerErrorEnvelopeSample({
+        error: { code: "no_capability", detail: "missing skill" },
+      }),
+      // a scalar / null / array output is not an envelope
+      scalarIsNull: redactionSafePlannerErrorEnvelopeSample("just a string"),
+      // an empty/whitespace-only error is not a usable sample
+      whitespaceErrorIsNull: redactionSafePlannerErrorEnvelopeSample({
+        error: "   \n\t  ",
+      }),
+    }).toStrictEqual({
+      collapsesWhitespace: "line one line two indented",
+      nonErrorIsNull: null,
+      objectErrorStringified:
+        '{"code":"no_capability","detail":"missing skill"}',
+      scalarIsNull: null,
+      whitespaceErrorIsNull: null,
+    });
+
+    const truncated = redactionSafePlannerErrorEnvelopeSample({
+      error: longReason,
+    });
+    expect({
+      endsWithMarker: truncated?.endsWith("…[sample truncated]"),
+      // 512 sampled chars + the truncation marker, nothing unbounded
+      length: truncated?.length,
+    }).toStrictEqual({
+      endsWithMarker: true,
+      length: 512 + "…[sample truncated]".length,
     });
   });
 

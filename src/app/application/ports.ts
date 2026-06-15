@@ -196,6 +196,65 @@ export const redactionSafeTopLevelKeyNames = (
 };
 
 /**
+ * Redaction-safe bounded sample of a planner output's own `error` self-report.
+ *
+ * Wound #38: when the planner pi-agent self-reports failure it emits a
+ * well-formed `{"error": "<reason>"}` envelope (exit 0, valid JSON, normalized
+ * true), which the contract correctly blocks as `planner_output_invalid` — but
+ * {@link redactionSafeTopLevelKeyNames} surfaces only the key NAME `[error]`,
+ * redacting the WHY. That left a live block diagnosable only by mining a
+ * content-addressed artifact (a 166s exec + tail dig that still could not reach
+ * the reason). The planner lane runs `--no-tools` (wound #31) with secret
+ * materialization forbidden by its prompt, so a pi-emitted `error` value is
+ * workflow-DESIGN reasoning (e.g. "no pinned package provides capability X"),
+ * never a credential, customer payload, or private path. So — narrowly — the
+ * `error` field of a RECOGNIZED error envelope crosses the boundary as a BOUNDED
+ * single-line sample, the same precedent as wound #34 threading `rawOutputSample`
+ * into the verifier blocker. Returns null for anything that is NOT a recognized
+ * error envelope, so a generic value (a `result` envelope, a `session` header)
+ * still never crosses — only the diagnostic `error` self-report does.
+ *
+ * @param value - The parsed planner output (typed `unknown`; pi controls it).
+ * @returns A bounded single-line sample of the `error` field, or null.
+ */
+export const redactionSafePlannerErrorEnvelopeSample = (
+  value: unknown
+): string | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  if (!("error" in value)) {
+    return null;
+  }
+  const rawError = (value as { readonly error: unknown }).error;
+  let text: string;
+  if (typeof rawError === "string") {
+    text = rawError;
+  } else if (rawError === null || rawError === undefined) {
+    text = "";
+  } else {
+    // A non-string error value (object/number/bool). Serialize it so the sample
+    // stays diagnostic; fall back to a marker rather than risk `[object Object]`
+    // for unserializable shapes (circular refs, functions → undefined).
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(rawError);
+    } catch {
+      serialized = undefined;
+    }
+    text = serialized ?? "[unserializable error envelope]";
+  }
+  const collapsed = text.replaceAll(/\s+/gu, " ").trim();
+  if (collapsed === "") {
+    return null;
+  }
+  const limit = 512;
+  return collapsed.length > limit
+    ? `${collapsed.slice(0, limit)}…[sample truncated]`
+    : collapsed;
+};
+
+/**
  * Thrown by a {@link DynamicWorkflowPlannerPort} when the planner lane RAN and
  * returned output, but that output failed the blueprint contract.
  *
@@ -204,13 +263,19 @@ export const redactionSafeTopLevelKeyNames = (
  * application catch keys on this type to surface the deterministic
  * `planner_output_invalid` blocker instead of the transient `adapter_unavailable`
  * that re-drove the same wrong shape for ~40 minutes (carrier wound #27). It
- * carries only top-level key NAMES (present vs missing) and schema issue PATHS —
- * never values — so the block stays redaction-safe while naming exactly what pi
- * emitted (a wrong-extraction header, an envelope, or a refusal) for the next
- * read instead of staring at a blind re-drive.
+ * carries top-level key NAMES (present vs missing) and schema issue PATHS so the
+ * block stays redaction-safe while naming exactly what pi emitted (a
+ * wrong-extraction header, an envelope, or a refusal) for the next read instead
+ * of staring at a blind re-drive. Wound #38 narrows the "never values" rule by
+ * one diagnostic exception: when pi self-reports via a RECOGNIZED `{error: ...}`
+ * envelope, a BOUNDED sample of that `error` field rides along (see
+ * {@link redactionSafePlannerErrorEnvelopeSample}) — the planner runs `--no-tools`
+ * with secrets forbidden, so its `error` is workflow-design reasoning, never a
+ * credential or customer payload. No other value crosses.
  */
 // eslint-disable-next-line max-classes-per-file -- typed lane errors are colocated with the ports they cross (sibling of StaleDriveGenerationError).
 export class PlannerBlueprintContractError extends Error {
+  readonly errorEnvelopeSample: string | null;
   readonly issuePaths: readonly string[];
   readonly missingKeys: readonly string[];
   readonly presentKeys: readonly string[];
@@ -219,6 +284,11 @@ export class PlannerBlueprintContractError extends Error {
   readonly workItemId: string;
 
   constructor(input: {
+    // Wound #38: a bounded, redaction-safe sample of a RECOGNIZED pi error
+    // envelope's `error` self-report — null unless the output was an error
+    // envelope. Turns a blind `present top-level keys [error]` block into a read
+    // of the actual cause. See redactionSafePlannerErrorEnvelopeSample.
+    readonly errorEnvelopeSample?: string | null;
     readonly issuePaths: readonly string[];
     readonly missingKeys: readonly string[];
     readonly presentKeys: readonly string[];
@@ -226,15 +296,21 @@ export class PlannerBlueprintContractError extends Error {
     readonly stage: PlannerBlueprintContractStage;
     readonly workItemId: string;
   }) {
+    const errorEnvelopeSample = input.errorEnvelopeSample ?? null;
     super(
       `Planner lane returned output that failed the blueprint contract ` +
         `(${input.stage}, deterministic): present top-level keys [${
           input.presentKeys.join(", ") || "<none>"
         }], missing required keys [${
           input.missingKeys.join(", ") || "<none>"
-        }], schema issue paths [${input.issuePaths.join(", ") || "<none>"}].`
+        }], schema issue paths [${input.issuePaths.join(", ") || "<none>"}]${
+          errorEnvelopeSample === null
+            ? ""
+            : `, planner error envelope: ${errorEnvelopeSample}`
+        }.`
     );
     this.name = "PlannerBlueprintContractError";
+    this.errorEnvelopeSample = errorEnvelopeSample;
     this.issuePaths = input.issuePaths;
     this.missingKeys = input.missingKeys;
     this.presentKeys = input.presentKeys;

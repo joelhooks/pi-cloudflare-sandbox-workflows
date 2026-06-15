@@ -1,0 +1,191 @@
+---
+title: "Carrier Wound #38: The Planner Self-Reported Why It Couldn't Plan, And The Carrier Redacted The Reason To A Bare Key Name. A Correct Block You Cannot Read Is A Coin Toss."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - dynamic-workflow-planner
+  - planner-output-contract
+  - blueprint-contract-error
+  - redaction
+  - diagnosability
+  - observability
+  - error-envelope
+  - bounded-sample
+  - never-values-narrowed
+  - additive-fix
+  - carrier-finding
+  - chaos-suite
+  - noindex
+source: "wound-38-planner-error-envelope-redacted"
+---
+
+# Carrier Wound #38: The Planner Self-Reported Why It Couldn't Plan, And The Carrier Redacted The Reason To A Bare Key Name. A Correct Block You Cannot Read Is A Coin Toss.
+
+Wound #37 (both halves) un-blinded the *verifier* and re-derived its size
+ceiling. The next live dream drives never reached the verifier. They went
+terminal one gate earlier, in the **Workflow planning step**, before a single
+verifier check ran:
+
+```
+run blocked: planner_output_invalid
+  "Planner lane returned output that failed the blueprint contract
+   (planner-output, deterministic): present top-level keys [error],
+   missing required keys [harness, machine, plan, verificationContract],
+   schema issue paths [...]"
+```
+
+The `sandbox.exec` SUCCEEDED — `exitCode: 0`, `durationMs ≈ 166_812` (~166s of
+real planner work), valid JSON, `outputNormalization.normalized === true`. This
+was **not** the no-parseable-output branch (wound #33/#34), **not** an incomplete
+agent-lane (`normalized === false`, wound #28). The planner pi-agent ran to
+completion and emitted a well-formed envelope:
+
+```json
+{ "error": "<the actual reason it could not produce a blueprint>" }
+```
+
+The carrier did the **right** thing: pi emitted an *error self-report*, not a
+blueprint, so `PlannerLaneBlueprintDocumentSchema.safeParse` failed and the run
+blocked `planner_output_invalid`. That block is correct and stays — a planner
+that says "I can't" must not be waved through as if it produced a plan.
+
+## The wound: the block was correct and completely unreadable
+
+`PlannerBlueprintContractError` is built to be redaction-safe by design (wound
+#27): it surfaces only top-level **key names**, never **values**, because a
+planner output could in principle contain a path, a secret, a customer payload.
+So the operator-facing block said `present top-level keys [error]` — it named the
+field and **redacted the one value that explains the failure.** The planner told
+us *exactly* why it couldn't plan, in plain workflow-design prose, and the
+carrier threw that prose on the floor and handed back the word "error."
+
+The reason was not gone — it was pinned in a content-addressed `ARTIFACTS`
+artifact. But reading it meant reverse-engineering the Workers Artifacts store
+format and re-running a 166s exec just to dig a tail that still couldn't reach
+the string. A live block whose only diagnosis path is "spend three minutes
+mining a content-addressed blob" is, operationally, a block you **guess** at. And
+the governing demand for this whole effort is the opposite of guessing:
+
+> *"feels like we should be able to observe the run in progress and not guess on
+> if its functioning instead of waiting and staring at it like fucking dummies."*
+
+The class is **diagnosability collapse at a correct gate**: the safety
+property (don't leak values) was applied so bluntly that it suppressed the *one*
+value that is itself the diagnosis. Observability's whole promise is the inverse:
+
+> "By gathering application telemetry, at the right level of abstraction,
+> aggregated around the user's experience, with the ability to analyze it in real
+> time, we gained magical insights. We removed the limitations of our traditional
+> tools once we had the capability to ask any question, trace any sequence of
+> steps, and understand any internal system state, simply by observing the
+> outputs of our applications."
+> — Charity Majors, Liz Fong-Jones, George Miranda, *Observability Engineering*,
+>   Ch. 3
+
+We could not "understand the internal system state simply by observing the
+outputs" — because the carrier had redacted the output that carried the state.
+
+## The fix: narrow the "never values" rule by exactly one diagnostic exception
+
+This is the wound #34 precedent (`rawOutputSample` → blocker) applied to the
+planner-output path, which had never received it. A new redaction-safe sampler,
+`redactionSafePlannerErrorEnvelopeSample` (`src/app/application/ports.ts`),
+crosses **only** the `error` field of a **recognized `{error: ...}` envelope**,
+bounded at 512 chars, whitespace collapsed to a single line, with a
+`…[sample truncated]` marker on overflow. `PlannerBlueprintContractError` gains an
+`errorEnvelopeSample` field and appends it to its message:
+`…, planner error envelope: <reason>`. The factory
+(`plannerBlueprintContractError`, `cloudflare-agent-lane-adapters.ts`) computes
+the sample from the raw output it already holds at the throw site.
+
+### Why narrowing "never values" is safe *here* and nowhere else
+
+The "never values" rule (wound #27) is correct as a default and is **not**
+relaxed in general. The exception is scoped to a single, provable condition: the
+value crosses **only** when the output is a recognized error envelope, and
+**only** the `error` field crosses. Justification, receipt-grounded:
+
+- The planner lane runs `--no-tools` (wound #31, gated at the CLI to
+  `LANE_KIND=planner`), so it cannot materialize a secret or read a private path
+  at all.
+- Its prompt forbids secret materialization. A pi-emitted `error` is therefore
+  **workflow-design reasoning** — "no pinned package exports a skill providing
+  capability X; cannot satisfy verificationContract" — never a credential, a
+  customer payload, or a private filesystem path.
+- A non-error output (a `{result}` envelope, a partial blueprint, a scalar)
+  returns `null` from the sampler, so its values **never** cross. Only the
+  diagnostic self-report does.
+
+The block **still fires.** Visibility never silences the check — the run is still
+`planner_output_invalid`, still terminal, still refusing to treat "I can't" as a
+plan. The only thing that changed is the operator can now *read why* on the
+status surface instead of mining an artifact.
+
+## What this fix does NOT decide (the layer-2 fork stays open)
+
+This makes the reason **visible**; it does not classify it. Once the next live
+drive prints `planner error envelope: <reason>`, the reason decides the next
+move, and the two branches are genuinely different wounds:
+
+- **Transient** (model hiccup, a flaky package-metadata read, a momentary
+  capability-discovery miss) → re-drive; the planner likely succeeds on retry and
+  the run proceeds past this gate. No further carrier change.
+- **Structural** (the planner *correctly* concludes the pinned package set cannot
+  satisfy the requested capability for this dream shape) → that is a **true signal
+  about the cartridge/package pinning**, a distinct wound to fix at the
+  cartridge/discovery layer — **not** to be silenced by loosening the blueprint
+  contract or by pretending an error envelope is a plan.
+
+Re-blinding the block to make the run go green would be the planner-side twin of
+removing the verifier check: it ships the harm (a run that proceeds on a planner
+that said "I can't"). Forbidden.
+
+## The chaos tests that would have caught it (hostile transport, not polite mocks)
+
+Two layers in `tests/integration/cloudflare-agent-lane-adapters.test.ts`, both
+falsified (red on the bug, green on the fix):
+
+- **Layer 1 — end-to-end through the real adapter.** A new case drives the
+  **real** `createCloudflarePiPlannerLaneAdapter`, injects a planner output of
+  `{ error: "<a real no-capability reason> ; cannot satisfy verificationContract" }`
+  as pi's *own self-report transport* (a hostile double of pi emitting an error
+  envelope, **not** a hand-crafted `ZodError`), and asserts the rejection is a
+  `PlannerBlueprintContractError` whose **message carries the full reason**
+  (`messageCarriesReason: true`), whose `presentKeys` is `["error"]`, and that the
+  block is still `deterministic: true`. **Falsified:** drop the
+  `errorEnvelopeSample` wiring and `messageCarriesReason` goes false — the reason
+  vanishes from the message exactly as it did live.
+- **Layer 2 — the sampler's bounds, directly.** A unit case pins the
+  redaction-safety boundary: a recognized `{error}` is sampled with whitespace
+  collapsed; a non-error `{result}` envelope, a scalar string, and a
+  whitespace-only error all return `null` (non-error values **never** cross); a
+  non-string error object is `JSON.stringify`'d; and a 900-char error truncates to
+  exactly `512 + "…[sample truncated]".length` with the marker. This is the
+  guard that keeps the "one diagnostic exception" from widening into a values
+  leak.
+
+The pre-existing `{result}`-shape contract test stays **green** untouched —
+`{result}` has no `error` field, so the sampler returns `null`, no message suffix
+appears, and the block reads `present top-level keys [result]` exactly as before.
+The exception is additive and inert on every non-error output.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **442 passed / 55 files**.
+
+## The carrier discipline (eighteenth carrier wound)
+
+#35 fixed *whether the verifier could speak.* #36 fixed *a check that refused
+every answer.* #37 fixed *what the verifier sees before it answers* and *how big
+that can be.* #38 steps back one gate earlier, to the planner, and fixes a
+different failure of the same family: **a correct block is worth nothing if the
+operator cannot read why it fired.** The "never values" redaction rule was right
+as a default and wrong as an absolute — it suppressed the single value that is
+the diagnosis. The class is not "the planner emitted an error." It is "**a
+safety-motivated redaction was applied so bluntly it hid the self-report that
+explains the failure, turning a correct, deterministic block into a guess.**" The
+fix narrows the rule by exactly one provable exception — a bounded sample of a
+recognized error envelope from a `--no-tools`, no-secrets lane — and proves with
+a hostile double that the block still fires and now *reads*. A block you cannot
+read is, operationally, a coin toss; and a coin toss at a safety gate is the
+thing this entire burn-in exists to kill. Linked: [[polite-fakes-franchise-wound]].

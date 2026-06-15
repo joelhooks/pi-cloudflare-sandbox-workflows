@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AgentLaneAlreadyCompletedError } from "../application/admitted-agent-lane-runtime.ts";
 import {
   PlannerBlueprintContractError,
+  redactionSafePlannerErrorEnvelopeSample,
   redactionSafeTopLevelKeyNames,
 } from "../application/ports.ts";
 import type {
@@ -110,6 +111,11 @@ export const plannerBlueprintContractError = (input: {
     ),
   ].slice(0, 12);
   return new PlannerBlueprintContractError({
+    // Wound #38: when pi self-reports via a recognized {error: "..."} envelope,
+    // carry a bounded sample of that reason so the block reads as a diagnosis
+    // instead of a blind `present top-level keys [error]`. Null for any output
+    // that is not an error envelope, so non-error values never cross.
+    errorEnvelopeSample: redactionSafePlannerErrorEnvelopeSample(input.raw),
     issuePaths,
     missingKeys,
     presentKeys,
