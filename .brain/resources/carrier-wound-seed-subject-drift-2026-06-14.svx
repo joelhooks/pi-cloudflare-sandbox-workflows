@@ -1,0 +1,179 @@
+---
+title: "Carrier Wound #40: The Seed Granted Mount To One Actor And The Live Run Executed As Another. Two Scripts Hardcoded The Same Identity Independently, So It Drifted, And A Green Seed Receipt Lied."
+type: "receipt"
+status: "active"
+created_at: "2026-06-14"
+tags:
+  - cloudflare
+  - package-entitlements
+  - deploy-seed
+  - live-run-actor
+  - subject-drift
+  - single-source-of-truth
+  - dont-repeat-yourself
+  - admission-gate
+  - entitlement-missing
+  - grant-dont-loosen
+  - additive-fix
+  - carrier-finding
+  - chaos-suite
+  - polite-fakes
+  - noindex
+source: "wound-40-seed-subject-drift"
+---
+
+# Carrier Wound #40: The Seed Granted Mount To One Actor And The Live Run Executed As Another.
+
+The D3 burn-in restarted after the wound #38 dream capture. Run 1 (dream) reached
+`captured`. Run 2 — the **support-sweep** shape — went terminal one gate before
+the planner even ran, at admission:
+
+```
+run blocked: entitlement_missing
+  "Actor cannot mount requested packages: workflow/aihero-support-sweep"
+```
+
+The first reflex was "the cartridge was never seeded." **Refuted by receipt:** the
+14 Jun 18:28 `pnpm app:deploy:seed` receipt shows `workflow/aihero-support-sweep`
+`updated`, `entitlementCount: 1`. The row exists. The package is seeded. The
+admission gate is working **correctly** — it checked `can_mount` for the actor's
+subject and found no grant. The block is true. The bug is upstream of the block.
+
+## The wound: two scripts, one identity, hardcoded twice, drifted apart
+
+The deploy-seed path and the live-submit path each decide an actor identity, and
+they decided it **independently**:
+
+- **Seed** (`scripts/workflow-app-deploy-and-seed.mjs` → `packageSeedRequestBody`)
+  granted entitlements to subject `actor:operator` (plus schema defaults). One row
+  per package, `subject_id = "actor:operator"`, `can_mount = 1`.
+- **Submit** (`scripts/workflow-app-run.ts` → `actorForLiveRun`) builds the actor
+  a LIVE run executes as with `id: "actor:workflow-live-operator"`.
+
+Admission resolves the executing actor's subject (`actor:workflow-live-operator`),
+joins `package_entitlements`, filters `e.can_mount = 1` on
+`(subject_type, subject_id)` — and finds the only seeded row is for a **different
+subject**, `actor:operator`. No grant for the identity that is actually running.
+Block. The two string literals were the same *intent* — "the operator that drives
+seeds and live runs" — written in two files, and they **drifted**: at some point
+the live-run actor was renamed/specialized to `actor:workflow-live-operator` and
+the seed body was never updated to match. The seed kept returning green
+(`entitlementCount: 1`, `updated`) the entire time, because the seed is not wrong
+about *what it was told to grant* — it is wrong about *who actually runs*, and it
+has no way to know.
+
+This is the **polite-fakes franchise wound in identity form**: the seed receipt is
+politer than production. It reports success against the subject it was handed, not
+against the subject that will mount. A green receipt that does not exercise the
+real executing identity is a receipt that can lie, and this one did.
+
+> "The canonical use case for typeof is if you have a single value that you'd like
+> to be the source of truth for a type (perhaps it's some kind of schema or API
+> specification). By making the value the source of truth, you avoid duplication in
+> defining the type."
+> — Dan Vanderkam, *Effective TypeScript, 2nd Edition*, Item 15: Use Type
+>   Operations and Generic Types to Avoid Repeating Yourself
+
+Vanderkam is talking about types, but the leverage point is the same one Meadows
+would name: **duplicated truth diverges.** Two hardcoded copies of "the operator
+identity" is two sources of truth, which is zero sources of truth. The fix is to
+make there be exactly one.
+
+## The fix: one module both scripts import — the identities cannot disagree
+
+`scripts/workflow-live-subjects.mjs` is the single source of truth for the
+workflow subject identities, written as plain `.mjs` so **both** a plain-node
+deploy script (`.mjs`) and a tsx submit script (`.ts`) can import it. A sibling
+`scripts/workflow-live-subjects.d.mts` carries the declarations so the `.ts`
+caller typechecks cleanly under NodeNext (allowJs off).
+
+- `liveRunOperatorSubjectId = "actor:workflow-live-operator"` — exported once.
+  `workflow-app-run.ts`'s `actorForLiveRun` now sets `id: liveRunOperatorSubjectId`
+  instead of a bare literal.
+- `packageSeedSubjects()` returns the per-package grant set the deploy-seed path
+  provisions for **every** package. It mirrors the proven-working memory-fabric
+  grant exactly:
+  - `actor:operator` — mount, no invoke
+  - `actor:workflow` — mount, no invoke (internal in-graph mounts)
+  - `actor:workflow-live-operator` — **mount AND invoke** (the live executing
+    identity)
+- `workflow-app-deploy-and-seed.mjs`'s `packageSeedRequestBody` now returns
+  `{ subjects: packageSeedSubjects({ operatorSubjectId: env..., operatorSubjectType: env... }) }`.
+
+Now the seed grants `can_mount` to the exact subject the submit path runs as,
+**because both read the same constant.** Renaming the live-run actor is a
+one-line edit in one file that both paths pick up; they can no longer drift,
+because there is nothing to keep in sync.
+
+### Grant the subject — do NOT loosen the gate
+
+The standing rule holds: *a verifier with no tools reviews nothing; tool/mode
+constraints must be scoped per-lane, never blanket-applied.* Its admission twin:
+the `can_mount` gate is **correct** and stays. The wound is fixed by **granting
+the live-operator subject**, never by removing the entitlement check, widening the
+subject predicate to match-any, or stamping `can_mount` true for a wildcard
+subject. The gate that blocked run 2 is the same gate that will block an
+*unauthorized* mount tomorrow; we did not file its teeth down, we issued the badge
+the runner was missing.
+
+## The chaos test that would have caught it (hostile transport, not a polite mock)
+
+`tests/integration/package-seed-live-operator-entitlement.test.ts` exercises the
+seed→mount handoff **end to end through both real components**, with a mutable D1
+double that reproduces the production transport contract on both ends:
+
+- The **real** seeder `finalizeCloudflarePackageSeed` → `upsertEntitlements` writes
+  rows through the production insert column-order
+  `(subject_type, subject_id, package_id, version_range, can_discover, can_mount, can_invoke)`.
+- The **real** registry `createCloudflareD1PackageRegistryActor` → `pinPackages`
+  reads them back through the production mount-check SELECT's package-id filter and
+  subject-predicate bind layout.
+- Nothing pre-stages rows. The double's `run()` parses the seeder's binds and the
+  double's `all()` serves the registry's SELECT, replicating `queryRows`'s
+  subject/package filter. The handoff is genuinely exercised; it is not a mock that
+  returns a canned "pinned."
+- The executing actor in the test is built with `id: liveRunOperatorSubjectId` —
+  the **same shared constant** `actorForLiveRun` uses — so test and production
+  cannot disagree about who runs.
+
+Two cases, both falsifiable:
+
+- **Grant proves out.** `seedThenMount(packageSeedSubjects())` → `status: "pinned"`,
+  the live-run operator mounts. Plus a direct guard that `packageSeedSubjects()`
+  contains the live operator with `canMount`. **Falsified:** drop the live-operator
+  entry from `packageSeedSubjects()` and the mount blocks.
+- **The wound, reproduced.** `seedThenMount([{ subjectId: "actor:operator",
+  subjectType: "actor" }])` — the pre-fix operator-only body — →
+  `entitlement_missing`, `"Actor cannot mount requested packages:
+  workflow/memory-fabric"`. This is the exact live failure, captured as a red line.
+  **Falsified by the fix:** it stays red precisely because the fix did *not* touch
+  this path — it reproduces the old seed body and proves that body was insufficient.
+
+If the seeded subject set and the executing actor identity ever drift apart again,
+the grant case goes red. The drift class is now guarded, not just this instance.
+
+`pnpm typecheck` clean · `pnpm check` clean · full suite **444 passed / 56 files**.
+
+## The carrier discipline (nineteenth carrier wound)
+
+#38 fixed *a correct block the operator could not read.* #40 fixes *a correct
+block that should never have fired* — not by silencing it, but by issuing the
+grant its target was missing. The class is not "support-sweep wasn't seeded." It
+is "**the same identity was hardcoded in two scripts that provision and consume it,
+so they drifted, and a green seed receipt certified a grant the live runner could
+never use.**" Duplicated truth diverges; the fix collapses two copies of the
+operator identity into one imported constant, so the seed and the submit cannot
+disagree about who runs. The hostile double reproduces the seed→mount handoff
+through both real components and pins both the grant and the wound. A seed receipt
+that does not exercise the real executing identity is a receipt that can lie — and
+killing that class is the whole reason the burn-in resets on a carrier failure
+instead of patching past it. Linked: [[polite-fakes-franchise-wound]].
+
+## Live outcome
+
+Pending: re-seed deployed D1 via `pnpm app:deploy:seed` (provisions
+`actor:workflow` + `actor:workflow-live-operator` for every package), verify the
+`workflow/aihero-support-sweep` rows by direct D1 query, then re-submit the
+support-sweep run and poll `/runs/:runId/status` to terminal. This section is
+appended with the honest live result once the re-drive is observed — the receipt
+records what happened on deployed code, not what the fix predicted.

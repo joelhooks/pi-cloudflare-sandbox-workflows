@@ -23,6 +23,7 @@ import {
   requireInstalledSourceProfile,
   workflowProfileWorkspacePaths,
 } from "./workflow-app-profile.ts";
+import { liveRunOperatorSubjectId } from "./workflow-live-subjects.mjs";
 
 const defaultWorkerUrl =
   "https://pi-cloudflare-sandbox-workflows.joelhooks.workers.dev";
@@ -243,7 +244,7 @@ const actorForLiveRun = (input: {
   readonly sessionId?: string;
 }): Actor =>
   ActorSchema.parse({
-    id: "actor:workflow-live-operator",
+    id: liveRunOperatorSubjectId,
     organizationId: "org:joelhooks",
     roleIds: ["workflow.operator", "wzrrd.publish"],
     sessionId: input.sessionId ?? `session:${input.runId}`,

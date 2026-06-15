@@ -18,6 +18,8 @@ import {
 } from "isomorphic-git";
 import http from "isomorphic-git/http/node";
 
+import { packageSeedSubjects } from "./workflow-live-subjects.mjs";
+
 const repoRoot = resolve(import.meta.dirname, "..");
 const configPath = "wrangler.jsonc";
 const defaultReceiptPath =
@@ -358,12 +360,10 @@ const postAdminJson = async (workerUrl, path, body) => {
 };
 
 const packageSeedRequestBody = () => ({
-  subjects: [
-    {
-      subjectId: env.WORKFLOW_APP_SEED_SUBJECT_ID ?? "actor:operator",
-      subjectType: env.WORKFLOW_APP_SEED_SUBJECT_TYPE ?? "actor",
-    },
-  ],
+  subjects: packageSeedSubjects({
+    operatorSubjectId: env.WORKFLOW_APP_SEED_SUBJECT_ID,
+    operatorSubjectType: env.WORKFLOW_APP_SEED_SUBJECT_TYPE,
+  }),
 });
 
 const isMissingDefaultBranchError = (error) =>
