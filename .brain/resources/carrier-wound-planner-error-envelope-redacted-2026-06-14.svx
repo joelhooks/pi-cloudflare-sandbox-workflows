@@ -189,3 +189,30 @@ recognized error envelope from a `--no-tools`, no-secrets lane — and proves wi
 a hostile double that the block still fires and now *reads*. A block you cannot
 read is, operationally, a coin toss; and a coin toss at a safety gate is the
 thing this entire burn-in exists to kill. Linked: [[polite-fakes-franchise-wound]].
+
+## Honest live outcome: the block did NOT recur — the fork resolved TRANSIENT
+
+The carrier discipline demands the receipt say what actually happened on the
+deployed code, not what the wound *predicted*. So: **the wound #38 block did not
+fire on the live re-drive.** Run `run-live-20260615T012808096Z-83eee46c`,
+submitted ~18:28 and observed live by polling `/runs/:runId/status`, ran the
+planner for ~6 minutes (`planningDynamicWorkflow` from 18:28:51 through 18:34:51)
+and then produced a **valid blueprint** — it pinned the plan artifact, resolved
+the capsule, pinned packages, loaded the pinned dynamic workflow, executed,
+verified for ~2 minutes, delivered the review surface, and reached **`captured`
+(terminal=true, blocker=none) at 18:44:54**. No `planner_output_invalid` block,
+no `PlannerBlueprintContractError`, no error envelope to sample.
+
+That means the prior drive's `{error}` envelope was **transient** — exactly the
+left branch of the layer-2 fork above (a model/discovery hiccup, not a structural
+"this cartridge cannot satisfy the contract" verdict). The honest reading: the
+fix shipped as **validated latent observability insurance**, not as the thing
+that unblocked this run. It changed nothing about *this* drive's path; it changed
+what the *next* planner self-report will be able to tell us. If a future drive
+prints `planner error envelope: <reason>`, the operator now reads the reason
+instead of a bare `[error]`, and the fork gets decided on evidence. Shipping a
+correct, falsified, hostile-double-tested fix whose live trigger never fired this
+round is not a wasted fix — it is the gauge installed before the next time the
+needle moves. It is also the governing goal met: **a dream-shaped run actually
+reached `captured` on the deployed code, observed live.** Discord ping fired
+(operator-side DM, not a workflow side effect) with the review URL.
