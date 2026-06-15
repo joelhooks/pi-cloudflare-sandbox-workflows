@@ -158,10 +158,41 @@ misleading "does not support." Linked: [[polite-fakes-franchise-wound]],
 
 ## Live outcome
 
-Pending: `pnpm app:deploy` (executor code → full Worker redeploy), then re-submit
-the support-sweep run and poll `/runs/:runId/status` to terminal. Expected: a
-precise `secret_denied` provisioning blocker naming
-`AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL`, routed to aihero — NOT memory-fabric's raw
-"does not support" error. This section is appended with the honest live result
-once the re-drive is observed — the receipt records what happened on deployed
-code, not what the fix predicted.
+**Proven on deployed code.** After `pnpm app:deploy` redeployed the Worker with
+the fix (commit `30c0b64`), the re-submitted support-sweep run
+(`run-live-20260615T024907979Z-2170cde0`, HTTP 202) went terminal at the executor
+with exactly the blocker the fix predicted:
+
+```
+status: blocked  ·  terminal: true
+blocker.code:     secret_denied
+blocker.stepId:   inventory-sources
+blocker.nodeType: aihero.support-sweep.source-inventory
+blocker.message:  "workflow/aihero-support-sweep mounted and planned nodeType
+                   aihero.support-sweep.source-inventory, but its live executor is
+                   unprovisioned: AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL is not set on
+                   the deployed Worker. Provision the relay binding to execute this
+                   cartridge live."
+```
+
+Compare the pre-fix terminal on `run-live-20260615T021858572Z-ec8eb69c`:
+`adapter_unavailable: "Memory fabric workflow node adapter does not support
+nodeType aihero.support-sweep.source-inventory."` — a **foreign** adapter answering
+for an aihero node and pointing the operator at the wrong subsystem. Same node,
+same gate, same unprovisioned condition; the only thing that changed is the
+carrier. Post-fix:
+
+- The code is **terminal** `secret_denied`, not the composite-skippable
+  `adapter_unavailable` — the aihero adapter held its own node instead of letting
+  it fall through to memory-fabric.
+- The message names **`workflow/aihero-support-sweep`** and the missing
+  **`AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL`** binding — the real gap at the real
+  owner. No mention of "Memory fabric."
+
+The vanishing-adapter class is dead on deployed code: an unprovisioned cartridge
+now stays present and fails closed at its own palette instead of erasing itself and
+letting a foreign adapter mis-answer. The carrier did its job — it stopped lying
+about where the wall is. The wall itself (provisioning
+`AIHERO_SUPPORT_SWEEP_RELAY_BASE_URL`, a new network boundary to customer-private
+support data) is the **second gate, and that is Joel's call** — escalated, not
+patched. The support-sweep shape reaching `captured` waits on that owner decision.
