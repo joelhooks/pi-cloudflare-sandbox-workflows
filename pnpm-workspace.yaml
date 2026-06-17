@@ -7,6 +7,7 @@ allowBuilds:
   "@mongodb-js/zstd": false
   esbuild: true
   lefthook: true
+  msw: true
   node-liblzma: false
   sharp: true
   workerd: true
