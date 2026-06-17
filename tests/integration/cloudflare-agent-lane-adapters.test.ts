@@ -16,6 +16,7 @@ import {
   DiscordMessagePayloadSchema,
   DynamicWorkflowPlanDocumentSchema,
   PlannerLaneBlueprintDocumentSchema,
+  PinnedPackageSchema,
   VerificationResultDocumentSchema,
 } from "../../src/app/domain/schemas.ts";
 import type {
@@ -546,6 +547,94 @@ describe("Cloudflare Pi planner lane adapter", () => {
         runId: fixture.plannerInput.runId,
       }),
       transcript: "real planner transcript from Cloudflare Sandbox",
+    });
+  });
+
+  it("repairs planner-copied pinnedPackages from the supervisor-pinned packages", async () => {
+    const fixture = await buildPlannerLaneFixture();
+    const pinnedPackagesWithSkill = fixture.plannerInput.pinnedPackages.map(
+      (pinnedPackage, index) =>
+        index === 0
+          ? PinnedPackageSchema.parse({
+              ...pinnedPackage,
+              metadata: {
+                ...pinnedPackage.metadata,
+                exports: [
+                  ...pinnedPackage.metadata.exports,
+                  {
+                    contractRef:
+                      "contract://claw-kernel/workflow-shape-skill.v1",
+                    exportId: "workflow-shape-skill",
+                    kind: "skill",
+                    skill: {
+                      body: "Shape the dream as search -> hydrate -> report.",
+                      skillId: "dream.workflow-shape",
+                      title: "Dream Workflow Shape",
+                    },
+                  },
+                ],
+              },
+            })
+          : pinnedPackage
+    );
+    const plannerOutputWithDroppedSkill = structuredClone(
+      fixture.plannerOutput
+    );
+    plannerOutputWithDroppedSkill.plan.pinnedPackages =
+      pinnedPackagesWithSkill.map((pinnedPackage, index) =>
+        index === 0
+          ? {
+              ...pinnedPackage,
+              metadata: {
+                ...pinnedPackage.metadata,
+                exports: pinnedPackage.metadata.exports.map((exportRecord) =>
+                  exportRecord.kind === "skill"
+                    ? {
+                        contractRef: exportRecord.contractRef,
+                        exportId: exportRecord.exportId,
+                        kind: exportRecord.kind,
+                      }
+                    : exportRecord
+                ),
+              },
+            }
+          : pinnedPackage
+      );
+    const plannerInput = {
+      ...fixture.plannerInput,
+      pinnedPackages: pinnedPackagesWithSkill,
+    };
+    const harness = createPlannerRuntimeHarness({
+      ...fixture,
+      plannerOutput: plannerOutputWithDroppedSkill,
+    });
+    const adapter = createCloudflarePiPlannerLaneAdapter({
+      artifactRemote: "https://artifacts.example.invalid/repo.git",
+      artifactStore: fixture.artifacts,
+      artifactTokenSecret: "artifact-token",
+      authLease: agentAuthLeaseFor(plannerInput),
+      leasedPiAuthJsonBase64: "auth-json",
+      model: "integration-test-pi-model",
+      provider: "openai-codex",
+      runtime: harness.runtime,
+      timeoutMs: 30_000,
+    });
+
+    const blueprint = await adapter.proposePlan(plannerInput);
+    const skillExports = blueprint.plan.pinnedPackages
+      .flatMap((pinnedPackage) => pinnedPackage.metadata.exports)
+      .filter((exportRecord) => exportRecord.kind === "skill");
+
+    expect({
+      artifactRefs: blueprint.plan.pinnedPackages.map(
+        (pinnedPackage) => pinnedPackage.artifactRef
+      ),
+      skillIds: skillExports.map((exportRecord) => exportRecord.skill?.skillId),
+    }).toStrictEqual({
+      artifactRefs: pinnedPackagesWithSkill.map(
+        (pinnedPackage) => pinnedPackage.artifactRef
+      ),
+      skillIds: ["dream.workflow-shape"],
     });
   });
 

@@ -351,6 +351,31 @@ const assertPlannerBlueprintBoundToRequest = (input: {
   }
 };
 
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const withSupervisorPinnedPackages = (input: {
+  readonly pinnedPackages: readonly PinnedPackage[];
+  readonly plannerOutputRaw: unknown;
+}): unknown => {
+  if (!isJsonObject(input.plannerOutputRaw)) {
+    return input.plannerOutputRaw;
+  }
+
+  const { plan } = input.plannerOutputRaw;
+  if (!isJsonObject(plan)) {
+    return input.plannerOutputRaw;
+  }
+
+  return {
+    ...input.plannerOutputRaw,
+    plan: {
+      ...plan,
+      pinnedPackages: input.pinnedPackages,
+    },
+  };
+};
+
 const requireLaneCommitSha = (
   receipt: { readonly artifactCommitSha?: string | undefined },
   laneKind: string
@@ -446,11 +471,16 @@ export const createCloudflarePiPlannerLaneAdapter = (
       artifactCommitSha,
       artifactRef: outputPin.artifactRef,
     });
-    const plannerOutputResult =
-      PlannerLaneBlueprintDocumentSchema.safeParse(plannerOutputRaw);
+    const plannerOutputCandidate = withSupervisorPinnedPackages({
+      pinnedPackages: input.pinnedPackages,
+      plannerOutputRaw,
+    });
+    const plannerOutputResult = PlannerLaneBlueprintDocumentSchema.safeParse(
+      plannerOutputCandidate
+    );
     if (!plannerOutputResult.success) {
       throw plannerBlueprintContractError({
-        raw: plannerOutputRaw,
+        raw: plannerOutputCandidate,
         requiredKeys: PLANNER_OUTPUT_REQUIRED_KEYS,
         runId: input.runId,
         stage: "planner-output",
