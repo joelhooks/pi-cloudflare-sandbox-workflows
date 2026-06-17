@@ -802,3 +802,16 @@ Acceptance:
 - Integration: the trusted local relay can produce the manifest from `joelclaw sessions signals` without returning raw transcripts.
 - Public report: shows scanned files, hits, emitted hits, cluster categories, source family coverage, and hydrated receipt count.
 - Non-claim: the report must not call itself a system scan unless this manifest gate passes.
+
+## Push-protection fixture gotcha - 2026-06-17
+
+GitHub push protection blocked `m1-memory-fabric-carve` because a test fixture string in `tests/integration/cloudflare-run-async-driver.test.ts` used a real Stripe-key-shaped token pattern inside an error message sample.
+
+Rule: test fixtures must use non-secret-shaped sentinels like `[REDACTED_STRIPE_KEY]`, `secretref:test`, or `fake-token-for-redaction-test`. Do not put provider-realistic key prefixes such as Stripe `sk_live_` or `sk_test_` into committed fixtures, even when the value is fake and intended to test redaction.
+
+Repair receipt:
+
+- Rewrote unpublished branch history after the first push was rejected.
+- Replaced the key-shaped fixture with `[REDACTED_STRIPE_KEY]`.
+- Deleted filter-branch backup refs, expired reflogs, and pruned unreachable objects locally.
+- Scanned reachable git refs for the Stripe-key pattern before the successful push.
