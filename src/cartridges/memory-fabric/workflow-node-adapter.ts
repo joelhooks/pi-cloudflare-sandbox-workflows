@@ -1696,108 +1696,6 @@ const receiptLineFor = (receipt: MemoryReceiptRef): string =>
 const ratingForHit = (hit: MemorySearchHit): number =>
   Math.min(10, Math.max(1, Math.round(hit.score * 10)));
 
-const reportCardForHit = (input: {
-  readonly hydratedReceiptKeys: ReadonlySet<string>;
-  readonly hit: MemorySearchHit;
-  readonly index: number;
-}): WorkflowHitlReportCard => {
-  const receipt = input.hit.receipts.at(0);
-  const familyLabel =
-    receipt === undefined
-      ? "memory fabric"
-      : memoryFamilyLabels[receipt.family];
-  const hydrated = input.hit.receipts.some((candidate) =>
-    input.hydratedReceiptKeys.has(receiptKey(candidate))
-  );
-
-  return {
-    rating: ratingForHit(input.hit),
-    reasoning: hydrated
-      ? "The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts."
-      : "The search hit has receipt metadata but no matching hydration yet, so treat this as a lead instead of a claim.",
-    receipts: input.hit.receipts,
-    recommendation:
-      "Review the receipts, decide whether this updates .brain, and turn any capture gap into a recovery task instead of normal workflow behavior.",
-    summary: input.hit.summary,
-    title: `Finding ${input.index + 1}: ${familyLabel} needs human review`,
-  };
-};
-
-// Families that resolved at least one search hit carrying at least one receipt.
-// A receipt is the proof a family was actually READ — a hit with no receipts is
-// not authority. Used to decide whether a PRIMARY family is unread.
-const familiesWithReceiptsIn = (
-  search: MemorySearchDocument
-): Set<MemorySourceFamily> => {
-  const families = new Set<MemorySourceFamily>();
-  for (const hit of search.hits) {
-    for (const receipt of hit.receipts) {
-      families.add(receipt.family);
-    }
-  }
-
-  return families;
-};
-
-// The PRIMARY families that resolved zero receipts in this run: the families the
-// workflow exists to read but could not. A non-empty result means a dead primary
-// source — the run must not masquerade as a confident review over it.
-const unreadPrimaryFamiliesFor = (input: {
-  readonly primarySourceFamilies: readonly MemorySourceFamily[];
-  readonly search: MemorySearchDocument;
-}): MemorySourceFamily[] => {
-  const resolved = familiesWithReceiptsIn(input.search);
-
-  return input.primarySourceFamilies.filter((family) => !resolved.has(family));
-};
-
-// Block: a primary source the run exists to read resolved zero receipts. The
-// message names the unread families and the skipped-source caveats that explain
-// why (e.g. `...:joelclaw-index-unavailable`) so GET status surfaces a precise,
-// redacted blocker instead of a confident bookshelf-review masquerade.
-const deadPrimarySourceBlocker = (input: {
-  readonly search: MemorySearchDocument;
-  readonly unreadPrimaryFamilies: readonly MemorySourceFamily[];
-}): BlockedWorkflowNodeExecutionResult => {
-  const families = input.unreadPrimaryFamilies.join(", ");
-  const skipped =
-    input.search.skippedSources.length === 0
-      ? "no skipped-source caveats were recorded"
-      : `skipped-source caveats: ${input.search.skippedSources.join(", ")}`;
-
-  return blocker(
-    "stale_package",
-    `Primary source family ${families} resolved zero receipts -- this run cannot be a confident review of it (${skipped}). Fix the source or remove it from the run's primary contract.`
-  );
-};
-
-const reportCardsFor = (input: {
-  readonly hydration: MemoryHydrationDocument;
-  readonly search: MemorySearchDocument;
-}): WorkflowHitlReportCard[] => {
-  const hydratedReceiptKeys = new Set(
-    input.hydration.hydrated.map((hydrated) => receiptKey(hydrated.receipt))
-  );
-
-  return input.search.hits.map((hit, index) =>
-    reportCardForHit({
-      hit,
-      hydratedReceiptKeys,
-      index,
-    })
-  );
-};
-
-const proposalSlugFor = (value: string): string => {
-  const slug = value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, "-")
-    .replaceAll(/^-|-$/gu, "")
-    .slice(0, 40);
-
-  return slug.length === 0 ? "memory" : slug;
-};
-
 const targetKindForHit = (
   hit: MemorySearchHit
 ): MemoryRefinementProposalTargetKind => {
@@ -1871,6 +1769,136 @@ const proposedNextStepFor = (
   }
 
   return "Consider whether this should become an installable workflow-node plugin instead of report prose.";
+};
+
+const reportCardForHit = (input: {
+  readonly hydratedReceiptKeys: ReadonlySet<string>;
+  readonly hit: MemorySearchHit;
+  readonly index: number;
+}): WorkflowHitlReportCard => {
+  const receipt = input.hit.receipts.at(0);
+  const familyLabel =
+    receipt === undefined
+      ? "memory fabric"
+      : memoryFamilyLabels[receipt.family];
+  const hydrated = input.hit.receipts.some((candidate) =>
+    input.hydratedReceiptKeys.has(receiptKey(candidate))
+  );
+  const targetKind = targetKindForHit(input.hit);
+
+  return {
+    failureClass: targetKind,
+    rating: ratingForHit(input.hit),
+    reasoning: hydrated
+      ? "The search hit has matching redacted hydration, so the report can point at receipts without returning full transcripts."
+      : "The search hit has receipt metadata but no matching hydration yet, so treat this as a lead instead of a claim.",
+    receipts: input.hit.receipts,
+    recommendation: `classify as ${targetKind}; ${proposedNextStepFor(
+      targetKind
+    )}`,
+    sourceKind: "search-hit",
+    summary: input.hit.summary,
+    title: `Search lead ${input.index + 1}: ${familyLabel} -> ${targetKind}`,
+  };
+};
+
+const reportCardForProposal = (
+  proposal: MemoryRefinementProposal
+): WorkflowHitlReportCard => ({
+  failureClass: proposal.targetKind,
+  rating: proposal.rating,
+  reasoning: proposal.reasoning,
+  receipts: proposal.receipts,
+  recommendation: `${proposal.recommendation}: ${proposal.proposedNextStep}`,
+  sourceKind: "refinement-proposal",
+  summary: proposal.summary,
+  title: proposal.title,
+});
+
+// Families that resolved at least one search hit carrying at least one receipt.
+// A receipt is the proof a family was actually READ — a hit with no receipts is
+// not authority. Used to decide whether a PRIMARY family is unread.
+const familiesWithReceiptsIn = (
+  search: MemorySearchDocument
+): Set<MemorySourceFamily> => {
+  const families = new Set<MemorySourceFamily>();
+  for (const hit of search.hits) {
+    for (const receipt of hit.receipts) {
+      families.add(receipt.family);
+    }
+  }
+
+  return families;
+};
+
+// The PRIMARY families that resolved zero receipts in this run: the families the
+// workflow exists to read but could not. A non-empty result means a dead primary
+// source — the run must not masquerade as a confident review over it.
+const unreadPrimaryFamiliesFor = (input: {
+  readonly primarySourceFamilies: readonly MemorySourceFamily[];
+  readonly search: MemorySearchDocument;
+}): MemorySourceFamily[] => {
+  const resolved = familiesWithReceiptsIn(input.search);
+
+  return input.primarySourceFamilies.filter((family) => !resolved.has(family));
+};
+
+// Block: a primary source the run exists to read resolved zero receipts. The
+// message names the unread families and the skipped-source caveats that explain
+// why (e.g. `...:joelclaw-index-unavailable`) so GET status surfaces a precise,
+// redacted blocker instead of a confident bookshelf-review masquerade.
+const deadPrimarySourceBlocker = (input: {
+  readonly search: MemorySearchDocument;
+  readonly unreadPrimaryFamilies: readonly MemorySourceFamily[];
+}): BlockedWorkflowNodeExecutionResult => {
+  const families = input.unreadPrimaryFamilies.join(", ");
+  const skipped =
+    input.search.skippedSources.length === 0
+      ? "no skipped-source caveats were recorded"
+      : `skipped-source caveats: ${input.search.skippedSources.join(", ")}`;
+
+  return blocker(
+    "stale_package",
+    `Primary source family ${families} resolved zero receipts -- this run cannot be a confident review of it (${skipped}). Fix the source or remove it from the run's primary contract.`
+  );
+};
+
+const reportCardsFor = (input: {
+  readonly hydration: MemoryHydrationDocument;
+  readonly refinementProposals: readonly MemoryRefinementProposal[];
+  readonly search: MemorySearchDocument;
+}): WorkflowHitlReportCard[] => {
+  if (input.refinementProposals.length > 0) {
+    return input.refinementProposals
+      .filter((proposal) => proposal.receipts.length > 0)
+      .slice(0, 7)
+      .map(reportCardForProposal);
+  }
+
+  const hydratedReceiptKeys = new Set(
+    input.hydration.hydrated.map((hydrated) => receiptKey(hydrated.receipt))
+  );
+
+  return input.search.hits
+    .filter((hit) => hit.receipts.length > 0)
+    .slice(0, 7)
+    .map((hit, index) =>
+      reportCardForHit({
+        hit,
+        hydratedReceiptKeys,
+        index,
+      })
+    );
+};
+
+const proposalSlugFor = (value: string): string => {
+  const slug = value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/gu, "-")
+    .replaceAll(/^-|-$/gu, "")
+    .slice(0, 40);
+
+  return slug.length === 0 ? "memory" : slug;
 };
 
 const recommendationForProposal = (input: {
@@ -2610,6 +2638,8 @@ const reportCardMdsvxFor = (finding: WorkflowHitlReportCard): string =>
   [
     `### ${finding.title}`,
     finding.summary,
+    `**Failure class.** ${finding.failureClass}`,
+    `**Source.** ${finding.sourceKind}`,
     `**Reasoning.** ${finding.reasoning}`,
     `**Rating.** ${finding.rating}/10`,
     `**Recommendation.** ${finding.recommendation}`,
@@ -3482,6 +3512,7 @@ const executeHitlReportNode = async (
 
   const findings = reportCardsFor({
     hydration: reportInputs.hydration,
+    refinementProposals: refinementProposals.document?.proposals ?? [],
     search: reportInputs.search,
   });
   // Carry the consumed refinement doc's honesty label through to the report so a

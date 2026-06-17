@@ -775,10 +775,12 @@ export const WorkflowHitlReportDefinitionOfDoneAuditSchema = z.object({
 });
 
 export const WorkflowHitlReportCardSchema = z.object({
+  failureClass: MemoryRefinementProposalTargetKindSchema,
   rating: z.number().int().min(1).max(10),
   reasoning: z.string().min(1),
   receipts: z.array(MemoryReceiptRefSchema).min(1),
   recommendation: z.string().min(1),
+  sourceKind: z.enum(["refinement-proposal", "search-hit"]),
   summary: z.string().min(1),
   title: z.string().min(1),
 });

@@ -878,15 +878,17 @@ describe("Dream memory fabric domain contracts", () => {
       findingCount: 1,
       findings: [
         {
+          failureClass: "dynamic-workflow-pattern",
           rating: 9,
           reasoning:
             "The memory search hit has matching redacted hydration and can be reviewed without raw transcripts.",
           receipts: [receiptRef],
           recommendation:
             "Promote this to .brain only after the human reviewer accepts the receipt trail.",
+          sourceKind: "refinement-proposal",
           summary:
             "Generated workflow proof keeps recurring across the Dream memory fabric.",
-          title: "Generated workflow proof needs human review",
+          title: "Generated workflow proof needs a follow-up workflow seed",
         },
       ],
       generatedAt: timestamp,

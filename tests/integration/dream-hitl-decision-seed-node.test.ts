@@ -379,6 +379,7 @@ const reportDocument = WorkflowHitlReportDocumentSchema.parse({
   findingCount: 1,
   findings: [
     {
+      failureClass: "dynamic-workflow-pattern",
       rating: 9,
       reasoning:
         "The report has generated-machine proof and redacted source receipts.",
@@ -393,6 +394,7 @@ const reportDocument = WorkflowHitlReportDocumentSchema.parse({
       ],
       recommendation:
         "Draft follow-up work from the proposals, but keep it unsubmitted.",
+      sourceKind: "refinement-proposal",
       summary: "This dream found work to do.",
       title: "Generated Dream report needs follow-up drafts",
     },

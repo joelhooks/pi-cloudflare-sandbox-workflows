@@ -49,13 +49,69 @@ const reportAuditRequirementStatusById = (
     audit.items.map((item) => [item.requirementId, item.status] as const)
   );
 
+const genericReviewPattern = /\bneeds human review\b|\breview the receipts\b/iu;
+
+const reportQualityFailuresFor = (
+  report: ReturnType<typeof WorkflowHitlReportDocumentSchema.parse>
+): string[] => {
+  const ratings = report.findings.map((finding) => finding.rating);
+  const uniqueRatings = new Set(ratings);
+  const genericFindingTitles = report.findings.filter((finding) =>
+    genericReviewPattern.test(`${finding.title} ${finding.recommendation}`)
+  );
+  const refinementProposalFindings = report.findings.filter(
+    (finding) => finding.sourceKind === "refinement-proposal"
+  );
+  const failures: string[] = [];
+
+  if (report.findingCount !== report.findings.length) {
+    failures.push(
+      `findingCount ${report.findingCount} does not match findings length ${report.findings.length}`
+    );
+  }
+
+  if (report.findings.length > 7) {
+    failures.push(`report contains ${report.findings.length} findings; max 7`);
+  }
+
+  if (genericFindingTitles.length > 0) {
+    failures.push(
+      `${genericFindingTitles.length} finding(s) use generic review wording instead of a concrete title/recommendation`
+    );
+  }
+
+  if (report.findings.length > 1 && ratings.every((rating) => rating === 10)) {
+    failures.push("all findings are rated 10/10");
+  }
+
+  if (report.findings.length >= 3 && uniqueRatings.size === 1) {
+    failures.push("three or more findings share one undifferentiated rating");
+  }
+
+  if (
+    report.refinementProposalCount > 0 &&
+    refinementProposalFindings.length === 0
+  ) {
+    failures.push(
+      "report has refinement proposals but no finding card sourced from them"
+    );
+  }
+
+  return failures;
+};
+
 const reportAuditCheckSummaryFor = (input: {
+  readonly qualityFailures: readonly string[];
   readonly missingRequirementIds: readonly string[];
   readonly overclaimedPostReportRequirementIds: readonly string[];
   readonly reportAuditStatus?: string;
   readonly reportRef: ArtifactRef;
   readonly summaryMatches: boolean;
 }): string => {
+  if (input.qualityFailures.length > 0) {
+    return `Workflow HITL report ${input.reportRef} failed report-quality gate: ${input.qualityFailures.join("; ")}.`;
+  }
+
   if (input.missingRequirementIds.length > 0) {
     return `Workflow HITL report ${input.reportRef} is missing definition-of-done audit requirement(s): ${input.missingRequirementIds.join(", ")}.`;
   }
@@ -102,17 +158,20 @@ export const buildWorkflowHitlReportAuditProofCheck = async (input: {
         (requirementId) => statusById.get(requirementId) !== "not-proven"
       );
     const summaryMatches = reportAuditSummaryMatchesItems(audit);
+    const qualityFailures = reportQualityFailuresFor(report);
 
     return {
       checkId: "report:definition-of-done-audit",
       evidenceRefs: [reportRef],
       passed:
+        qualityFailures.length === 0 &&
         missingRequirementIds.length === 0 &&
         overclaimedPostReportRequirementIds.length === 0 &&
         summaryMatches,
       summary: reportAuditCheckSummaryFor({
         missingRequirementIds,
         overclaimedPostReportRequirementIds,
+        qualityFailures,
         reportAuditStatus: audit.status,
         reportRef,
         summaryMatches,

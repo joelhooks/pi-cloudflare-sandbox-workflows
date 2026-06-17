@@ -4937,7 +4937,7 @@ describe("workflow app integration contract", () => {
         notProvenCount: 4,
         totalCount: 9,
       },
-      reportFindingCount: 3,
+      reportFindingCount: 4,
       reportHitlDecisionContract: {
         artifactPath: "report/hitl-decision.json",
         contractRef: "contract://workflow/memory-fabric/hitl-decision.v1",

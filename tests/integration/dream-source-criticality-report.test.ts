@@ -5,7 +5,10 @@ import type {
   WorkflowNodeAdapterPort,
   WorkflowNodeInvocationStep,
 } from "../../src/app/application/ports.ts";
-import { WorkflowNodeTypeSchema } from "../../src/app/domain/schemas.ts";
+import {
+  WorkflowExecutionProofDocumentSchema,
+  WorkflowNodeTypeSchema,
+} from "../../src/app/domain/schemas.ts";
 import type {
   AgentLaneReceipt,
   ArtifactPin,
@@ -18,9 +21,11 @@ import {
   sourceFamilyCriticalityOf,
 } from "../../src/app/domain/source-profile.ts";
 import { createMemoryArtifactStore } from "../../src/app/infrastructure/memory-adapters.ts";
+import { buildWorkflowHitlReportAuditProofCheck } from "../../src/cartridges/memory-fabric/hitl-report-audit-proof-check.ts";
 import {
   MemoryCorrelationGraphDocumentSchema,
   MemoryHydrationDocumentSchema,
+  MemoryRefinementProposalDocumentSchema,
   MemorySearchDocumentSchema,
   WorkflowHitlReportDocumentSchema,
 } from "../../src/cartridges/memory-fabric/schemas.ts";
@@ -316,6 +321,64 @@ const seedReportInputs = async (input: {
     searchRef: searchWrite.artifactRef,
   };
 };
+
+const reasonedRefinementProposalDocumentFor = (
+  sourceRefs: readonly ArtifactRef[]
+) =>
+  MemoryRefinementProposalDocumentSchema.parse({
+    generatedAt: at,
+    nextWorkflowSeed: {
+      plannerInstructions: [
+        "Patch report cards from accepted refinement proposals before publishing.",
+      ],
+      proposalIds: [
+        "proposal:agentic:report-node-improvement:1:report-cards",
+        "proposal:agentic:dynamic-workflow-pattern:2:tunnel-guard",
+      ],
+      requiredCapabilityKinds: [],
+      sourceRefs,
+    },
+    proposalCount: 2,
+    proposals: [
+      {
+        proposalId: "proposal:agentic:report-node-improvement:1:report-cards",
+        proposedNextStep:
+          "Change the HITL report node to render proposal-backed finding cards before raw search-hit leads.",
+        rating: 9,
+        reasoning:
+          "The evidence shows search-hit cards can swamp the report and hide the reasoned refinement output.",
+        receipts: [transcriptReceipt],
+        recommendation: "turn-into-work",
+        sourceRefs,
+        summary:
+          "Report cards must be sourced from reasoned refinement proposals, not every search hit.",
+        targetKind: "report-node-improvement",
+        title: "Render proposal-backed report cards first",
+      },
+      {
+        proposalId: "proposal:agentic:dynamic-workflow-pattern:2:tunnel-guard",
+        proposedNextStep:
+          "Reject ephemeral relay tunnel URLs for live deploys unless an operator uses a deliberate emergency override.",
+        rating: 6,
+        reasoning:
+          "The tunnel issue is blocking future live runs but is separable from report rendering.",
+        receipts: [brainReceipt],
+        recommendation: "turn-into-work",
+        sourceRefs,
+        summary:
+          "Live run setup should not deploy a relay URL that dies with a quick tunnel.",
+        targetKind: "dynamic-workflow-pattern",
+        title: "Guard live runs from dead quick tunnels",
+      },
+    ],
+    reasoningMode: "agentic",
+    reasoningNote: "Integration fixture: proposal-backed report card contract.",
+    redacted: true,
+    runId,
+    schemaVersion: "memory.refinement-proposals.v1",
+    sourceRefs,
+    workItemId,
+  });
 
 const executeReportNode = (input: {
   readonly artifacts: ArtifactStoreContract;
@@ -650,6 +713,191 @@ describe("Dream source criticality enforcement", () => {
     }).toStrictEqual({
       findingCount: 2,
       schemaVersion: "workflow.hitl-report.v1",
+    });
+  });
+
+  it("renders proposal-backed findings instead of dumping raw search hits", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "dream-source-criticality-proposal-findings"
+    );
+    const refs = await seedReportInputs({
+      artifacts,
+      hits: [transcriptHit, brainHit, repoHit],
+      skippedSources: [],
+    });
+    const refinementWrite = await artifacts.writeJson({
+      path: "dream/refinement-proposals.json",
+      redacted: true,
+      runId,
+      value: reasonedRefinementProposalDocumentFor([
+        refs.searchRef,
+        refs.hydrationRef,
+        refs.correlationRef,
+      ]),
+    });
+
+    const result = await executeReportNode({
+      artifacts,
+      config: {
+        primarySourceFamilies: ["agent-transcripts"],
+        refinementProposalRef: refinementWrite.artifactRef,
+      },
+      refs,
+    });
+
+    expect(result.status).toBe("executed");
+    if (result.status !== "executed") {
+      throw new Error("Expected the report node to execute.");
+    }
+
+    const reportRef = result.outputRefs.at(0);
+    if (reportRef === undefined) {
+      throw new Error("Expected a HITL report output ref.");
+    }
+
+    const report = WorkflowHitlReportDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: reportRef })
+    );
+
+    expect({
+      findingCount: report.findingCount,
+      findings: report.findings.map((finding) => ({
+        failureClass: finding.failureClass,
+        sourceKind: finding.sourceKind,
+        title: finding.title,
+      })),
+      genericNeedsReviewAbsent: report.findings.every(
+        (finding) => !finding.title.includes("needs human review")
+      ),
+      mdsvxShowsFailureClass: report.mdsvx.includes(
+        "**Failure class.** report-node-improvement"
+      ),
+      refinementProposalCount: report.refinementProposalCount,
+    }).toStrictEqual({
+      findingCount: 2,
+      findings: [
+        {
+          failureClass: "report-node-improvement",
+          sourceKind: "refinement-proposal",
+          title: "Render proposal-backed report cards first",
+        },
+        {
+          failureClass: "dynamic-workflow-pattern",
+          sourceKind: "refinement-proposal",
+          title: "Guard live runs from dead quick tunnels",
+        },
+      ],
+      genericNeedsReviewAbsent: true,
+      mdsvxShowsFailureClass: true,
+      refinementProposalCount: 2,
+    });
+  });
+
+  it("fails the report proof gate for generic all-10 search-hit dumps", async () => {
+    const artifacts = createMemoryArtifactStore(
+      "dream-source-criticality-garbage-report-gate"
+    );
+    const refs = await seedReportInputs({
+      artifacts,
+      hits: [transcriptHit, brainHit, repoHit],
+      skippedSources: [],
+    });
+    const refinementDocument = reasonedRefinementProposalDocumentFor([
+      refs.searchRef,
+      refs.hydrationRef,
+      refs.correlationRef,
+    ]);
+    const baselineResult = await executeReportNode({
+      artifacts,
+      config: {
+        primarySourceFamilies: ["agent-transcripts"],
+      },
+      refs,
+    });
+    if (baselineResult.status !== "executed") {
+      throw new Error("Expected baseline report node to execute.");
+    }
+    const baselineReportRef = baselineResult.outputRefs.at(0);
+    if (baselineReportRef === undefined) {
+      throw new Error("Expected a baseline HITL report ref.");
+    }
+    const baselineReport = WorkflowHitlReportDocumentSchema.parse(
+      await artifacts.readJson({ artifactRef: baselineReportRef })
+    );
+    const garbageFindings = Array.from({ length: 8 }, (_, index) => ({
+      failureClass: "workflow-node-plugin" as const,
+      rating: 10,
+      reasoning:
+        "The search hit score was high, so this fake card pretends to be analysis.",
+      receipts: [transcriptReceipt],
+      recommendation:
+        "Review the receipts and decide whether this updates .brain.",
+      sourceKind: "search-hit" as const,
+      summary: `Search metadata row ${index + 1}.`,
+      title: `Finding ${index + 1}: agent transcripts needs human review`,
+    }));
+    const garbageReport = WorkflowHitlReportDocumentSchema.parse({
+      ...baselineReport,
+      findingCount: garbageFindings.length,
+      findings: garbageFindings,
+      mdsvx: "# Garbage report\n\n## The actual findings\n\nneeds human review",
+      refinementProposalCount: refinementDocument.proposalCount,
+      refinementProposalRef:
+        "artifact://dream-source-criticality-test/dream/refinement-proposals.json",
+      refinementProposals: refinementDocument.proposals,
+      refinementReasoningMode: "agentic",
+    });
+    const garbageWrite = await artifacts.writeJson({
+      path: "report/hitl-report.json",
+      redacted: true,
+      runId,
+      value: garbageReport,
+    });
+    const executionProof = WorkflowExecutionProofDocumentSchema.parse({
+      completedStepIds: [reportStep.stepId],
+      eventCount: 1,
+      eventLogHash: hash,
+      generatedAt: at,
+      generatedStateSequence: ["report", "done"],
+      harnessArtifact: plan.harness,
+      machineArtifact: plan.machine,
+      planArtifact: {
+        artifactRef: "artifact://dream-source-criticality-test/run/plan.json",
+        hash,
+        pinnedAt: at,
+        runId,
+      },
+      platform: "local-integration",
+      proofId: "proof:dream-source-criticality-garbage-report-gate",
+      reason: "Integration fixture for report quality proof gate.",
+      redacted: true,
+      requiredProof: ["report-quality"],
+      runId,
+      schemaVersion: "workflow.execution-proof.v1",
+      status: "not-proven-local-integration",
+      workItemId,
+      workflowNodeOutputRefs: [garbageWrite.artifactRef],
+    });
+
+    const check = await buildWorkflowHitlReportAuditProofCheck({
+      artifacts,
+      executionProof,
+    });
+
+    expect({
+      passed: check.passed,
+      summaryMentionsAll10: check.summary.includes("all findings are rated"),
+      summaryMentionsGeneric: check.summary.includes("generic review wording"),
+      summaryMentionsMax7: check.summary.includes("max 7"),
+      summaryMentionsNoProposalCards: check.summary.includes(
+        "no finding card sourced from them"
+      ),
+    }).toStrictEqual({
+      passed: false,
+      summaryMentionsAll10: true,
+      summaryMentionsGeneric: true,
+      summaryMentionsMax7: true,
+      summaryMentionsNoProposalCards: true,
     });
   });
 
