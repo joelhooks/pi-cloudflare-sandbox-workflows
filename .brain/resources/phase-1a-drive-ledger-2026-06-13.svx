@@ -29,7 +29,7 @@ Drive generations fence writes. The supervisor admits a new generation for each 
 
 ## Receipts
 
-- Spec source: `.brain/resources/phase1a-drive-ledger-spec.md`.
+- Spec source: `.brain/resources/phase1a-drive-ledger-spec.svx`.
 - Code surfaces: `src/app/infrastructure/cloudflare-capsule-supervisor.ts`, `src/app/application/workflow-app.ts`, `src/app/application/ports.ts`, `src/app/domain/schemas.ts`, `src/app/infrastructure/cloudflare-artifacts-store.ts`, `src/app/infrastructure/memory-adapters.ts`.
 - Integration tests:
   - `tests/integration/cloudflare-run-async-driver.test.ts` proves stale generation rejection and ledger persistence across supervisor instance swaps.
