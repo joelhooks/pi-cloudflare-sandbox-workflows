@@ -41,17 +41,21 @@ const requiredRelayCheckIds = [
 
 interface WorkflowRunArgs {
   readonly approvalSignoff?: string;
+  readonly intent?: string;
   readonly localRelayProofPath?: string;
   readonly pollIntervalMs?: number;
   readonly pollTimeoutMs?: number;
   readonly preflightPath: string;
   readonly refreshPreflight: boolean;
   readonly receiptPath?: string;
+  readonly requestedPackageIds: readonly string[];
   readonly requestPath?: string;
   readonly responsePath?: string;
   readonly runId?: string;
   readonly submit: boolean;
+  readonly stochasticNotes: readonly string[];
   readonly workerUrl?: string;
+  readonly workItemId?: string;
 }
 
 const defaultPollIntervalMs = 5000;
@@ -67,9 +71,13 @@ interface PreflightLoadResult {
 
 export interface BuildWorkflowLiveRunRequestInput {
   readonly actor?: Actor;
+  readonly intent?: string;
   readonly profile: MemorySourceProfile;
+  readonly requestedPackageIds?: readonly string[];
   readonly runId: string;
   readonly sessionId?: string;
+  readonly stochasticNotes?: readonly string[];
+  readonly workItemId?: string;
 }
 
 export interface BuildWorkflowLiveRunRequestReceiptInput {
@@ -131,6 +139,26 @@ const argValue = (
   return argv[index + 1];
 };
 
+const argValues = (argv: readonly string[], name: string): string[] => {
+  const values: string[] = [];
+  const prefix = `${name}=`;
+  for (const [index, arg] of argv.entries()) {
+    if (arg.startsWith(prefix)) {
+      values.push(arg.slice(prefix.length));
+      continue;
+    }
+
+    if (arg === name) {
+      const value = argv[index + 1];
+      if (value !== undefined) {
+        values.push(value);
+      }
+    }
+  }
+
+  return values;
+};
+
 const positiveIntArg = (
   argv: readonly string[],
   name: string
@@ -158,9 +186,13 @@ const parseArgs = (
   const receiptPath = argValue(argv, "--receipt-path");
   const responsePath = argValue(argv, "--response-path");
   const workerUrl = argValue(argv, "--worker-url");
+  const intent = argValue(argv, "--intent");
+  const workItemId = argValue(argv, "--work-item-id");
   const localRelayProofPath = argValue(argv, "--local-relay-proof-path");
   const pollIntervalMs = positiveIntArg(argv, "--poll-interval-ms");
   const pollTimeoutMs = positiveIntArg(argv, "--poll-timeout-ms");
+  const requestedPackageIds = argValues(argv, "--requested-package-id");
+  const stochasticNotes = argValues(argv, "--stochastic-note");
   const submit = argv.includes("--submit");
   const refreshPreflight =
     argv.includes("--refresh-preflight") ||
@@ -168,6 +200,7 @@ const parseArgs = (
 
   return {
     ...(approvalSignoff === undefined ? {} : { approvalSignoff }),
+    ...(intent === undefined ? {} : { intent }),
     ...(localRelayProofPath === undefined ? {} : { localRelayProofPath }),
     ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
     ...(pollTimeoutMs === undefined ? {} : { pollTimeoutMs }),
@@ -175,12 +208,15 @@ const parseArgs = (
       argValue(argv, "--preflight-path") ??
       workflowProfileWorkspacePaths(profile.profileId).preflightReceiptPath,
     refreshPreflight,
+    requestedPackageIds,
     submit,
     ...(receiptPath === undefined ? {} : { receiptPath }),
     ...(requestPath === undefined ? {} : { requestPath }),
     ...(responsePath === undefined ? {} : { responsePath }),
     ...(runId === undefined ? {} : { runId }),
+    stochasticNotes,
     ...(workerUrl === undefined ? {} : { workerUrl }),
+    ...(workItemId === undefined ? {} : { workItemId }),
   };
 };
 
@@ -289,7 +325,11 @@ export const buildWorkflowLiveRunRequest = (
   const { profile } = input;
   const guidance = profile.plannerGuidance;
   const requestedPackageIds = [
-    ...new Set([...(guidance?.requestedPackageIds ?? []), profile.packageId]),
+    ...new Set([
+      ...(guidance?.requestedPackageIds ?? []),
+      ...(input.requestedPackageIds ?? []),
+      profile.packageId,
+    ]),
   ];
 
   return WorkflowRunRequestSchema.parse({
@@ -302,13 +342,19 @@ export const buildWorkflowLiveRunRequest = (
           : { sessionId: input.sessionId }),
       }),
     planProposal: {
-      intent: guidance?.intent ?? profile.purpose,
+      intent: input.intent ?? guidance?.intent ?? profile.purpose,
       requestedPackageIds,
       sourceProfileId: profile.profileId,
-      stochasticNotes: [...profileStochasticNotesFor(profile)],
+      stochasticNotes: [
+        ...profileStochasticNotesFor(profile),
+        ...(input.stochasticNotes ?? []),
+      ],
     },
     runId: input.runId,
-    workItemId: guidance?.workItemId ?? `work-item:${profile.profileId}`,
+    workItemId:
+      input.workItemId ??
+      guidance?.workItemId ??
+      `work-item:${profile.profileId}`,
   });
 };
 
@@ -592,6 +638,22 @@ const submitLiveRunIfAllowed = async (input: {
   };
 };
 
+const buildWorkflowLiveRunRequestForArgs = (input: {
+  readonly args: WorkflowRunArgs;
+  readonly profile: MemorySourceProfile;
+  readonly runId: string;
+}): WorkflowRunRequest =>
+  buildWorkflowLiveRunRequest({
+    ...(input.args.intent === undefined ? {} : { intent: input.args.intent }),
+    profile: input.profile,
+    requestedPackageIds: input.args.requestedPackageIds,
+    runId: input.runId,
+    stochasticNotes: input.args.stochasticNotes,
+    ...(input.args.workItemId === undefined
+      ? {}
+      : { workItemId: input.args.workItemId }),
+  });
+
 export const runWorkflowLiveRunCli = async (
   input: RunWorkflowLiveRunCliInput
 ): Promise<WorkflowLiveRunRequestReceipt> => {
@@ -634,7 +696,11 @@ export const runWorkflowLiveRunCli = async (
       input.processEnv["WORKFLOW_APP_URL"] ??
       defaultWorkerUrl
   );
-  const request = buildWorkflowLiveRunRequest({ profile, runId });
+  const request = buildWorkflowLiveRunRequestForArgs({
+    args,
+    profile,
+    runId,
+  });
   const runDir = workflowProfileWorkspacePaths(profile.profileId).runReceiptDir;
   const relativeRequestPath =
     args.requestPath ?? `${runDir}/${runId}-request.json`;

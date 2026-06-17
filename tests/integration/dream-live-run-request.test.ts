@@ -312,6 +312,40 @@ describe("Dream live run request harness", () => {
     });
   });
 
+  it("can focus the Dreamer request on a Brain work item without changing the installed profile", () => {
+    const request = buildWorkflowLiveRunRequest({
+      intent:
+        "Run Dreamer over .brain/projects/workflow-seam-ladder.svx and propose receipt-backed carrier/planner/data/render-verifier follow-up work.",
+      profile: dreamTranscriptReviewSourceProfile,
+      requestedPackageIds: ["workflow/memory-fabric"],
+      runId: "run-seam-ladder-dreamer",
+      stochasticNotes: [
+        "Treat .brain/projects/workflow-seam-ladder.svx as the target work item and classify each finding by seam-ladder failure class.",
+      ],
+      workItemId: "brain-project:workflow-seam-ladder",
+    });
+
+    expect({
+      intentMentionsLadder: request.planProposal.intent.includes(
+        ".brain/projects/workflow-seam-ladder.svx"
+      ),
+      noDuplicatePackages:
+        new Set(request.planProposal.requestedPackageIds).size ===
+        request.planProposal.requestedPackageIds.length,
+      sourceProfileId: request.planProposal.sourceProfileId,
+      targetNotePresent: request.planProposal.stochasticNotes.some((note) =>
+        note.includes("workflow-seam-ladder.svx")
+      ),
+      workItemId: request.workItemId,
+    }).toStrictEqual({
+      intentMentionsLadder: true,
+      noDuplicatePackages: true,
+      sourceProfileId: dreamTranscriptReviewSourceProfile.profileId,
+      targetNotePresent: true,
+      workItemId: "brain-project:workflow-seam-ladder",
+    });
+  });
+
   it("blocks submission when the live preflight is not ready", () => {
     const request = buildWorkflowLiveRunRequest({
       profile: dreamTranscriptReviewSourceProfile,
@@ -392,6 +426,59 @@ describe("Dream live run request harness", () => {
         requestRunId: "run-live-memory-fabric-blocked",
         returnedStatus: "blocked",
         writtenStatus: "blocked",
+      });
+    } finally {
+      await rm(repoRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("writes a ladder-focused Dreamer request from CLI overrides", async () => {
+    const repoRoot = await workflowCliTestRepoRoot("dream-live-run-ladder-");
+
+    try {
+      await writePreflight(repoRoot, blockedPreflight);
+
+      const receipt = await runWorkflowLiveRunCli({
+        argv: [
+          ...profileArgs,
+          "--run-id",
+          "run-seam-ladder-dreamer",
+          "--intent",
+          "Run Dreamer over .brain/projects/workflow-seam-ladder.svx.",
+          "--work-item-id",
+          "brain-project:workflow-seam-ladder",
+          "--stochastic-note",
+          "Classify every finding by seam-ladder failure class.",
+          "--preflight-path",
+          "preflight.json",
+          "--request-path",
+          "request.json",
+          "--receipt-path",
+          "receipt.json",
+          "--skip-preflight-refresh",
+        ],
+        log() {},
+        processEnv: {},
+        repoRoot,
+      });
+      const request = WorkflowRunRequestSchema.parse(
+        JSON.parse(await readFile(resolve(repoRoot, "request.json"), "utf-8"))
+      );
+
+      expect({
+        intent: request.planProposal.intent,
+        receiptStatus: receipt.status,
+        submitAttempted: receipt.submit.attempted,
+        targetNotePresent: request.planProposal.stochasticNotes.some((note) =>
+          note.includes("seam-ladder failure class")
+        ),
+        workItemId: request.workItemId,
+      }).toStrictEqual({
+        intent: "Run Dreamer over .brain/projects/workflow-seam-ladder.svx.",
+        receiptStatus: "blocked",
+        submitAttempted: false,
+        targetNotePresent: true,
+        workItemId: "brain-project:workflow-seam-ladder",
       });
     } finally {
       await rm(repoRoot, { force: true, recursive: true });

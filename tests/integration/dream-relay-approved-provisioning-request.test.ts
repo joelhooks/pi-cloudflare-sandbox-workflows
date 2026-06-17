@@ -284,4 +284,35 @@ describe("Memory relay approved provisioning request", () => {
       status: "blocked",
     });
   });
+
+  it("rejects Cloudflare Quick Tunnel relay URLs even with exact signoff", async () => {
+    const repoRoot = await workflowCliTestRepoRoot("dream-relay-approved-");
+
+    await writeFixtureFiles(repoRoot);
+
+    const receipt = await runMemoryRelayApprovedProvisioningRequestCli({
+      argv: [
+        "--profile",
+        dreamTranscriptReviewSourceProfile.profileId,
+        `--approval-signoff=${signoffPhrase}`,
+        "--relay-base-url=https://relax-offer-oscar-derek.trycloudflare.com",
+      ],
+      log: () => {},
+      now: () => "2026-06-10T10:49:00.000Z",
+      processEnv: {},
+      repoRoot,
+    });
+
+    expect({
+      blockers: receipt.blockers,
+      ephemeralQuickTunnel: receipt.relayEndpoint.ephemeralQuickTunnel,
+      relayHttps: receipt.relayEndpoint.https,
+      status: receipt.status,
+    }).toStrictEqual({
+      blockers: ["memory-relay-base-url-ephemeral-quick-tunnel"],
+      ephemeralQuickTunnel: true,
+      relayHttps: true,
+      status: "blocked",
+    });
+  });
 });

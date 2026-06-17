@@ -937,10 +937,10 @@ const buildProvisioningPlan = (input: {
       buildProvisioningStep({
         blockedBy: relayExposureBlockers,
         commandTemplate:
-          "<approved-transport> expose http://127.0.0.1:<relay-port> as HTTPS",
+          "<approved-persistent-transport> route http://127.0.0.1:<relay-port> to a stable HTTPS hostname (Cloudflare named tunnel DNS route, static ngrok domain, or equivalent; not trycloudflare.com)",
         description:
-          "Expose the localhost trusted relay through the approved HTTPS transport.",
-        expectedReceipt: "approved HTTPS relay URL",
+          "Expose the localhost trusted relay through an approved persistent HTTPS transport.",
+        expectedReceipt: "approved stable HTTPS relay URL",
         requiresSignoff: true,
         sideEffectClass: "network-boundary",
         stepId: "expose-approved-https-relay",

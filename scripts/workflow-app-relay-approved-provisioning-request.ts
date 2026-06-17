@@ -64,6 +64,7 @@ export const MemoryRelayApprovedProvisioningRequestReceiptSchema = z.object({
   redacted: z.literal(true),
   relayEndpoint: z.object({
     configured: z.boolean(),
+    ephemeralQuickTunnel: z.boolean().optional(),
     hostHash: z.string().min(1).optional(),
     https: z.boolean(),
     redacted: z.literal(true),
@@ -152,6 +153,9 @@ const safeLocalArtifactRef = (path: string): string =>
 const sha256 = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
 
+const isCloudflareQuickTunnelHost = (hostname: string): boolean =>
+  hostname === "trycloudflare.com" || hostname.endsWith(".trycloudflare.com");
+
 const readJsonOrNull = async (path: string): Promise<unknown | null> => {
   try {
     return JSON.parse(await readFile(path, "utf-8"));
@@ -180,11 +184,18 @@ const relayUrlSummary = (
   try {
     const url = new URL(relayBaseUrl);
     const https = url.protocol === "https:";
+    const ephemeralQuickTunnel = isCloudflareQuickTunnelHost(url.hostname);
 
     return {
-      blockers: https ? [] : ["memory-relay-base-url-not-https"],
+      blockers: [
+        ...(https ? [] : ["memory-relay-base-url-not-https"]),
+        ...(ephemeralQuickTunnel
+          ? ["memory-relay-base-url-ephemeral-quick-tunnel"]
+          : []),
+      ],
       summary: {
         configured: true,
+        ephemeralQuickTunnel,
         hostHash: sha256(url.host),
         https,
         redacted: true,

@@ -457,6 +457,17 @@ const relayHealthUrl = (baseUrl: string): string => {
   return new URL("healthz", normalized).toString();
 };
 
+const relayReadinessRetryDelaysMs = [250, 1000, 2000] as const;
+
+const sleep = (durationMs: number): Promise<void> =>
+  // oxlint-disable-next-line promise/avoid-new -- Bounded retry backoff for flaky public relay tunnels.
+  new Promise<void>((_resolve) => {
+    setTimeout(_resolve, durationMs);
+  });
+
+const isTransientRelayStatus = (status: number): boolean =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
+
 const missingRelayReadinessCheck = (
   message: string
 ): WorkflowLivePreflightCheck => ({
@@ -498,66 +509,90 @@ export const checkMemoryRelayReadiness = async (input: {
     );
   }
 
-  try {
-    const fetcher = input.fetch ?? fetch;
-    const response = await fetcher(relayHealthUrl(relayBaseUrl), {
-      headers: {
-        authorization: `Bearer ${relayToken}`,
-      },
-      method: "GET",
-    });
-    const responseText = await response.text();
-    if (!response.ok) {
-      return failedRelayReadinessCheck(
-        `Memory relay /healthz returned HTTP ${response.status}.`
-      );
-    }
+  const fetcher = input.fetch ?? fetch;
+  const maxAttempts = relayReadinessRetryDelaysMs.length + 1;
+  let lastFailureMessage = "Memory relay readiness check failed.";
 
-    const readinessResult =
-      TrustedLocalMemoryRelayReadinessReceiptSchema.safeParse(
-        JSON.parse(responseText)
-      );
-    if (!readinessResult.success) {
-      return failedRelayReadinessCheck(
-        "Memory relay /healthz returned an invalid redacted readiness receipt."
-      );
-    }
+  for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex += 1) {
+    try {
+      const response = await fetcher(relayHealthUrl(relayBaseUrl), {
+        headers: {
+          Authorization: `Bearer ${relayToken}`,
+        },
+        method: "GET",
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        lastFailureMessage = `Memory relay /healthz returned HTTP ${response.status}.`;
+        if (
+          isTransientRelayStatus(response.status) &&
+          attemptIndex < relayReadinessRetryDelaysMs.length
+        ) {
+          const retryDelayMs = relayReadinessRetryDelaysMs[attemptIndex];
+          if (retryDelayMs !== undefined) {
+            await sleep(retryDelayMs);
+          }
+          continue;
+        }
 
-    const { data: readiness } = readinessResult;
-    const supportedOperations = new Set<string>(readiness.supportedOperations);
-    const missingOperations = input.requiredOperations.filter(
-      (operation) => !supportedOperations.has(operation)
-    );
-    if (missingOperations.length > 0) {
-      return failedRelayReadinessCheck(
-        `Memory relay readiness is missing required operations: ${missingOperations.join(", ")}.`
-      );
-    }
+        return failedRelayReadinessCheck(lastFailureMessage);
+      }
 
-    if (readiness.rawCredentialsReturned || readiness.rawPathsReturned) {
-      return failedRelayReadinessCheck(
-        "Memory relay readiness reported raw credentials or raw paths."
-      );
-    }
+      const readinessResult =
+        TrustedLocalMemoryRelayReadinessReceiptSchema.safeParse(
+          JSON.parse(responseText)
+        );
+      if (!readinessResult.success) {
+        return failedRelayReadinessCheck(
+          "Memory relay /healthz returned an invalid redacted readiness receipt."
+        );
+      }
 
-    return {
-      checkId: "relay:healthz",
-      message:
-        "Memory relay /healthz returned a redacted readiness receipt with required operations.",
-      redacted: true,
-      required: true,
-      requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
-      status: "passed",
-    };
-  } catch (error) {
-    return failedRelayReadinessCheck(
-      `Memory relay readiness check failed: ${
+      const { data: readiness } = readinessResult;
+      const supportedOperations = new Set<string>(
+        readiness.supportedOperations
+      );
+      const missingOperations = input.requiredOperations.filter(
+        (operation) => !supportedOperations.has(operation)
+      );
+      if (missingOperations.length > 0) {
+        return failedRelayReadinessCheck(
+          `Memory relay readiness is missing required operations: ${missingOperations.join(", ")}.`
+        );
+      }
+
+      if (readiness.rawCredentialsReturned || readiness.rawPathsReturned) {
+        return failedRelayReadinessCheck(
+          "Memory relay readiness reported raw credentials or raw paths."
+        );
+      }
+
+      return {
+        checkId: "relay:healthz",
+        message:
+          "Memory relay /healthz returned a redacted readiness receipt with required operations.",
+        redacted: true,
+        required: true,
+        requiredFor: ["memory-relay-readiness", "memory-relay-lease"],
+        status: "passed",
+      };
+    } catch (error) {
+      lastFailureMessage = `Memory relay readiness check failed: ${
         error instanceof Error
           ? redactText(error.message, [relayToken])
           : "Unknown relay readiness error."
-      }`
-    );
+      }`;
+      if (attemptIndex < relayReadinessRetryDelaysMs.length) {
+        const retryDelayMs = relayReadinessRetryDelaysMs[attemptIndex];
+        if (retryDelayMs !== undefined) {
+          await sleep(retryDelayMs);
+        }
+        continue;
+      }
+    }
   }
+
+  return failedRelayReadinessCheck(lastFailureMessage);
 };
 
 const missingLocalRelayProofCheck = (

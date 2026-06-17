@@ -92,6 +92,13 @@ export interface CloudflareMemoryFabricRelayConfig {
 }
 
 const DEFAULT_RELAY_TIMEOUT_MS = 30_000;
+const DEFAULT_RELAY_RETRY_DELAYS_MS = [250, 1000] as const;
+
+const sleep = (durationMs: number): Promise<void> =>
+  // oxlint-disable-next-line promise/avoid-new -- Bounded retry backoff for transient relay tunnel statuses.
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
 
 type MemoryRelayPayload =
   | MemoryRelayCaptureArtifactPayload
@@ -141,6 +148,9 @@ const blockerForRelayStatus = <TDocument>(
     `Memory relay ${operation} failed with HTTP ${status}.`
   );
 };
+
+const isTransientRelayStatus = (status: number): boolean =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
 
 const operationPaths: Readonly<Record<MemoryRelayOperation, string>> = {
   "capture-artifact": "/memory/capture/artifact",
@@ -286,41 +296,61 @@ export const createCloudflareMemoryFabricRelay = (
     }
 
     const timeoutMs = config.relayTimeoutMs ?? DEFAULT_RELAY_TIMEOUT_MS;
-    let response: Response;
-    try {
-      response = await fetcher(
-        relayUrl(config.relayBaseUrl, operationPath(input.operation)),
-        {
-          body: JSON.stringify(
-            relayRequestEnvelope({
-              budget: config.budget,
-              operation: input.operation,
-              payload: input.body,
-              relaySecretRef: config.relaySecretRef,
-            })
-          ),
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json",
-            "user-agent": config.userAgent,
-          },
-          method: "POST",
-          signal: AbortSignal.timeout(timeoutMs),
-        }
-      );
-    } catch (error) {
-      const reason =
-        error instanceof Error && error.name === "TimeoutError"
-          ? `did not respond within ${timeoutMs}ms`
-          : `failed: ${error instanceof Error ? error.name : "network error"}`;
+    let response: Response | undefined;
+    for (
+      let attemptIndex = 0;
+      attemptIndex <= DEFAULT_RELAY_RETRY_DELAYS_MS.length;
+      attemptIndex += 1
+    ) {
+      try {
+        response = await fetcher(
+          relayUrl(config.relayBaseUrl, operationPath(input.operation)),
+          {
+            body: JSON.stringify(
+              relayRequestEnvelope({
+                budget: config.budget,
+                operation: input.operation,
+                payload: input.body,
+                relaySecretRef: config.relaySecretRef,
+              })
+            ),
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+              "user-agent": config.userAgent,
+            },
+            method: "POST",
+            signal: AbortSignal.timeout(timeoutMs),
+          }
+        );
+      } catch (error) {
+        const reason =
+          error instanceof Error && error.name === "TimeoutError"
+            ? `did not respond within ${timeoutMs}ms`
+            : `failed: ${error instanceof Error ? error.name : "network error"}`;
 
-      return blocked(
-        "adapter_unavailable",
-        `Memory relay ${input.operation} ${reason}.`
-      );
+        return blocked(
+          "adapter_unavailable",
+          `Memory relay ${input.operation} ${reason}.`
+        );
+      }
+
+      if (
+        response.ok ||
+        !isTransientRelayStatus(response.status) ||
+        attemptIndex === DEFAULT_RELAY_RETRY_DELAYS_MS.length
+      ) {
+        break;
+      }
+
+      const retryDelayMs = DEFAULT_RELAY_RETRY_DELAYS_MS[attemptIndex];
+      if (retryDelayMs !== undefined) {
+        await sleep(retryDelayMs);
+      }
     }
-    if (!response.ok) {
-      return blockerForRelayStatus(response.status, input.operation);
+
+    if (response === undefined || !response.ok) {
+      return blockerForRelayStatus(response?.status ?? 0, input.operation);
     }
 
     try {

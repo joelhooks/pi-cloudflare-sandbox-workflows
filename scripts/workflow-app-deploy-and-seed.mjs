@@ -142,6 +142,9 @@ const memoryRelayApprovalSignoff = () =>
   env.MEMORY_RELAY_APPROVAL_SIGNOFF ??
   env.MEMORY_RELAY_PROVISIONING_SIGNOFF;
 
+const isCloudflareQuickTunnelHost = (hostname) =>
+  hostname === "trycloudflare.com" || hostname.endsWith(".trycloudflare.com");
+
 const parseMemoryRelayBaseUrl = () => {
   const raw = env.MEMORY_RELAY_BASE_URL?.trim();
   if (!raw) {
@@ -157,6 +160,12 @@ const parseMemoryRelayBaseUrl = () => {
 
   if (url.protocol !== "https:") {
     throw new Error("MEMORY_RELAY_BASE_URL must use HTTPS.");
+  }
+
+  if (isCloudflareQuickTunnelHost(url.hostname)) {
+    throw new Error(
+      "MEMORY_RELAY_BASE_URL must not use a Cloudflare Quick Tunnel (*.trycloudflare.com) for live Worker deploys; use a named Cloudflare Tunnel DNS route or another stable approved HTTPS endpoint."
+    );
   }
 
   return url.toString().replace(/\/$/u, "");
