@@ -55,6 +55,7 @@ const WzrrdPublishRequestBodySchema = z.object({
     .array(
       z.object({
         content: z.string().min(1),
+        contentType: z.string().min(1),
         path: z.string().min(1),
       })
     )
@@ -311,6 +312,9 @@ describe("Cloudflare Wzrrd publish adapter", () => {
           );
 
     expect({
+      contentTypes: Object.fromEntries(
+        requestBody.files.map((file) => [file.path, file.contentType])
+      ),
       delivery,
       filePaths: requestBody.files.map((file) => file.path),
       htmlContainsRunId:
@@ -323,6 +327,10 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       tokenLeaked: JSON.stringify(delivery).includes(wzrrdToken),
       url: fakeFetch.calls[0]?.url,
     }).toStrictEqual({
+      contentTypes: {
+        "index.html": "text/html; charset=utf-8",
+        "review-surface.json": "application/json; charset=utf-8",
+      },
       delivery: {
         dryRun: false,
         payloadHash: hashJson(payload),
@@ -428,6 +436,9 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     );
 
     expect({
+      contentTypes: Object.fromEntries(
+        requestBody.files.map((file) => [file.path, file.contentType])
+      ),
       delivery:
         delivery.status === "published"
           ? {
@@ -457,6 +468,12 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       reportSourceMatches: filesByPath.get("report.mdsvx") === mdsvx,
       reviewSurfaceIncluded: filesByPath.has("review-surface.json"),
     }).toStrictEqual({
+      contentTypes: {
+        "index.html": "text/html; charset=utf-8",
+        "report-rendering.json": "application/json; charset=utf-8",
+        "report.mdsvx": "text/plain; charset=utf-8",
+        "review-surface.json": "application/json; charset=utf-8",
+      },
       delivery: {
         primaryDocument: {
           artifactRef: mdsvxWrite.artifactRef,
@@ -650,6 +667,9 @@ describe("Cloudflare Wzrrd publish adapter", () => {
     );
 
     expect({
+      contentTypes: Object.fromEntries(
+        requestBody.files.map((file) => [file.path, file.contentType])
+      ),
       deliveryRenderer:
         delivery.status === "published"
           ? delivery.primaryDocument?.rendererId
@@ -662,6 +682,13 @@ describe("Cloudflare Wzrrd publish adapter", () => {
       rendererInputs,
       sourceStillPublished: filesByPath.get("report.mdsvx") === mdsvx,
     }).toStrictEqual({
+      contentTypes: {
+        "assets/report-renderer.txt": "text/plain; charset=utf-8",
+        "index.html": "text/html; charset=utf-8",
+        "report-rendering.json": "application/json; charset=utf-8",
+        "report.mdsvx": "text/plain; charset=utf-8",
+        "review-surface.json": "application/json; charset=utf-8",
+      },
       deliveryRenderer: "@joelhooks/wzrrd-hitl-report/static@0.1.0",
       deliveryStatus: "published",
       filePaths: [

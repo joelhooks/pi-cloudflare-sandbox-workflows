@@ -76,6 +76,7 @@ export interface CloudflareWzrrdPublishAdapterConfig {
 
 export interface WzrrdPublishFile {
   readonly content: string;
+  readonly contentType?: string;
   readonly path: string;
 }
 
@@ -112,6 +113,58 @@ const WzrrdApiPublishResponseSchema = z.object({
 const defaultWzrrdApiBaseUrl = "https://wzrrd.sh";
 
 const DEFAULT_WZRRD_TIMEOUT_MS = 30_000;
+
+const contentTypeForWzrrdPath = (path: string): string => {
+  const lower = path.toLowerCase();
+
+  if (lower.endsWith(".html")) {
+    return "text/html; charset=utf-8";
+  }
+
+  if (lower.endsWith(".css")) {
+    return "text/css; charset=utf-8";
+  }
+
+  if (lower.endsWith(".js")) {
+    return "text/javascript; charset=utf-8";
+  }
+
+  if (lower.endsWith(".json")) {
+    return "application/json; charset=utf-8";
+  }
+
+  if (lower.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lower.endsWith(".gif")) {
+    return "image/gif";
+  }
+
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  if (lower.endsWith(".ico")) {
+    return "image/x-icon";
+  }
+
+  return "text/plain; charset=utf-8";
+};
+
+const withWzrrdContentType = (file: WzrrdPublishFile): WzrrdPublishFile => ({
+  content: file.content,
+  contentType: file.contentType ?? contentTypeForWzrrdPath(file.path),
+  path: file.path,
+});
 
 const blocked = (
   code: CapabilityDenialCode,
@@ -1014,7 +1067,7 @@ const renderPrimaryDocumentFiles = async (input: {
   }
 
   return {
-    files: renderResult.files,
+    files: renderResult.files.map(withWzrrdContentType),
     rendererId: renderResult.rendererId,
     status: "rendered",
   };
@@ -1094,17 +1147,17 @@ const filesForWzrrdPublish = async (input: {
   if (input.payload.primaryDocument === undefined) {
     return {
       files: [
-        {
+        withWzrrdContentType({
           content: renderReviewSurfaceHtml({
             payload: input.payload,
             reviewSurface: input.reviewSurface,
           }),
           path: "index.html",
-        },
-        {
+        }),
+        withWzrrdContentType({
           content: `${JSON.stringify(input.reviewSurface, null, 2)}\n`,
           path: "review-surface.json",
-        },
+        }),
       ],
       status: "ready",
     };
@@ -1145,11 +1198,11 @@ const filesForWzrrdPublish = async (input: {
   return {
     files: [
       ...rendered.files,
-      {
+      withWzrrdContentType({
         content: primaryDocumentContent.content,
         path: primaryDocumentDescriptor.path,
-      },
-      {
+      }),
+      withWzrrdContentType({
         content: `${JSON.stringify(
           {
             primaryDocument,
@@ -1163,11 +1216,11 @@ const filesForWzrrdPublish = async (input: {
           2
         )}\n`,
         path: "report-rendering.json",
-      },
-      {
+      }),
+      withWzrrdContentType({
         content: `${JSON.stringify(input.reviewSurface, null, 2)}\n`,
         path: "review-surface.json",
-      },
+      }),
     ],
     primaryDocument,
     status: "ready",
@@ -1207,7 +1260,7 @@ const postWzrrdPublish = async (input: {
       `${apiBaseUrl}/api/sites`,
       {
         body: JSON.stringify({
-          files: input.files,
+          files: input.files.map(withWzrrdContentType),
           indexing: "noindex",
           slug: input.slug,
           source: `pi-cloudflare-sandbox-workflows:${input.runId}`,
